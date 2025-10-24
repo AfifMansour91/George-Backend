@@ -1,0 +1,43 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<InvariantGlobalization>false</InvariantGlobalization>
+		<GenerateDocumentationFile>True</GenerateDocumentationFile>
+		<DocumentationFile>bin\Debug\net8.0\George.Admin.Api.xml</DocumentationFile>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+		<NoWarn>1701;1702;CS1591;CS1573</NoWarn>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+		<NoWarn>1701;1702;CS1591;CS1573</NoWarn>
+	</PropertyGroup>
+
+	<ItemGroup>
+	  <Compile Remove="publish\**" />
+	  <Content Remove="publish\**" />
+	  <EmbeddedResource Remove="publish\**" />
+	  <None Remove="publish\**" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\George.Api.Core\George.Api.Core.csproj" />
+	</ItemGroup>
+
+	<!-- Shared Assembly File -->
+	<ItemGroup>
+		<Compile Include="..\..\GlobalAssemblyInfo.cs" Link="GlobalAssemblyInfo.cs" />
+	</ItemGroup>
+
+	<!-- Assembly Version -->
+	<PropertyGroup>
+		<GeneratedAssemblyInfoFile>GlobalAssemblyInfo.cs</GeneratedAssemblyInfoFile>
+		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+		<Deterministic>false</Deterministic>
+	</PropertyGroup>
+
+</Project>

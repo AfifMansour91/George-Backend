@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<DataComparison>
+  <Version>10</Version>
+  <ConnectionProperties1>
+    <ConnectionString>Data Source=.;Initial Catalog=Teragon;Integrated Security=True;Persist Security Info=False;Pooling=False;Multiple Active Result Sets=False;Connect Timeout=60;Encrypt=False;Trust Server Certificate=False;Command Timeout=0</ConnectionString>
+    <FullDisplayName>..Teragon (SA-MASTER\Sharon)</FullDisplayName>
+  </ConnectionProperties1>
+  <ConnectionProperties2>
+    <ConnectionString>Data Source=ec2-18-195-31-71.eu-central-1.compute.amazonaws.com;Initial Catalog=Teragon.Dev;Persist Security Info=True;User ID=MsbitDev;Pooling=False;Multiple Active Result Sets=False;Connect Timeout=60;Encrypt=True;Trust Server Certificate=True;Command Timeout=0</ConnectionString>
+    <FullDisplayName>ec2-18-195-31-71.eu-central-1.compute.amazonaws.com.Teragon.Dev (MsbitDev)</FullDisplayName>
+  </ConnectionProperties2>
+  <SessionSettings>IncludeDifferentRecords, IncludeRecordsInOne, IncludeRecordsInTwo</SessionSettings>
+  <DeselectedTable>[dbo].[SystemConfiguration]</DeselectedTable>
+</DataComparison>

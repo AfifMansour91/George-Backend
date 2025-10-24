@@ -1,0 +1,36 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
+
+	<ItemGroup>
+	  <Compile Remove="Utils\MessageSendWorker__.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="AutoMapper" Version="13.0.1" />
+		<PackageReference Include="AWSSDK.S3" Version="3.7.308.2" />
+		<PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.2" />
+		<PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\George.Data\George.Data.csproj" />
+	</ItemGroup>
+
+	<!-- Shared Assembly File -->
+	<ItemGroup>
+		<Compile Include="..\..\GlobalAssemblyInfo.cs" Link="GlobalAssemblyInfo.cs" />
+	</ItemGroup>
+
+	<!-- Assembly Version -->
+	<PropertyGroup>
+		<GeneratedAssemblyInfoFile>GlobalAssemblyInfo.cs</GeneratedAssemblyInfoFile>
+		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+		<Deterministic>false</Deterministic>
+	</PropertyGroup>
+
+</Project>

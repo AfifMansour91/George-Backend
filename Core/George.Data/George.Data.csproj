@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\George.Common\George.Common.csproj" />
+		<ProjectReference Include="..\George.DB\George.DB.csproj" />
+	</ItemGroup>
+
+	<!-- Shared Assembly File -->
+	<ItemGroup>
+		<Compile Include="..\..\GlobalAssemblyInfo.cs" Link="GlobalAssemblyInfo.cs" />
+	</ItemGroup>
+
+	<!-- Assembly Version -->
+	<PropertyGroup>
+		<GeneratedAssemblyInfoFile>GlobalAssemblyInfo.cs</GeneratedAssemblyInfoFile>
+		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+		<Deterministic>false</Deterministic>
+	</PropertyGroup>
+
+</Project>
