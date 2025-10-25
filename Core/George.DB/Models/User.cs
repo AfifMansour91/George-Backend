@@ -15,6 +15,8 @@ public partial class User
 
     public int StatusId { get; set; }
 
+    public int RoleId { get; set; }
+
     [StringLength(50)]
     public string FirstName { get; set; } = null!;
 
@@ -52,4 +54,30 @@ public partial class User
     public bool IsMaster { get; set; }
 
     public bool IsDeleted { get; set; }
+
+    [StringLength(50)]
+    public string? Phone { get; set; }
+
+    [InverseProperty("User")]
+    public virtual ICollection<AccountUser> AccountUsers { get; set; } = new List<AccountUser>();
+
+    [InverseProperty("User")]
+    public virtual ICollection<AuditLog> AuditLogs { get; set; } = new List<AuditLog>();
+
+    [InverseProperty("User")]
+    public virtual ICollection<ProductEditLog> ProductEditLogs { get; set; } = new List<ProductEditLog>();
+
+    [ForeignKey("RoleId")]
+    [InverseProperty("Users")]
+    public virtual Role Role { get; set; } = null!;
+
+    [ForeignKey("StatusId")]
+    [InverseProperty("Users")]
+    public virtual UserStatus Status { get; set; } = null!;
+
+    [InverseProperty("RequestedByNavigation")]
+    public virtual ICollection<SyncJob> SyncJobs { get; set; } = new List<SyncJob>();
+
+    [InverseProperty("StartedByUser")]
+    public virtual ICollection<WizardSession> WizardSessions { get; set; } = new List<WizardSession>();
 }
