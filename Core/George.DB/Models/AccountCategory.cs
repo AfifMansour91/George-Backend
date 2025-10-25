@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("AccountCategory")]
+[Index("AccountId", "ParentAccountCategoryId", Name = "IX_AccountCategory_AccountId_Parent")]
 public partial class AccountCategory
 {
     [Key]

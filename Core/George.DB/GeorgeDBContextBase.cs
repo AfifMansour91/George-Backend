@@ -69,6 +69,10 @@ public partial class GeorgeDBContextBase : DbContext
 
     public virtual DbSet<ProductTemplateAttributeOption> ProductTemplateAttributeOptions { get; set; }
 
+    public virtual DbSet<ProductTemplateBusinessType> ProductTemplateBusinessTypes { get; set; }
+
+    public virtual DbSet<ProductTemplateCategory> ProductTemplateCategories { get; set; }
+
     public virtual DbSet<ProductTemplateMedium> ProductTemplateMedia { get; set; }
 
     public virtual DbSet<ProductTemplateSelectableWeight> ProductTemplateSelectableWeights { get; set; }
@@ -362,40 +366,6 @@ public partial class GeorgeDBContextBase : DbContext
             entity.HasOne(d => d.Supplier).WithMany(p => p.ProductTemplates).HasConstraintName("FK_ProductTemplate_Supplier");
 
             entity.HasOne(d => d.WeightPricingModel).WithMany(p => p.ProductTemplates).HasConstraintName("FK_ProductTemplate_WeightPricingModel");
-
-            entity.HasMany(d => d.BusinessTypes).WithMany(p => p.ProductTemplates)
-                .UsingEntity<Dictionary<string, object>>(
-                    "ProductTemplateBusinessType",
-                    r => r.HasOne<BusinessType>().WithMany()
-                        .HasForeignKey("BusinessTypeId")
-                        .OnDelete(DeleteBehavior.ClientSetNull)
-                        .HasConstraintName("FK_ProductTemplateBusinessType_BusinessType"),
-                    l => l.HasOne<ProductTemplate>().WithMany()
-                        .HasForeignKey("ProductTemplateId")
-                        .OnDelete(DeleteBehavior.ClientSetNull)
-                        .HasConstraintName("FK_ProductTemplateBusinessType_ProductTemplate"),
-                    j =>
-                    {
-                        j.HasKey("ProductTemplateId", "BusinessTypeId");
-                        j.ToTable("ProductTemplateBusinessType");
-                    });
-
-            entity.HasMany(d => d.Categories).WithMany(p => p.ProductTemplates)
-                .UsingEntity<Dictionary<string, object>>(
-                    "ProductTemplateCategory",
-                    r => r.HasOne<Category>().WithMany()
-                        .HasForeignKey("CategoryId")
-                        .OnDelete(DeleteBehavior.ClientSetNull)
-                        .HasConstraintName("FK_ProductTemplateCategory_Category"),
-                    l => l.HasOne<ProductTemplate>().WithMany()
-                        .HasForeignKey("ProductTemplateId")
-                        .OnDelete(DeleteBehavior.ClientSetNull)
-                        .HasConstraintName("FK_ProductTemplateCategory_ProductTemplate"),
-                    j =>
-                    {
-                        j.HasKey("ProductTemplateId", "CategoryId");
-                        j.ToTable("ProductTemplateCategory");
-                    });
         });
 
         modelBuilder.Entity<ProductTemplateAttribute>(entity =>
@@ -418,6 +388,28 @@ public partial class GeorgeDBContextBase : DbContext
             entity.HasOne(d => d.ProductTemplateAttribute).WithMany(p => p.ProductTemplateAttributeOptions)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_ProductTemplateAttributeOption_ProductTemplateAttribute");
+        });
+
+        modelBuilder.Entity<ProductTemplateBusinessType>(entity =>
+        {
+            entity.HasOne(d => d.BusinessType).WithMany(p => p.ProductTemplateBusinessTypes)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ProductTemplateBusinessType_BusinessType");
+
+            entity.HasOne(d => d.ProductTemplate).WithMany(p => p.ProductTemplateBusinessTypes)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ProductTemplateBusinessType_ProductTemplate");
+        });
+
+        modelBuilder.Entity<ProductTemplateCategory>(entity =>
+        {
+            entity.HasOne(d => d.Category).WithMany(p => p.ProductTemplateCategories)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ProductTemplateCategory_Category");
+
+            entity.HasOne(d => d.ProductTemplate).WithMany(p => p.ProductTemplateCategories)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ProductTemplateCategory_ProductTemplate");
         });
 
         modelBuilder.Entity<ProductTemplateMedium>(entity =>

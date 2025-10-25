@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("AccountBusinessType")]
+[Index("AccountId", Name = "IX_AccountBusinessType_AccountId")]
 public partial class AccountBusinessType
 {
     [Key]

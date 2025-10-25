@@ -31,7 +31,6 @@ public partial class Category
     [InverseProperty("ParentCategory")]
     public virtual ICollection<CategoryHierarchy> CategoryHierarchyParentCategories { get; set; } = new List<CategoryHierarchy>();
 
-    [ForeignKey("CategoryId")]
-    [InverseProperty("Categories")]
-    public virtual ICollection<ProductTemplate> ProductTemplates { get; set; } = new List<ProductTemplate>();
+    [InverseProperty("Category")]
+    public virtual ICollection<ProductTemplateCategory> ProductTemplateCategories { get; set; } = new List<ProductTemplateCategory>();
 }

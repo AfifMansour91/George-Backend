@@ -21,7 +21,6 @@ public partial class BusinessType
     [InverseProperty("BusinessType")]
     public virtual ICollection<AccountBusinessType> AccountBusinessTypes { get; set; } = new List<AccountBusinessType>();
 
-    [ForeignKey("BusinessTypeId")]
-    [InverseProperty("BusinessTypes")]
-    public virtual ICollection<ProductTemplate> ProductTemplates { get; set; } = new List<ProductTemplate>();
+    [InverseProperty("BusinessType")]
+    public virtual ICollection<ProductTemplateBusinessType> ProductTemplateBusinessTypes { get; set; } = new List<ProductTemplateBusinessType>();
 }

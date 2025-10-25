@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("ProductTemplate")]
+[Index("Title", "IsActive", Name = "IX_ProductTemplate_Title_IsActive")]
 public partial class ProductTemplate
 {
     [Key]
@@ -73,6 +74,12 @@ public partial class ProductTemplate
     public virtual ICollection<ProductTemplateAttribute> ProductTemplateAttributes { get; set; } = new List<ProductTemplateAttribute>();
 
     [InverseProperty("ProductTemplate")]
+    public virtual ICollection<ProductTemplateBusinessType> ProductTemplateBusinessTypes { get; set; } = new List<ProductTemplateBusinessType>();
+
+    [InverseProperty("ProductTemplate")]
+    public virtual ICollection<ProductTemplateCategory> ProductTemplateCategories { get; set; } = new List<ProductTemplateCategory>();
+
+    [InverseProperty("ProductTemplate")]
     public virtual ICollection<ProductTemplateMedium> ProductTemplateMedia { get; set; } = new List<ProductTemplateMedium>();
 
     [InverseProperty("ProductTemplate")]
@@ -89,12 +96,4 @@ public partial class ProductTemplate
     [ForeignKey("WeightPricingModelId")]
     [InverseProperty("ProductTemplates")]
     public virtual WeightPricingModel? WeightPricingModel { get; set; }
-
-    [ForeignKey("ProductTemplateId")]
-    [InverseProperty("ProductTemplates")]
-    public virtual ICollection<BusinessType> BusinessTypes { get; set; } = new List<BusinessType>();
-
-    [ForeignKey("ProductTemplateId")]
-    [InverseProperty("ProductTemplates")]
-    public virtual ICollection<Category> Categories { get; set; } = new List<Category>();
 }

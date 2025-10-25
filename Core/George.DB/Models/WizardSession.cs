@@ -28,6 +28,9 @@ public partial class WizardSession
     [StringLength(20)]
     public string ContentOwner { get; set; } = null!;
 
+    [StringLength(100)]
+    public string? InviteToken { get; set; }
+
     [ForeignKey("AccountId")]
     [InverseProperty("WizardSessions")]
     public virtual Account Account { get; set; } = null!;
