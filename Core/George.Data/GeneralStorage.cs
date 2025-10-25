@@ -16,18 +16,7 @@ namespace George.Data
 		}
 
 
-		//*************************    Public Methods    *************************//
-	
-			
-		public async Task<List<Color>?> GetColorsAsync(CancellationToken cancelToken = default)
-		{
-			return await GetFromCacheOrDBAsync<List<Color>>(CacheKey.Colors, () => _dbContext.Colors.AsNoTracking().ToListAsync(cancelToken));
-		}
-
-		public async Task<List<LandUse>?> GetLandUsesAsync(CancellationToken cancelToken = default)
-		{
-			return await _dbContext.LandUses.AsNoTracking().ToListAsync(cancelToken);
-		}
+		//*************************    Public Methods    *************************//			
 
 		public List<SystemConfiguration> GetSystemConfiguration()
 		{

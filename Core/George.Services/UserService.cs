@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using George.Common;
 using George.Data;
 using George.DB;
+using UserStatus = George.Common.UserStatus;
 
 namespace George.Services
 {

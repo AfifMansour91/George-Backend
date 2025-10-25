@@ -17,7 +17,6 @@ namespace George.Services
 		//*********************  Data members/Constants  *********************//
 		private ILogger<DataUpdater> _logger;
 		private readonly HttpHelper _httpHelper;
-		private readonly RegistryUnitStorage _registryUnitStorage;
 		private readonly IServiceScopeFactory _scopeFactory;
 		private readonly IServiceProvider _serviceProvider;
 
@@ -39,40 +38,40 @@ namespace George.Services
         {
             bool response = false;
 
-            using var scope = _scopeFactory.CreateScope(); // Scope is defined from this line to the end of he block.
-			var registryUnitStorage = scope.ServiceProvider.GetRequiredService<RegistryUnitStorage>();
+   //         using var scope = _scopeFactory.CreateScope(); // Scope is defined from this line to the end of he block.
+			//var registryUnitStorage = scope.ServiceProvider.GetRequiredService<RegistryUnitStorage>();
 
-            var registryUnits = await registryUnitStorage.GetRegistryUnitsForUpdateAsync(paging, cancelToken);
-            if (!registryUnits.HasValue())
-                return response;
+   //         var registryUnits = await registryUnitStorage.GetRegistryUnitsForUpdateAsync(paging, cancelToken);
+   //         if (!registryUnits.HasValue())
+   //             return response;
 
 
-			//*** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG ***//
-			response = true;
+			////*** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG ***//
+			//response = true;
 
-			_logger.LogTrace($"Next 10 addresses (skip: {paging.Skip}).");
+			//_logger.LogTrace($"Next 10 addresses (skip: {paging.Skip}).");
 
-			foreach (var registryUnit in registryUnits)
-			{
-				try
-				{
-					string? res = await GetAddressAsync(registryUnit, cancelToken);
-					if (res != null)
-					{
-						response = true;
+			//foreach (var registryUnit in registryUnits)
+			//{
+			//	try
+			//	{
+			//		string? res = await GetAddressAsync(registryUnit, cancelToken);
+			//		if (res != null)
+			//		{
+			//			response = true;
 
-						//if (registryUnit.Address.HasValue())
-						await registryUnitStorage.UpdateRegistryUnitAddressAsync(registryUnit.Id, registryUnit.Address, res, cancelToken);
-					}
+			//			//if (registryUnit.Address.HasValue())
+			//			await registryUnitStorage.UpdateRegistryUnitAddressAsync(registryUnit.Id, registryUnit.Address, res, cancelToken);
+			//		}
 
-					// Next address.
-					await Task.Delay(100, cancelToken);
-				}
-				catch (Exception ex)
-				{
-					_logger.LogError($"Failed to update address from GovMap (block: {registryUnit.Block}, parcel: {registryUnit.Parcel}) - ex: {ex.ToString()}");
-				}
-			}
+			//		// Next address.
+			//		await Task.Delay(100, cancelToken);
+			//	}
+			//	catch (Exception ex)
+			//	{
+			//		_logger.LogError($"Failed to update address from GovMap (block: {registryUnit.Block}, parcel: {registryUnit.Parcel}) - ex: {ex.ToString()}");
+			//	}
+			//}
 
 			return response;
 		}

@@ -9,7 +9,7 @@ using George.Services;
 
 // For more information on enabling Web API for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
 
-namespace George.Admin.Api.Controllers
+namespace George.Api.Controllers
 {
 	[Route("[controller]", Name = "User")]
 	[ApiController]

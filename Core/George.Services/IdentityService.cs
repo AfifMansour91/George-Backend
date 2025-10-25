@@ -5,6 +5,7 @@ using George.Common;
 using George.Data;
 using George.DB;
 using Task = System.Threading.Tasks.Task;
+using UserStatus = George.Common.UserStatus;
 
 namespace George.Services
 {

@@ -7,7 +7,7 @@ using George.Common;
 using George.Data;
 using George.Services;
 
-namespace George.Admin.Api.Controllers
+namespace George.Api.Controllers
 {
 	[Authorize()]
 	//[Route("[controller]")]

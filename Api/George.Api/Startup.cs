@@ -1,7 +1,7 @@
 ﻿
 using George.Services;
 
-namespace George.Admin.Api
+namespace George.Api
 {
 	public class Startup : George.Api.Core.StartupBase
 	{
@@ -9,7 +9,7 @@ namespace George.Admin.Api
 		public Startup(IConfiguration configuration) : base(configuration)
 		{
 			this.Name = @"George Admin API";
-			this.XmlDocFile = @"George.Admin.Api.xml";
+			this.XmlDocFile = @"George.Api.xml";
 		}
 
 

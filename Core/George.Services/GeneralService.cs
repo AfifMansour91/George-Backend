@@ -46,18 +46,6 @@ namespace George.Services
 			return response;
 		}
 
-		public async Task<IApiResponse<List<IdNamePair>>> GetLandUsesAsync(CancellationToken cancelToken = default)
-		{
-			IApiResponse<List<IdNamePair>> res = new ApiResponse<List<IdNamePair>>();
-
-			// Get the data from the DB.
-			var landUses = await _generalStorage.GetLandUsesAsync(cancelToken).ConfigureAwait(false);
-			if (landUses != null)
-				res.Data = landUses.ConvertAll(a => _mapper.Map<IdNamePair>(a));
-
-			return res;
-		}
-
 		public async Task<IApiResponse<MetadataRes>> GetMetadataAsync(CancellationToken cancelToken = default)
 		{
 			IApiResponse<MetadataRes> response = new ApiResponse<MetadataRes>();
@@ -123,9 +111,9 @@ namespace George.Services
 
 			// Get the data from the DB.
 
-			var colors = await _generalStorage.GetColorsAsync(cancelToken).ConfigureAwait(false);
-			if (colors != null)
-				res.Colors = colors.ConvertAll(a => _mapper.Map<ColorRes>(a));
+			//var colors = await _generalStorage.GetColorsAsync(cancelToken).ConfigureAwait(false);
+			//if (colors != null)
+			//	res.Colors = colors.ConvertAll(a => _mapper.Map<ColorRes>(a));
 
 			//res.Roles = RoleManager.GetRoles();
 			res.Roles = EnumToIdNamePair(typeof(UserRole));

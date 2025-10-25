@@ -135,11 +135,11 @@ namespace George.Data
 							.FirstOrDefaultAsync(cancelToken);
 		}
 
-		public async Task<UserStatus?> GetUserStatusAsync(int id, CancellationToken cancelToken = default)
+		public async Task<Common.UserStatus?> GetUserStatusAsync(int id, CancellationToken cancelToken = default)
 		{
 			return await _dbContext.Users.AsNoTracking()
 							.Where(a => a.Id == id)
-							.Select(a => (UserStatus?)a.StatusId)
+							.Select(a => (Common.UserStatus?)a.StatusId)
 							.FirstOrDefaultAsync(cancelToken);
 		}
 
@@ -223,7 +223,7 @@ namespace George.Data
 			await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
 		}
 
-		public async Task<User?> UpdateUserLoginAsync(int id, string refreshToken, DateTime refreshTokenExpiration, bool isSetUserEmailOtpToValid = false, UserStatus? statusId = null, CancellationToken cancelToken = default)
+		public async Task<User?> UpdateUserLoginAsync(int id, string refreshToken, DateTime refreshTokenExpiration, bool isSetUserEmailOtpToValid = false, Common.UserStatus? statusId = null, CancellationToken cancelToken = default)
 		{
 			// Get the data from the DB.
 			User? dbModel = await _dbContext.Users
@@ -285,7 +285,7 @@ namespace George.Data
 			if (dbModel != null)
 			{
 				// Delete the entity.
-				dbModel.StatusId = isBlocked ? (int)UserStatus.Blocked : (int)UserStatus.Active;
+				dbModel.StatusId = isBlocked ? (int)Common.UserStatus.Blocked : (int)Common.UserStatus.Active;
 
 				// Save to the DB.
 				await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);

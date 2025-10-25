@@ -3,7 +3,7 @@ using System.Diagnostics;
 using NLog;
 using NLog.Web;
 
-namespace George.Admin.Api
+namespace George.Api
 {
 	public class Program
 	{

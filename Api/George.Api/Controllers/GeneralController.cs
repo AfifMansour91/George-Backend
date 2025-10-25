@@ -9,7 +9,7 @@ using George.Services;
 
 // For more information on enabling Web API for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
 
-namespace George.Admin.Api.Controllers
+namespace George.Api.Controllers
 {
 	[Route("[controller]", Name = "General")]
 	[ApiController]
@@ -43,15 +43,6 @@ namespace George.Admin.Api.Controllers
 
 			return await SafeCallWithErrorCatchingAsync(() => _generalSvc.GetConfigurationAsync(cancelToken));
 		}
-
-		[AllowAnonymous]
-		[HttpGet("LandUse")]
-		[ProducesResponseType(typeof(IApiResponse<List<IdNamePair>?>), 200)]
-		public async Task<IActionResult> GetLandUsesAsync(CancellationToken cancelToken = default)
-		{
-			return await SafeCallWithErrorCatchingAsync(() => _generalSvc.GetLandUsesAsync(cancelToken));
-		}
-
 
 		[AllowAnonymous]
 		[HttpGet("Metadata"), ProducesResponseType(typeof(IApiResponse<MetadataRes>), (int)HttpStatusCode.OK)]

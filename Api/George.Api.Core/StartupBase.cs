@@ -323,14 +323,12 @@ namespace George.Api.Core
 			// SQL Storage/Repositories.
 			services.AddScoped<AuthStorage>();
 			services.AddScoped<GeneralStorage>();
-			services.AddScoped<RegistryUnitStorage>();
 			services.AddScoped<UserStorage>();
 
 			// Add Services.
 			services.AddScoped<ConfigurationService>();
 			services.AddScoped<GeneralService>();
 			services.AddScoped<IdentityService>();
-			services.AddScoped<RegistryUnitService>();
 			services.AddScoped<UserService>();
 
 			// Let the derived add its own dependencies.
