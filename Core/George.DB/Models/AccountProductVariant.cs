@@ -33,6 +33,12 @@ public partial class AccountProductVariant
 
     public int SortOrder { get; set; }
 
+    [StringLength(1000)]
+    public string? ImageUrl { get; set; }
+
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? SalePrice { get; set; }
+
     [ForeignKey("AccountProductId")]
     [InverseProperty("AccountProductVariants")]
     public virtual AccountProduct AccountProduct { get; set; } = null!;

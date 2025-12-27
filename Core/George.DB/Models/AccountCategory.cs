@@ -26,9 +26,17 @@ public partial class AccountCategory
 
     public bool IsEnabled { get; set; }
 
+    [StringLength(1000)]
+    public string? Description { get; set; }
+
+    public bool DisplayAsMain { get; set; }
+
     [ForeignKey("AccountId")]
     [InverseProperty("AccountCategories")]
     public virtual Account Account { get; set; } = null!;
+
+    [InverseProperty("AccountCategory")]
+    public virtual ICollection<AccountCategorySite> AccountCategorySites { get; set; } = new List<AccountCategorySite>();
 
     [InverseProperty("AccountCategory")]
     public virtual ICollection<AccountProductCategory> AccountProductCategories { get; set; } = new List<AccountProductCategory>();

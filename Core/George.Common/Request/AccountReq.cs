@@ -323,4 +323,19 @@
     {
         // same structure for now
     }
+
+
+
+
+
+
+
+
+    ////////////////////////////////////////////////////// New
+    public class AccountListFilter
+    {
+        public string? Search { get; set; }
+        public string? Status { get; set; }        // "Active" / "Inactive" (optional)
+        public string? WizardStatus { get; set; }  // "InProgress" / "Completed" (optional)
+    }
 }

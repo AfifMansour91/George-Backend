@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("AccountUser")]
+[Index("AccountId", "SiteId", Name = "IX_AccountUser_Account_Site")]
 public partial class AccountUser
 {
     [Key]
@@ -20,6 +21,8 @@ public partial class AccountUser
 
     public bool IsActive { get; set; }
 
+    public long? SiteId { get; set; }
+
     [ForeignKey("AccountId")]
     [InverseProperty("AccountUsers")]
     public virtual Account Account { get; set; } = null!;
@@ -27,6 +30,10 @@ public partial class AccountUser
     [ForeignKey("RoleId")]
     [InverseProperty("AccountUsers")]
     public virtual Role Role { get; set; } = null!;
+
+    [ForeignKey("SiteId")]
+    [InverseProperty("AccountUsers")]
+    public virtual Site? Site { get; set; }
 
     [ForeignKey("UserId")]
     [InverseProperty("AccountUsers")]

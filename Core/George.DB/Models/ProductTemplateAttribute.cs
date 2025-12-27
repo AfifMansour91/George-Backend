@@ -28,4 +28,7 @@ public partial class ProductTemplateAttribute
 
     [InverseProperty("ProductTemplateAttribute")]
     public virtual ICollection<ProductTemplateAttributeOption> ProductTemplateAttributeOptions { get; set; } = new List<ProductTemplateAttributeOption>();
+
+    [InverseProperty("ProductTemplateAttribute")]
+    public virtual ICollection<ProductTemplateAttributeSite> ProductTemplateAttributeSites { get; set; } = new List<ProductTemplateAttributeSite>();
 }

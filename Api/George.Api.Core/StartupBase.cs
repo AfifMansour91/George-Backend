@@ -329,8 +329,10 @@ namespace George.Api.Core
 			services.AddScoped<AccountProductStorage>();
 			services.AddScoped<AccountCategoryStorage>();
 
-			// Add Services.
-			services.AddScoped<ConfigurationService>();
+			services.AddScoped<BusinessTypeStorage>();
+
+            // Add Services.
+            services.AddScoped<ConfigurationService>();
 			services.AddScoped<GeneralService>();
 			services.AddScoped<IdentityService>();
 			services.AddScoped<UserService>();
@@ -338,6 +340,8 @@ namespace George.Api.Core
 			services.AddScoped<AccountService>();
 			services.AddScoped<AccountProductService>();
 			services.AddScoped<AccountCategoryService>();
+
+			services.AddScoped<BusinessTypeService>();
 
 			// Let the derived add its own dependencies.
 			AddCustomDependencies(services);

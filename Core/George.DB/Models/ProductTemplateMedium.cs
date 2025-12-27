@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
+[Index("MediaId", Name = "IX_ProductTemplateMedia_MediaId")]
 public partial class ProductTemplateMedium
 {
     [Key]
@@ -22,6 +23,12 @@ public partial class ProductTemplateMedium
     public int SortOrder { get; set; }
 
     public bool IsPrimary { get; set; }
+
+    public long? MediaId { get; set; }
+
+    [ForeignKey("MediaId")]
+    [InverseProperty("ProductTemplateMedia")]
+    public virtual Medium? Media { get; set; }
 
     [ForeignKey("ProductTemplateId")]
     [InverseProperty("ProductTemplateMedia")]

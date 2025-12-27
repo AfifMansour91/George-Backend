@@ -58,11 +58,22 @@ public partial class User
     [StringLength(50)]
     public string? Phone { get; set; }
 
+    [StringLength(500)]
+    public string? AvatarUrl { get; set; }
+
+    [StringLength(200)]
+    public string? Department { get; set; }
+
+    public string? Notes { get; set; }
+
     [InverseProperty("User")]
     public virtual ICollection<AccountUser> AccountUsers { get; set; } = new List<AccountUser>();
 
     [InverseProperty("User")]
     public virtual ICollection<AuditLog> AuditLogs { get; set; } = new List<AuditLog>();
+
+    [InverseProperty("CreatedByUser")]
+    public virtual ICollection<Medium> Media { get; set; } = new List<Medium>();
 
     [InverseProperty("User")]
     public virtual ICollection<ProductEditLog> ProductEditLogs { get; set; } = new List<ProductEditLog>();

@@ -2,6 +2,35 @@
 
 namespace George.Services.Response
 {
+    public class AccountListRowRes
+    {
+        public long Id { get; set; }
+
+        public string AccountName { get; set; } = default!;
+        public string? AccountDescription { get; set; }
+        public string? AccountAddress { get; set; }
+        public string? AccountCity { get; set; }
+        public string? AccountState { get; set; }
+        public string? AccountZip { get; set; }
+        public string? AccountPhone { get; set; }
+
+        public string? ManagerName { get; set; }
+        public string? ManagerEmail { get; set; }
+
+        public string Status { get; set; } = "Active";          // match base44
+        public string WizardStatus { get; set; } = "In Progress";
+        public string WizardType { get; set; } = "all_sites";   // you can store it or default it
+        public decimal WizardStep { get; set; }
+
+        public string ContentOwner { get; set; } = "Company";
+
+        public DateTime CreatedDate { get; set; }
+        public DateTime? UpdatedDate { get; set; }
+
+        public int? CreatedById { get; set; }
+        public string? CreatedBy { get; set; }
+    }
+
     public class AccountRes
     {
         public long Id { get; set; }

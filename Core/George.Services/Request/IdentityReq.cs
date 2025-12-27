@@ -38,10 +38,21 @@ namespace George.Services
 
 		[RequiredNotEmpty]
 		public string RefreshToken { get; set; } = null!;
-	}
+    }
+
+    public class SendLoginOtpReq
+    {
+        [RequiredNotEmpty]
+        [Phone]
+        public string Phone { get; set; } = null!;
+
+        [RequiredNotEmpty]
+        [EmailAddress]
+        public string Email { get; set; } = null!;
+    }
 
 
-	public class ProfileReq
+    public class ProfileReq
 	{
 		[RequiredNotEmpty]
 		[StringLength(50)]

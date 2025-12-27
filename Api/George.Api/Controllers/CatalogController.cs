@@ -4,6 +4,7 @@ using George.Common.Request;
 using George.Data;
 using George.Services;
 using George.Services.Response;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Net;
 
@@ -21,6 +22,7 @@ namespace George.Api.Controllers
             _svc = svc;
         }
 
+        [AllowAnonymous]
         [HttpGet("Products")]
         [ProducesResponseType(typeof(IApiResponse<ApiListResponse<CatalogListRow>>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetCatalogProductsAsync([FromQuery] ApiListReq<CatalogProductListFilter> request, CancellationToken cancelToken = default)
@@ -63,6 +65,7 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _svc.GetLookupsAsync(cancelToken));
         }
 
+        [AllowAnonymous]
         [HttpGet("Categories")]
         [ProducesResponseType(typeof(IApiResponse<List<GlobalCategoryNodeRes>>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetGlobalCategoriesAsync(CancellationToken cancelToken = default)

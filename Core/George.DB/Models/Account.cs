@@ -28,6 +28,50 @@ public partial class Account
     [StringLength(250)]
     public string? StoreDomain { get; set; }
 
+    [StringLength(1000)]
+    public string? Description { get; set; }
+
+    [StringLength(300)]
+    public string? Address { get; set; }
+
+    [StringLength(100)]
+    public string? City { get; set; }
+
+    [StringLength(100)]
+    public string? State { get; set; }
+
+    [StringLength(20)]
+    public string? Zip { get; set; }
+
+    [StringLength(50)]
+    public string? Phone { get; set; }
+
+    [StringLength(200)]
+    public string? ManagerName { get; set; }
+
+    [StringLength(250)]
+    public string? ManagerEmail { get; set; }
+
+    [StringLength(20)]
+    public string Status { get; set; } = null!;
+
+    [StringLength(20)]
+    public string WizardStatus { get; set; } = null!;
+
+    [StringLength(20)]
+    public string? WizardType { get; set; }
+
+    public int WizardStep { get; set; }
+
+    [StringLength(20)]
+    public string ContentOwner { get; set; } = null!;
+
+    [StringLength(50)]
+    public string? Base44Id { get; set; }
+
+    [StringLength(250)]
+    public string? Base44CreatedBy { get; set; }
+
     [InverseProperty("Account")]
     public virtual ICollection<AccountBusinessType> AccountBusinessTypes { get; set; } = new List<AccountBusinessType>();
 
@@ -45,6 +89,9 @@ public partial class Account
 
     [InverseProperty("Account")]
     public virtual ICollection<AccountUser> AccountUsers { get; set; } = new List<AccountUser>();
+
+    [InverseProperty("Account")]
+    public virtual ICollection<Site> Sites { get; set; } = new List<Site>();
 
     [InverseProperty("Account")]
     public virtual ICollection<SyncJob> SyncJobs { get; set; } = new List<SyncJob>();

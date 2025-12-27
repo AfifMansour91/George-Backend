@@ -40,4 +40,15 @@ namespace George.Common
 	}
 
 
+    /////////////////////// New Filters ////////////////////////
+
+    public class BusinessTypeFilter
+    {
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+        public string? Icon { get; set; }
+        //public List<int>? CategoriesIds { get; set; }
+        public SearchFilter? Search { get; set; }
+    }
+    
 }

@@ -22,8 +22,22 @@ public partial class Category
 
     public int SortOrder { get; set; }
 
+    public int ProductCount { get; set; }
+
+    [StringLength(1000)]
+    public string? Description { get; set; }
+
+    public DateTime CreatedAt { get; set; }
+
+    public DateTime? UpdatedAt { get; set; }
+
+    public int? CreatedByUserId { get; set; }
+
     [InverseProperty("Category")]
     public virtual ICollection<AccountCategory> AccountCategories { get; set; } = new List<AccountCategory>();
+
+    [InverseProperty("Category")]
+    public virtual ICollection<CategoryBusinessType> CategoryBusinessTypes { get; set; } = new List<CategoryBusinessType>();
 
     [InverseProperty("ChildCategory")]
     public virtual ICollection<CategoryHierarchy> CategoryHierarchyChildCategories { get; set; } = new List<CategoryHierarchy>();
@@ -33,4 +47,8 @@ public partial class Category
 
     [InverseProperty("Category")]
     public virtual ICollection<ProductTemplateCategory> ProductTemplateCategories { get; set; } = new List<ProductTemplateCategory>();
+
+    [ForeignKey("CategoryId")]
+    [InverseProperty("Categories")]
+    public virtual ICollection<Medium> Media { get; set; } = new List<Medium>();
 }

@@ -2,9 +2,9 @@
 using George.Common;
 using George.Common.Request;
 using George.Data;
+using George.Data.Models;
 using George.DB;
 using George.Services.Response;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace George.Services
@@ -25,6 +25,70 @@ namespace George.Services
             _accountStorage = accountStorage;
             _userStorage = userStorage;
         }
+
+        public async Task<IApiResponse<ApiListResponse<AccountListRowRes>>> GetAccountsAsync(
+            ApiListReq<AccountListFilter> request,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<ApiListResponse<AccountListRowRes>>
+            {
+                Data = new ApiListResponse<AccountListRowRes>()
+            };
+
+            var res = await _accountStorage.GetAccountsAsync(request.Filter, request, cancelToken);
+
+            response.Data.Items = (res.Items ?? new List<AccountListEntityRow>())
+                .Select(x =>
+                {
+                    var acc = x.Account;
+                    var ws = x.LatestWizardSession;
+                    var mgr = x.ManagerUser;
+
+                    return new AccountListRowRes
+                    {
+                        Id = acc.Id,
+                        AccountName = acc.Name,
+
+                        // If you don’t have these columns yet, keep null/empty
+                        AccountDescription = acc.Description,
+                        AccountAddress = acc.Address,
+                        AccountCity = acc.City,
+                        AccountState = acc.State,
+                        AccountZip = acc.Zip,
+                        AccountPhone = acc.Phone,
+
+                        ManagerName = mgr == null ? null : $"{mgr.FirstName} {mgr.LastName}".Trim(),
+                        ManagerEmail = mgr?.Email,
+
+                        Status = acc.IsActive ? "Active" : "Inactive",
+
+                        WizardStatus = ws == null
+                            ? "Not Started"
+                            : (ws.Status == "Completed" ? "Completed" : "In Progress"),
+
+                        WizardType = "all_sites", // until you store it
+                        WizardStep = ws?.Step ?? 0,
+
+                        ContentOwner = ws?.ContentOwner ?? "Company",
+
+                        CreatedDate = acc.CreatedAt,
+                        UpdatedDate = acc.UpdatedAt,
+
+                        CreatedById = null,
+                        CreatedBy = null
+                    };
+                })
+                .ToList();
+
+            response.Data.Skip = request.Skip;
+            response.Data.Limit = request.Take;
+            response.Data.Total = res.Total;
+
+            return response;
+        }
+
+
+
 
         // 1. Create account (wizard step 1 start)
         public async Task<IApiResponse<CreateAccountRes>> CreateAccountAsync(CreateAccountReq req, CancellationToken cancelToken)

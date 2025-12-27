@@ -63,6 +63,65 @@ public partial class AccountProduct
     [Column(TypeName = "decimal(18, 3)")]
     public decimal? WeightStepGrams { get; set; }
 
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? Price { get; set; }
+
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? SalePrice { get; set; }
+
+    [Precision(0)]
+    public DateTime? SalePriceStartDate { get; set; }
+
+    [Precision(0)]
+    public DateTime? SalePriceEndDate { get; set; }
+
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? CostPrice { get; set; }
+
+    [StringLength(20)]
+    public string? StockManagementType { get; set; }
+
+    [StringLength(20)]
+    public string? StockStatus { get; set; }
+
+    [StringLength(20)]
+    public string? ShippingClass { get; set; }
+
+    [StringLength(20)]
+    public string? Visibility { get; set; }
+
+    [StringLength(20)]
+    public string? Status { get; set; }
+
+    [StringLength(300)]
+    public string? SeoTitle { get; set; }
+
+    [StringLength(500)]
+    public string? SeoDescription { get; set; }
+
+    [StringLength(100)]
+    public string? SourceProductId { get; set; }
+
+    public bool? IsWeighted { get; set; }
+
+    [StringLength(20)]
+    public string? WeightUnit { get; set; }
+
+    [Column(TypeName = "decimal(18, 3)")]
+    public decimal? StartWeightGrams { get; set; }
+
+    public bool? FixedWeightPerUnit { get; set; }
+
+    [Column(TypeName = "decimal(18, 3)")]
+    public decimal? UnitWeightGrams { get; set; }
+
+    [StringLength(20)]
+    public string? UnitWeightMode { get; set; }
+
+    public string? WeightOptions { get; set; }
+
+    public bool? WeightByVariant { get; set; }
+
     [ForeignKey("AccountId")]
     [InverseProperty("AccountProducts")]
     public virtual Account Account { get; set; } = null!;
@@ -75,6 +134,12 @@ public partial class AccountProduct
 
     [InverseProperty("AccountProduct")]
     public virtual ICollection<AccountProductMedium> AccountProductMedia { get; set; } = new List<AccountProductMedium>();
+
+    [InverseProperty("AccountProduct")]
+    public virtual ICollection<AccountProductSite> AccountProductSites { get; set; } = new List<AccountProductSite>();
+
+    [InverseProperty("AccountProduct")]
+    public virtual ICollection<AccountProductTag> AccountProductTags { get; set; } = new List<AccountProductTag>();
 
     [InverseProperty("AccountProduct")]
     public virtual ICollection<AccountProductVariant> AccountProductVariants { get; set; } = new List<AccountProductVariant>();

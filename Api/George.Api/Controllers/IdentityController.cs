@@ -58,7 +58,7 @@ namespace George.Api.Controllers
 		//	return await SafeCallWithErrorCatchingAsync(() => _identitySvc.SendLoginOtpAsync(request, cancelToken));
 		//}
 
-		
+
 
 
 		//[HttpGet("Permissions")]

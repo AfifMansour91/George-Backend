@@ -3,6 +3,7 @@ using George.Common;
 using George.Common.Request;
 using George.Services;
 using George.Services.Response;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Net;
 
@@ -19,11 +20,14 @@ namespace George.Api.Controllers
             _accountSvc = accountSvc;
         }
 
-        [HttpPost]
-        [ProducesResponseType(typeof(IApiResponse<CreateAccountRes>), (int)HttpStatusCode.OK)]
-        public async Task<IActionResult> CreateAccountAsync([FromBody] CreateAccountReq req, CancellationToken cancelToken = default)
+        [AllowAnonymous]
+        [HttpGet]
+        [ProducesResponseType(typeof(IApiResponse<ApiListResponse<AccountListRowRes>>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetAccountsAsync(
+            [FromQuery] ApiListReq<AccountListFilter> request,
+            CancellationToken cancelToken = default)
         {
-            return await SafeCallWithErrorCatchingAsync(() => _accountSvc.CreateAccountAsync(req, cancelToken));
+            return await SafeCallWithErrorCatchingAsync(() => _accountSvc.GetAccountsAsync(request, cancelToken));
         }
 
         [HttpGet("{accountId:long}")]
@@ -31,6 +35,13 @@ namespace George.Api.Controllers
         public async Task<IActionResult> GetAccountAsync([FromRoute] long accountId, CancellationToken cancelToken = default)
         {
             return await SafeCallWithErrorCatchingAsync(() => _accountSvc.GetAccountAsync(accountId, cancelToken));
+        }
+
+        [HttpPost]
+        [ProducesResponseType(typeof(IApiResponse<CreateAccountRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> CreateAccountAsync([FromBody] CreateAccountReq req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _accountSvc.CreateAccountAsync(req, cancelToken));
         }
 
         [HttpPut("{accountId:long}")]

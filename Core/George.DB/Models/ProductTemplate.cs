@@ -52,6 +52,75 @@ public partial class ProductTemplate
 
     public DateTime? UpdatedAt { get; set; }
 
+    [StringLength(30)]
+    public string SetupType { get; set; } = null!;
+
+    [StringLength(20)]
+    public string? ByUnitType { get; set; }
+
+    [StringLength(100)]
+    public string? ApproxWeightText { get; set; }
+
+    [Column(TypeName = "decimal(18, 3)")]
+    public decimal? MinWeightGrams { get; set; }
+
+    [Column(TypeName = "decimal(18, 3)")]
+    public decimal? WeightStepGrams { get; set; }
+
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? CostPrice { get; set; }
+
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? SalePrice { get; set; }
+
+    [Precision(0)]
+    public DateTime? SalePriceStartDate { get; set; }
+
+    [Precision(0)]
+    public DateTime? SalePriceEndDate { get; set; }
+
+    [StringLength(20)]
+    public string? StockManagementType { get; set; }
+
+    [Column(TypeName = "decimal(18, 3)")]
+    public decimal? StockQuantity { get; set; }
+
+    [StringLength(20)]
+    public string? StockStatus { get; set; }
+
+    [StringLength(20)]
+    public string? ShippingClass { get; set; }
+
+    [StringLength(20)]
+    public string? Visibility { get; set; }
+
+    [StringLength(20)]
+    public string? Status { get; set; }
+
+    [StringLength(300)]
+    public string? SeoTitle { get; set; }
+
+    [StringLength(500)]
+    public string? SeoDescription { get; set; }
+
+    [StringLength(20)]
+    public string? WeightUnit { get; set; }
+
+    [Column(TypeName = "decimal(18, 3)")]
+    public decimal? StartWeightGrams { get; set; }
+
+    public bool? FixedWeightPerUnit { get; set; }
+
+    [Column(TypeName = "decimal(18, 3)")]
+    public decimal? UnitWeightGrams { get; set; }
+
+    [StringLength(20)]
+    public string? UnitWeightMode { get; set; }
+
+    public string? WeightOptions { get; set; }
+
+    public bool? WeightByVariant { get; set; }
+
     [InverseProperty("MatchedProductTemplate")]
     public virtual ICollection<AccountProductImportStaging> AccountProductImportStagings { get; set; } = new List<AccountProductImportStaging>();
 
@@ -96,4 +165,8 @@ public partial class ProductTemplate
     [ForeignKey("WeightPricingModelId")]
     [InverseProperty("ProductTemplates")]
     public virtual WeightPricingModel? WeightPricingModel { get; set; }
+
+    [ForeignKey("ProductTemplateId")]
+    [InverseProperty("ProductTemplates")]
+    public virtual ICollection<Tag> Tags { get; set; } = new List<Tag>();
 }

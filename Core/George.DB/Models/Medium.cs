@@ -6,27 +6,54 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("Medium")]
+[Index("BusinessTypeId", Name = "IX_Media_BusinessTypeId")]
+[Index("Name", Name = "IX_Media_Name")]
+[Index("Type", Name = "IX_Media_Type")]
 public partial class Medium
 {
     [Key]
-    public int Id { get; set; }
+    public long Id { get; set; }
 
-    public int RegistryUnitId { get; set; }
+    [StringLength(1000)]
+    public string Url { get; set; } = null!;
 
-    [StringLength(50)]
+    [StringLength(255)]
     public string Name { get; set; } = null!;
 
-    [StringLength(1000)]
-    public string? Url { get; set; }
+    [StringLength(20)]
+    public string? Type { get; set; }
 
-    [StringLength(1000)]
-    public string? FileUrl { get; set; }
+    public int? BusinessTypeId { get; set; }
 
-    [StringLength(1000)]
-    public string? Description { get; set; }
+    public long? FileSize { get; set; }
 
-    [ForeignKey("RegistryUnitId")]
+    public int UsageCount { get; set; }
+
+    public DateTime CreatedAt { get; set; }
+
+    public DateTime? UpdatedAt { get; set; }
+
+    public int? CreatedByUserId { get; set; }
+
     [InverseProperty("Media")]
-    public virtual RegistryUnit RegistryUnit { get; set; } = null!;
+    public virtual ICollection<AccountProductMedium> AccountProductMedia { get; set; } = new List<AccountProductMedium>();
+
+    [ForeignKey("BusinessTypeId")]
+    [InverseProperty("Media")]
+    public virtual BusinessType? BusinessType { get; set; }
+
+    [ForeignKey("CreatedByUserId")]
+    [InverseProperty("Media")]
+    public virtual User? CreatedByUser { get; set; }
+
+    [InverseProperty("Media")]
+    public virtual ICollection<ProductTemplateMedium> ProductTemplateMedia { get; set; } = new List<ProductTemplateMedium>();
+
+    [ForeignKey("MediaId")]
+    [InverseProperty("Media")]
+    public virtual ICollection<Category> Categories { get; set; } = new List<Category>();
+
+    [ForeignKey("MediaId")]
+    [InverseProperty("Media")]
+    public virtual ICollection<Tag> Tags { get; set; } = new List<Tag>();
 }
