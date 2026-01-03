@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("Role")]
-[Index("Name", Name = "IX_Role_Name_Unique", IsUnique = true)]
+[Index("Name", Name = "UQ__Role__737584F6337D9D8B", IsUnique = true)]
 public partial class Role
 {
     [Key]
@@ -16,8 +16,7 @@ public partial class Role
     [StringLength(50)]
     public string Name { get; set; } = null!;
 
-    [InverseProperty("Role")]
-    public virtual ICollection<AccountUser> AccountUsers { get; set; } = new List<AccountUser>();
+    public bool IsDeleted { get; set; }
 
     [InverseProperty("Role")]
     public virtual ICollection<User> Users { get; set; } = new List<User>();

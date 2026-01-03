@@ -13,414 +13,238 @@ public partial class GeorgeDBContextBase : DbContext
 
     public virtual DbSet<Account> Accounts { get; set; }
 
-    public virtual DbSet<AccountBusinessType> AccountBusinessTypes { get; set; }
-
-    public virtual DbSet<AccountCategory> AccountCategories { get; set; }
-
-    public virtual DbSet<AccountCategorySite> AccountCategorySites { get; set; }
-
-    public virtual DbSet<AccountEcomCredential> AccountEcomCredentials { get; set; }
-
-    public virtual DbSet<AccountProduct> AccountProducts { get; set; }
-
-    public virtual DbSet<AccountProductAttribute> AccountProductAttributes { get; set; }
-
-    public virtual DbSet<AccountProductAttributeValue> AccountProductAttributeValues { get; set; }
-
-    public virtual DbSet<AccountProductCategory> AccountProductCategories { get; set; }
-
-    public virtual DbSet<AccountProductImportStaging> AccountProductImportStagings { get; set; }
-
-    public virtual DbSet<AccountProductMedium> AccountProductMedia { get; set; }
-
-    public virtual DbSet<AccountProductSite> AccountProductSites { get; set; }
-
-    public virtual DbSet<AccountProductTag> AccountProductTags { get; set; }
-
-    public virtual DbSet<AccountProductVariant> AccountProductVariants { get; set; }
-
-    public virtual DbSet<AccountProductVariantOption> AccountProductVariantOptions { get; set; }
-
-    public virtual DbSet<AccountUser> AccountUsers { get; set; }
+    public virtual DbSet<AccountStatus> AccountStatuses { get; set; }
 
     public virtual DbSet<Attribute> Attributes { get; set; }
 
-    public virtual DbSet<AttributeOption> AttributeOptions { get; set; }
-
-    public virtual DbSet<AuditLog> AuditLogs { get; set; }
+    public virtual DbSet<AttributeValue> AttributeValues { get; set; }
 
     public virtual DbSet<Brand> Brands { get; set; }
 
     public virtual DbSet<BusinessType> BusinessTypes { get; set; }
 
+    public virtual DbSet<BusinessTypeCategory> BusinessTypeCategories { get; set; }
+
     public virtual DbSet<Category> Categories { get; set; }
 
-    public virtual DbSet<CategoryBusinessType> CategoryBusinessTypes { get; set; }
+    public virtual DbSet<ContentOwner> ContentOwners { get; set; }
 
-    public virtual DbSet<CategoryHierarchy> CategoryHierarchies { get; set; }
+    public virtual DbSet<GlobalCategory> GlobalCategories { get; set; }
 
-    public virtual DbSet<EcomCategoryMap> EcomCategoryMaps { get; set; }
-
-    public virtual DbSet<EcomPlatform> EcomPlatforms { get; set; }
-
-    public virtual DbSet<EcomProductMap> EcomProductMaps { get; set; }
-
-    public virtual DbSet<EcomVariantMap> EcomVariantMaps { get; set; }
-
-    public virtual DbSet<KosherStatus> KosherStatuses { get; set; }
+    public virtual DbSet<MediaType> MediaTypes { get; set; }
 
     public virtual DbSet<Medium> Media { get; set; }
 
-    public virtual DbSet<ProductEditLog> ProductEditLogs { get; set; }
+    public virtual DbSet<Product> Products { get; set; }
 
-    public virtual DbSet<ProductTemplate> ProductTemplates { get; set; }
+    public virtual DbSet<ProductCategory> ProductCategories { get; set; }
 
-    public virtual DbSet<ProductTemplateAttribute> ProductTemplateAttributes { get; set; }
+    public virtual DbSet<ProductImage> ProductImages { get; set; }
 
-    public virtual DbSet<ProductTemplateAttributeOption> ProductTemplateAttributeOptions { get; set; }
+    public virtual DbSet<ProductOption> ProductOptions { get; set; }
 
-    public virtual DbSet<ProductTemplateAttributeSite> ProductTemplateAttributeSites { get; set; }
+    public virtual DbSet<ProductOptionValue> ProductOptionValues { get; set; }
 
-    public virtual DbSet<ProductTemplateBusinessType> ProductTemplateBusinessTypes { get; set; }
+    public virtual DbSet<ProductStatus> ProductStatuses { get; set; }
 
-    public virtual DbSet<ProductTemplateCategory> ProductTemplateCategories { get; set; }
+    public virtual DbSet<ProductVariant> ProductVariants { get; set; }
 
-    public virtual DbSet<ProductTemplateMedium> ProductTemplateMedia { get; set; }
-
-    public virtual DbSet<ProductTemplateSelectableWeight> ProductTemplateSelectableWeights { get; set; }
-
-    public virtual DbSet<ProductType> ProductTypes { get; set; }
+    public virtual DbSet<ProductVariantOptionValue> ProductVariantOptionValues { get; set; }
 
     public virtual DbSet<Role> Roles { get; set; }
 
+    public virtual DbSet<SetupType> SetupTypes { get; set; }
+
+    public virtual DbSet<ShippingClass> ShippingClasses { get; set; }
+
     public virtual DbSet<Site> Sites { get; set; }
 
-    public virtual DbSet<SiteBusinessType> SiteBusinessTypes { get; set; }
+    public virtual DbSet<StockManagementType> StockManagementTypes { get; set; }
+
+    public virtual DbSet<StockStatus> StockStatuses { get; set; }
 
     public virtual DbSet<Supplier> Suppliers { get; set; }
-
-    public virtual DbSet<SyncJob> SyncJobs { get; set; }
-
-    public virtual DbSet<SyncJobLog> SyncJobLogs { get; set; }
 
     public virtual DbSet<SystemConfiguration> SystemConfigurations { get; set; }
 
     public virtual DbSet<Tag> Tags { get; set; }
 
+    public virtual DbSet<TemplateAttribute> TemplateAttributes { get; set; }
+
+    public virtual DbSet<TemplateAttributeValue> TemplateAttributeValues { get; set; }
+
+    public virtual DbSet<TemplateProduct> TemplateProducts { get; set; }
+
+    public virtual DbSet<TemplateProductCategory> TemplateProductCategories { get; set; }
+
+    public virtual DbSet<TemplateProductImage> TemplateProductImages { get; set; }
+
+    public virtual DbSet<TemplateProductOption> TemplateProductOptions { get; set; }
+
+    public virtual DbSet<TemplateProductOptionValue> TemplateProductOptionValues { get; set; }
+
+    public virtual DbSet<TemplateProductVariant> TemplateProductVariants { get; set; }
+
+    public virtual DbSet<TemplateProductVariantOptionValue> TemplateProductVariantOptionValues { get; set; }
+
     public virtual DbSet<Unit> Units { get; set; }
+
+    public virtual DbSet<UnitWeightMode> UnitWeightModes { get; set; }
 
     public virtual DbSet<User> Users { get; set; }
 
     public virtual DbSet<UserStatus> UserStatuses { get; set; }
 
-    public virtual DbSet<VwAccountCategoryTree> VwAccountCategoryTrees { get; set; }
+    public virtual DbSet<Visibility> Visibilities { get; set; }
 
-    public virtual DbSet<VwAccountProductList> VwAccountProductLists { get; set; }
+    public virtual DbSet<WeightConfig> WeightConfigs { get; set; }
 
-    public virtual DbSet<VwAccountProductStatusSummary> VwAccountProductStatusSummaries { get; set; }
+    public virtual DbSet<WizardStatus> WizardStatuses { get; set; }
 
-    public virtual DbSet<WeightPricingModel> WeightPricingModels { get; set; }
-
-    public virtual DbSet<WizardSession> WizardSessions { get; set; }
+    public virtual DbSet<WizardType> WizardTypes { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Account>(entity =>
         {
-            entity.HasIndex(e => e.Base44Id, "UX_Account_Base44Id")
-                .IsUnique()
-                .HasFilter("([Base44Id] IS NOT NULL)");
-
-            entity.Property(e => e.AllowWeighted).HasDefaultValue(true);
-            entity.Property(e => e.ContentOwner).HasDefaultValue("Company");
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysdatetime())");
+            entity.Property(e => e.ContentOwnerId).HasDefaultValue(1);
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
-            entity.Property(e => e.IsKosherShop).HasDefaultValue(true);
             entity.Property(e => e.Status).HasDefaultValue("Active");
-            entity.Property(e => e.WizardStatus).HasDefaultValue("Not Started");
+
+            entity.HasOne(d => d.ContentOwner).WithMany(p => p.Accounts).HasConstraintName("FK_Account_ContentOwner");
+
+            entity.HasOne(d => d.CreationUser).WithMany(p => p.AccountCreationUsers).HasConstraintName("FK_Account_CreationUser");
+
+            entity.HasOne(d => d.Manager).WithMany(p => p.AccountManagers).HasConstraintName("FK_Account_Manager");
+
+            entity.HasOne(d => d.StatusNavigation).WithMany(p => p.Accounts).HasConstraintName("FK_Account_Status");
+
+            entity.HasOne(d => d.UpdateUser).WithMany(p => p.AccountUpdateUsers).HasConstraintName("FK_Account_UpdateUser");
+
+            entity.HasOne(d => d.WizardStatus).WithMany(p => p.Accounts).HasConstraintName("FK_Account_WizardStatus");
+
+            entity.HasOne(d => d.WizardType).WithMany(p => p.Accounts).HasConstraintName("FK_Account_WizardType");
         });
 
-        modelBuilder.Entity<AccountBusinessType>(entity =>
+        modelBuilder.Entity<Attribute>(entity =>
         {
-            entity.Property(e => e.IsSelected).HasDefaultValue(true);
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
 
-            entity.HasOne(d => d.Account).WithMany(p => p.AccountBusinessTypes)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountBusinessType_Account");
+            entity.HasOne(d => d.CreationUser).WithMany(p => p.AttributeCreationUsers).HasConstraintName("FK_Attribute_CreationUser");
 
-            entity.HasOne(d => d.BusinessType).WithMany(p => p.AccountBusinessTypes)
+            entity.HasOne(d => d.Site).WithMany(p => p.Attributes)
                 .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountBusinessType_BusinessType");
+                .HasConstraintName("FK_Attribute_Site");
+
+            entity.HasOne(d => d.UpdateUser).WithMany(p => p.AttributeUpdateUsers).HasConstraintName("FK_Attribute_UpdateUser");
         });
 
-        modelBuilder.Entity<AccountCategory>(entity =>
+        modelBuilder.Entity<AttributeValue>(entity =>
         {
-            entity.Property(e => e.IsEnabled).HasDefaultValue(true);
-
-            entity.HasOne(d => d.Account).WithMany(p => p.AccountCategories)
+            entity.HasOne(d => d.Attribute).WithMany(p => p.AttributeValues)
                 .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountCategory_Account");
-
-            entity.HasOne(d => d.Category).WithMany(p => p.AccountCategories)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountCategory_Category");
-
-            entity.HasOne(d => d.ParentAccountCategory).WithMany(p => p.InverseParentAccountCategory).HasConstraintName("FK_AccountCategory_Parent");
-        });
-
-        modelBuilder.Entity<AccountCategorySite>(entity =>
-        {
-            entity.Property(e => e.IsEnabled).HasDefaultValue(true);
-
-            entity.HasOne(d => d.AccountCategory).WithMany(p => p.AccountCategorySites)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountCategorySite_AccountCategory");
-
-            entity.HasOne(d => d.Site).WithMany(p => p.AccountCategorySites)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountCategorySite_Site");
-        });
-
-        modelBuilder.Entity<AccountEcomCredential>(entity =>
-        {
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysdatetime())");
-            entity.Property(e => e.IsActive).HasDefaultValue(true);
-
-            entity.HasOne(d => d.Account).WithMany(p => p.AccountEcomCredentials)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountEcomCredential_Account");
-
-            entity.HasOne(d => d.EcomPlatform).WithMany(p => p.AccountEcomCredentials)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountEcomCredential_EcomPlatform");
-        });
-
-        modelBuilder.Entity<AccountProduct>(entity =>
-        {
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysdatetime())");
-            entity.Property(e => e.EditingStatus).HasDefaultValue("NotEdited");
-            entity.Property(e => e.IsEnabled).HasDefaultValue(true);
-
-            entity.HasOne(d => d.Account).WithMany(p => p.AccountProducts)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProduct_Account");
-
-            entity.HasOne(d => d.BaseUnit).WithMany(p => p.AccountProducts).HasConstraintName("FK_AccountProduct_Unit");
-
-            entity.HasOne(d => d.Brand).WithMany(p => p.AccountProducts).HasConstraintName("FK_AccountProduct_Brand");
-
-            entity.HasOne(d => d.KosherStatus).WithMany(p => p.AccountProducts).HasConstraintName("FK_AccountProduct_KosherStatus");
-
-            entity.HasOne(d => d.ProductTemplate).WithMany(p => p.AccountProducts)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProduct_ProductTemplate");
-
-            entity.HasOne(d => d.Supplier).WithMany(p => p.AccountProducts).HasConstraintName("FK_AccountProduct_Supplier");
-
-            entity.HasOne(d => d.WeightPricingModel).WithMany(p => p.AccountProducts).HasConstraintName("FK_AccountProduct_WeightPricingModel");
-        });
-
-        modelBuilder.Entity<AccountProductAttribute>(entity =>
-        {
-            entity.HasOne(d => d.AccountProduct).WithMany(p => p.AccountProductAttributes)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProductAttribute_AccountProduct");
-
-            entity.HasOne(d => d.Attribute).WithMany(p => p.AccountProductAttributes)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProductAttribute_Attribute");
-        });
-
-        modelBuilder.Entity<AccountProductAttributeValue>(entity =>
-        {
-            entity.HasOne(d => d.AccountProductAttribute).WithMany(p => p.AccountProductAttributeValues)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProductAttributeValue_AccountProductAttribute");
-
-            entity.HasOne(d => d.AttributeOption).WithMany(p => p.AccountProductAttributeValues).HasConstraintName("FK_AccountProductAttributeValue_AttributeOption");
-        });
-
-        modelBuilder.Entity<AccountProductCategory>(entity =>
-        {
-            entity.HasOne(d => d.AccountCategory).WithMany(p => p.AccountProductCategories)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProductCategory_AccountCategory");
-
-            entity.HasOne(d => d.AccountProduct).WithMany(p => p.AccountProductCategories)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProductCategory_AccountProduct");
-        });
-
-        modelBuilder.Entity<AccountProductImportStaging>(entity =>
-        {
-            entity.Property(e => e.Status).HasDefaultValue("Pending");
-
-            entity.HasOne(d => d.Account).WithMany(p => p.AccountProductImportStagings)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProductImportStaging_Account");
-
-            entity.HasOne(d => d.MatchedProductTemplate).WithMany(p => p.AccountProductImportStagings).HasConstraintName("FK_AccountProductImportStaging_ProductTemplate");
-        });
-
-        modelBuilder.Entity<AccountProductMedium>(entity =>
-        {
-            entity.HasOne(d => d.AccountProduct).WithMany(p => p.AccountProductMedia)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProductMedia_AccountProduct");
-
-            entity.HasOne(d => d.Media).WithMany(p => p.AccountProductMedia).HasConstraintName("FK_AccountProductMedia_Media");
-        });
-
-        modelBuilder.Entity<AccountProductSite>(entity =>
-        {
-            entity.Property(e => e.IsEnabled).HasDefaultValue(true);
-
-            entity.HasOne(d => d.AccountProduct).WithMany(p => p.AccountProductSites)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProductSite_AccountProduct");
-
-            entity.HasOne(d => d.Site).WithMany(p => p.AccountProductSites)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProductSite_Site");
-        });
-
-        modelBuilder.Entity<AccountProductTag>(entity =>
-        {
-            entity.HasKey(e => e.Id).HasName("PK__AccountP__3214EC07A53582F2");
-
-            entity.HasOne(d => d.AccountProduct).WithMany(p => p.AccountProductTags)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProductTag_AccountProduct");
-
-            entity.HasOne(d => d.Tag).WithMany(p => p.AccountProductTags)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProductTag_Tag");
-        });
-
-        modelBuilder.Entity<AccountProductVariant>(entity =>
-        {
-            entity.Property(e => e.IsEnabled).HasDefaultValue(true);
-
-            entity.HasOne(d => d.AccountProduct).WithMany(p => p.AccountProductVariants)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProductVariant_AccountProduct");
-        });
-
-        modelBuilder.Entity<AccountProductVariantOption>(entity =>
-        {
-            entity.HasOne(d => d.AccountProductVariant).WithMany(p => p.AccountProductVariantOptions)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProductVariantOption_AccountProductVariant");
-
-            entity.HasOne(d => d.Attribute).WithMany(p => p.AccountProductVariantOptions)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProductVariantOption_Attribute");
-
-            entity.HasOne(d => d.AttributeOption).WithMany(p => p.AccountProductVariantOptions)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountProductVariantOption_AttributeOption");
-        });
-
-        modelBuilder.Entity<AccountUser>(entity =>
-        {
-            entity.Property(e => e.IsActive).HasDefaultValue(true);
-
-            entity.HasOne(d => d.Account).WithMany(p => p.AccountUsers)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountUser_Account");
-
-            entity.HasOne(d => d.Role).WithMany(p => p.AccountUsers)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountUser_Role");
-
-            entity.HasOne(d => d.Site).WithMany(p => p.AccountUsers).HasConstraintName("FK_AccountUser_Site");
-
-            entity.HasOne(d => d.User).WithMany(p => p.AccountUsers)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AccountUser_User");
-        });
-
-        modelBuilder.Entity<AttributeOption>(entity =>
-        {
-            entity.HasOne(d => d.Attribute).WithMany(p => p.AttributeOptions)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_AttributeOption_Attribute");
-        });
-
-        modelBuilder.Entity<AuditLog>(entity =>
-        {
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysdatetime())");
-
-            entity.HasOne(d => d.User).WithMany(p => p.AuditLogs).HasConstraintName("FK_AuditLog_User");
+                .HasConstraintName("FK_AttributeValue_Attribute");
         });
 
         modelBuilder.Entity<Brand>(entity =>
         {
-            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.CreationUser).WithMany(p => p.BrandCreationUsers).HasConstraintName("FK_Brand_CreationUser");
+
+            entity.HasOne(d => d.UpdateUser).WithMany(p => p.BrandUpdateUsers).HasConstraintName("FK_Brand_UpdateUser");
+        });
+
+        modelBuilder.Entity<BusinessType>(entity =>
+        {
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
+
+            entity.HasOne(d => d.CreationUser).WithMany(p => p.BusinessTypeCreationUsers).HasConstraintName("FK_BusinessType_CreationUser");
+
+            entity.HasOne(d => d.UpdateUser).WithMany(p => p.BusinessTypeUpdateUsers).HasConstraintName("FK_BusinessType_UpdateUser");
+        });
+
+        modelBuilder.Entity<BusinessTypeCategory>(entity =>
+        {
+            entity.HasOne(d => d.BusinessType).WithMany(p => p.BusinessTypeCategories)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_BTC_BusinessType");
         });
 
         modelBuilder.Entity<Category>(entity =>
         {
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysdatetime())");
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
+
+            entity.HasOne(d => d.CreationUser).WithMany(p => p.CategoryCreationUsers).HasConstraintName("FK_Category_CreationUser");
+
+            entity.HasOne(d => d.ParentCategory).WithMany(p => p.InverseParentCategory).HasConstraintName("FK_Category_Parent");
+
+            entity.HasOne(d => d.UpdateUser).WithMany(p => p.CategoryUpdateUsers).HasConstraintName("FK_Category_UpdateUser");
+
+            entity.HasMany(d => d.Sites).WithMany(p => p.Categories)
+                .UsingEntity<Dictionary<string, object>>(
+                    "CategorySite",
+                    r => r.HasOne<Site>().WithMany()
+                        .HasForeignKey("SiteId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_CategorySite_Site"),
+                    l => l.HasOne<Category>().WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_CategorySite_Category"),
+                    j =>
+                    {
+                        j.HasKey("CategoryId", "SiteId");
+                        j.ToTable("CategorySite");
+                    });
         });
 
-        modelBuilder.Entity<CategoryBusinessType>(entity =>
+        modelBuilder.Entity<GlobalCategory>(entity =>
         {
-            entity.HasOne(d => d.BusinessType).WithMany(p => p.CategoryBusinessTypes)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_CategoryBusinessType_BusinessType");
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
 
-            entity.HasOne(d => d.Category).WithMany(p => p.CategoryBusinessTypes)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_CategoryBusinessType_Category");
-        });
+            entity.HasOne(d => d.CreationUser).WithMany(p => p.GlobalCategoryCreationUsers).HasConstraintName("FK_GlobalCategory_CreationUser");
 
-        modelBuilder.Entity<CategoryHierarchy>(entity =>
-        {
-            entity.HasOne(d => d.ChildCategory).WithMany(p => p.CategoryHierarchyChildCategories)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_CategoryHierarchy_Child");
+            entity.HasOne(d => d.ParentGlobalCategory).WithMany(p => p.InverseParentGlobalCategory).HasConstraintName("FK_GlobalCategory_Parent");
 
-            entity.HasOne(d => d.ParentCategory).WithMany(p => p.CategoryHierarchyParentCategories)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_CategoryHierarchy_Parent");
-        });
+            entity.HasOne(d => d.UpdateUser).WithMany(p => p.GlobalCategoryUpdateUsers).HasConstraintName("FK_GlobalCategory_UpdateUser");
 
-        modelBuilder.Entity<EcomCategoryMap>(entity =>
-        {
-            entity.Property(e => e.SyncedAt).HasDefaultValueSql("(sysdatetime())");
-
-            entity.HasOne(d => d.AccountCategory).WithMany(p => p.EcomCategoryMaps)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_EcomCategoryMap_AccountCategory");
-        });
-
-        modelBuilder.Entity<EcomProductMap>(entity =>
-        {
-            entity.Property(e => e.SyncedAt).HasDefaultValueSql("(sysdatetime())");
-
-            entity.HasOne(d => d.AccountProduct).WithMany(p => p.EcomProductMaps)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_EcomProductMap_AccountProduct");
-        });
-
-        modelBuilder.Entity<EcomVariantMap>(entity =>
-        {
-            entity.Property(e => e.SyncedAt).HasDefaultValueSql("(sysdatetime())");
-
-            entity.HasOne(d => d.AccountProductVariant).WithMany(p => p.EcomVariantMaps)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_EcomVariantMap_AccountProductVariant");
+            entity.HasMany(d => d.BusinessTypes).WithMany(p => p.GlobalCategories)
+                .UsingEntity<Dictionary<string, object>>(
+                    "GlobalCategoryBusinessType",
+                    r => r.HasOne<BusinessType>().WithMany()
+                        .HasForeignKey("BusinessTypeId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_GCBT_BusinessType"),
+                    l => l.HasOne<GlobalCategory>().WithMany()
+                        .HasForeignKey("GlobalCategoryId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_GCBT_GlobalCategory"),
+                    j =>
+                    {
+                        j.HasKey("GlobalCategoryId", "BusinessTypeId");
+                        j.ToTable("GlobalCategoryBusinessType");
+                    });
         });
 
         modelBuilder.Entity<Medium>(entity =>
         {
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysdatetime())");
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
 
             entity.HasOne(d => d.BusinessType).WithMany(p => p.Media).HasConstraintName("FK_Media_BusinessType");
 
-            entity.HasOne(d => d.CreatedByUser).WithMany(p => p.Media).HasConstraintName("FK_Media_CreatedByUser");
+            entity.HasOne(d => d.CreationUser).WithMany(p => p.MediumCreationUsers).HasConstraintName("FK_Media_CreationUser");
+
+            entity.HasOne(d => d.Type).WithMany(p => p.Media).HasConstraintName("FK_Media_Type");
+
+            entity.HasOne(d => d.UpdateUser).WithMany(p => p.MediumUpdateUsers).HasConstraintName("FK_Media_UpdateUser");
 
             entity.HasMany(d => d.Categories).WithMany(p => p.Media)
                 .UsingEntity<Dictionary<string, object>>(
@@ -431,12 +255,12 @@ public partial class GeorgeDBContextBase : DbContext
                         .HasConstraintName("FK_MediaCategory_Category"),
                     l => l.HasOne<Medium>().WithMany()
                         .HasForeignKey("MediaId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
                         .HasConstraintName("FK_MediaCategory_Media"),
                     j =>
                     {
                         j.HasKey("MediaId", "CategoryId");
                         j.ToTable("MediaCategory");
-                        j.HasIndex(new[] { "CategoryId" }, "IX_MediaCategory_CategoryId");
                     });
 
             entity.HasMany(d => d.Tags).WithMany(p => p.Media)
@@ -448,205 +272,342 @@ public partial class GeorgeDBContextBase : DbContext
                         .HasConstraintName("FK_MediaTag_Tag"),
                     l => l.HasOne<Medium>().WithMany()
                         .HasForeignKey("MediaId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
                         .HasConstraintName("FK_MediaTag_Media"),
                     j =>
                     {
                         j.HasKey("MediaId", "TagId");
                         j.ToTable("MediaTag");
-                        j.HasIndex(new[] { "TagId" }, "IX_MediaTag_TagId");
                     });
         });
 
-        modelBuilder.Entity<ProductEditLog>(entity =>
+        modelBuilder.Entity<Product>(entity =>
         {
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysdatetime())");
-
-            entity.HasOne(d => d.AccountProduct).WithMany(p => p.ProductEditLogs)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_ProductEditLog_AccountProduct");
-
-            entity.HasOne(d => d.User).WithMany(p => p.ProductEditLogs)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_ProductEditLog_User");
-        });
-
-        modelBuilder.Entity<ProductTemplate>(entity =>
-        {
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysdatetime())");
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
-            entity.Property(e => e.IsKosherDefault).HasDefaultValue(true);
-            entity.Property(e => e.SetupType).HasDefaultValue("standard");
 
-            entity.HasOne(d => d.BaseUnit).WithMany(p => p.ProductTemplates).HasConstraintName("FK_ProductTemplate_Unit");
+            entity.HasOne(d => d.Brand).WithMany(p => p.Products).HasConstraintName("FK_Product_Brand");
 
-            entity.HasOne(d => d.Brand).WithMany(p => p.ProductTemplates).HasConstraintName("FK_ProductTemplate_Brand");
+            entity.HasOne(d => d.CreationUser).WithMany(p => p.ProductCreationUsers).HasConstraintName("FK_Product_CreationUser");
 
-            entity.HasOne(d => d.KosherStatus).WithMany(p => p.ProductTemplates).HasConstraintName("FK_ProductTemplate_KosherStatus");
+            entity.HasOne(d => d.SetupType).WithMany(p => p.Products).HasConstraintName("FK_Product_SetupType");
 
-            entity.HasOne(d => d.ProductType).WithMany(p => p.ProductTemplates)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_ProductTemplate_ProductType");
+            entity.HasOne(d => d.ShippingClass).WithMany(p => p.Products).HasConstraintName("FK_Product_ShippingClass");
 
-            entity.HasOne(d => d.Supplier).WithMany(p => p.ProductTemplates).HasConstraintName("FK_ProductTemplate_Supplier");
+            entity.HasOne(d => d.Status).WithMany(p => p.Products).HasConstraintName("FK_Product_Status");
 
-            entity.HasOne(d => d.WeightPricingModel).WithMany(p => p.ProductTemplates).HasConstraintName("FK_ProductTemplate_WeightPricingModel");
+            entity.HasOne(d => d.StockManagementType).WithMany(p => p.Products).HasConstraintName("FK_Product_StockManagementType");
 
-            entity.HasMany(d => d.Tags).WithMany(p => p.ProductTemplates)
+            entity.HasOne(d => d.StockStatus).WithMany(p => p.Products).HasConstraintName("FK_Product_StockStatus");
+
+            entity.HasOne(d => d.Supplier).WithMany(p => p.Products).HasConstraintName("FK_Product_Supplier");
+
+            entity.HasOne(d => d.UpdateUser).WithMany(p => p.ProductUpdateUsers).HasConstraintName("FK_Product_UpdateUser");
+
+            entity.HasOne(d => d.Visibility).WithMany(p => p.Products).HasConstraintName("FK_Product_Visibility");
+
+            entity.HasOne(d => d.WeightConfig).WithMany(p => p.Products).HasConstraintName("FK_Product_WeightConfig");
+
+            entity.HasMany(d => d.Sites).WithMany(p => p.Products)
                 .UsingEntity<Dictionary<string, object>>(
-                    "ProductTemplateTag",
+                    "ProductSite",
+                    r => r.HasOne<Site>().WithMany()
+                        .HasForeignKey("SiteId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_ProductSite_Site"),
+                    l => l.HasOne<Product>().WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_ProductSite_Product"),
+                    j =>
+                    {
+                        j.HasKey("ProductId", "SiteId");
+                        j.ToTable("ProductSite");
+                    });
+
+            entity.HasMany(d => d.Tags).WithMany(p => p.Products)
+                .UsingEntity<Dictionary<string, object>>(
+                    "ProductTag",
                     r => r.HasOne<Tag>().WithMany()
                         .HasForeignKey("TagId")
                         .OnDelete(DeleteBehavior.ClientSetNull)
-                        .HasConstraintName("FK_ProductTemplateTag_Tag"),
-                    l => l.HasOne<ProductTemplate>().WithMany()
-                        .HasForeignKey("ProductTemplateId")
+                        .HasConstraintName("FK_ProductTag_Tag"),
+                    l => l.HasOne<Product>().WithMany()
+                        .HasForeignKey("ProductId")
                         .OnDelete(DeleteBehavior.ClientSetNull)
-                        .HasConstraintName("FK_ProductTemplateTag_ProductTemplate"),
+                        .HasConstraintName("FK_ProductTag_Product"),
                     j =>
                     {
-                        j.HasKey("ProductTemplateId", "TagId");
-                        j.ToTable("ProductTemplateTag");
+                        j.HasKey("ProductId", "TagId");
+                        j.ToTable("ProductTag");
                     });
         });
 
-        modelBuilder.Entity<ProductTemplateAttribute>(entity =>
+        modelBuilder.Entity<ProductCategory>(entity =>
         {
-            entity.HasOne(d => d.Attribute).WithMany(p => p.ProductTemplateAttributes)
+            entity.HasOne(d => d.Category).WithMany(p => p.ProductCategories)
                 .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_ProductTemplateAttribute_Attribute");
+                .HasConstraintName("FK_ProductCategory_Category");
 
-            entity.HasOne(d => d.ProductTemplate).WithMany(p => p.ProductTemplateAttributes)
+            entity.HasOne(d => d.Product).WithMany(p => p.ProductCategories)
                 .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_ProductTemplateAttribute_ProductTemplate");
+                .HasConstraintName("FK_ProductCategory_Product");
         });
 
-        modelBuilder.Entity<ProductTemplateAttributeOption>(entity =>
+        modelBuilder.Entity<ProductImage>(entity =>
         {
-            entity.HasOne(d => d.AttributeOption).WithMany(p => p.ProductTemplateAttributeOptions)
+            entity.HasOne(d => d.Product).WithMany(p => p.ProductImages)
                 .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_ProductTemplateAttributeOption_AttributeOption");
-
-            entity.HasOne(d => d.ProductTemplateAttribute).WithMany(p => p.ProductTemplateAttributeOptions)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_ProductTemplateAttributeOption_ProductTemplateAttribute");
+                .HasConstraintName("FK_ProductImage_Product");
         });
 
-        modelBuilder.Entity<ProductTemplateAttributeSite>(entity =>
+        modelBuilder.Entity<ProductOption>(entity =>
         {
-            entity.HasOne(d => d.ProductTemplateAttribute).WithMany(p => p.ProductTemplateAttributeSites)
+            entity.HasOne(d => d.Product).WithMany(p => p.ProductOptions)
                 .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_ProductTemplateAttributeSite_ProductTemplateAttribute");
-
-            entity.HasOne(d => d.Site).WithMany(p => p.ProductTemplateAttributeSites)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_ProductTemplateAttributeSite_Site");
+                .HasConstraintName("FK_ProductOption_Product");
         });
 
-        modelBuilder.Entity<ProductTemplateBusinessType>(entity =>
+        modelBuilder.Entity<ProductOptionValue>(entity =>
         {
-            entity.HasOne(d => d.BusinessType).WithMany(p => p.ProductTemplateBusinessTypes)
+            entity.HasOne(d => d.ProductOption).WithMany(p => p.ProductOptionValues)
                 .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_ProductTemplateBusinessType_BusinessType");
-
-            entity.HasOne(d => d.ProductTemplate).WithMany(p => p.ProductTemplateBusinessTypes)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_ProductTemplateBusinessType_ProductTemplate");
+                .HasConstraintName("FK_ProductOptionValue_ProductOption");
         });
 
-        modelBuilder.Entity<ProductTemplateCategory>(entity =>
+        modelBuilder.Entity<ProductVariant>(entity =>
         {
-            entity.HasOne(d => d.Category).WithMany(p => p.ProductTemplateCategories)
+            entity.HasOne(d => d.Product).WithMany(p => p.ProductVariants)
                 .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_ProductTemplateCategory_Category");
-
-            entity.HasOne(d => d.ProductTemplate).WithMany(p => p.ProductTemplateCategories)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_ProductTemplateCategory_ProductTemplate");
+                .HasConstraintName("FK_ProductVariant_Product");
         });
 
-        modelBuilder.Entity<ProductTemplateMedium>(entity =>
+        modelBuilder.Entity<ProductVariantOptionValue>(entity =>
         {
-            entity.HasOne(d => d.Media).WithMany(p => p.ProductTemplateMedia).HasConstraintName("FK_ProductTemplateMedia_Media");
-
-            entity.HasOne(d => d.ProductTemplate).WithMany(p => p.ProductTemplateMedia)
+            entity.HasOne(d => d.ProductVariant).WithMany(p => p.ProductVariantOptionValues)
                 .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_ProductTemplateMedia_ProductTemplate");
-        });
-
-        modelBuilder.Entity<ProductTemplateSelectableWeight>(entity =>
-        {
-            entity.HasOne(d => d.ProductTemplate).WithMany(p => p.ProductTemplateSelectableWeights)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_ProductTemplateSelectableWeight_ProductTemplate");
-        });
-
-        modelBuilder.Entity<Role>(entity =>
-        {
-            entity.Property(e => e.Id).ValueGeneratedNever();
+                .HasConstraintName("FK_ProductVariantOptionValue_ProductVariant");
         });
 
         modelBuilder.Entity<Site>(entity =>
         {
-            entity.Property(e => e.AllowWeightedProducts).HasDefaultValue(true);
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysdatetime())");
-            entity.Property(e => e.Status).HasDefaultValue("active");
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
 
             entity.HasOne(d => d.Account).WithMany(p => p.Sites)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_Site_Account");
-        });
 
-        modelBuilder.Entity<SiteBusinessType>(entity =>
-        {
-            entity.HasOne(d => d.BusinessType).WithMany(p => p.SiteBusinessTypes)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_SiteBusinessType_BusinessType");
+            entity.HasOne(d => d.CreationUser).WithMany(p => p.SiteCreationUsers).HasConstraintName("FK_Site_CreationUser");
 
-            entity.HasOne(d => d.Site).WithMany(p => p.SiteBusinessTypes)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_SiteBusinessType_Site");
+            entity.HasOne(d => d.UpdateUser).WithMany(p => p.SiteUpdateUsers).HasConstraintName("FK_Site_UpdateUser");
+
+            entity.HasMany(d => d.BusinessTypes).WithMany(p => p.Sites)
+                .UsingEntity<Dictionary<string, object>>(
+                    "SiteBusinessType",
+                    r => r.HasOne<BusinessType>().WithMany()
+                        .HasForeignKey("BusinessTypeId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_SiteBusinessType_BusinessType"),
+                    l => l.HasOne<Site>().WithMany()
+                        .HasForeignKey("SiteId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_SiteBusinessType_Site"),
+                    j =>
+                    {
+                        j.HasKey("SiteId", "BusinessTypeId");
+                        j.ToTable("SiteBusinessType");
+                    });
+
+            entity.HasMany(d => d.Users).WithMany(p => p.Sites)
+                .UsingEntity<Dictionary<string, object>>(
+                    "SiteUser",
+                    r => r.HasOne<User>().WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_SiteUser_User"),
+                    l => l.HasOne<Site>().WithMany()
+                        .HasForeignKey("SiteId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_SiteUser_Site"),
+                    j =>
+                    {
+                        j.HasKey("SiteId", "UserId");
+                        j.ToTable("SiteUser");
+                    });
         });
 
         modelBuilder.Entity<Supplier>(entity =>
         {
-            entity.Property(e => e.IsActive).HasDefaultValue(true);
-        });
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
 
-        modelBuilder.Entity<SyncJob>(entity =>
-        {
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysdatetime())");
-            entity.Property(e => e.Status).HasDefaultValue("Pending");
+            entity.HasOne(d => d.CreationUser).WithMany(p => p.SupplierCreationUsers).HasConstraintName("FK_Supplier_CreationUser");
 
-            entity.HasOne(d => d.Account).WithMany(p => p.SyncJobs)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_SyncJob_Account");
-
-            entity.HasOne(d => d.RequestedByNavigation).WithMany(p => p.SyncJobs).HasConstraintName("FK_SyncJob_RequestedBy");
-        });
-
-        modelBuilder.Entity<SyncJobLog>(entity =>
-        {
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysdatetime())");
-
-            entity.HasOne(d => d.SyncJob).WithMany(p => p.SyncJobLogs)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_SyncJobLog_SyncJob");
+            entity.HasOne(d => d.UpdateUser).WithMany(p => p.SupplierUpdateUsers).HasConstraintName("FK_Supplier_UpdateUser");
         });
 
         modelBuilder.Entity<Tag>(entity =>
         {
-            entity.HasKey(e => e.Id).HasName("PK__Tag__3214EC0770F07255");
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
 
-            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.HasOne(d => d.CreationUser).WithMany(p => p.TagCreationUsers).HasConstraintName("FK_Tag_CreationUser");
+
+            entity.HasOne(d => d.UpdateUser).WithMany(p => p.TagUpdateUsers).HasConstraintName("FK_Tag_UpdateUser");
+        });
+
+        modelBuilder.Entity<TemplateAttribute>(entity =>
+        {
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
+
+            entity.HasOne(d => d.CreationUser).WithMany(p => p.TemplateAttributeCreationUsers).HasConstraintName("FK_TemplateAttribute_CreationUser");
+
+            entity.HasOne(d => d.UpdateUser).WithMany(p => p.TemplateAttributeUpdateUsers).HasConstraintName("FK_TemplateAttribute_UpdateUser");
+
+            entity.HasMany(d => d.Sites).WithMany(p => p.TemplateAttributes)
+                .UsingEntity<Dictionary<string, object>>(
+                    "TemplateAttributeSite",
+                    r => r.HasOne<Site>().WithMany()
+                        .HasForeignKey("SiteId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_TAS_Site"),
+                    l => l.HasOne<TemplateAttribute>().WithMany()
+                        .HasForeignKey("TemplateAttributeId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_TAS_TemplateAttribute"),
+                    j =>
+                    {
+                        j.HasKey("TemplateAttributeId", "SiteId");
+                        j.ToTable("TemplateAttributeSite");
+                    });
+        });
+
+        modelBuilder.Entity<TemplateAttributeValue>(entity =>
+        {
+            entity.HasOne(d => d.TemplateAttribute).WithMany(p => p.TemplateAttributeValues)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_TemplateAttributeValue_TemplateAttribute");
+        });
+
+        modelBuilder.Entity<TemplateProduct>(entity =>
+        {
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
+
+            entity.HasOne(d => d.Brand).WithMany(p => p.TemplateProducts).HasConstraintName("FK_TemplateProduct_Brand");
+
+            entity.HasOne(d => d.CreationUser).WithMany(p => p.TemplateProductCreationUsers).HasConstraintName("FK_TemplateProduct_CreationUser");
+
+            entity.HasOne(d => d.SetupType).WithMany(p => p.TemplateProducts).HasConstraintName("FK_TemplateProduct_SetupType");
+
+            entity.HasOne(d => d.ShippingClass).WithMany(p => p.TemplateProducts).HasConstraintName("FK_TemplateProduct_ShippingClass");
+
+            entity.HasOne(d => d.Status).WithMany(p => p.TemplateProducts).HasConstraintName("FK_TemplateProduct_Status");
+
+            entity.HasOne(d => d.StockManagementType).WithMany(p => p.TemplateProducts).HasConstraintName("FK_TemplateProduct_StockManagementType");
+
+            entity.HasOne(d => d.StockStatus).WithMany(p => p.TemplateProducts).HasConstraintName("FK_TemplateProduct_StockStatus");
+
+            entity.HasOne(d => d.Supplier).WithMany(p => p.TemplateProducts).HasConstraintName("FK_TemplateProduct_Supplier");
+
+            entity.HasOne(d => d.UpdateUser).WithMany(p => p.TemplateProductUpdateUsers).HasConstraintName("FK_TemplateProduct_UpdateUser");
+
+            entity.HasOne(d => d.Visibility).WithMany(p => p.TemplateProducts).HasConstraintName("FK_TemplateProduct_Visibility");
+
+            entity.HasOne(d => d.WeightConfig).WithMany(p => p.TemplateProducts).HasConstraintName("FK_TemplateProduct_WeightConfig");
+
+            entity.HasMany(d => d.Sites).WithMany(p => p.TemplateProducts)
+                .UsingEntity<Dictionary<string, object>>(
+                    "TemplateProductSite",
+                    r => r.HasOne<Site>().WithMany()
+                        .HasForeignKey("SiteId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_TPS_Site"),
+                    l => l.HasOne<TemplateProduct>().WithMany()
+                        .HasForeignKey("TemplateProductId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_TPS_TemplateProduct"),
+                    j =>
+                    {
+                        j.HasKey("TemplateProductId", "SiteId");
+                        j.ToTable("TemplateProductSite");
+                    });
+
+            entity.HasMany(d => d.Tags).WithMany(p => p.TemplateProducts)
+                .UsingEntity<Dictionary<string, object>>(
+                    "TemplateProductTag",
+                    r => r.HasOne<Tag>().WithMany()
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_TPT_Tag"),
+                    l => l.HasOne<TemplateProduct>().WithMany()
+                        .HasForeignKey("TemplateProductId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_TPT_TemplateProduct"),
+                    j =>
+                    {
+                        j.HasKey("TemplateProductId", "TagId");
+                        j.ToTable("TemplateProductTag");
+                    });
+        });
+
+        modelBuilder.Entity<TemplateProductCategory>(entity =>
+        {
+            entity.HasOne(d => d.Category).WithMany(p => p.TemplateProductCategories)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_TPC_Category");
+
+            entity.HasOne(d => d.TemplateProduct).WithMany(p => p.TemplateProductCategories)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_TPC_TemplateProduct");
+        });
+
+        modelBuilder.Entity<TemplateProductImage>(entity =>
+        {
+            entity.HasOne(d => d.TemplateProduct).WithMany(p => p.TemplateProductImages)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_TemplateProductImage_TemplateProduct");
+        });
+
+        modelBuilder.Entity<TemplateProductOption>(entity =>
+        {
+            entity.HasOne(d => d.TemplateProduct).WithMany(p => p.TemplateProductOptions)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_TemplateProductOption_TemplateProduct");
+        });
+
+        modelBuilder.Entity<TemplateProductOptionValue>(entity =>
+        {
+            entity.HasOne(d => d.TemplateProductOption).WithMany(p => p.TemplateProductOptionValues)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_TemplateProductOptionValue_TemplateProductOption");
+        });
+
+        modelBuilder.Entity<TemplateProductVariant>(entity =>
+        {
+            entity.HasOne(d => d.TemplateProduct).WithMany(p => p.TemplateProductVariants)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_TemplateProductVariant_TemplateProduct");
+        });
+
+        modelBuilder.Entity<TemplateProductVariantOptionValue>(entity =>
+        {
+            entity.HasOne(d => d.TemplateProductVariant).WithMany(p => p.TemplateProductVariantOptionValues)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_TPVOV_TemplateProductVariant");
         });
 
         modelBuilder.Entity<User>(entity =>
         {
-            entity.HasIndex(e => e.Email, "IX_User_Email_Unique")
-                .IsUnique()
-                .HasFilter("([IsDeleted]=(0) AND [Email] IS NOT NULL)");
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.FullName).HasComputedColumnSql("(([FirstName]+N' ')+[LastName])", true);
+            entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
 
-            entity.Property(e => e.FullName).HasComputedColumnSql("(([Firstname]+' ')+[LastName])", true);
+            entity.HasOne(d => d.Account).WithMany(p => p.Users).HasConstraintName("FK_User_Account");
+
+            entity.HasOne(d => d.CreationUser).WithMany(p => p.InverseCreationUser).HasConstraintName("FK_User_CreationUser");
 
             entity.HasOne(d => d.Role).WithMany(p => p.Users)
                 .OnDelete(DeleteBehavior.ClientSetNull)
@@ -654,43 +615,16 @@ public partial class GeorgeDBContextBase : DbContext
 
             entity.HasOne(d => d.Status).WithMany(p => p.Users)
                 .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_User_UserStatus");
+                .HasConstraintName("FK_User_Status");
+
+            entity.HasOne(d => d.UpdateUser).WithMany(p => p.InverseUpdateUser).HasConstraintName("FK_User_UpdateUser");
         });
 
-        modelBuilder.Entity<UserStatus>(entity =>
+        modelBuilder.Entity<WeightConfig>(entity =>
         {
-            entity.Property(e => e.Id).ValueGeneratedNever();
-        });
+            entity.HasOne(d => d.Unit).WithMany(p => p.WeightConfigs).HasConstraintName("FK_WeightConfig_Unit");
 
-        modelBuilder.Entity<VwAccountCategoryTree>(entity =>
-        {
-            entity.ToView("vw_AccountCategoryTree");
-        });
-
-        modelBuilder.Entity<VwAccountProductList>(entity =>
-        {
-            entity.ToView("vw_AccountProductList");
-        });
-
-        modelBuilder.Entity<VwAccountProductStatusSummary>(entity =>
-        {
-            entity.ToView("vw_AccountProductStatusSummary");
-        });
-
-        modelBuilder.Entity<WizardSession>(entity =>
-        {
-            entity.Property(e => e.ContentOwner).HasDefaultValue("Company");
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysdatetime())");
-            entity.Property(e => e.Status).HasDefaultValue("InProgress");
-            entity.Property(e => e.Step).HasDefaultValue(1);
-
-            entity.HasOne(d => d.Account).WithMany(p => p.WizardSessions)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_WizardSession_Account");
-
-            entity.HasOne(d => d.StartedByUser).WithMany(p => p.WizardSessions)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_WizardSession_StartedByUser");
+            entity.HasOne(d => d.UnitWeightMode).WithMany(p => p.WeightConfigs).HasConstraintName("FK_WeightConfig_UnitWeightMode");
         });
 
         OnModelCreatingPartial(modelBuilder);

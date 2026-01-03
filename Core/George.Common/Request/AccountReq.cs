@@ -231,21 +231,6 @@
         public bool AllowWeighted { get; set; }
     }
 
-    public class CreateAccountReq
-    {
-        public string AccountName { get; set; } = default!;
-        public bool IsKosherShop { get; set; }
-        public bool AllowWeighted { get; set; }
-        public List<int>? BusinessTypeIds { get; set; }
-
-        public string ManagerName { get; set; } = default!;
-        public string ManagerEmail { get; set; } = default!;
-        public string? TempPassword { get; set; }
-
-        public bool SendInviteToClient { get; set; }
-        public string? ContentOwner { get; set; } // "Client" or "Company"
-    }
-
     public class UpdateWizardSessionReq
     {
         public int? Step { get; set; }
@@ -332,10 +317,31 @@
 
 
     ////////////////////////////////////////////////////// New
-    public class AccountListFilter
+
+
+
+    public class CreateAccountReq
     {
-        public string? Search { get; set; }
-        public string? Status { get; set; }        // "Active" / "Inactive" (optional)
-        public string? WizardStatus { get; set; }  // "InProgress" / "Completed" (optional)
+        public string AccountName { get; set; } = default!;
+        public string? AccountDescription { get; set; }
+        public string? AccountAddress { get; set; }
+        public string? AccountCity { get; set; }
+        public string? AccountState { get; set; }
+        public string? AccountZip { get; set; }
+        public string? AccountPhone { get; set; }
+        public string? ContentOwner { get; set; } // "Client" or "Company"
+
+        public string ManagerName { get; set; } = default!;
+        public string ManagerEmail { get; set; } = default!;
+        public string? TempPassword { get; set; }
+
+        public string Status { get; set; } = "Active";
+        public string WizardStatus { get; set; } = "Not Started";
+        public int WizardStep { get; set; } = 1;
+        public string WizardType { get; set; } = "all_sites";
+
+        public bool SendInviteToClient { get; set; } = false;
+        public bool IsKosherShop { get; set; } = false;
+        public bool AllowWeighted { get; set; } = false;
     }
 }

@@ -6,8 +6,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("BusinessType")]
-public partial class BusinessType
+[Table("GlobalCategory")]
+public partial class GlobalCategory
 {
     [Key]
     public int Id { get; set; }
@@ -32,28 +32,28 @@ public partial class BusinessType
     [StringLength(2000)]
     public string? Description { get; set; }
 
-    [StringLength(200)]
-    public string? Icon { get; set; }
+    public int? ParentGlobalCategoryId { get; set; }
 
-    [InverseProperty("BusinessType")]
-    public virtual ICollection<BusinessTypeCategory> BusinessTypeCategories { get; set; } = new List<BusinessTypeCategory>();
+    public int? SortOrder { get; set; }
+
+    public int? ProductCount { get; set; }
 
     [ForeignKey("CreationUserId")]
-    [InverseProperty("BusinessTypeCreationUsers")]
+    [InverseProperty("GlobalCategoryCreationUsers")]
     public virtual User? CreationUser { get; set; }
 
-    [InverseProperty("BusinessType")]
-    public virtual ICollection<Medium> Media { get; set; } = new List<Medium>();
+    [InverseProperty("ParentGlobalCategory")]
+    public virtual ICollection<GlobalCategory> InverseParentGlobalCategory { get; set; } = new List<GlobalCategory>();
+
+    [ForeignKey("ParentGlobalCategoryId")]
+    [InverseProperty("InverseParentGlobalCategory")]
+    public virtual GlobalCategory? ParentGlobalCategory { get; set; }
 
     [ForeignKey("UpdateUserId")]
-    [InverseProperty("BusinessTypeUpdateUsers")]
+    [InverseProperty("GlobalCategoryUpdateUsers")]
     public virtual User? UpdateUser { get; set; }
 
-    [ForeignKey("BusinessTypeId")]
-    [InverseProperty("BusinessTypes")]
-    public virtual ICollection<GlobalCategory> GlobalCategories { get; set; } = new List<GlobalCategory>();
-
-    [ForeignKey("BusinessTypeId")]
-    [InverseProperty("BusinessTypes")]
-    public virtual ICollection<Site> Sites { get; set; } = new List<Site>();
+    [ForeignKey("GlobalCategoryId")]
+    [InverseProperty("GlobalCategories")]
+    public virtual ICollection<BusinessType> BusinessTypes { get; set; } = new List<BusinessType>();
 }

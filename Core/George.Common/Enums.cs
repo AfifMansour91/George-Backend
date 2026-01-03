@@ -71,9 +71,9 @@ namespace George.Common
 	{
 		None = 0,
 
-		SysAdmin = 1,
-		Admin = 2,
-		User = 3,
+		Admin = 1,
+		AccountAdmin = 2,
+		SiteAdmin = 3,
 	}
 
 	public enum RolePermission

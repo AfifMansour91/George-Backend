@@ -1,0 +1,159 @@
+﻿using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using Microsoft.EntityFrameworkCore;
+
+namespace George.DB;
+
+[Table("Product")]
+public partial class Product
+{
+    [Key]
+    public int Id { get; set; }
+
+    public bool IsDeleted { get; set; }
+
+    public Guid GuidId { get; set; }
+
+    [Precision(0)]
+    public DateTime CreationTime { get; set; }
+
+    [Precision(0)]
+    public DateTime? UpdatedDate { get; set; }
+
+    public int? CreationUserId { get; set; }
+
+    public int? UpdateUserId { get; set; }
+
+    public bool IsActive { get; set; }
+
+    [StringLength(300)]
+    public string Name { get; set; } = null!;
+
+    [StringLength(2000)]
+    public string? ShortDescription { get; set; }
+
+    public string? LongDescription { get; set; }
+
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? Price { get; set; }
+
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? SalePrice { get; set; }
+
+    [Precision(0)]
+    public DateTime? SalePriceStartDate { get; set; }
+
+    [Precision(0)]
+    public DateTime? SalePriceEndDate { get; set; }
+
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? CostPrice { get; set; }
+
+    [StringLength(100)]
+    public string? Sku { get; set; }
+
+    public int? StockManagementTypeId { get; set; }
+
+    public int? StockQuantity { get; set; }
+
+    public int? StockStatusId { get; set; }
+
+    [Column(TypeName = "decimal(18, 4)")]
+    public decimal? Weight { get; set; }
+
+    public int? ShippingClassId { get; set; }
+
+    public int? StatusId { get; set; }
+
+    public int? VisibilityId { get; set; }
+
+    public int? SetupTypeId { get; set; }
+
+    public int? BrandId { get; set; }
+
+    public int? SupplierId { get; set; }
+
+    public bool? IsKosher { get; set; }
+
+    public bool? IsWeighted { get; set; }
+
+    public int? WeightConfigId { get; set; }
+
+    [StringLength(300)]
+    public string? SeoTitle { get; set; }
+
+    [StringLength(2000)]
+    public string? SeoDescription { get; set; }
+
+    [StringLength(100)]
+    public string? TemplateId { get; set; }
+
+    [StringLength(100)]
+    public string? SourceProductId { get; set; }
+
+    [ForeignKey("BrandId")]
+    [InverseProperty("Products")]
+    public virtual Brand? Brand { get; set; }
+
+    [ForeignKey("CreationUserId")]
+    [InverseProperty("ProductCreationUsers")]
+    public virtual User? CreationUser { get; set; }
+
+    [InverseProperty("Product")]
+    public virtual ICollection<ProductCategory> ProductCategories { get; set; } = new List<ProductCategory>();
+
+    [InverseProperty("Product")]
+    public virtual ICollection<ProductImage> ProductImages { get; set; } = new List<ProductImage>();
+
+    [InverseProperty("Product")]
+    public virtual ICollection<ProductOption> ProductOptions { get; set; } = new List<ProductOption>();
+
+    [InverseProperty("Product")]
+    public virtual ICollection<ProductVariant> ProductVariants { get; set; } = new List<ProductVariant>();
+
+    [ForeignKey("SetupTypeId")]
+    [InverseProperty("Products")]
+    public virtual SetupType? SetupType { get; set; }
+
+    [ForeignKey("ShippingClassId")]
+    [InverseProperty("Products")]
+    public virtual ShippingClass? ShippingClass { get; set; }
+
+    [ForeignKey("StatusId")]
+    [InverseProperty("Products")]
+    public virtual ProductStatus? Status { get; set; }
+
+    [ForeignKey("StockManagementTypeId")]
+    [InverseProperty("Products")]
+    public virtual StockManagementType? StockManagementType { get; set; }
+
+    [ForeignKey("StockStatusId")]
+    [InverseProperty("Products")]
+    public virtual StockStatus? StockStatus { get; set; }
+
+    [ForeignKey("SupplierId")]
+    [InverseProperty("Products")]
+    public virtual Supplier? Supplier { get; set; }
+
+    [ForeignKey("UpdateUserId")]
+    [InverseProperty("ProductUpdateUsers")]
+    public virtual User? UpdateUser { get; set; }
+
+    [ForeignKey("VisibilityId")]
+    [InverseProperty("Products")]
+    public virtual Visibility? Visibility { get; set; }
+
+    [ForeignKey("WeightConfigId")]
+    [InverseProperty("Products")]
+    public virtual WeightConfig? WeightConfig { get; set; }
+
+    [ForeignKey("ProductId")]
+    [InverseProperty("Products")]
+    public virtual ICollection<Site> Sites { get; set; } = new List<Site>();
+
+    [ForeignKey("ProductId")]
+    [InverseProperty("Products")]
+    public virtual ICollection<Tag> Tags { get; set; } = new List<Tag>();
+}

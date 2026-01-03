@@ -12,43 +12,65 @@ public partial class Category
     [Key]
     public int Id { get; set; }
 
-    [StringLength(200)]
-    public string Name { get; set; } = null!;
+    public bool IsDeleted { get; set; }
 
-    [StringLength(200)]
-    public string? Slug { get; set; }
+    public Guid GuidId { get; set; }
+
+    [Precision(0)]
+    public DateTime CreationTime { get; set; }
+
+    [Precision(0)]
+    public DateTime? UpdatedDate { get; set; }
+
+    public int? CreationUserId { get; set; }
+
+    public int? UpdateUserId { get; set; }
 
     public bool IsActive { get; set; }
 
-    public int SortOrder { get; set; }
+    [StringLength(200)]
+    public string Name { get; set; } = null!;
 
-    public int ProductCount { get; set; }
+    public int? ParentCategoryId { get; set; }
 
-    [StringLength(1000)]
+    [StringLength(2000)]
     public string? Description { get; set; }
 
-    public DateTime CreatedAt { get; set; }
+    [StringLength(200)]
+    public string? CustomName { get; set; }
 
-    public DateTime? UpdatedAt { get; set; }
+    public bool? IsEnabled { get; set; }
 
-    public int? CreatedByUserId { get; set; }
+    public int? SortOrder { get; set; }
 
-    [InverseProperty("Category")]
-    public virtual ICollection<AccountCategory> AccountCategories { get; set; } = new List<AccountCategory>();
+    public bool? DisplayAsMain { get; set; }
 
-    [InverseProperty("Category")]
-    public virtual ICollection<CategoryBusinessType> CategoryBusinessTypes { get; set; } = new List<CategoryBusinessType>();
-
-    [InverseProperty("ChildCategory")]
-    public virtual ICollection<CategoryHierarchy> CategoryHierarchyChildCategories { get; set; } = new List<CategoryHierarchy>();
+    [ForeignKey("CreationUserId")]
+    [InverseProperty("CategoryCreationUsers")]
+    public virtual User? CreationUser { get; set; }
 
     [InverseProperty("ParentCategory")]
-    public virtual ICollection<CategoryHierarchy> CategoryHierarchyParentCategories { get; set; } = new List<CategoryHierarchy>();
+    public virtual ICollection<Category> InverseParentCategory { get; set; } = new List<Category>();
+
+    [ForeignKey("ParentCategoryId")]
+    [InverseProperty("InverseParentCategory")]
+    public virtual Category? ParentCategory { get; set; }
 
     [InverseProperty("Category")]
-    public virtual ICollection<ProductTemplateCategory> ProductTemplateCategories { get; set; } = new List<ProductTemplateCategory>();
+    public virtual ICollection<ProductCategory> ProductCategories { get; set; } = new List<ProductCategory>();
+
+    [InverseProperty("Category")]
+    public virtual ICollection<TemplateProductCategory> TemplateProductCategories { get; set; } = new List<TemplateProductCategory>();
+
+    [ForeignKey("UpdateUserId")]
+    [InverseProperty("CategoryUpdateUsers")]
+    public virtual User? UpdateUser { get; set; }
 
     [ForeignKey("CategoryId")]
     [InverseProperty("Categories")]
     public virtual ICollection<Medium> Media { get; set; } = new List<Medium>();
+
+    [ForeignKey("CategoryId")]
+    [InverseProperty("Categories")]
+    public virtual ICollection<Site> Sites { get; set; } = new List<Site>();
 }

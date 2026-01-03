@@ -7,22 +7,34 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("Tag")]
-[Index("Name", Name = "IX_Tag_Name", IsUnique = true)]
+[Index("Name", Name = "UQ__Tag__737584F686AD379B", IsUnique = true)]
 public partial class Tag
 {
     [Key]
-    public long Id { get; set; }
+    public int Id { get; set; }
 
-    [StringLength(100)]
+    public bool IsDeleted { get; set; }
+
+    [Precision(0)]
+    public DateTime CreationTime { get; set; }
+
+    [Precision(0)]
+    public DateTime? UpdatedDate { get; set; }
+
+    public int? CreationUserId { get; set; }
+
+    public int? UpdateUserId { get; set; }
+
+    [StringLength(200)]
     public string Name { get; set; } = null!;
 
-    [StringLength(120)]
-    public string? Slug { get; set; }
+    [ForeignKey("CreationUserId")]
+    [InverseProperty("TagCreationUsers")]
+    public virtual User? CreationUser { get; set; }
 
-    public bool IsActive { get; set; }
-
-    [InverseProperty("Tag")]
-    public virtual ICollection<AccountProductTag> AccountProductTags { get; set; } = new List<AccountProductTag>();
+    [ForeignKey("UpdateUserId")]
+    [InverseProperty("TagUpdateUsers")]
+    public virtual User? UpdateUser { get; set; }
 
     [ForeignKey("TagId")]
     [InverseProperty("Tags")]
@@ -30,5 +42,9 @@ public partial class Tag
 
     [ForeignKey("TagId")]
     [InverseProperty("Tags")]
-    public virtual ICollection<ProductTemplate> ProductTemplates { get; set; } = new List<ProductTemplate>();
+    public virtual ICollection<Product> Products { get; set; } = new List<Product>();
+
+    [ForeignKey("TagId")]
+    [InverseProperty("Tags")]
+    public virtual ICollection<TemplateProduct> TemplateProducts { get; set; } = new List<TemplateProduct>();
 }

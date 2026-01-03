@@ -22,9 +22,9 @@ namespace George.Api.Controllers
 
         [AllowAnonymous]
         [HttpGet]
-        [ProducesResponseType(typeof(IApiResponse<ApiListResponse<AccountListRowRes>>), (int)HttpStatusCode.OK)]
+        [ProducesResponseType(typeof(IApiResponse<ApiListResponse<AccountFilter>>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetAccountsAsync(
-            [FromQuery] ApiListReq<AccountListFilter> request,
+            [FromQuery] ApiListReq<AccountFilter> request,
             CancellationToken cancelToken = default)
         {
             return await SafeCallWithErrorCatchingAsync(() => _accountSvc.GetAccountsAsync(request, cancelToken));
@@ -44,26 +44,26 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _accountSvc.CreateAccountAsync(req, cancelToken));
         }
 
-        [HttpPut("{accountId:long}")]
+        [HttpPut("{accountId:int}")]
         [ProducesResponseType(typeof(IApiResponse<AccountRes>), (int)HttpStatusCode.OK)]
-        public async Task<IActionResult> UpdateAccountAsync([FromRoute] long accountId, [FromBody] UpdateAccountReq req, CancellationToken cancelToken = default)
+        public async Task<IActionResult> UpdateAccountAsync([FromRoute] int accountId, [FromBody] UpdateAccountReq req, CancellationToken cancelToken = default)
         {
             return await SafeCallWithErrorCatchingAsync(() => _accountSvc.UpdateAccountAsync(accountId, req, cancelToken));
         }
 
-        [HttpGet("{accountId:long}/WizardSession")]
-        [ProducesResponseType(typeof(IApiResponse<WizardSessionRes>), 200)]
-        public async Task<IActionResult> GetWizardSessionAsync([FromRoute] long accountId, CancellationToken cancelToken = default)
-        {
-            return await SafeCallWithErrorCatchingAsync(() => _accountSvc.GetWizardSessionAsync(accountId, cancelToken));
-        }
+        //[HttpGet("{accountId:long}/WizardSession")]
+        //[ProducesResponseType(typeof(IApiResponse<WizardSessionRes>), 200)]
+        //public async Task<IActionResult> GetWizardSessionAsync([FromRoute] long accountId, CancellationToken cancelToken = default)
+        //{
+        //    return await SafeCallWithErrorCatchingAsync(() => _accountSvc.GetWizardSessionAsync(accountId, cancelToken));
+        //}
 
-        [HttpPut("{accountId:long}/WizardSession")]
-        [ProducesResponseType(typeof(IApiResponse<WizardSessionRes>), 200)]
-        public async Task<IActionResult> UpdateWizardSessionAsync([FromRoute] long accountId, [FromBody] UpdateWizardSessionReq req, CancellationToken cancelToken = default)
-        {
-            return await SafeCallWithErrorCatchingAsync(() => _accountSvc.UpdateWizardSessionAsync(accountId, req, cancelToken));
-        }
+        //[HttpPut("{accountId:long}/WizardSession")]
+        //[ProducesResponseType(typeof(IApiResponse<WizardSessionRes>), 200)]
+        //public async Task<IActionResult> UpdateWizardSessionAsync([FromRoute] long accountId, [FromBody] UpdateWizardSessionReq req, CancellationToken cancelToken = default)
+        //{
+        //    return await SafeCallWithErrorCatchingAsync(() => _accountSvc.UpdateWizardSessionAsync(accountId, req, cancelToken));
+        //}
 
         [ApiExplorerSettings(IgnoreApi = true)]
         public void SetAuthUser()

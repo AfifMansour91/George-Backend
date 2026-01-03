@@ -2,7 +2,6 @@
 using George.Common;
 using George.Common.Request;
 using George.Data;
-using George.Data.Models;
 using George.DB;
 using George.Services.Response;
 using Microsoft.Extensions.Logging;
@@ -26,53 +25,63 @@ namespace George.Services
             _userStorage = userStorage;
         }
 
-        public async Task<IApiResponse<ApiListResponse<AccountListRowRes>>> GetAccountsAsync(
-            ApiListReq<AccountListFilter> request,
+        public async Task<IApiResponse<ApiListResponse<AccountRes>>> GetAccountsAsync(
+            ApiListReq<AccountFilter> request,
             CancellationToken cancelToken)
         {
-            var response = new ApiResponse<ApiListResponse<AccountListRowRes>>
+            var response = new ApiResponse<ApiListResponse<AccountRes>>
             {
-                Data = new ApiListResponse<AccountListRowRes>()
+                Data = new ApiListResponse<AccountRes>()
             };
 
             var res = await _accountStorage.GetAccountsAsync(request.Filter, request, cancelToken);
 
-            response.Data.Items = (res.Items ?? new List<AccountListEntityRow>())
-                .Select(x =>
+            response.Data.Items = (res.Items ?? new List<Account>())
+                .Select(account =>
                 {
-                    var acc = x.Account;
-                    var ws = x.LatestWizardSession;
-                    var mgr = x.ManagerUser;
-
-                    return new AccountListRowRes
+                    return new AccountRes
                     {
-                        Id = acc.Id,
-                        AccountName = acc.Name,
+                        Id = account.Id,
+                        AccountName = account.Name,
 
                         // If you don’t have these columns yet, keep null/empty
-                        AccountDescription = acc.Description,
-                        AccountAddress = acc.Address,
-                        AccountCity = acc.City,
-                        AccountState = acc.State,
-                        AccountZip = acc.Zip,
-                        AccountPhone = acc.Phone,
+                        AccountDescription = account.Description,
+                        AccountAddress = account.Address,
+                        AccountCity = account.City,
+                        AccountState = account.State,
+                        AccountZip = account.Zip,
+                        AccountPhone = account.Phone,
 
-                        ManagerName = mgr == null ? null : $"{mgr.FirstName} {mgr.LastName}".Trim(),
-                        ManagerEmail = mgr?.Email,
+                        ManagerName = account.ManagerName,
+                        ManagerEmail = account?.ManagerEmail,
 
-                        Status = acc.IsActive ? "Active" : "Inactive",
+                        Status = account.IsActive ? "Active" : "Inactive",
 
-                        WizardStatus = ws == null
+                        WizardStatusNamePair = account.WizardStatus != null
+                            ? new IdNamePair
+                            {
+                                Id = account.WizardStatus.Id,
+                                Name = account.WizardStatus.Name
+                            }
+                            : null,
+                        WizardStatus = account.Status == null
                             ? "Not Started"
-                            : (ws.Status == "Completed" ? "Completed" : "In Progress"),
+                            : (account.Status == "Completed" ? "Completed" : "In Progress"),
 
+                        WizardTypeIdNamePair = account.WizardType != null
+                            ? new IdNamePair
+                            {
+                                Id = account.WizardType.Id,
+                                Name = account.WizardType.Name
+                            }
+                            : null,
                         WizardType = "all_sites", // until you store it
-                        WizardStep = ws?.Step ?? 0,
+                        WizardStep = account?.WizardStep ?? 0,
 
-                        ContentOwner = ws?.ContentOwner ?? "Company",
+                        ContentOwner = account?.ContentOwner?.Name ?? "Company",
 
-                        CreatedDate = acc.CreatedAt,
-                        UpdatedDate = acc.UpdatedAt,
+                        CreatedDate = account.CreationTime,
+                        UpdatedDate = account.UpdatedDate,
 
                         CreatedById = null,
                         CreatedBy = null
@@ -87,17 +96,9 @@ namespace George.Services
             return response;
         }
 
-
-
-
-        // 1. Create account (wizard step 1 start)
-        public async Task<IApiResponse<CreateAccountRes>> CreateAccountAsync(CreateAccountReq req, CancellationToken cancelToken)
+        public async Task<IApiResponse<AccountRes>> CreateAccountAsync(CreateAccountReq req, CancellationToken cancelToken)
         {
-            var response = new ApiResponse<CreateAccountRes>();
-
-            // SuperAdmin-only check (basic version)
-            if (!AuthUser.IsMaster)
-                return CreateResponse(response, StatusCode.UnauthorizedData);
+            var response = new ApiResponse<AccountRes>();
 
             // ensure or create a user for the manager
             var managerUser = await _userStorage.GetUserByEmailAsync(req.ManagerEmail, cancelToken);
@@ -110,10 +111,9 @@ namespace George.Services
                     Email = req.ManagerEmail,
                     Password = req.TempPassword ?? "123456", // TODO: hash & generate safely
                     IsEmailVerified = false,
-                    StatusId = (int)Common.UserStatus.Pending,
-                    RoleId = (int)UserRole.Admin, // or whatever role means client admin
+                    StatusId = (int)Common.UserStatus.Active,
+                    RoleId = (int)UserRole.AccountAdmin, // or whatever role means client admin
                     LockoutFailCount = 0,
-                    IsMaster = false,
                     IsDeleted = false
                 };
 
@@ -125,41 +125,47 @@ namespace George.Services
             var acc = new Account
             {
                 Name = req.AccountName,
+                Description = req.AccountDescription,
+                Address = req.AccountAddress,
+                City = req.AccountCity,
+
+                State = req.AccountState,
+                Zip = req.AccountZip,
+                Phone = req.AccountPhone,
+                ManagerName = req.ManagerName,
+                ManagerEmail = req.ManagerEmail,
+                //contentOwnerId = req.ContentOwnerId, TODO: lookup later
+                Status = req.Status,
+                //WizardStatus = req.WizardStatus, TODO: lookup later
+                WizardStep = req.WizardStep,
+                //WizardType = req.WizardType,  TODO: lookup later
+
                 IsActive = true,
-                IsKosherShop = req.IsKosherShop,
-                AllowWeighted = req.AllowWeighted,
-                CreatedAt = DateTime.UtcNow
+                CreationTime = DateTime.UtcNow,
+                Users = new List<User> { managerUser },
             };
 
             acc = await _accountStorage.CreateAccountAsync(acc, cancelToken);
 
-            // business types
-            await _accountStorage.AddAccountBusinessTypesAsync(acc.Id, req.BusinessTypeIds ?? new List<int>(), cancelToken);
-
             // link account-user as Admin
-            await _accountStorage.AddAccountUserAsync(acc.Id, managerUser.Id, (int)UserRole.Admin, cancelToken);
+            //await _accountStorage.AddAccountUserAsync(acc.Id, managerUser.Id, (int)UserRole.Admin, cancelToken);
 
-            // create wizard session
-            string owner = req.ContentOwner ?? "Company"; // "Client" or "Company"
-            string? inviteToken = req.SendInviteToClient ? Guid.NewGuid().ToString("N") : null;
+            //// create wizard session
+            //string owner = req.ContentOwner ?? "Company"; // "Client" or "Company"
+            //string? inviteToken = req.SendInviteToClient ? Guid.NewGuid().ToString("N") : null;
 
-            var wizard = await _accountStorage.CreateWizardSessionAsync(
-                acc.Id,
-                AuthUser.Id,
-                owner,
-                inviteToken,
-                cancelToken
-            );
+            //var wizard = await _accountStorage.CreateWizardSessionAsync(
+            //    acc.Id,
+            //    AuthUser.Id,
+            //    owner,
+            //    inviteToken,
+            //    cancelToken
+            //);
 
-            // onboard products/categories from ProductTemplate (future: proc)
-            await _accountStorage.RunOnboardProcAsync(acc.Id, AuthUser.Id, cancelToken);
+            //// onboard products/categories from ProductTemplate (future: proc)
+            //await _accountStorage.RunOnboardProcAsync(acc.Id, AuthUser.Id, cancelToken);
 
-            response.Data = new CreateAccountRes
-            {
-                AccountId = acc.Id,
-                WizardSessionId = wizard.Id,
-                InviteToken = inviteToken
-            };
+            response.Data = _mapper.Map<AccountRes>(acc);
 
             return response;
         }
@@ -175,40 +181,27 @@ namespace George.Services
                 // TODO: check AccountUser table for this AuthUser.Id
             }
 
-            var acc = await _accountStorage.GetAccountAsync(accountId, cancelToken);
-            if (acc == null)
+            var account = await _accountStorage.GetAccountAsync(accountId, cancelToken);
+            if (account == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
 
-            response.Data = new AccountRes
-            {
-                Id = acc.Id,
-                Name = acc.Name,
-                IsActive = acc.IsActive,
-                IsKosherShop = acc.IsKosherShop,
-                AllowWeighted = acc.AllowWeighted
-            };
+
+            response.Data = _mapper.Map<AccountRes>(account);
 
             return response;
         }
 
         // 3. Update account settings (kosher/weighted/shop name)
-        public async Task<IApiResponse<AccountRes>> UpdateAccountAsync(long accountId, UpdateAccountReq req, CancellationToken cancelToken)
+        public async Task<IApiResponse<AccountRes>> UpdateAccountAsync(int accountId, UpdateAccountReq req, CancellationToken cancelToken)
         {
             var response = new ApiResponse<AccountRes>();
-
-            if (!AuthUser.IsMaster)
-            {
-                // TODO: check AccountUser role for AuthUser
-            }
 
             var model = new Account
             {
                 Id = accountId,
                 Name = req.Name,
                 IsActive = req.IsActive,
-                IsKosherShop = req.IsKosherShop,
-                AllowWeighted = req.AllowWeighted,
-                UpdatedAt = DateTime.UtcNow
+                UpdatedDate = DateTime.UtcNow
             };
 
             var updated = await _accountStorage.UpdateAccountAsync(model, cancelToken);
@@ -218,72 +211,91 @@ namespace George.Services
             response.Data = new AccountRes
             {
                 Id = updated.Id,
-                Name = updated.Name,
+                AccountName = updated.Name,
                 IsActive = updated.IsActive,
-                IsKosherShop = updated.IsKosherShop,
-                AllowWeighted = updated.AllowWeighted
             };
 
             return response;
         }
 
-        // 4. Wizard session status (get)
-        public async Task<IApiResponse<WizardSessionRes>> GetWizardSessionAsync(long accountId, CancellationToken cancelToken)
+        public async Task<IApiResponse<AccountRes?>> DeleteAccountAsync(int id, CancellationToken cancelToken = default)
         {
-            var response = new ApiResponse<WizardSessionRes>();
+            IApiResponse<AccountRes?> response = new ApiResponse<AccountRes?>();
 
-            // check access (like above)
+            //// Verify authorization.
 
-            var ws = await _accountStorage.GetWizardSessionAsync(accountId, cancelToken);
-            if (ws == null)
-                return CreateResponse(response, StatusCode.ItemNotFound);
+            //// Check for dependencies.
+            //if (await _taskStorage.TaskHasDependenciesAsync(id))
+            //	return CreateResponse(response, StatusCode.ItemHasDependencies);
 
-            response.Data = new WizardSessionRes
+            // Delete from the DB.
+            Account? model = await _accountStorage.DeleteAccountAsync(id, cancelToken).ConfigureAwait(false);
+            if (model != null)
             {
-                Id = ws.Id,
-                AccountId = ws.AccountId,
-                Step = ws.Step,
-                Status = ws.Status,
-                ContentOwner = ws.ContentOwner,
-                InviteToken = ws.InviteToken
-            };
+                // Convert to response.
+                response.Data = _mapper.Map<AccountRes>(model);
+            }
 
             return response;
         }
 
-        // 5. Wizard session status (update step / complete)
-        public async Task<IApiResponse<WizardSessionRes>> UpdateWizardSessionAsync(long accountId, UpdateWizardSessionReq req, CancellationToken cancelToken)
-        {
-            var response = new ApiResponse<WizardSessionRes>();
+        //// 4. Wizard session status (get)
+        //public async Task<IApiResponse<WizardSessionRes>> GetWizardSessionAsync(long accountId, CancellationToken cancelToken)
+        //{
+        //    var response = new ApiResponse<WizardSessionRes>();
 
-            // check access
+        //    // check access (like above)
 
-            var ws = await _accountStorage.GetWizardSessionAsync(accountId, cancelToken);
-            if (ws == null)
-                return CreateResponse(response, StatusCode.ItemNotFound);
+        //    var ws = await _accountStorage.GetWizardSessionAsync(accountId, cancelToken);
+        //    if (ws == null)
+        //        return CreateResponse(response, StatusCode.ItemNotFound);
 
-            var updated = await _accountStorage.UpdateWizardSessionAsync(
-                ws.Id,
-                req.Step,
-                req.Status,
-                cancelToken
-            );
+        //    response.Data = new WizardSessionRes
+        //    {
+        //        Id = ws.Id,
+        //        AccountId = ws.AccountId,
+        //        Step = ws.Step,
+        //        Status = ws.Status,
+        //        ContentOwner = ws.ContentOwner,
+        //        InviteToken = ws.InviteToken
+        //    };
 
-            if (updated == null)
-                return CreateResponse(response, StatusCode.ItemNotFound);
+        //    return response;
+        //}
 
-            response.Data = new WizardSessionRes
-            {
-                Id = updated.Id,
-                AccountId = updated.AccountId,
-                Step = updated.Step,
-                Status = updated.Status,
-                ContentOwner = updated.ContentOwner,
-                InviteToken = updated.InviteToken
-            };
+        //// 5. Wizard session status (update step / complete)
+        //public async Task<IApiResponse<WizardSessionRes>> UpdateWizardSessionAsync(long accountId, UpdateWizardSessionReq req, CancellationToken cancelToken)
+        //{
+        //    var response = new ApiResponse<WizardSessionRes>();
 
-            return response;
-        }
+        //    // check access
+
+        //    var ws = await _accountStorage.GetWizardSessionAsync(accountId, cancelToken);
+        //    if (ws == null)
+        //        return CreateResponse(response, StatusCode.ItemNotFound);
+
+        //    var updated = await _accountStorage.UpdateWizardSessionAsync(
+        //        ws.Id,
+        //        req.Step,
+        //        req.Status,
+        //        cancelToken
+        //    );
+
+        //    if (updated == null)
+        //        return CreateResponse(response, StatusCode.ItemNotFound);
+
+        //    response.Data = new WizardSessionRes
+        //    {
+        //        Id = updated.Id,
+        //        AccountId = updated.AccountId,
+        //        Step = updated.Step,
+        //        Status = updated.Status,
+        //        ContentOwner = updated.ContentOwner,
+        //        InviteToken = updated.InviteToken
+        //    };
+
+        //    return response;
+        //}
     }
 
 }

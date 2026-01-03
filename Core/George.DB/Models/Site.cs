@@ -10,21 +10,37 @@ namespace George.DB;
 public partial class Site
 {
     [Key]
-    public long Id { get; set; }
+    public int Id { get; set; }
 
-    public long AccountId { get; set; }
+    public bool IsDeleted { get; set; }
+
+    public Guid GuidId { get; set; }
+
+    [Precision(0)]
+    public DateTime CreationTime { get; set; }
+
+    [Precision(0)]
+    public DateTime? UpdatedDate { get; set; }
+
+    public int? CreationUserId { get; set; }
+
+    public int? UpdateUserId { get; set; }
+
+    public bool IsActive { get; set; }
+
+    public int AccountId { get; set; }
 
     [StringLength(200)]
-    public string Name { get; set; } = null!;
+    public string SiteName { get; set; } = null!;
 
     [StringLength(500)]
     public string? Location { get; set; }
 
-    [StringLength(1000)]
+    [StringLength(2000)]
     public string? Description { get; set; }
 
     [StringLength(20)]
-    public string Status { get; set; } = null!;
+    public string? Status { get; set; }
 
     [StringLength(250)]
     public string? ContactEmail { get; set; }
@@ -32,28 +48,46 @@ public partial class Site
     [StringLength(50)]
     public string? ContactPhone { get; set; }
 
-    public bool IsKosherSite { get; set; }
+    public bool? IsKosherSite { get; set; }
 
-    public bool AllowWeightedProducts { get; set; }
-
-    public DateTime CreatedAt { get; set; }
+    public bool? AllowWeightedProducts { get; set; }
 
     [ForeignKey("AccountId")]
     [InverseProperty("Sites")]
     public virtual Account Account { get; set; } = null!;
 
     [InverseProperty("Site")]
-    public virtual ICollection<AccountCategorySite> AccountCategorySites { get; set; } = new List<AccountCategorySite>();
+    public virtual ICollection<Attribute> Attributes { get; set; } = new List<Attribute>();
 
-    [InverseProperty("Site")]
-    public virtual ICollection<AccountProductSite> AccountProductSites { get; set; } = new List<AccountProductSite>();
+    [ForeignKey("CreationUserId")]
+    [InverseProperty("SiteCreationUsers")]
+    public virtual User? CreationUser { get; set; }
 
-    [InverseProperty("Site")]
-    public virtual ICollection<AccountUser> AccountUsers { get; set; } = new List<AccountUser>();
+    [ForeignKey("UpdateUserId")]
+    [InverseProperty("SiteUpdateUsers")]
+    public virtual User? UpdateUser { get; set; }
 
-    [InverseProperty("Site")]
-    public virtual ICollection<ProductTemplateAttributeSite> ProductTemplateAttributeSites { get; set; } = new List<ProductTemplateAttributeSite>();
+    [ForeignKey("SiteId")]
+    [InverseProperty("Sites")]
+    public virtual ICollection<BusinessType> BusinessTypes { get; set; } = new List<BusinessType>();
 
-    [InverseProperty("Site")]
-    public virtual ICollection<SiteBusinessType> SiteBusinessTypes { get; set; } = new List<SiteBusinessType>();
+    [ForeignKey("SiteId")]
+    [InverseProperty("Sites")]
+    public virtual ICollection<Category> Categories { get; set; } = new List<Category>();
+
+    [ForeignKey("SiteId")]
+    [InverseProperty("Sites")]
+    public virtual ICollection<Product> Products { get; set; } = new List<Product>();
+
+    [ForeignKey("SiteId")]
+    [InverseProperty("Sites")]
+    public virtual ICollection<TemplateAttribute> TemplateAttributes { get; set; } = new List<TemplateAttribute>();
+
+    [ForeignKey("SiteId")]
+    [InverseProperty("Sites")]
+    public virtual ICollection<TemplateProduct> TemplateProducts { get; set; } = new List<TemplateProduct>();
+
+    [ForeignKey("SiteId")]
+    [InverseProperty("Sites")]
+    public virtual ICollection<User> Users { get; set; } = new List<User>();
 }

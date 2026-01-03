@@ -12,23 +12,37 @@ public partial class Attribute
     [Key]
     public int Id { get; set; }
 
-    [StringLength(150)]
+    public bool IsDeleted { get; set; }
+
+    public Guid GuidId { get; set; }
+
+    [Precision(0)]
+    public DateTime CreationTime { get; set; }
+
+    [Precision(0)]
+    public DateTime? UpdatedDate { get; set; }
+
+    public int? CreationUserId { get; set; }
+
+    public int? UpdateUserId { get; set; }
+
+    [StringLength(200)]
     public string Name { get; set; } = null!;
 
-    [StringLength(30)]
-    public string DataType { get; set; } = null!;
-
-    public bool IsVariantAxis { get; set; }
+    public int SiteId { get; set; }
 
     [InverseProperty("Attribute")]
-    public virtual ICollection<AccountProductAttribute> AccountProductAttributes { get; set; } = new List<AccountProductAttribute>();
+    public virtual ICollection<AttributeValue> AttributeValues { get; set; } = new List<AttributeValue>();
 
-    [InverseProperty("Attribute")]
-    public virtual ICollection<AccountProductVariantOption> AccountProductVariantOptions { get; set; } = new List<AccountProductVariantOption>();
+    [ForeignKey("CreationUserId")]
+    [InverseProperty("AttributeCreationUsers")]
+    public virtual User? CreationUser { get; set; }
 
-    [InverseProperty("Attribute")]
-    public virtual ICollection<AttributeOption> AttributeOptions { get; set; } = new List<AttributeOption>();
+    [ForeignKey("SiteId")]
+    [InverseProperty("Attributes")]
+    public virtual Site Site { get; set; } = null!;
 
-    [InverseProperty("Attribute")]
-    public virtual ICollection<ProductTemplateAttribute> ProductTemplateAttributes { get; set; } = new List<ProductTemplateAttribute>();
+    [ForeignKey("UpdateUserId")]
+    [InverseProperty("AttributeUpdateUsers")]
+    public virtual User? UpdateUser { get; set; }
 }

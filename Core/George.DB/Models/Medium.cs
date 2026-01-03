@@ -6,48 +6,52 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Index("BusinessTypeId", Name = "IX_Media_BusinessTypeId")]
-[Index("Name", Name = "IX_Media_Name")]
-[Index("Type", Name = "IX_Media_Type")]
 public partial class Medium
 {
     [Key]
-    public long Id { get; set; }
+    public int Id { get; set; }
+
+    public bool IsDeleted { get; set; }
+
+    [Precision(0)]
+    public DateTime CreationTime { get; set; }
+
+    [Precision(0)]
+    public DateTime? UpdatedDate { get; set; }
+
+    public int? CreationUserId { get; set; }
+
+    public int? UpdateUserId { get; set; }
 
     [StringLength(1000)]
     public string Url { get; set; } = null!;
 
-    [StringLength(255)]
+    [StringLength(300)]
     public string Name { get; set; } = null!;
 
-    [StringLength(20)]
-    public string? Type { get; set; }
+    public int? TypeId { get; set; }
 
     public int? BusinessTypeId { get; set; }
 
     public long? FileSize { get; set; }
 
-    public int UsageCount { get; set; }
-
-    public DateTime CreatedAt { get; set; }
-
-    public DateTime? UpdatedAt { get; set; }
-
-    public int? CreatedByUserId { get; set; }
-
-    [InverseProperty("Media")]
-    public virtual ICollection<AccountProductMedium> AccountProductMedia { get; set; } = new List<AccountProductMedium>();
+    public int? UsageCount { get; set; }
 
     [ForeignKey("BusinessTypeId")]
     [InverseProperty("Media")]
     public virtual BusinessType? BusinessType { get; set; }
 
-    [ForeignKey("CreatedByUserId")]
-    [InverseProperty("Media")]
-    public virtual User? CreatedByUser { get; set; }
+    [ForeignKey("CreationUserId")]
+    [InverseProperty("MediumCreationUsers")]
+    public virtual User? CreationUser { get; set; }
 
+    [ForeignKey("TypeId")]
     [InverseProperty("Media")]
-    public virtual ICollection<ProductTemplateMedium> ProductTemplateMedia { get; set; } = new List<ProductTemplateMedium>();
+    public virtual MediaType? Type { get; set; }
+
+    [ForeignKey("UpdateUserId")]
+    [InverseProperty("MediumUpdateUsers")]
+    public virtual User? UpdateUser { get; set; }
 
     [ForeignKey("MediaId")]
     [InverseProperty("Media")]

@@ -2,7 +2,7 @@
 
 namespace George.Services.Response
 {
-    public class AccountListRowRes
+    public class AccountRes
     {
         public long Id { get; set; }
 
@@ -13,15 +13,19 @@ namespace George.Services.Response
         public string? AccountState { get; set; }
         public string? AccountZip { get; set; }
         public string? AccountPhone { get; set; }
+        public bool? IsActive { get; set; }
 
         public string? ManagerName { get; set; }
         public string? ManagerEmail { get; set; }
 
+        public IdNamePair? StatusIdNamePair { get; set; }
         public string Status { get; set; } = "Active";          // match base44
+        public IdNamePair? WizardStatusNamePair { get; set; }
         public string WizardStatus { get; set; } = "In Progress";
+        public IdNamePair? WizardTypeIdNamePair { get; set; }
         public string WizardType { get; set; } = "all_sites";   // you can store it or default it
         public decimal WizardStep { get; set; }
-
+        public IdNamePair? ContentOwnerIdNamePair { get; set; }
         public string ContentOwner { get; set; } = "Company";
 
         public DateTime CreatedDate { get; set; }
@@ -31,17 +35,17 @@ namespace George.Services.Response
         public string? CreatedBy { get; set; }
     }
 
-    public class AccountRes
-    {
-        public long Id { get; set; }
-        public string Name { get; set; } = default!;
-        public string? StoreDomain { get; set; }
-        public bool IsKosherShop { get; set; }
-        public bool AllowWeighted { get; set; }
-        public bool IsActive { get; set; }
-        public List<IdNamePair> BusinessTypes { get; set; } = new();
-        public WizardSessionRes? WizardSession { get; set; }
-    }
+    //public class AccountRes
+    //{
+    //    public long Id { get; set; }
+    //    public string Name { get; set; } = default!;
+    //    public string? StoreDomain { get; set; }
+    //    public bool IsKosherShop { get; set; }
+    //    public bool AllowWeighted { get; set; }
+    //    public bool IsActive { get; set; }
+    //    public List<IdNamePair> BusinessTypes { get; set; } = new();
+    //    public WizardSessionRes? WizardSession { get; set; }
+    //}
 
     public class AccountCategoryRes
     {

@@ -50,5 +50,35 @@ namespace George.Common
         //public List<int>? CategoriesIds { get; set; }
         public SearchFilter? Search { get; set; }
     }
-    
+
+    public class AccountFilter
+    {
+        public string? Name { get; set; }
+        public SearchFilter? Search { get; set; }
+        public string? Status { get; set; }        // "Active" / "Inactive" (optional)
+        public string? WizardStatus { get; set; }  // "InProgress" / "Completed" (optional)
+    }
+
+    public class SiteFilter
+    {
+        public string? Name { get; set; }
+        public string? Location { get; set; }
+        public string? Description { get; set; }
+        public string? Status { get; set; }
+        public string? ContactEmail { get; set; }
+        public string? ContactPhone { get; set; }
+        public bool? IsKosherSite { get; set; }
+        public bool? AllowWeightedProducts { get; set; }
+        public SearchFilter? Search { get; set; }
+    }
+
+    public class AttributeFilter
+    {
+        public string? Name { get; set; }
+        public string? Value { get; set; }
+        public List<int>? SiteIds { get; set; }
+        public SearchFilter? Search { get; set; }
+    }
+
+
 }

@@ -6,14 +6,15 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("Brand")]
-[Index("Name", Name = "UQ__Brand__737584F6B8E4DBC4", IsUnique = true)]
-public partial class Brand
+[Table("TemplateAttribute")]
+public partial class TemplateAttribute
 {
     [Key]
     public int Id { get; set; }
 
     public bool IsDeleted { get; set; }
+
+    public Guid GuidId { get; set; }
 
     [Precision(0)]
     public DateTime CreationTime { get; set; }
@@ -29,16 +30,17 @@ public partial class Brand
     public string Name { get; set; } = null!;
 
     [ForeignKey("CreationUserId")]
-    [InverseProperty("BrandCreationUsers")]
+    [InverseProperty("TemplateAttributeCreationUsers")]
     public virtual User? CreationUser { get; set; }
 
-    [InverseProperty("Brand")]
-    public virtual ICollection<Product> Products { get; set; } = new List<Product>();
-
-    [InverseProperty("Brand")]
-    public virtual ICollection<TemplateProduct> TemplateProducts { get; set; } = new List<TemplateProduct>();
+    [InverseProperty("TemplateAttribute")]
+    public virtual ICollection<TemplateAttributeValue> TemplateAttributeValues { get; set; } = new List<TemplateAttributeValue>();
 
     [ForeignKey("UpdateUserId")]
-    [InverseProperty("BrandUpdateUsers")]
+    [InverseProperty("TemplateAttributeUpdateUsers")]
     public virtual User? UpdateUser { get; set; }
+
+    [ForeignKey("TemplateAttributeId")]
+    [InverseProperty("TemplateAttributes")]
+    public virtual ICollection<Site> Sites { get; set; } = new List<Site>();
 }

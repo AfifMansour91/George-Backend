@@ -6,9 +6,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("UserStatus")]
-[Index("Name", Name = "UQ__UserStat__737584F61AC3C70F", IsUnique = true)]
-public partial class UserStatus
+[Table("WizardType")]
+[Index("Name", Name = "UQ__WizardTy__737584F6340E88E4", IsUnique = true)]
+public partial class WizardType
 {
     [Key]
     public int Id { get; set; }
@@ -18,6 +18,6 @@ public partial class UserStatus
 
     public bool IsDeleted { get; set; }
 
-    [InverseProperty("Status")]
-    public virtual ICollection<User> Users { get; set; } = new List<User>();
+    [InverseProperty("WizardType")]
+    public virtual ICollection<Account> Accounts { get; set; } = new List<Account>();
 }
