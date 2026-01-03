@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("StockManagementType")]
-[Index("Name", Name = "UQ__StockMan__737584F6FA56C020", IsUnique = true)]
+[Index("Name", Name = "UQ__StockMan__737584F62CB3B34A", IsUnique = true)]
 public partial class StockManagementType
 {
     [Key]

@@ -130,6 +130,10 @@ public partial class GeorgeDBContextBase : DbContext
 
         modelBuilder.Entity<Attribute>(entity =>
         {
+            entity.HasIndex(e => new { e.SiteId, e.Name }, "UX_Attribute_SiteId_Name_NotDeleted")
+                .IsUnique()
+                .HasFilter("([IsDeleted]=(0))");
+
             entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
 
@@ -151,7 +155,13 @@ public partial class GeorgeDBContextBase : DbContext
 
         modelBuilder.Entity<Brand>(entity =>
         {
+            entity.HasIndex(e => new { e.AccountId, e.Name }, "UX_Brand_AccountId_Name_NotDeleted")
+                .IsUnique()
+                .HasFilter("([IsDeleted]=(0) AND [AccountId] IS NOT NULL)");
+
             entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.Account).WithMany(p => p.Brands).HasConstraintName("FK_Brand_Account");
 
             entity.HasOne(d => d.CreationUser).WithMany(p => p.BrandCreationUsers).HasConstraintName("FK_Brand_CreationUser");
 
@@ -177,13 +187,21 @@ public partial class GeorgeDBContextBase : DbContext
 
         modelBuilder.Entity<Category>(entity =>
         {
+            entity.HasIndex(e => new { e.AccountId, e.ParentCategoryId, e.Name }, "UX_Category_Account_Parent_Name_NotDeleted")
+                .IsUnique()
+                .HasFilter("([IsDeleted]=(0) AND [AccountId] IS NOT NULL)");
+
             entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
 
+            entity.HasOne(d => d.Account).WithMany(p => p.Categories).HasConstraintName("FK_Category_Account");
+
             entity.HasOne(d => d.CreationUser).WithMany(p => p.CategoryCreationUsers).HasConstraintName("FK_Category_CreationUser");
 
             entity.HasOne(d => d.ParentCategory).WithMany(p => p.InverseParentCategory).HasConstraintName("FK_Category_Parent");
+
+            entity.HasOne(d => d.SourceGlobalCategory).WithMany(p => p.Categories).HasConstraintName("FK_Category_SourceGlobalCategory");
 
             entity.HasOne(d => d.UpdateUser).WithMany(p => p.CategoryUpdateUsers).HasConstraintName("FK_Category_UpdateUser");
 
@@ -202,6 +220,7 @@ public partial class GeorgeDBContextBase : DbContext
                     {
                         j.HasKey("CategoryId", "SiteId");
                         j.ToTable("CategorySite");
+                        j.HasIndex(new[] { "SiteId" }, "IX_CategorySite_SiteId");
                     });
         });
 
@@ -237,6 +256,8 @@ public partial class GeorgeDBContextBase : DbContext
         modelBuilder.Entity<Medium>(entity =>
         {
             entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.Account).WithMany(p => p.Media).HasConstraintName("FK_Media_Account");
 
             entity.HasOne(d => d.BusinessType).WithMany(p => p.Media).HasConstraintName("FK_Media_BusinessType");
 
@@ -278,11 +299,16 @@ public partial class GeorgeDBContextBase : DbContext
                     {
                         j.HasKey("MediaId", "TagId");
                         j.ToTable("MediaTag");
+                        j.HasIndex(new[] { "TagId" }, "IX_MediaTag_TagId");
                     });
         });
 
         modelBuilder.Entity<Product>(entity =>
         {
+            entity.HasIndex(e => new { e.AccountId, e.Sku }, "UX_Product_AccountId_Sku_NotDeleted")
+                .IsUnique()
+                .HasFilter("([IsDeleted]=(0) AND [Sku] IS NOT NULL AND [AccountId] IS NOT NULL)");
+
             entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
@@ -324,6 +350,7 @@ public partial class GeorgeDBContextBase : DbContext
                     {
                         j.HasKey("ProductId", "SiteId");
                         j.ToTable("ProductSite");
+                        j.HasIndex(new[] { "SiteId" }, "IX_ProductSite_SiteId");
                     });
 
             entity.HasMany(d => d.Tags).WithMany(p => p.Products)
@@ -341,6 +368,7 @@ public partial class GeorgeDBContextBase : DbContext
                     {
                         j.HasKey("ProductId", "TagId");
                         j.ToTable("ProductTag");
+                        j.HasIndex(new[] { "TagId" }, "IX_ProductTag_TagId");
                     });
         });
 
@@ -393,6 +421,7 @@ public partial class GeorgeDBContextBase : DbContext
         modelBuilder.Entity<Site>(entity =>
         {
             entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.Currency).HasDefaultValue("ILS");
             entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
 
@@ -441,7 +470,13 @@ public partial class GeorgeDBContextBase : DbContext
 
         modelBuilder.Entity<Supplier>(entity =>
         {
+            entity.HasIndex(e => new { e.AccountId, e.Name }, "UX_Supplier_AccountId_Name_NotDeleted")
+                .IsUnique()
+                .HasFilter("([IsDeleted]=(0) AND [AccountId] IS NOT NULL)");
+
             entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.Account).WithMany(p => p.Suppliers).HasConstraintName("FK_Supplier_Account");
 
             entity.HasOne(d => d.CreationUser).WithMany(p => p.SupplierCreationUsers).HasConstraintName("FK_Supplier_CreationUser");
 
@@ -450,7 +485,13 @@ public partial class GeorgeDBContextBase : DbContext
 
         modelBuilder.Entity<Tag>(entity =>
         {
+            entity.HasIndex(e => new { e.AccountId, e.Name }, "UX_Tag_AccountId_Name_NotDeleted")
+                .IsUnique()
+                .HasFilter("([IsDeleted]=(0) AND [AccountId] IS NOT NULL)");
+
             entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.Account).WithMany(p => p.Tags).HasConstraintName("FK_Tag_Account");
 
             entity.HasOne(d => d.CreationUser).WithMany(p => p.TagCreationUsers).HasConstraintName("FK_Tag_CreationUser");
 

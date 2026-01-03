@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("SetupType")]
-[Index("Name", Name = "UQ__SetupTyp__737584F687A3DFEB", IsUnique = true)]
+[Index("Name", Name = "UQ__SetupTyp__737584F63DF762F1", IsUnique = true)]
 public partial class SetupType
 {
     [Key]

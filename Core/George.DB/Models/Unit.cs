@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("Unit")]
-[Index("Name", Name = "UQ__Unit__737584F63F84DD90", IsUnique = true)]
+[Index("Name", Name = "UQ__Unit__737584F662FEB2B6", IsUnique = true)]
 public partial class Unit
 {
     [Key]

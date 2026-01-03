@@ -91,14 +91,14 @@ namespace George.Services
 			return value;
 		}
 
-		public AuthRes CreateAuthenticationToken(int userId, bool isMaster/*, UserRole role = UserRole.None*/)
+		public AuthRes CreateAuthenticationToken(int userId, UserRole role = UserRole.None)
 		{
 			// Add claims.
 			var claims = new List<Claim>();
 			claims.Add(new Claim(CustomClaimType.Authorized, "1"));
 			//claims.Add(new Claim(CustomClaimType.Id, accountId.ToString()));
 			claims.Add(new Claim(CustomClaimType.UserId, userId.ToString()));
-			claims.Add(new Claim(CustomClaimType.IsMaster, isMaster.ToString()));
+			//claims.Add(new Claim(CustomClaimType.IsMaster, isMaster.ToString()));
 			//claims.Add(new Claim(CustomClaimType.Role, role.ToString()));
 			//if (role != UserRole.None)
 			//	claims.Add(new Claim(ClaimTypes.Role, role.ToString()));

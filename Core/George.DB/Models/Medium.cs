@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
+[Index("AccountId", Name = "IX_Media_AccountId")]
 public partial class Medium
 {
     [Key]
@@ -36,6 +37,12 @@ public partial class Medium
     public long? FileSize { get; set; }
 
     public int? UsageCount { get; set; }
+
+    public int? AccountId { get; set; }
+
+    [ForeignKey("AccountId")]
+    [InverseProperty("Media")]
+    public virtual Account? Account { get; set; }
 
     [ForeignKey("BusinessTypeId")]
     [InverseProperty("Media")]

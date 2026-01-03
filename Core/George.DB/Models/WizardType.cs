@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("WizardType")]
-[Index("Name", Name = "UQ__WizardTy__737584F6340E88E4", IsUnique = true)]
+[Index("Name", Name = "UQ__WizardTy__737584F630854B67", IsUnique = true)]
 public partial class WizardType
 {
     [Key]

@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("ContentOwner")]
-[Index("Name", Name = "UQ__ContentO__737584F69691C391", IsUnique = true)]
+[Index("Name", Name = "UQ__ContentO__737584F6AA024CD0", IsUnique = true)]
 public partial class ContentOwner
 {
     [Key]

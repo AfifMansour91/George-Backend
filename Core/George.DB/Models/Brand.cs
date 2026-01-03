@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("Brand")]
-[Index("Name", Name = "UQ__Brand__737584F6B8E4DBC4", IsUnique = true)]
+[Index("AccountId", Name = "IX_Brand_AccountId")]
 public partial class Brand
 {
     [Key]
@@ -27,6 +27,12 @@ public partial class Brand
 
     [StringLength(200)]
     public string Name { get; set; } = null!;
+
+    public int? AccountId { get; set; }
+
+    [ForeignKey("AccountId")]
+    [InverseProperty("Brands")]
+    public virtual Account? Account { get; set; }
 
     [ForeignKey("CreationUserId")]
     [InverseProperty("BrandCreationUsers")]

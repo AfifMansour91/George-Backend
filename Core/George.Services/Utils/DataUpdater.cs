@@ -78,42 +78,6 @@ namespace George.Services
 
 
 		//*************************    Private/Protected Methods    *************************//
-		public async Task<string?> GetAddressAsync(RegistryUnit registryUnit, CancellationToken cancelToken)
-		{
-
-			//*** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG *** DEBUG ***//
-			//registryUnit.Block = 6578;
-			//registryUnit.Parcel = 8;
-
-
-			var request = new AddressReq {
-				WhereValues = new List<string> { "ID", $"{registryUnit.Block}--{registryUnit.Parcel}", "text" },
-				LocateType = 3
-			};
-
-			string url = @"https://ags.govmap.gov.il/Search/SearchLocate";
-
-			// Set authentication.
-			//_httpHelper.SetHttpHeaderKey("Authorization", $"Basic {_apiToken}");
-
-			// Send the request to GovMap API.
-			var httpRes = await _httpHelper.HttpPostAsync<AddressReq, AddressRes>(request, url, cancelToken);
-			if (!httpRes.IsSuccessful || httpRes.Data == null || (httpRes.Data != null && httpRes.Data.ErrorCode != 0))
-			{
-                _logger.LogError($"GovMap Address check failed.  - HTTP response: {httpRes.HttpResponse}, HTTP content: {httpRes.HttpContent}");
-				return null;
-			}
-
-			// Parse the result.
-			var addressRes = httpRes.Data;
-			if(addressRes!.Data.Values.HasValue())
-			{
-				foreach (var value in addressRes!.Data.Values.First().Values)
-					registryUnit.Address += value + " ";
-			}
-
-			return httpRes.HttpContent;
-		}
 
 	}
 }

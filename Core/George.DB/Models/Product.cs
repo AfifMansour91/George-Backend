@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("Product")]
+[Index("AccountId", Name = "IX_Product_AccountId")]
 public partial class Product
 {
     [Key]
@@ -92,6 +93,8 @@ public partial class Product
 
     [StringLength(100)]
     public string? SourceProductId { get; set; }
+
+    public int? AccountId { get; set; }
 
     [ForeignKey("BrandId")]
     [InverseProperty("Products")]

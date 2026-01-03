@@ -8,6 +8,7 @@ namespace George.DB;
 
 [PrimaryKey("ProductId", "CategoryId")]
 [Table("ProductCategory")]
+[Index("CategoryId", Name = "IX_ProductCategory_CategoryId")]
 public partial class ProductCategory
 {
     [Key]

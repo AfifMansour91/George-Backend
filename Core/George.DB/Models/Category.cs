@@ -7,6 +7,8 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("Category")]
+[Index("AccountId", Name = "IX_Category_AccountId")]
+[Index("SourceGlobalCategoryId", Name = "IX_Category_SourceGlobalCategoryId")]
 public partial class Category
 {
     [Key]
@@ -45,6 +47,14 @@ public partial class Category
 
     public bool? DisplayAsMain { get; set; }
 
+    public int? AccountId { get; set; }
+
+    public int? SourceGlobalCategoryId { get; set; }
+
+    [ForeignKey("AccountId")]
+    [InverseProperty("Categories")]
+    public virtual Account? Account { get; set; }
+
     [ForeignKey("CreationUserId")]
     [InverseProperty("CategoryCreationUsers")]
     public virtual User? CreationUser { get; set; }
@@ -58,6 +68,10 @@ public partial class Category
 
     [InverseProperty("Category")]
     public virtual ICollection<ProductCategory> ProductCategories { get; set; } = new List<ProductCategory>();
+
+    [ForeignKey("SourceGlobalCategoryId")]
+    [InverseProperty("Categories")]
+    public virtual GlobalCategory? SourceGlobalCategory { get; set; }
 
     [InverseProperty("Category")]
     public virtual ICollection<TemplateProductCategory> TemplateProductCategories { get; set; } = new List<TemplateProductCategory>();

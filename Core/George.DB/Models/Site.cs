@@ -52,6 +52,9 @@ public partial class Site
 
     public bool? AllowWeightedProducts { get; set; }
 
+    [StringLength(10)]
+    public string Currency { get; set; } = null!;
+
     [ForeignKey("AccountId")]
     [InverseProperty("Sites")]
     public virtual Account Account { get; set; } = null!;

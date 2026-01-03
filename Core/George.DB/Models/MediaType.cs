@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("MediaType")]
-[Index("Name", Name = "UQ__MediaTyp__737584F6DE362F8B", IsUnique = true)]
+[Index("Name", Name = "UQ__MediaTyp__737584F6C93EF07A", IsUnique = true)]
 public partial class MediaType
 {
     [Key]

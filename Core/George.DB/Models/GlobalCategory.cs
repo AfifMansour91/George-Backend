@@ -38,6 +38,9 @@ public partial class GlobalCategory
 
     public int? ProductCount { get; set; }
 
+    [InverseProperty("SourceGlobalCategory")]
+    public virtual ICollection<Category> Categories { get; set; } = new List<Category>();
+
     [ForeignKey("CreationUserId")]
     [InverseProperty("GlobalCategoryCreationUsers")]
     public virtual User? CreationUser { get; set; }

@@ -64,7 +64,7 @@ namespace George.Services
 			}
 
 			// Create the token.
-			response.Data = _authHelper.CreateAuthenticationToken(user.Id, user.IsMaster);
+			response.Data = _authHelper.CreateAuthenticationToken(user.Id, (UserRole)user.RoleId);
 
 			//// Set permissions.
 			//response.Data.Permissions = await _authManager!.GetUserPermissionsAsync(user.Id, user.IsMaster, cancelToken);
@@ -106,7 +106,7 @@ namespace George.Services
 
 
             // Create a new token.
-            response.Data = _authHelper.CreateAuthenticationToken(user.Id, user.IsMaster);
+            response.Data = _authHelper.CreateAuthenticationToken(user.Id, (UserRole)user.RoleId);
 
 			//// Set permissions.
 			//response.Data.Permissions = await _authManager!.GetUserPermissionsAsync(user.Id, user.IsMaster, cancelToken);

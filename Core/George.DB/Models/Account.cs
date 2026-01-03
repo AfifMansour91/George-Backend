@@ -73,6 +73,12 @@ public partial class Account
 
     public bool IsActive { get; set; }
 
+    [InverseProperty("Account")]
+    public virtual ICollection<Brand> Brands { get; set; } = new List<Brand>();
+
+    [InverseProperty("Account")]
+    public virtual ICollection<Category> Categories { get; set; } = new List<Category>();
+
     [ForeignKey("ContentOwnerId")]
     [InverseProperty("Accounts")]
     public virtual ContentOwner? ContentOwner { get; set; }
@@ -86,11 +92,20 @@ public partial class Account
     public virtual User? Manager { get; set; }
 
     [InverseProperty("Account")]
+    public virtual ICollection<Medium> Media { get; set; } = new List<Medium>();
+
+    [InverseProperty("Account")]
     public virtual ICollection<Site> Sites { get; set; } = new List<Site>();
 
     [ForeignKey("StatusId")]
     [InverseProperty("Accounts")]
     public virtual AccountStatus? StatusNavigation { get; set; }
+
+    [InverseProperty("Account")]
+    public virtual ICollection<Supplier> Suppliers { get; set; } = new List<Supplier>();
+
+    [InverseProperty("Account")]
+    public virtual ICollection<Tag> Tags { get; set; } = new List<Tag>();
 
     [ForeignKey("UpdateUserId")]
     [InverseProperty("AccountUpdateUsers")]

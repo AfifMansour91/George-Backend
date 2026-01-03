@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("ShippingClass")]
-[Index("Name", Name = "UQ__Shipping__737584F6FFB47F5F", IsUnique = true)]
+[Index("Name", Name = "UQ__Shipping__737584F6750513EE", IsUnique = true)]
 public partial class ShippingClass
 {
     [Key]

@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Table("UnitWeightMode")]
-[Index("Name", Name = "UQ__UnitWeig__737584F6780E4456", IsUnique = true)]
+[Index("Name", Name = "UQ__UnitWeig__737584F63AE04B1E", IsUnique = true)]
 public partial class UnitWeightMode
 {
     [Key]
