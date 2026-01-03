@@ -83,8 +83,8 @@ namespace George.Data
             if (dbAcc == null) return null;
 
             dbAcc.Name = updated.Name;
-            dbAcc.Description = updated.Description;
-            dbAcc.Icon = updated.Icon;
+            //dbAcc.Description = updated.Description;
+            //dbAcc.Icon = updated.Icon;
             //dbAcc.UpdatedAt = DateTime.UtcNow;
 
             await _dbContext.SaveChangesAsync(cancelToken);
