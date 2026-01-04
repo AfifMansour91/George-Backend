@@ -82,6 +82,13 @@ namespace George.Api.Controllers
 			return await SafeCallWithErrorCatchingAsync(() => _identitySvc.UpdateProfileAsync(request, cancelToken));
 		}
 
+		[HttpPost("Password/Change")]
+		[ProducesResponseType(typeof(IApiResponse<bool>), 200)]
+		public async Task<IActionResult> ChangePasswordAsync([FromBody] ChangePasswordReq request, CancellationToken cancelToken = default)
+		{
+			return await SafeCallWithErrorCatchingAsync(() => _identitySvc.ChangePasswordAsync(request, cancelToken));
+		}
+
 
 
 		//*************************    Private Methods    ************************//

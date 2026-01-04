@@ -66,4 +66,21 @@ namespace George.Services
 
 		//public string? AvatarFileKey { get; set; }
 	}
+
+	public class ChangePasswordReq
+	{
+		[RequiredNotEmpty]
+		public string CurrentPassword { get; set; } = null!;
+
+		[RequiredNotEmpty]
+		[StringLength(250, MinimumLength = 6)]
+		public string NewPassword { get; set; } = null!;
+	}
+
+	public class SetPasswordReq
+	{
+		[RequiredNotEmpty]
+		[StringLength(250, MinimumLength = 6)]
+		public string Password { get; set; } = null!;
+	}
 }

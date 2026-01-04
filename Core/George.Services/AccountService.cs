@@ -1,6 +1,7 @@
 ﻿using AutoMapper;
 using George.Common;
 using George.Common.Request;
+using George.Common.Utils;
 using George.Data;
 using George.DB;
 using George.Services.Response;
@@ -104,12 +105,16 @@ namespace George.Services
             var managerUser = await _userStorage.GetUserByEmailAsync(req.ManagerEmail, cancelToken);
             if (managerUser == null)
             {
+                // Hash password
+                string password = req.TempPassword ?? Cryptography.GeneratePassword(12);
+                string passwordHash = Cryptography.GeneratePasswordHash(password);
+
                 managerUser = new User
                 {
                     FirstName = req.ManagerName, // later split
                     LastName = "",
                     Email = req.ManagerEmail,
-                    Password = req.TempPassword ?? "123456", // TODO: hash & generate safely
+                    Password = passwordHash,
                     IsEmailVerified = false,
                     StatusId = (int)Common.UserStatus.Active,
                     RoleId = (int)UserRole.AccountAdmin, // or whatever role means client admin
@@ -117,8 +122,8 @@ namespace George.Services
                     IsDeleted = false
                 };
 
-                //_dbContext.Users.Add(managerUser);
-                //await _dbContext.SaveChangesAsync(cancelToken);
+                // Create user in database
+                managerUser = await _userStorage.CreateUserAsync(managerUser, cancelToken);
             }
 
             // create account

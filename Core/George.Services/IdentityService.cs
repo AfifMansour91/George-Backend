@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using George.Common;
+using George.Common.Utils;
 using George.Data;
 using George.DB;
 using Task = System.Threading.Tasks.Task;
@@ -202,6 +203,42 @@ namespace George.Services
 
 			}
 
+			return response;
+		}
+
+		public async Task<IApiResponse<bool>> ChangePasswordAsync(ChangePasswordReq request, CancellationToken cancelToken = default)
+		{
+			IApiResponse<bool> response = new ApiResponse<bool>();
+
+			// Get current user
+			User? user = await _userStorage.GetUserAsync(_authUser.Id, cancelToken).ConfigureAwait(false);
+			if (user == null)
+				return CreateResponse(response, StatusCode.UserNotFound, "User not found.");
+
+			// Verify current password
+			bool isCurrentPasswordValid = false;
+			if (user.Password != null && user.Password.Contains(':'))
+			{
+				// Password is hashed
+				isCurrentPasswordValid = Cryptography.VerifyPasswordHash(request.CurrentPassword, user.Password);
+			}
+			else
+			{
+				// Plain text password (legacy)
+				isCurrentPasswordValid = user.Password == request.CurrentPassword;
+			}
+
+			if (!isCurrentPasswordValid)
+				return CreateResponse(response, StatusCode.InvalidCredentials, "Current password is incorrect.");
+
+			// Hash new password
+			string newPasswordHash = Cryptography.GeneratePasswordHash(request.NewPassword);
+
+			// Update password
+			user.Password = newPasswordHash;
+			await _userStorage.UpdateUserPasswordAsync(user.Id, newPasswordHash, cancelToken).ConfigureAwait(false);
+
+			response.Data = true;
 			return response;
 		}
 

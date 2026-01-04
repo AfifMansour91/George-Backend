@@ -35,29 +35,29 @@ namespace George.Api.Controllers
 			return await SafeCallWithErrorCatchingAsync(() => _userSvc.GetUsersAsync(request, cancelToken));
 		}
 
-		//[HttpGet("{id}")]
-		//[ProducesResponseType(typeof(IApiResponse<UserRes>), 200)]
-		//public async Task<IActionResult> GetUserAsync([FromRoute] int id, CancellationToken cancelToken = default)
-		//{
-		//	return await SafeCallWithErrorCatchingAsync(() => _userSvc.GetUserAsync(id, cancelToken));
-		//}
+		[HttpGet("{id}")]
+		[ProducesResponseType(typeof(IApiResponse<UserRes>), 200)]
+		public async Task<IActionResult> GetUserAsync([FromRoute] int id, CancellationToken cancelToken = default)
+		{
+			return await SafeCallWithErrorCatchingAsync(() => _userSvc.GetUserAsync(id, cancelToken));
+		}
 
-		//[HttpPost(Name = "[controller]_Post")] // The name property is a workaround for a swagger bug.
-		//[ProducesResponseType(typeof(IApiResponse<UserRes>), 200)]
-		//public async Task<IActionResult> CreateUserAsync([FromBody] CreateUserReq request, CancellationToken cancelToken = default)
-		//{
-		//	return await SafeCallWithErrorCatchingAsync(() => _userSvc.CreateUserAsync(request, cancelToken));
-		//}
+		[HttpPost(Name = "[controller]_Post")] // The name property is a workaround for a swagger bug.
+		[ProducesResponseType(typeof(IApiResponse<UserRes>), 200)]
+		public async Task<IActionResult> CreateUserAsync([FromBody] CreateUserReq request, CancellationToken cancelToken = default)
+		{
+			return await SafeCallWithErrorCatchingAsync(() => _userSvc.CreateUserAsync(request, cancelToken));
+		}
 
-		//[HttpPut("{id}")]
-		//[ProducesResponseType(typeof(IApiResponse<UserRes>), 200)]
-		//public async Task<IActionResult> UpdateUserAsync([FromRoute] int id, [FromBody] UpdateSystemUserReq request, CancellationToken cancelToken = default)
-		//{
-		//	if (id != request.Id)
-		//		return CreateHttpResponse(Common.StatusCode.InvalidRequest, "Mismatching IDs.");
+		[HttpPut("{id}")]
+		[ProducesResponseType(typeof(IApiResponse<UserRes>), 200)]
+		public async Task<IActionResult> UpdateUserAsync([FromRoute] int id, [FromBody] UpdateUserReq request, CancellationToken cancelToken = default)
+		{
+			if (id != request.Id)
+				return CreateHttpResponse(Common.StatusCode.InvalidRequest, "Mismatching IDs.");
 
-		//	return await SafeCallWithErrorCatchingAsync(() => _userSvc.UpdateUserAsync(request, cancelToken));
-		//}
+			return await SafeCallWithErrorCatchingAsync(() => _userSvc.UpdateUserAsync(request, cancelToken));
+		}
 
 		//[HttpDelete("{id}")]
 		//[ProducesResponseType(typeof(IApiResponse<UserRes>), 200)]

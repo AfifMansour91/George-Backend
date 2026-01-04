@@ -7,9 +7,9 @@ namespace George.Services
 		public int Id { get; set; }
 		public string FirstName { get; set; } = null!;
 		public string? LastName { get; set; }
-		public string IdentificationNumber { get; set; } = null!;
+		public string? IdentificationNumber { get; set; } // Optional - not in User model
 		public string? Email { get; set; }
-		public string Phone { get; set; } = null!;
+		public string? Phone { get; set; } // Made optional to match User model
 		//public bool IsActive { get; set; }
 		public int LanguageId { get; set; }
 		public UserStatus? StatusId { get; set; }

@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using George.Common;
+using George.Common.Utils;
 using George.DB;
 
 using Task = System.Threading.Tasks.Task;
@@ -122,8 +123,28 @@ namespace George.Data
 
 		public async Task<User?> GetUserByCredentialsAsync(string email, string password, CancellationToken cancelToken = default)
 		{
-			return await _dbContext.Users.AsNoTracking()
-							.FirstOrDefaultAsync(a => a.Email == email && a.Password == password, cancelToken);
+			// Get user by email
+			var user = await _dbContext.Users.AsNoTracking()
+							.FirstOrDefaultAsync(a => a.Email == email, cancelToken);
+			
+			if (user == null || string.IsNullOrWhiteSpace(user.Password))
+				return null;
+
+			// Verify password hash
+			// Support both hashed and plain text passwords (for migration)
+			bool isPasswordValid = false;
+			if (user.Password.Contains(':'))
+			{
+				// Password is hashed (format: "salt:hash")
+				isPasswordValid = Cryptography.VerifyPasswordHash(password, user.Password);
+			}
+			else
+			{
+				// Plain text password (legacy support during migration)
+				isPasswordValid = user.Password == password;
+			}
+
+			return isPasswordValid ? user : null;
 		}
 
 
@@ -297,6 +318,125 @@ namespace George.Data
 		public async Task<bool> UserHasDependenciesAsync(int id, CancellationToken cancelToken = default)
 		{
 			return false;
+		}
+
+		public async Task<User> CreateUserAsync(User user, CancellationToken cancelToken = default)
+		{
+			// Set required fields
+			if (string.IsNullOrWhiteSpace(user.FullName))
+			{
+				user.FullName = $"{user.FirstName} {user.LastName}".Trim();
+			}
+
+			if (user.GuidId == Guid.Empty)
+			{
+				user.GuidId = Guid.NewGuid();
+			}
+
+			if (user.CreationTime == default)
+			{
+				user.CreationTime = DateTime.UtcNow;
+			}
+
+			if (user.StatusId == 0)
+			{
+				user.StatusId = (int)Common.UserStatus.Active;
+			}
+
+			if (user.RoleId == 0)
+			{
+				user.RoleId = (int)Common.UserRole.SiteAdmin;
+			}
+
+			// Add to DB
+			_dbContext.Users.Add(user);
+			await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+
+			return user;
+		}
+
+		public async Task<User?> UpdateUserAsync(User user, CancellationToken cancelToken = default)
+		{
+			// Get the data from the DB.
+			User? dbModel = await _dbContext.Users
+									.Where(a => a.Id == user.Id)
+									.FirstOrDefaultAsync(cancelToken);
+			if (dbModel == null)
+				return null;
+
+			// Update fields.
+			if (user.FirstName.HasValue())
+			{
+				dbModel.FirstName = user.FirstName;
+			}
+
+			if (user.LastName != null)
+			{
+				dbModel.LastName = user.LastName;
+			}
+
+			// Update FullName if FirstName or LastName changed
+			if (user.FirstName.HasValue() || user.LastName != null)
+			{
+				dbModel.FullName = $"{dbModel.FirstName} {dbModel.LastName}".Trim();
+			}
+
+			if (user.Email != null)
+			{
+				dbModel.Email = user.Email;
+			}
+
+			if (user.Phone != null)
+			{
+				dbModel.Phone = user.Phone;
+			}
+
+			if (user.AccountId.HasValue)
+			{
+				dbModel.AccountId = user.AccountId;
+			}
+
+			if (user.RoleId > 0)
+			{
+				dbModel.RoleId = user.RoleId;
+			}
+
+			if (user.StatusId > 0)
+			{
+				dbModel.StatusId = user.StatusId;
+			}
+
+			if (user.AvatarUrl != null)
+			{
+				dbModel.AvatarUrl = user.AvatarUrl;
+			}
+
+			// Update timestamp
+			dbModel.UpdatedDate = DateTime.UtcNow;
+
+			// Save to the DB.
+			await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+
+			return dbModel;
+		}
+
+		public async Task<User?> UpdateUserPasswordAsync(int userId, string passwordHash, CancellationToken cancelToken = default)
+		{
+			// Get the data from the DB.
+			User? dbModel = await _dbContext.Users
+									.Where(a => a.Id == userId)
+									.FirstOrDefaultAsync(cancelToken);
+			if (dbModel == null)
+				return null;
+
+			// Update password
+			dbModel.Password = passwordHash;
+			dbModel.UpdatedDate = DateTime.UtcNow;
+
+			// Save to the DB.
+			await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+
+			return dbModel;
 		}
 
 

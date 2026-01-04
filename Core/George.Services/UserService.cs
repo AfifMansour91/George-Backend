@@ -1,6 +1,7 @@
 ﻿using AutoMapper;
 using Microsoft.Extensions.Logging;
 using George.Common;
+using George.Common.Utils;
 using George.Data;
 using George.DB;
 using UserStatus = George.Common.UserStatus;
@@ -183,6 +184,100 @@ namespace George.Services
 
 			// Get the data from the DB.
 			response.Data = await _userStorage.IsEmailAvailableAsync(request.Email, cancelToken).ConfigureAwait(false);
+
+			return response;
+		}
+
+		public async Task<IApiResponse<UserRes>> CreateUserAsync(CreateUserReq request, CancellationToken cancelToken = default)
+		{
+			IApiResponse<UserRes> response = new ApiResponse<UserRes>();
+
+			// Check if email is already in use
+			bool isEmailAvailable = await _userStorage.IsEmailAvailableAsync(request.Email, cancelToken).ConfigureAwait(false);
+			if (!isEmailAvailable)
+			{
+				return CreateResponse(response, StatusCode.UserEmailAlreadyInUse, "The specified email is already in use by another user.");
+			}
+
+			// Hash password if provided
+			string? passwordHash = null;
+			if (!string.IsNullOrWhiteSpace(request.Password))
+			{
+				passwordHash = Cryptography.GeneratePasswordHash(request.Password);
+			}
+
+			// Create user model
+			var user = new User
+			{
+				FirstName = request.FirstName,
+				LastName = request.LastName ?? "",
+				Email = request.Email,
+				Phone = request.Phone,
+				Password = passwordHash,
+				AccountId = request.AccountId,
+				RoleId = request.RoleId ?? (int)UserRole.SiteAdmin,
+				StatusId = request.StatusId ?? (int)UserStatus.Active,
+				AvatarUrl = request.AvatarUrl,
+				IsEmailVerified = false,
+				LockoutFailCount = 0,
+				IsDeleted = false,
+				CreationUserId = _authUser?.Id,
+			};
+
+			// Create in DB
+			user = await _userStorage.CreateUserAsync(user, cancelToken).ConfigureAwait(false);
+
+			if (user != null)
+			{
+				response.Data = _mapper.Map<UserRes>(user);
+			}
+
+			return response;
+		}
+
+		public async Task<IApiResponse<UserRes>> UpdateUserAsync(UpdateUserReq request, CancellationToken cancelToken = default)
+		{
+			IApiResponse<UserRes> response = new ApiResponse<UserRes>();
+
+			// Get existing user
+			User? existingUser = await _userStorage.GetUserAsync(request.Id, cancelToken).ConfigureAwait(false);
+			if (existingUser == null)
+			{
+				return CreateResponse(response, StatusCode.UserNotFound, "User not found.");
+			}
+
+			// Check if email is changed and already in use
+			if (request.Email != null && request.Email != existingUser.Email)
+			{
+				bool isEmailAvailable = await _userStorage.IsEmailAvailableAsync(request.Email, cancelToken).ConfigureAwait(false);
+				if (!isEmailAvailable)
+				{
+					return CreateResponse(response, StatusCode.UserEmailAlreadyInUse, "The specified email is already in use by another user.");
+				}
+			}
+
+			// Update user model
+			var user = new User
+			{
+				Id = request.Id,
+				FirstName = request.FirstName ?? existingUser.FirstName,
+				LastName = request.LastName ?? existingUser.LastName,
+				Email = request.Email ?? existingUser.Email,
+				Phone = request.Phone ?? existingUser.Phone,
+				AccountId = request.AccountId ?? existingUser.AccountId,
+				RoleId = request.RoleId ?? existingUser.RoleId,
+				StatusId = request.StatusId ?? existingUser.StatusId,
+				AvatarUrl = request.AvatarUrl ?? existingUser.AvatarUrl,
+				UpdateUserId = _authUser?.Id,
+			};
+
+			// Update in DB
+			User? updatedUser = await _userStorage.UpdateUserAsync(user, cancelToken).ConfigureAwait(false);
+
+			if (updatedUser != null)
+			{
+				response.Data = _mapper.Map<UserRes>(updatedUser);
+			}
 
 			return response;
 		}
