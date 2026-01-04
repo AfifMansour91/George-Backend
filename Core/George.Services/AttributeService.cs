@@ -1,135 +1,141 @@
-﻿//using AutoMapper;
-//using George.Common;
-//using George.Common.Request;
-//using George.Data;
-//using George.Data.Models;
-//using George.DB;
-//using George.Services.Request;
-//using George.Services.Response;
-//using Microsoft.Extensions.Logging;
+﻿using AutoMapper;
+using George.Common;
+using George.Common.Request;
+using George.Data;
+using George.Data.Models;
+using George.DB;
+using George.Services.Request;
+using George.Services.Response;
+using Microsoft.Extensions.Logging;
+using Attribute = George.DB.Attribute;
 
-//namespace George.Services
-//{
-//    public class AttributeService : ServiceBase
-//    {
-//        //*********************  Data members/Constants  *********************//
-//        //private readonly FileStorageManager _fileStorage;
-//        private readonly AttributeStorage _attributeStorage;
+namespace George.Services
+{
+    public class AttributeService : ServiceBase
+    {
+        private readonly AttributeStorage _attributeStorage;
 
+        public AttributeService(
+            ILogger<AttributeService> logger,
+            IMapper mapper,
+            CacheManager cache,
+            AttributeStorage attributeStorage
+        ) : base(logger, mapper, cache)
+        {
+            _attributeStorage = attributeStorage;
+        }
 
-//        //**************************    Construction    **************************//
-//        public AttributeService(ILogger<AttributeService> logger, IMapper mapper, CacheManager cache,
-//            AttributeStorage attributeStorage) : base(logger, mapper, cache)
-//        {
-//            _attributeStorage = attributeStorage;
-//        }
+        public async Task<IApiResponse<ApiListResponse<AttributeRes>>> GetAttributesAsync(
+            ApiListReq<AttributeFilter> request,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<ApiListResponse<AttributeRes>>
+            {
+                Data = new ApiListResponse<AttributeRes>()
+            };
 
+            var res = await _attributeStorage.GetAttributesAsync(request.Filter, request, cancelToken);
 
-//        //*************************    Public Methods    *************************//
-//        public async Task<IApiResponse<ApiListResponse<AttributeRes>>> GetAttributesAsync(ApiListReq<AttributeFilter> request, CancellationToken cancelToken)
-//        {
-//            IApiResponse<ApiListResponse<AttributeRes>> response = new ApiResponse<ApiListResponse<AttributeRes>>();
-//            response.Data = new();
+            response.Data!.Items = res.Items.ConvertAll(a => MapAttributeToRes(a));
 
-//            // Get the data from the DB.
-//            DataListResult<Attribute> res = await _attributeStorage.GetAttributesAsync(request.Filter, request, cancelToken).ConfigureAwait(false);
-//            if (res != null && res.Items.HasValue())
-//            {
-//                // Convert to response.
-//                response.Data!.Items = res.Items.ConvertAll(a => _mapper.Map<AttributeRes>(a));
-//            }
+            response.Data.Skip = request.Skip;
+            response.Data.Limit = request.Take;
+            response.Data.Total = res.Total;
 
-//            // Set the paging.
-//            response.Data!.Skip = request.Skip;
-//            response.Data.Limit = request.Take;
-//            response.Data.Total = res!.Total;
+            return response;
+        }
 
-//            return response;
-//        }
+        public async Task<IApiResponse<AttributeRes>> GetAttributeAsync(int attributeId, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<AttributeRes>();
 
-//        public async Task<IApiResponse<AttributeRes?>> GetAttributeAsync(int id, CancellationToken cancelToken = default)
-//        {
-//            IApiResponse<AttributeRes?> response = new ApiResponse<AttributeRes?>();
+            var attribute = await _attributeStorage.GetAttributeAsync(attributeId, cancelToken);
+            if (attribute == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
 
-//            // Get the data from the DB.
-//            Attribute? model = await _attributeStorage.GetAttributeAsync(id, cancelToken).ConfigureAwait(false);
-//            if (model != null)
-//            {
-//                // Convert to response.
-//                response.Data = _mapper.Map<AttributeRes>(model);
-//            }
+            response.Data = MapAttributeToRes(attribute);
 
-//            return response;
-//        }
+            return response;
+        }
 
-//        public async Task<IApiResponse<AttributeRes>> CreateAttributeAsync(CreateAttributeReq request, CancellationToken cancelToken = default)
-//        {
-//            IApiResponse<AttributeRes> response = new ApiResponse<AttributeRes>();
+        public async Task<IApiResponse<AttributeRes>> CreateAttributeAsync(CreateAttributeReq req, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<AttributeRes>();
 
-//            //// Verify that the user is authorized to access the item.
-//            //if (await CanUser....(Id) == false)
-//            //	return CreateResponse(response, StatusCode.ItemNotAuthorized);
+            // Convert to EF model
+            Attribute? model = _mapper.Map<Attribute>(req);
+            model.CreationUserId = AuthUser.Id;
+            model.CreationTime = DateTime.UtcNow;
+            model.IsDeleted = false;
 
-//            // Convert to EF model
-//            Attribute? model = _mapper.Map<Attribute>(request);
+            // Create the data in the DB.
+            model = await _attributeStorage.CreateAttributeAsync(model, req.Values, cancelToken).ConfigureAwait(false);
+            if (model != null)
+            {
+                // Load with relationships for mapping
+                model = await _attributeStorage.GetAttributeAsync(model.Id, cancelToken);
+                // Convert to response.
+                response.Data = MapAttributeToRes(model);
+            }
 
-//            // Create the data in the DB.
-//            model = await _attributeStorage.CreateAttributeAsync(model, cancelToken).ConfigureAwait(false);
-//            if (model != null)
-//            {
-//                // Convert to response.
-//                response.Data = _mapper.Map<AttributeRes>(model);
-//            }
+            return response;
+        }
 
-//            return response;
-//        }
+        public async Task<IApiResponse<AttributeRes>> UpdateAttributeAsync(int attributeId, UpdateAttributeReq req, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<AttributeRes>();
 
-//        public async Task<IApiResponse<AttributeRes?>> UpdateAttributeAsync(UpdateAttributeReq request, CancellationToken cancelToken = default)
-//        {
-//            IApiResponse<AttributeRes> response = new ApiResponse<AttributeRes>();
+            var existingAttribute = await _attributeStorage.GetAttributeAsync(attributeId, cancelToken);
+            if (existingAttribute == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
 
-//            //// Verify that the user is authorized to access the item.
-//            //if (await CanUser....(Id) == false)
-//            //	return CreateResponse(response, StatusCode.ItemNotAuthorized);
+            // Convert to EF model
+            Attribute? model = _mapper.Map<Attribute>(req);
+            model.Id = attributeId;
+            model.UpdateUserId = AuthUser.Id;
 
-//            // Convert to EF model
-//            Attribute? model = _mapper.Map<Attribute>(request);
+            // Update the data in the DB.
+            model = await _attributeStorage.UpdateAttributeAsync(model, req.Values, cancelToken).ConfigureAwait(false);
+            if (model != null)
+            {
+                // Load with relationships for mapping
+                model = await _attributeStorage.GetAttributeAsync(model.Id, cancelToken);
+                // Convert to response.
+                response.Data = MapAttributeToRes(model);
+            }
 
-//            // Create the data in the DB.
-//            model = await _attributeStorage.UpdateAttributeAsync(model, cancelToken).ConfigureAwait(false);
-//            if (model != null)
-//            {
-//                // Convert to response.
-//                response.Data = _mapper.Map<AttributeRes>(model);
-//            }
+            return response;
+        }
 
-//            return response;
-//        }
+        public async Task<IApiResponse<bool>> DeleteAttributeAsync(int attributeId, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<bool>();
 
-//        public async Task<IApiResponse<AttributeRes?>> DeleteAttributeAsync(int id, CancellationToken cancelToken = default)
-//        {
-//            IApiResponse<AttributeRes?> response = new ApiResponse<AttributeRes?>();
+            var result = await _attributeStorage.DeleteAttributeAsync(attributeId, cancelToken);
+            response.Data = result;
 
-//            //// Verify authorization.
+            return response;
+        }
 
-//            //// Check for dependencies.
-//            //if (await _taskStorage.TaskHasDependenciesAsync(id))
-//            //	return CreateResponse(response, StatusCode.ItemHasDependencies);
+        private AttributeRes MapAttributeToRes(Attribute attribute)
+        {
+            var res = new AttributeRes
+            {
+                Id = attribute.Id,
+                CreationTime = attribute.CreationTime,
+                UpdatedDate = attribute.UpdatedDate,
+                CreationUserId = attribute.CreationUserId,
+                Name = attribute.Name,
+                SiteId = attribute.SiteId
+            };
 
-//            // Delete from the DB.
-//            Attribute? model = await _attributeStorage.DeleteAttributeAsync(id, cancelToken).ConfigureAwait(false);
-//            if (model != null)
-//            {
-//                // Convert to response.
-//                response.Data = _mapper.Map<AttributeRes>(model);
-//            }
+            // Map attribute values
+            if (attribute.AttributeValues != null && attribute.AttributeValues.Any())
+            {
+                res.Values = attribute.AttributeValues.Select(av => av.Value).ToList();
+            }
 
-//            return response;
-//        }
-
-//        //*************************    Private/Protected Methods    *************************//
-
-
-//    }
-
-//}
+            return res;
+        }
+    }
+}

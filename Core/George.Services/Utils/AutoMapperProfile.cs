@@ -133,6 +133,23 @@ namespace George.Services
                 {
                 });
 
+            ////////////////////////// Attribute
+            CreateMap<Attribute, AttributeRes>()
+                .AfterMap((src, dest, context) =>
+                {
+                    // Values will be mapped in the service layer
+                });
+            CreateMap<CreateAttributeReq, Attribute>()
+                .AfterMap((src, dest, context) =>
+                {
+                    // Values will be handled separately in storage
+                });
+            CreateMap<UpdateAttributeReq, Attribute>()
+                .AfterMap((src, dest, context) =>
+                {
+                    // Values will be handled separately in storage
+                });
+
             ////////////////////////// Category
             CreateMap<Category, CategoryRes>()
                 .AfterMap((src, dest, context) =>

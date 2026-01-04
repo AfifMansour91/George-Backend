@@ -16,27 +16,34 @@ namespace George.Data
         }
 
         public async Task<DataListResult<Attribute>> GetAttributesAsync(
-            AttributeFilter filter,
+            AttributeFilter? filter,
             PagingExDto paging,
             CancellationToken cancelToken = default)
         {
             DataListResult<Attribute> res = new DataListResult<Attribute>();
 
             // Build the query.
-            var query = _dbContext.Attributes.AsNoTracking();
+            var query = _dbContext.Attributes
+                .Include(a => a.Site)
+                .Include(a => a.AttributeValues)
+                .AsNoTracking();
 
             // Filter.
-            if (filter.Name.HasValue())
-                query = query.Where(a => a.Name != null && a.Name.Contains(filter.Name));
-            //if (filter.Value != null)
-            //    query = query.Where(a => a.AttributeValues != null && filter.Value.Contains(a.Value));
-            //if (filter.StatusId.HasValue)
-            //    query = query.Where(a => a.StatusId == (int)filter.StatusId);
-            if (filter.Search != null && filter.Search.SearchTerm.HasValue())
+            if (filter != null)
             {
-                var term = filter.Search.SearchTerm!;
-                query = query.Where(a =>
-                    a.Name.Contains(term));
+                if (filter.Name.HasValue())
+                    query = query.Where(a => a.Name.Contains(filter.Name));
+
+                if (filter.SiteIds != null && filter.SiteIds.Any())
+                {
+                    query = query.Where(a => filter.SiteIds.Contains(a.SiteId));
+                }
+
+                if (filter.Search != null && filter.Search.SearchTerm.HasValue())
+                {
+                    var term = filter.Search.SearchTerm!;
+                    query = query.Where(a => a.Name.Contains(term));
+                }
             }
 
             if (paging.IncludeTotal)
@@ -48,66 +55,91 @@ namespace George.Data
             // Add paging.
             query = query.Skip(paging.Skip).Take(paging.Take);
 
-            //// Add includes.
-            //query = query.Include(a => a.Organization)
-            //                //.Include(a => a.AccountSubscriptions.FirstOrDefault(a => a.IsActive)).ThenInclude(b => b.Subscription)
-            //                .Include(a => a.AccountSubscriptions.Where(a => a.IsActive)).ThenInclude(b => b.Subscription)
-            //                .Include(a => a.Owner)
-            //                .Include(a => a.AccountUsers.Where(b => b.UserId == userId)).ThenInclude(c => c.User);
-
             // Get the data from the DB.
             res.Items = await query.ToListAsync(cancelToken).ConfigureAwait(false);
 
             return res;
         }
 
-        public async Task<Attribute?> GetAttributeAsync(long attributeId, CancellationToken cancelToken)
+        public async Task<Attribute?> GetAttributeAsync(int attributeId, CancellationToken cancelToken)
         {
             return await _dbContext.Attributes
+                .Include(a => a.Site)
+                .Include(a => a.AttributeValues)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(a => a.Id == attributeId, cancelToken);
         }
 
-        public async Task<Attribute> CreateAttributeAsync(Attribute attribute, CancellationToken cancelToken)
+        public async Task<Attribute> CreateAttributeAsync(Attribute attribute, List<string>? values, CancellationToken cancelToken)
         {
             _dbContext.Attributes.Add(attribute);
             await _dbContext.SaveChangesAsync(cancelToken);
+
+            // Add attribute values if provided
+            if (values != null && values.Any())
+            {
+                foreach (var value in values)
+                {
+                    _dbContext.AttributeValues.Add(new AttributeValue
+                    {
+                        AttributeId = attribute.Id,
+                        Value = value
+                    });
+                }
+                await _dbContext.SaveChangesAsync(cancelToken);
+            }
+
             return attribute;
         }
 
-        public async Task<Attribute?> UpdateAttributeAsync(Attribute updated, CancellationToken cancelToken)
+        public async Task<Attribute?> UpdateAttributeAsync(Attribute updated, List<string>? values, CancellationToken cancelToken)
         {
-            var dbAcc = await _dbContext.Attributes
+            var dbAttr = await _dbContext.Attributes
+                .Include(a => a.AttributeValues)
                 .FirstOrDefaultAsync(a => a.Id == updated.Id, cancelToken);
 
-            if (dbAcc == null) return null;
+            if (dbAttr == null) return null;
 
-            dbAcc.Name = updated.Name;
-            //dbAcc.Description = updated.Description;
-            //dbAcc.Icon = updated.Icon;
-            //dbAcc.UpdatedAt = DateTime.UtcNow;
+            dbAttr.Name = updated.Name;
+            dbAttr.SiteId = updated.SiteId;
+            dbAttr.UpdatedDate = DateTime.UtcNow;
+            dbAttr.UpdateUserId = updated.UpdateUserId;
 
-            await _dbContext.SaveChangesAsync(cancelToken);
-            return dbAcc;
-        }
-
-        public async Task<Attribute?> DeleteAttributeAsync(int id, CancellationToken cancelToken = default)
-        {
-            // Get the data from the DB.
-            var dbModel = await _dbContext.Attributes
-                                .Where(a => a.Id == id)
-                                .FirstOrDefaultAsync(cancelToken)
-                                .ConfigureAwait(false);
-            if (dbModel != null)
+            // Update attribute values
+            if (values != null)
             {
-                // Delete the entity.
-                _dbContext.Attributes.Remove(dbModel);
-
-                // Save to the DB.
-                await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+                // Remove existing values
+                _dbContext.AttributeValues.RemoveRange(dbAttr.AttributeValues);
+                
+                // Add new values
+                if (values.Any())
+                {
+                    foreach (var value in values)
+                    {
+                        _dbContext.AttributeValues.Add(new AttributeValue
+                        {
+                            AttributeId = dbAttr.Id,
+                            Value = value
+                        });
+                    }
+                }
             }
 
-            return dbModel;
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return dbAttr;
+        }
+
+        public async Task<bool> DeleteAttributeAsync(int id, CancellationToken cancelToken = default)
+        {
+            var dbModel = await _dbContext.Attributes
+                .FirstOrDefaultAsync(a => a.Id == id, cancelToken);
+
+            if (dbModel == null) return false;
+
+            dbModel.IsDeleted = true;
+            dbModel.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return true;
         }
 
     }
