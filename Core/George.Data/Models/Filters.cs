@@ -130,4 +130,13 @@ namespace George.Common
         public SearchFilter? Search { get; set; }
     }
 
+    public class TemplateProductFilter
+    {
+        public string? TemplateId { get; set; }
+        public int? SiteId { get; set; }
+        public int? GlobalCategoryId { get; set; }
+        public string? Status { get; set; }
+        public SearchFilter? Search { get; set; }
+    }
+
 }
