@@ -98,4 +98,22 @@ namespace George.Common
         public SearchFilter? Search { get; set; }
     }
 
+    public class MediaFilter
+    {
+        public int? AccountId { get; set; }
+        public int? BusinessTypeId { get; set; }
+        public int? CategoryId { get; set; }
+        public string? Type { get; set; } // "image" | "video" | "document"
+        public SearchFilter? Search { get; set; }
+    }
+
+    public class ClientFilter
+    {
+        public int? AccountId { get; set; }
+        public int? SiteId { get; set; }
+        public string? ClientRole { get; set; } // "super_admin" | "account_admin" | "site_admin"
+        public string? Status { get; set; } // "active" | "inactive" | "suspended"
+        public SearchFilter? Search { get; set; }
+    }
+
 }
