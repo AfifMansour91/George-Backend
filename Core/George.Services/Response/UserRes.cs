@@ -13,6 +13,10 @@ namespace George.Services
 		//public bool IsActive { get; set; }
 		public int LanguageId { get; set; }
 		public UserStatus? StatusId { get; set; }
+		public int? RoleId { get; set; } // Added: User role ID
+		public int? AccountId { get; set; } // Added: Account ID
+		public string? AvatarUrl { get; set; } // Added: Avatar URL
+		public DateTime? LastLoginDate { get; set; } // Added: Last login date
 		public DateTime CreationTime { get; set; }
 		public DateTime UpdateTime { get; set; }
 
