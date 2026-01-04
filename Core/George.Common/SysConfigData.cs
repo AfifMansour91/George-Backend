@@ -62,6 +62,8 @@ namespace George.Common
 		public string? AWSBucket { get; set; }
 		public string? AWSAccessKey { get; set; }
 		public string? AWSKeySecret { get; set; }
+		
+		public bool UseLocalStorage { get; set; } = false;
 
 
 

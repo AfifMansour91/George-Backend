@@ -27,18 +27,22 @@ namespace George.Common
 			return $"{baseUrl}/{filePath}";
 		}
 
-		public static string GetFileExternalPath(string? filePath)
-		{
-			if( !filePath.HasValue() )
-				return string.Empty;
+	public static string GetFileExternalPath(string? filePath)
+	{
+		if( !filePath.HasValue() )
+			return string.Empty;
 
-			filePath = filePath!.Trim('/').Trim('\\');
-			string baseUrl = SysConfig.Data.StorageExternalBasePath.Trim('/').Trim('\\');
+		filePath = filePath!.Trim('/').Trim('\\');
+		
+		// Use local storage external path if configured, otherwise use S3 path
+		string baseUrl = string.IsNullOrEmpty(SysConfig.Data.StorageLocalExternalBasePath) 
+			? SysConfig.Data.StorageExternalBasePath.Trim('/').Trim('\\')
+			: SysConfig.Data.StorageLocalExternalBasePath.Trim('/').Trim('\\');
 
-			string res = $"{baseUrl}/{filePath}";
+		string res = $"{baseUrl}/{filePath}";
 
-			return res;
-		}
+		return res;
+	}
 
 		public static string GetSystemFolderPath()
 		{

@@ -1,5 +1,6 @@
 ﻿using System.Data;
 using AutoMapper;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using George.Common;
 using George.Data;
@@ -11,13 +12,15 @@ namespace George.Services
 	{
 		//*********************  Data members/Constants  *********************//
 		private readonly GeneralStorage _generalStorage;
+		private readonly IConfiguration _configuration;
 
 
 		//**************************    Construction    **************************//
 		public ConfigurationService(ILogger<ConfigurationService> logger, IMapper mapper, CacheManager cache, 
-									GeneralStorage generalStorage) : base(logger, mapper, cache)
+									GeneralStorage generalStorage, IConfiguration configuration) : base(logger, mapper, cache)
 		{
 			_generalStorage = generalStorage;
+			_configuration = configuration;
 		}
 
 
@@ -79,8 +82,11 @@ namespace George.Services
 				// Create new configuration data.
 				SysConfigData data = new SysConfigData();
 
-				// Set new configuration data values.
+				// Set new configuration data values from database.
 				SetConfigs(configs, data);
+
+				// Override with appsettings.json values if present (appsettings takes precedence)
+				LoadFromAppSettings(data);
 
 				// Replace the existing configuration data with the new one.
 				SysConfig.Data = data;
@@ -95,6 +101,33 @@ namespace George.Services
 			}
 
 			return res;
+		}
+
+		private void LoadFromAppSettings(SysConfigData data)
+		{
+			// Load file storage settings from appsettings.json
+			var fileStorageSection = _configuration.GetSection("FileStorage");
+			
+			// UseLocalStorage flag - if set to true, forces local storage regardless of AWS config
+			var useLocalStorage = fileStorageSection.GetValue<bool?>("UseLocalStorage");
+			if (useLocalStorage.HasValue)
+			{
+				data.UseLocalStorage = useLocalStorage.Value;
+			}
+
+			// StorageLocalInternalBasePath - physical path on server
+			var storageLocalInternal = fileStorageSection.GetValue<string>("StorageLocalInternalBasePath");
+			if (!string.IsNullOrEmpty(storageLocalInternal))
+			{
+				data.StorageLocalInternalBasePath = storageLocalInternal.Trim();
+			}
+
+			// StorageLocalExternalBasePath - public URL for accessing files
+			var storageLocalExternal = fileStorageSection.GetValue<string>("StorageLocalExternalBasePath");
+			if (!string.IsNullOrEmpty(storageLocalExternal))
+			{
+				data.StorageLocalExternalBasePath = storageLocalExternal.Trim();
+			}
 		}
 
 
