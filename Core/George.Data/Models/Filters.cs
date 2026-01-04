@@ -123,4 +123,11 @@ namespace George.Common
         public SearchFilter? Search { get; set; }
     }
 
+    public class TemplateAttributeFilter
+    {
+        public int? SiteId { get; set; }
+        public List<int>? SiteIds { get; set; }
+        public SearchFilter? Search { get; set; }
+    }
+
 }

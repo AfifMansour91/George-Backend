@@ -334,6 +334,7 @@ namespace George.Api.Core
 			services.AddScoped<MediaStorage>();
 			services.AddScoped<ClientStorage>();
 			services.AddScoped<GlobalCategoryStorage>();
+			services.AddScoped<TemplateAttributeStorage>();
 
             // Add Services.
             services.AddScoped<ConfigurationService>();
@@ -350,6 +351,7 @@ namespace George.Api.Core
 			services.AddScoped<MediaService>();
 			services.AddScoped<ClientService>();
 			services.AddScoped<GlobalCategoryService>();
+			services.AddScoped<TemplateAttributeService>();
 
 			// Let the derived add its own dependencies.
 			AddCustomDependencies(services);
