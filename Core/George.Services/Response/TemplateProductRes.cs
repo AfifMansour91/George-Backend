@@ -17,18 +17,7 @@ namespace George.Services.Response
         public decimal? Weight { get; set; }
     }
 
-    //public class WeightConfigRes
-    //{
-    //    public string? Unit { get; set; }
-    //    public string? StartWeight { get; set; }
-    //    public string? Step { get; set; }
-    //    public bool? FixedWeightPerUnit { get; set; }
-    //    public string? UnitWeight { get; set; }
-    //    public string? UnitWeightMode { get; set; }
-    //    public string? WeightOptions { get; set; }
-    //    public bool? WeightByVariant { get; set; }
-    //    public bool? ShowPricePer100g { get; set; }
-    //}
+    // Reuse WeightConfigRes from ProductRes
 
     public class TemplateProductRes
     {
@@ -64,7 +53,7 @@ namespace George.Services.Response
         public bool? IsKosher { get; set; }
         public bool? IsWeighted { get; set; }
         public string? SetupType { get; set; }
-        public WeightConfigRes? WeightConfig { get; set; }
+        public George.Services.Response.WeightConfigRes? WeightConfig { get; set; }
         public List<int> SiteIds { get; set; } = new(); // Empty = all sites
         public string? SeoTitle { get; set; }
         public string? SeoDescription { get; set; }

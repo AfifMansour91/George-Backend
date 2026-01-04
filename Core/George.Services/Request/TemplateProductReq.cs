@@ -82,7 +82,7 @@ namespace George.Services.Request
 
         public string? SetupType { get; set; }
 
-        public WeightConfigReq? WeightConfig { get; set; }
+        public George.Services.Request.WeightConfigReq? WeightConfig { get; set; }
 
         public List<int>? SiteIds { get; set; } // Empty = all sites
 

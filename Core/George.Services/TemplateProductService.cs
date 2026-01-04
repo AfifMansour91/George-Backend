@@ -339,7 +339,7 @@ namespace George.Services
             // Map weight config
             if (templateProduct.WeightConfig != null)
             {
-                res.WeightConfig = new WeightConfigRes
+                res.WeightConfig = new George.Services.Response.WeightConfigRes
                 {
                     Unit = templateProduct.WeightConfig.Unit?.Name,
                     StartWeight = templateProduct.WeightConfig.StartWeight,
