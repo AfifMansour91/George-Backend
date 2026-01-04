@@ -116,4 +116,11 @@ namespace George.Common
         public SearchFilter? Search { get; set; }
     }
 
+    public class GlobalCategoryFilter
+    {
+        public int? ParentGlobalCategoryId { get; set; }
+        public int? BusinessTypeId { get; set; }
+        public SearchFilter? Search { get; set; }
+    }
+
 }

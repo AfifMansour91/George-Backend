@@ -8,6 +8,7 @@ using George.Services.Response;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Identity.Client;
 using System.Text.Json;
+using Attribute = George.DB.Attribute;
 using SysRegex = System.Text.RegularExpressions;
 
 namespace George.Services

@@ -203,23 +203,23 @@
         public bool? IsActive { get; set; }
     }
 
-    public class UpdateGlobalCategoryReq
-    {
-        public string? Name { get; set; }
-        public string? Slug { get; set; }
-        public int? SortOrder { get; set; }
-        public bool? IsActive { get; set; }
-        // future: ParentCategoryId, etc.
-    }
+    //public class UpdateGlobalCategoryReq
+    //{
+    //    public string? Name { get; set; }
+    //    public string? Slug { get; set; }
+    //    public int? SortOrder { get; set; }
+    //    public bool? IsActive { get; set; }
+    //    // future: ParentCategoryId, etc.
+    //}
 
-    public class CreateGlobalCategoryReq
-    {
-        public string Name { get; set; } = default!;
-        public string? Slug { get; set; }
-        public int? SortOrder { get; set; }
-        public bool? IsActive { get; set; }
-        public int? ParentCategoryId { get; set; }
-    }
+    //public class CreateGlobalCategoryReq
+    //{
+    //    public string Name { get; set; } = default!;
+    //    public string? Slug { get; set; }
+    //    public int? SortOrder { get; set; }
+    //    public bool? IsActive { get; set; }
+    //    public int? ParentCategoryId { get; set; }
+    //}
 
 
 
