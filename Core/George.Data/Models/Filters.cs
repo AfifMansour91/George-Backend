@@ -80,5 +80,22 @@ namespace George.Common
         public SearchFilter? Search { get; set; }
     }
 
+    public class ProductFilter
+    {
+        public int? AccountId { get; set; }
+        public int? SiteId { get; set; }
+        public int? CategoryId { get; set; }
+        public string? Status { get; set; }
+        public SearchFilter? Search { get; set; }
+    }
+
+    public class CategoryFilter
+    {
+        public int? AccountId { get; set; }
+        public int? SiteId { get; set; }
+        public int? ParentCategoryId { get; set; }
+        public bool? IsEnabled { get; set; }
+        public SearchFilter? Search { get; set; }
+    }
 
 }

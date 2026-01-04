@@ -1,0 +1,163 @@
+using George.Common;
+using George.DB;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+
+namespace George.Data
+{
+    public class CategoryStorage : StorageBase
+    {
+        public CategoryStorage(GeorgeDBContext dbContext, ILogger<CategoryStorage> logger)
+            : base(dbContext, logger)
+        {
+        }
+
+        public async Task<DataListResult<Category>> GetCategoriesAsync(
+            CategoryFilter? filter,
+            PagingExDto paging,
+            CancellationToken cancelToken)
+        {
+            var res = new DataListResult<Category>();
+
+            var query = _dbContext.Categories
+                .Include(c => c.Account)
+                .Include(c => c.ParentCategory)
+                .Include(c => c.Sites)
+                .AsNoTracking();
+
+            // Apply filters
+            if (filter != null)
+            {
+                if (filter.AccountId.HasValue)
+                {
+                    query = query.Where(c => c.AccountId == filter.AccountId.Value);
+                }
+
+                if (filter.SiteId.HasValue)
+                {
+                    query = query.Where(c => c.Sites.Any(s => s.Id == filter.SiteId.Value));
+                }
+
+                if (filter.ParentCategoryId.HasValue)
+                {
+                    query = query.Where(c => c.ParentCategoryId == filter.ParentCategoryId.Value);
+                }
+                else if (filter.ParentCategoryId == 0)
+                {
+                    // Explicitly request root categories (no parent)
+                    query = query.Where(c => c.ParentCategoryId == null);
+                }
+
+                if (filter.IsEnabled.HasValue)
+                {
+                    query = query.Where(c => c.IsEnabled == filter.IsEnabled.Value);
+                }
+
+                if (filter.Search?.SearchTerm.HasValue() == true)
+                {
+                    var term = filter.Search.SearchTerm!.Trim();
+                    query = query.Where(c => c.Name.Contains(term) ||
+                                           (c.Description != null && c.Description.Contains(term)));
+                }
+            }
+
+            if (paging.IncludeTotal)
+                res.Total = await query.CountAsync(cancelToken).ConfigureAwait(false);
+
+            // Add sorting
+            query = query.OrderBy(c => c.SortOrder).ThenBy(c => c.Name);
+
+            // Add paging
+            query = query.Skip(paging.Skip).Take(paging.Take);
+
+            res.Items = await query.ToListAsync(cancelToken).ConfigureAwait(false);
+
+            return res;
+        }
+
+        public async Task<Category?> GetCategoryAsync(int categoryId, CancellationToken cancelToken)
+        {
+            return await _dbContext.Categories
+                .Include(c => c.Account)
+                .Include(c => c.ParentCategory)
+                .Include(c => c.Sites)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Id == categoryId, cancelToken);
+        }
+
+        public async Task<Category> CreateCategoryAsync(Category category, List<int>? siteIds, CancellationToken cancelToken)
+        {
+            _dbContext.Categories.Add(category);
+
+            // Add sites if provided
+            if (siteIds != null && siteIds.Any())
+            {
+                var sites = await _dbContext.Sites
+                    .Where(s => siteIds.Contains(s.Id))
+                    .ToListAsync(cancelToken);
+                
+                foreach (var site in sites)
+                {
+                    category.Sites.Add(site);
+                }
+            }
+
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return category;
+        }
+
+        public async Task<Category?> UpdateCategoryAsync(Category updated, List<int>? siteIds, CancellationToken cancelToken)
+        {
+            var dbCategory = await _dbContext.Categories
+                .Include(c => c.Sites)
+                .FirstOrDefaultAsync(c => c.Id == updated.Id, cancelToken);
+
+            if (dbCategory == null) return null;
+
+            // Update basic properties
+            dbCategory.Name = updated.Name;
+            dbCategory.ParentCategoryId = updated.ParentCategoryId;
+            dbCategory.Description = updated.Description;
+            dbCategory.CustomName = updated.CustomName;
+            dbCategory.IsEnabled = updated.IsEnabled;
+            dbCategory.SortOrder = updated.SortOrder;
+            dbCategory.DisplayAsMain = updated.DisplayAsMain;
+            dbCategory.AccountId = updated.AccountId;
+            dbCategory.UpdatedDate = DateTime.UtcNow;
+            dbCategory.UpdateUserId = updated.UpdateUserId;
+
+            // Update sites
+            if (siteIds != null)
+            {
+                dbCategory.Sites.Clear();
+                if (siteIds.Any())
+                {
+                    var sites = await _dbContext.Sites
+                        .Where(s => siteIds.Contains(s.Id))
+                        .ToListAsync(cancelToken);
+                    
+                    foreach (var site in sites)
+                    {
+                        dbCategory.Sites.Add(site);
+                    }
+                }
+            }
+
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return dbCategory;
+        }
+
+        public async Task<bool> DeleteCategoryAsync(int categoryId, CancellationToken cancelToken)
+        {
+            var category = await _dbContext.Categories
+                .FirstOrDefaultAsync(c => c.Id == categoryId, cancelToken);
+
+            if (category == null) return false;
+
+            category.IsDeleted = true;
+            category.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return true;
+        }
+    }
+}

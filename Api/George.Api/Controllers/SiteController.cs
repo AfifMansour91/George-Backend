@@ -51,6 +51,13 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _siteSvc.UpdateSiteAsync(siteId, req, cancelToken));
         }
 
+        [HttpGet("Account/{accountId:int}")]
+        [ProducesResponseType(typeof(IApiResponse<List<SiteRes>>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetSitesByAccountAsync([FromRoute] int accountId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _siteSvc.GetSitesByAccountAsync(accountId, cancelToken));
+        }
+
         [ApiExplorerSettings(IgnoreApi = true)]
         public void SetAuthUser()
         {

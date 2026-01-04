@@ -48,11 +48,16 @@ namespace George.Services
 
             // Convert to EF model
             Site? model = _mapper.Map<Site>(req);
+            model.CreationUserId = AuthUser.Id;
+            model.CreationTime = DateTime.UtcNow;
+            model.IsActive = true;
 
             // Create the data in the DB.
-            model = await _siteStorage.CreateSiteAsync(model, cancelToken).ConfigureAwait(false);
+            model = await _siteStorage.CreateSiteAsync(model, req.BusinessTypeIds, cancelToken).ConfigureAwait(false);
             if (model != null)
             {
+                // Load with business types for mapping
+                model = await _siteStorage.GetSiteAsync(model.Id, cancelToken);
                 // Convert to response.
                 response.Data = _mapper.Map<SiteRes>(model);
             }
@@ -82,14 +87,28 @@ namespace George.Services
 
             // Convert to EF model
             Site? model = _mapper.Map<Site>(req);
+            model.Id = siteId;
+            model.UpdateUserId = AuthUser.Id;
 
-            // Create the data in the DB.
-            model = await _siteStorage.UpdateSiteAsync(model, cancelToken).ConfigureAwait(false);
+            // Update the data in the DB.
+            model = await _siteStorage.UpdateSiteAsync(model, req.BusinessTypeIds, cancelToken).ConfigureAwait(false);
             if (model != null)
             {
+                // Load with business types for mapping
+                model = await _siteStorage.GetSiteAsync(model.Id, cancelToken);
                 // Convert to response.
                 response.Data = _mapper.Map<SiteRes>(model);
             }
+
+            return response;
+        }
+
+        public async Task<IApiResponse<List<SiteRes>>> GetSitesByAccountAsync(int accountId, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<List<SiteRes>>();
+
+            var sites = await _siteStorage.GetSitesByAccountAsync(accountId, cancelToken);
+            response.Data = sites.ConvertAll(s => _mapper.Map<SiteRes>(s));
 
             return response;
         }

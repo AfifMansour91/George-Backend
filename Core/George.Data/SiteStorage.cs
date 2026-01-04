@@ -21,6 +21,7 @@ namespace George.Data
             // Base sites query
             var query = _dbContext.Sites
                 .Include(a => a.Account)
+                .Include(s => s.BusinessTypes)
                 .AsNoTracking();
 
             if (filter?.Search?.SearchTerm.HasValue() == true)
@@ -52,38 +53,82 @@ namespace George.Data
         {
             return await _dbContext.Sites
                 .Include(a => a.Account)
+                .Include(s => s.BusinessTypes)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(a => a.Id == siteId, cancelToken);
         }
 
-        public async Task<Site> CreateSiteAsync(Site site, CancellationToken cancelToken)
+        public async Task<List<Site>> GetSitesByAccountAsync(int accountId, CancellationToken cancelToken)
+        {
+            return await _dbContext.Sites
+                .Include(s => s.BusinessTypes)
+                .Where(s => s.AccountId == accountId && !s.IsDeleted)
+                .AsNoTracking()
+                .OrderBy(s => s.SiteName)
+                .ToListAsync(cancelToken);
+        }
+
+        public async Task<Site> CreateSiteAsync(Site site, List<int>? businessTypeIds, CancellationToken cancelToken)
         {
             _dbContext.Sites.Add(site);
+            
+            // Add business types if provided
+            if (businessTypeIds != null && businessTypeIds.Any())
+            {
+                var businessTypes = await _dbContext.BusinessTypes
+                    .Where(bt => businessTypeIds.Contains(bt.Id))
+                    .ToListAsync(cancelToken);
+                
+                foreach (var bt in businessTypes)
+                {
+                    site.BusinessTypes.Add(bt);
+                }
+            }
+            
             await _dbContext.SaveChangesAsync(cancelToken);
             return site;
         }
 
-        public async Task<Site?> UpdateSiteAsync(Site updated, CancellationToken cancelToken)
+        public async Task<Site?> UpdateSiteAsync(Site updated, List<int>? businessTypeIds, CancellationToken cancelToken)
         {
-            var dbAcc = await _dbContext.Sites
+            var dbSite = await _dbContext.Sites
+                .Include(s => s.BusinessTypes)
                 .FirstOrDefaultAsync(a => a.Id == updated.Id, cancelToken);
 
-            if (dbAcc == null) return null;
+            if (dbSite == null) return null;
 
-            dbAcc.SiteName = updated.SiteName;
-            dbAcc.AccountId = updated.AccountId;
-            dbAcc.Location = updated.Location;
-            dbAcc.Description = updated.Description;
-            dbAcc.Status = updated.Status;
-            dbAcc.ContactEmail = updated.ContactEmail;
-            dbAcc.ContactPhone = updated.ContactPhone;
-            dbAcc.IsKosherSite = updated.IsKosherSite;
-            dbAcc.AllowWeightedProducts = updated.AllowWeightedProducts;
-            dbAcc.IsActive = updated.IsActive;
-            dbAcc.UpdatedDate = DateTime.UtcNow;
+            dbSite.SiteName = updated.SiteName;
+            dbSite.AccountId = updated.AccountId;
+            dbSite.Location = updated.Location;
+            dbSite.Description = updated.Description;
+            dbSite.Status = updated.Status;
+            dbSite.ContactEmail = updated.ContactEmail;
+            dbSite.ContactPhone = updated.ContactPhone;
+            dbSite.IsKosherSite = updated.IsKosherSite;
+            dbSite.AllowWeightedProducts = updated.AllowWeightedProducts;
+            dbSite.Currency = updated.Currency;
+            dbSite.IsActive = updated.IsActive;
+            dbSite.UpdatedDate = DateTime.UtcNow;
+
+            // Update business types
+            if (businessTypeIds != null)
+            {
+                dbSite.BusinessTypes.Clear();
+                if (businessTypeIds.Any())
+                {
+                    var businessTypes = await _dbContext.BusinessTypes
+                        .Where(bt => businessTypeIds.Contains(bt.Id))
+                        .ToListAsync(cancelToken);
+                    
+                    foreach (var bt in businessTypes)
+                    {
+                        dbSite.BusinessTypes.Add(bt);
+                    }
+                }
+            }
 
             await _dbContext.SaveChangesAsync(cancelToken);
-            return dbAcc;
+            return dbSite;
         }
 
         public async Task<Site?> DeleteSiteAsync(int id, CancellationToken cancelToken = default)

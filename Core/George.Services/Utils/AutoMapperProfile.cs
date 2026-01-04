@@ -90,14 +90,31 @@ namespace George.Services
             CreateMap<Site, SiteRes>()
                 .AfterMap((src, dest, context) =>
                 {
+                    // Map business types
+                    if (src.BusinessTypes != null && src.BusinessTypes.Any())
+                    {
+                        dest.BusinessTypeIds = src.BusinessTypes.Select(bt => bt.Id).ToList();
+                    }
+                    else
+                    {
+                        dest.BusinessTypeIds = new List<int>();
+                    }
+                    
+                    // Ensure status defaults to "active" if null
+                    if (string.IsNullOrWhiteSpace(dest.Status))
+                    {
+                        dest.Status = src.IsActive ? "active" : "inactive";
+                    }
                 });
             CreateMap<CreateSiteReq, Site>()
                 .AfterMap((src, dest, context) =>
                 {
+                    // Business types will be handled separately in storage
                 });
             CreateMap<UpdateSiteReq, Site>()
                 .AfterMap((src, dest, context) =>
                 {
+                    // Business types will be handled separately in storage
                 });
 
 
@@ -114,6 +131,23 @@ namespace George.Services
             CreateMap<UpdateBusinessTypeReq, BusinessType>()
                 .AfterMap((src, dest, context) =>
                 {
+                });
+
+            ////////////////////////// Category
+            CreateMap<Category, CategoryRes>()
+                .AfterMap((src, dest, context) =>
+                {
+                    // Sites will be mapped in the service layer
+                });
+            CreateMap<CreateCategoryReq, Category>()
+                .AfterMap((src, dest, context) =>
+                {
+                    // Sites will be handled separately in storage
+                });
+            CreateMap<UpdateCategoryReq, Category>()
+                .AfterMap((src, dest, context) =>
+                {
+                    // Sites will be handled separately in storage
                 });
 
 
