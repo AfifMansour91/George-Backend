@@ -45,10 +45,6 @@ namespace George.Services
         [RequiredNotEmpty]
         [Phone]
         public string Phone { get; set; } = null!;
-
-        [RequiredNotEmpty]
-        [EmailAddress]
-        public string Email { get; set; } = null!;
     }
     public class LoginWithOtpReq
     {
