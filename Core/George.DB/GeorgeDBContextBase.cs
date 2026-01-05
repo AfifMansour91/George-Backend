@@ -596,9 +596,9 @@ public partial class GeorgeDBContextBase : DbContext
 
         modelBuilder.Entity<TemplateProductCategory>(entity =>
         {
-            entity.HasOne(d => d.Category).WithMany(p => p.TemplateProductCategories)
+            entity.HasOne(d => d.GlobalCategory).WithMany(p => p.TemplateProductCategories)
                 .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("FK_TPC_Category");
+                .HasConstraintName("FK_TPC_GlobalCategory");
 
             entity.HasOne(d => d.TemplateProduct).WithMany(p => p.TemplateProductCategories)
                 .OnDelete(DeleteBehavior.ClientSetNull)

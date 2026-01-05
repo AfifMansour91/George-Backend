@@ -257,23 +257,19 @@ namespace George.Services
                     .ToList();
             }
 
-            // Map categories - get GlobalCategory IDs from Category.SourceGlobalCategoryId
+            // Map categories - get GlobalCategory IDs directly from TemplateProductCategory
             if (templateProduct.TemplateProductCategories != null && templateProduct.TemplateProductCategories.Any())
             {
                 var mainCategories = templateProduct.TemplateProductCategories
-                    .Where(tpc => tpc.Category != null && 
-                                 tpc.Category.SourceGlobalCategory != null &&
-                                 tpc.Category.SourceGlobalCategory.ParentGlobalCategoryId == null)
-                    .Select(tpc => tpc.Category!.SourceGlobalCategoryId ?? 0)
-                    .Where(id => id > 0)
+                    .Where(tpc => tpc.GlobalCategory != null && 
+                                 tpc.GlobalCategory.ParentGlobalCategoryId == null)
+                    .Select(tpc => tpc.GlobalCategoryId)
                     .Distinct()
                     .ToList();
                 var subCategories = templateProduct.TemplateProductCategories
-                    .Where(tpc => tpc.Category != null && 
-                                 tpc.Category.SourceGlobalCategory != null &&
-                                 tpc.Category.SourceGlobalCategory.ParentGlobalCategoryId != null)
-                    .Select(tpc => tpc.Category!.SourceGlobalCategoryId ?? 0)
-                    .Where(id => id > 0)
+                    .Where(tpc => tpc.GlobalCategory != null && 
+                                 tpc.GlobalCategory.ParentGlobalCategoryId != null)
+                    .Select(tpc => tpc.GlobalCategoryId)
                     .Distinct()
                     .ToList();
                 

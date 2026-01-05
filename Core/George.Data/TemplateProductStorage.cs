@@ -34,8 +34,7 @@ namespace George.Data
                 .Include(tp => tp.Sites)
                 .Include(tp => tp.Tags)
                 .Include(tp => tp.TemplateProductCategories)
-                    .ThenInclude(tpc => tpc.Category)
-                        .ThenInclude(c => c.SourceGlobalCategory)
+                    .ThenInclude(tpc => tpc.GlobalCategory)
                 .Include(tp => tp.TemplateProductImages)
                 .Include(tp => tp.TemplateProductOptions)
                     .ThenInclude(tpo => tpo.TemplateProductOptionValues)
@@ -58,15 +57,14 @@ namespace George.Data
 
                 if (filter.GlobalCategoryId.HasValue)
                 {
-                    query = query.Where(tp => tp.TemplateProductCategories.Any(tpc => 
-                        tpc.Category != null && 
-                        tpc.Category.SourceGlobalCategoryId == filter.GlobalCategoryId.Value));
+                    query = query.Where(tp => tp.TemplateProductCategories.Any(tpc =>
+                        tpc.GlobalCategoryId == filter.GlobalCategoryId.Value));
                 }
 
                 if (filter.Search?.SearchTerm.HasValue() == true)
                 {
                     var term = filter.Search.SearchTerm!.Trim();
-                    query = query.Where(tp => tp.Name.Contains(term) || 
+                    query = query.Where(tp => tp.Name.Contains(term) ||
                                            (tp.Sku != null && tp.Sku.Contains(term)) ||
                                            (tp.ShortDescription != null && tp.ShortDescription.Contains(term)));
                 }
@@ -110,8 +108,7 @@ namespace George.Data
                 .Include(tp => tp.Sites)
                 .Include(tp => tp.Tags)
                 .Include(tp => tp.TemplateProductCategories)
-                    .ThenInclude(tpc => tpc.Category)
-                        .ThenInclude(c => c.SourceGlobalCategory)
+                    .ThenInclude(tpc => tpc.GlobalCategory)
                 .Include(tp => tp.TemplateProductImages)
                 .Include(tp => tp.TemplateProductOptions)
                     .ThenInclude(tpo => tpo.TemplateProductOptionValues)
@@ -122,10 +119,10 @@ namespace George.Data
         }
 
         public async Task<TemplateProduct> CreateTemplateProductAsync(
-            TemplateProduct templateProduct, 
-            List<int>? siteIds, 
-            List<int>? globalCategoryIds, 
-            List<string>? tags, 
+            TemplateProduct templateProduct,
+            List<int>? siteIds,
+            List<int>? globalCategoryIds,
+            List<string>? tags,
             CancellationToken cancelToken)
         {
             _dbContext.TemplateProducts.Add(templateProduct);
@@ -146,16 +143,16 @@ namespace George.Data
             if (globalCategoryIds != null && globalCategoryIds.Any())
             {
                 // Find Categories that have SourceGlobalCategoryId matching the GlobalCategory IDs
-                var categories = await _dbContext.Categories
-                    .Where(c => globalCategoryIds.Contains(c.SourceGlobalCategoryId ?? 0))
+                var categories = await _dbContext.GlobalCategories
+                    .Where(c => globalCategoryIds.Contains(c.Id))
                     .ToListAsync(cancelToken);
-                
+
                 foreach (var category in categories)
                 {
                     templateProduct.TemplateProductCategories.Add(new TemplateProductCategory
                     {
                         TemplateProductId = templateProduct.Id,
-                        CategoryId = category.Id,
+                        GlobalCategoryId = category.Id,
                         IsPrimary = false
                     });
                 }
@@ -169,7 +166,7 @@ namespace George.Data
                     // For template products, tags might not have AccountId, so we search more broadly
                     var tag = await _dbContext.Tags
                         .FirstOrDefaultAsync(t => t.Name == tagName, cancelToken);
-                    
+
                     if (tag == null)
                     {
                         tag = new Tag
@@ -189,10 +186,10 @@ namespace George.Data
         }
 
         public async Task<TemplateProduct?> UpdateTemplateProductAsync(
-            TemplateProduct updated, 
-            List<int>? siteIds, 
-            List<int>? globalCategoryIds, 
-            List<string>? tags, 
+            TemplateProduct updated,
+            List<int>? siteIds,
+            List<int>? globalCategoryIds,
+            List<string>? tags,
             CancellationToken cancelToken)
         {
             var dbTemplateProduct = await _dbContext.TemplateProducts
@@ -256,16 +253,16 @@ namespace George.Data
                 if (globalCategoryIds.Any())
                 {
                     // Find Categories that have SourceGlobalCategoryId matching the GlobalCategory IDs
-                    var categories = await _dbContext.Categories
-                        .Where(c => globalCategoryIds.Contains(c.SourceGlobalCategoryId ?? 0))
+                    var categories = await _dbContext.GlobalCategories
+                        .Where(c => globalCategoryIds.Contains(c.Id))
                         .ToListAsync(cancelToken);
-                    
+
                     foreach (var category in categories)
                     {
                         dbTemplateProduct.TemplateProductCategories.Add(new TemplateProductCategory
                         {
                             TemplateProductId = dbTemplateProduct.Id,
-                            CategoryId = category.Id,
+                            GlobalCategoryId = category.Id,
                             IsPrimary = false
                         });
                     }
@@ -282,7 +279,7 @@ namespace George.Data
                     {
                         var tag = await _dbContext.Tags
                             .FirstOrDefaultAsync(t => t.Name == tagName, cancelToken);
-                        
+
                         if (tag == null)
                         {
                             tag = new Tag

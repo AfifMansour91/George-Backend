@@ -6,21 +6,21 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[PrimaryKey("TemplateProductId", "CategoryId")]
+[PrimaryKey("TemplateProductId", "GlobalCategoryId")]
 [Table("TemplateProductCategory")]
 public partial class TemplateProductCategory
 {
     [Key]
     public int TemplateProductId { get; set; }
 
-    [Key]
-    public int CategoryId { get; set; }
-
     public bool IsPrimary { get; set; }
 
-    [ForeignKey("CategoryId")]
+    [Key]
+    public int GlobalCategoryId { get; set; }
+
+    [ForeignKey("GlobalCategoryId")]
     [InverseProperty("TemplateProductCategories")]
-    public virtual Category Category { get; set; } = null!;
+    public virtual GlobalCategory GlobalCategory { get; set; } = null!;
 
     [ForeignKey("TemplateProductId")]
     [InverseProperty("TemplateProductCategories")]

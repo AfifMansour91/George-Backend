@@ -52,6 +52,9 @@ public partial class GlobalCategory
     [InverseProperty("InverseParentGlobalCategory")]
     public virtual GlobalCategory? ParentGlobalCategory { get; set; }
 
+    [InverseProperty("GlobalCategory")]
+    public virtual ICollection<TemplateProductCategory> TemplateProductCategories { get; set; } = new List<TemplateProductCategory>();
+
     [ForeignKey("UpdateUserId")]
     [InverseProperty("GlobalCategoryUpdateUsers")]
     public virtual User? UpdateUser { get; set; }

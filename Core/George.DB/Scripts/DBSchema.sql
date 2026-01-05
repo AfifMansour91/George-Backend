@@ -1,834 +1,703 @@
-USE [George.Dev]
+USE [George.Dev.V3]
 GO
-/****** Object:  Table [dbo].[Account]    Script Date: 10/25/2025 2:14:45 AM ******/
+/****** Object:  Table [dbo].[Account]    Script Date: 1/5/2026 2:57:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE TABLE [dbo].[Account](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+	[GuidId] [uniqueidentifier] NOT NULL,
+	[CreationTime] [datetime2](0) NOT NULL,
+	[UpdatedDate] [datetime2](0) NULL,
+	[CreationUserId] [int] NULL,
+	[UpdateUserId] [int] NULL,
 	[Name] [nvarchar](200) NOT NULL,
+	[Description] [nvarchar](2000) NULL,
+	[Address] [nvarchar](500) NULL,
+	[City] [nvarchar](200) NULL,
+	[State] [nvarchar](200) NULL,
+	[Zip] [nvarchar](50) NULL,
+	[Phone] [nvarchar](50) NULL,
+	[ManagerId] [int] NULL,
+	[ManagerName] [nvarchar](200) NULL,
+	[ManagerEmail] [nvarchar](250) NOT NULL,
+	[StatusId] [int] NULL,
+	[WizardStatusId] [int] NULL,
+	[WizardTypeId] [int] NULL,
+	[WizardStep] [int] NULL,
+	[ContentOwnerId] [int] NULL,
+	[LogoUrl] [nvarchar](1000) NULL,
+	[Status] [nvarchar](20) NOT NULL,
 	[IsActive] [bit] NOT NULL,
-	[IsKosherShop] [bit] NOT NULL,
-	[AllowWeighted] [bit] NOT NULL,
-	[CreatedAt] [datetime2](7) NOT NULL,
-	[UpdatedAt] [datetime2](7) NULL,
-	[StoreDomain] [nvarchar](250) NULL,
  CONSTRAINT [PK_Account] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-/****** Object:  Table [dbo].[AccountProduct]    Script Date: 10/25/2025 2:14:45 AM ******/
+/****** Object:  Table [dbo].[AccountStatus]    Script Date: 1/5/2026 2:57:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE TABLE [dbo].[AccountProduct](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountId] [bigint] NOT NULL,
-	[ProductTemplateId] [bigint] NOT NULL,
-	[IsEnabled] [bit] NOT NULL,
-	[EditingStatus] [nvarchar](30) NOT NULL,
-	[Title] [nvarchar](300) NULL,
-	[ShortDescription] [nvarchar](1000) NULL,
-	[DescriptionHtml] [nvarchar](max) NULL,
-	[BrandId] [int] NULL,
-	[SupplierId] [int] NULL,
-	[IsKosher] [bit] NULL,
-	[KosherStatusId] [int] NULL,
-	[WeightPricingModelId] [int] NULL,
-	[ShowPricePer100g] [bit] NULL,
-	[BaseUnitPrice] [decimal](18, 2) NULL,
-	[BaseUnitId] [int] NULL,
-	[BaseWeightGrams] [decimal](18, 3) NULL,
-	[StockQuantity] [decimal](18, 3) NULL,
-	[Sku] [nvarchar](100) NULL,
-	[CreatedAt] [datetime2](7) NOT NULL,
-	[UpdatedAt] [datetime2](7) NULL,
-	[WeightStepGrams] [decimal](18, 3) NULL,
- CONSTRAINT [PK_AccountProduct] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
-GO
-/****** Object:  View [dbo].[vw_AccountProductStatusSummary]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE VIEW [dbo].[vw_AccountProductStatusSummary]
-AS
-SELECT
-    ap.[AccountId],
-    a.[Name]                        AS [AccountName],
-
-    COUNT(*)                        AS [TotalProducts],
-    SUM(CASE WHEN ap.[IsEnabled] = 1 THEN 1 ELSE 0 END) AS [EnabledProducts],
-    SUM(CASE WHEN ap.[IsEnabled] = 0 THEN 1 ELSE 0 END) AS [DisabledProducts],
-
-    SUM(CASE WHEN ap.[EditingStatus] = N'NotEdited' THEN 1 ELSE 0 END) AS [NotEditedCount],
-    SUM(CASE WHEN ap.[EditingStatus] = N'Edited'    THEN 1 ELSE 0 END) AS [EditedCount],
-    SUM(CASE WHEN ap.[EditingStatus] = N'Published' THEN 1 ELSE 0 END) AS [PublishedCount],
-
-    MIN(ap.[CreatedAt])             AS [FirstProductCreatedAt],
-    MAX(ap.[UpdatedAt])             AS [LastProductUpdatedAt]
-FROM [dbo].[AccountProduct] ap
-JOIN [dbo].[Account] a
-  ON a.[Id] = ap.[AccountId]
-GROUP BY
-    ap.[AccountId],
-    a.[Name];
-GO
-/****** Object:  Table [dbo].[AccountCategory]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[AccountCategory](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountId] [bigint] NOT NULL,
-	[CategoryId] [int] NOT NULL,
-	[ParentAccountCategoryId] [bigint] NULL,
-	[CustomName] [nvarchar](200) NULL,
-	[SortOrder] [int] NOT NULL,
-	[IsEnabled] [bit] NOT NULL,
- CONSTRAINT [PK_AccountCategory] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[Category]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[Category](
+CREATE TABLE [dbo].[AccountStatus](
 	[Id] [int] IDENTITY(1,1) NOT NULL,
-	[Name] [nvarchar](200) NOT NULL,
-	[Slug] [nvarchar](200) NULL,
-	[IsActive] [bit] NOT NULL,
-	[SortOrder] [int] NOT NULL,
- CONSTRAINT [PK_Category] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  View [dbo].[vw_AccountCategoryTree]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE VIEW [dbo].[vw_AccountCategoryTree]
-AS
-SELECT
-    ac.[Id]                          AS [AccountCategoryId],
-    ac.[AccountId],
-    ac.[ParentAccountCategoryId],
-    ac.[SortOrder],
-    ac.[IsEnabled],
-    COALESCE(ac.[CustomName], c.[Name]) AS [DisplayName],
-    c.[Name]                          AS [BaseName],
-    c.[Slug]                          AS [BaseSlug]
-FROM [dbo].[AccountCategory] ac
-JOIN [dbo].[Category] c
-  ON c.[Id] = ac.[CategoryId];
-GO
-/****** Object:  Table [dbo].[AccountProductCategory]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[AccountProductCategory](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountProductId] [bigint] NOT NULL,
-	[AccountCategoryId] [bigint] NOT NULL,
- CONSTRAINT [PK_AccountProductCategory] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[AccountProductMedia]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[AccountProductMedia](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountProductId] [bigint] NOT NULL,
-	[Url] [nvarchar](1000) NOT NULL,
-	[AltText] [nvarchar](300) NULL,
-	[SortOrder] [int] NOT NULL,
-	[IsPrimary] [bit] NOT NULL,
- CONSTRAINT [PK_AccountProductMedia] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[Unit]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[Unit](
-	[Id] [int] IDENTITY(1,1) NOT NULL,
-	[Name] [nvarchar](50) NOT NULL,
-	[Code] [nvarchar](20) NOT NULL,
- CONSTRAINT [PK_Unit] PRIMARY KEY CLUSTERED 
+	[Name] [nvarchar](30) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_AccountStatus] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
- CONSTRAINT [UQ_Unit_Code] UNIQUE NONCLUSTERED 
+UNIQUE NONCLUSTERED 
 (
-	[Code] ASC
+	[Name] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-/****** Object:  Table [dbo].[KosherStatus]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[KosherStatus](
-	[Id] [int] IDENTITY(1,1) NOT NULL,
-	[Name] [nvarchar](50) NOT NULL,
- CONSTRAINT [PK_KosherStatus] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[WeightPricingModel]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[WeightPricingModel](
-	[Id] [int] IDENTITY(1,1) NOT NULL,
-	[Code] [nvarchar](40) NOT NULL,
-	[Name] [nvarchar](100) NOT NULL,
- CONSTRAINT [PK_WeightPricingModel] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[ProductTemplate]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[ProductTemplate](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[Sku] [nvarchar](100) NULL,
-	[Title] [nvarchar](300) NOT NULL,
-	[ShortDescription] [nvarchar](1000) NULL,
-	[DescriptionHtml] [nvarchar](max) NULL,
-	[BrandId] [int] NULL,
-	[SupplierId] [int] NULL,
-	[ProductTypeId] [int] NOT NULL,
-	[WeightPricingModelId] [int] NULL,
-	[IsKosherDefault] [bit] NOT NULL,
-	[KosherStatusId] [int] NULL,
-	[BaseUnitPrice] [decimal](18, 2) NULL,
-	[BaseUnitId] [int] NULL,
-	[BaseWeightGrams] [decimal](18, 3) NULL,
-	[ShowPricePer100g] [bit] NOT NULL,
-	[IsActive] [bit] NOT NULL,
-	[CreatedAt] [datetime2](7) NOT NULL,
-	[UpdatedAt] [datetime2](7) NULL,
- CONSTRAINT [PK_ProductTemplate] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
-GO
-/****** Object:  View [dbo].[vw_AccountProductList]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE VIEW [dbo].[vw_AccountProductList]
-AS
-WITH catmap AS (
-    SELECT
-        apc.[AccountProductId],
-        STUFF((
-            SELECT N', ' + COALESCE(ac.[CustomName], c.[Name])
-            FROM [dbo].[AccountProductCategory] apc2
-            JOIN [dbo].[AccountCategory] ac
-              ON ac.[Id] = apc2.[AccountCategoryId]
-            JOIN [dbo].[Category] c
-              ON c.[Id] = ac.[CategoryId]
-            WHERE apc2.[AccountProductId] = apc.[AccountProductId]
-              AND ac.[IsEnabled] = 1
-            FOR XML PATH(''), TYPE
-        ).value('.', 'nvarchar(max)'), 1, 2, N'') AS [CategoryNames]
-    FROM [dbo].[AccountProductCategory] apc
-    GROUP BY apc.[AccountProductId]
-),
-primary_image AS (
-    SELECT
-        apm.[AccountProductId],
-        apm.[Url] AS [PrimaryImageUrl]
-    FROM [dbo].[AccountProductMedia] apm
-    WHERE apm.[IsPrimary] = 1
-)
-SELECT
-    ap.[Id]                        AS [AccountProductId],
-    ap.[AccountId],
-    a.[Name]                       AS [AccountName],
-
-    COALESCE(ap.[Title], pt.[Title]) AS [DisplayTitle],
-    ap.[Sku],
-    ap.[IsEnabled],
-    ap.[EditingStatus],
-
-    ap.[BaseUnitPrice],
-    ap.[StockQuantity],
-    u.[Code]                      AS [BaseUnitCode],
-
-    ap.[IsKosher],
-    ks.[Name]                     AS [KosherStatusName],
-
-    wpm.[Code]                    AS [WeightModelCode],
-    wpm.[Name]                    AS [WeightModelName],
-
-    catmap.[CategoryNames],
-    img.[PrimaryImageUrl],
-
-    ap.[UpdatedAt],
-    ap.[CreatedAt]
-
-FROM [dbo].[AccountProduct] ap
-JOIN [dbo].[Account] a
-  ON a.[Id] = ap.[AccountId]
-JOIN [dbo].[ProductTemplate] pt
-  ON pt.[Id] = ap.[ProductTemplateId]
-LEFT JOIN [dbo].[Unit] u
-  ON u.[Id] = ap.[BaseUnitId]
-LEFT JOIN [dbo].[KosherStatus] ks
-  ON ks.[Id] = ap.[KosherStatusId]
-LEFT JOIN [dbo].[WeightPricingModel] wpm
-  ON wpm.[Id] = ap.[WeightPricingModelId]
-LEFT JOIN catmap
-  ON catmap.[AccountProductId] = ap.[Id]
-LEFT JOIN primary_image img
-  ON img.[AccountProductId] = ap.[Id];
-GO
-/****** Object:  Table [dbo].[AccountBusinessType]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[AccountBusinessType](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountId] [bigint] NOT NULL,
-	[BusinessTypeId] [int] NOT NULL,
-	[IsSelected] [bit] NOT NULL,
- CONSTRAINT [PK_AccountBusinessType] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[AccountEcomCredential]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[AccountEcomCredential](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountId] [bigint] NOT NULL,
-	[EcomPlatformId] [int] NOT NULL,
-	[BaseUrl] [nvarchar](300) NOT NULL,
-	[ApiKey] [nvarchar](300) NOT NULL,
-	[ApiSecret] [nvarchar](300) NOT NULL,
-	[IsActive] [bit] NOT NULL,
-	[CreatedAt] [datetime2](7) NOT NULL,
- CONSTRAINT [PK_AccountEcomCredential] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[AccountProductAttribute]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[AccountProductAttribute](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountProductId] [bigint] NOT NULL,
-	[AttributeId] [int] NOT NULL,
-	[IsVariantAxis] [bit] NOT NULL,
- CONSTRAINT [PK_AccountProductAttribute] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[AccountProductAttributeValue]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[AccountProductAttributeValue](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountProductAttributeId] [bigint] NOT NULL,
-	[AttributeOptionId] [int] NULL,
-	[ValueText] [nvarchar](500) NULL,
-	[SortOrder] [int] NOT NULL,
- CONSTRAINT [PK_AccountProductAttributeValue] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[AccountProductImportStaging]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[AccountProductImportStaging](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountId] [bigint] NOT NULL,
-	[SourceFileName] [nvarchar](255) NULL,
-	[RowNumber] [int] NOT NULL,
-	[RawName] [nvarchar](300) NULL,
-	[RawDescription] [nvarchar](max) NULL,
-	[RawSku] [nvarchar](100) NULL,
-	[RawImageUrl] [nvarchar](1000) NULL,
-	[RawPrice] [decimal](18, 2) NULL,
-	[RawWeightInfo] [nvarchar](200) NULL,
-	[MatchedProductTemplateId] [bigint] NULL,
-	[MatchConfidence] [decimal](5, 2) NULL,
-	[UseClientImage] [bit] NOT NULL,
-	[Status] [nvarchar](30) NOT NULL,
- CONSTRAINT [PK_AccountProductImportStaging] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[AccountProductVariant]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[AccountProductVariant](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountProductId] [bigint] NOT NULL,
-	[VariantSku] [nvarchar](100) NULL,
-	[VariantTitle] [nvarchar](300) NULL,
-	[Price] [decimal](18, 2) NULL,
-	[StockQuantity] [decimal](18, 3) NULL,
-	[WeightGrams] [decimal](18, 3) NULL,
-	[IsEnabled] [bit] NOT NULL,
-	[SortOrder] [int] NOT NULL,
- CONSTRAINT [PK_AccountProductVariant] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[AccountProductVariantOption]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[AccountProductVariantOption](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountProductVariantId] [bigint] NOT NULL,
-	[AttributeId] [int] NOT NULL,
-	[AttributeOptionId] [int] NOT NULL,
- CONSTRAINT [PK_AccountProductVariantOption] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[AccountUser]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[AccountUser](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountId] [bigint] NOT NULL,
-	[UserId] [int] NOT NULL,
-	[RoleId] [int] NOT NULL,
-	[IsActive] [bit] NOT NULL,
- CONSTRAINT [PK_AccountUser] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[Attribute]    Script Date: 10/25/2025 2:14:45 AM ******/
+/****** Object:  Table [dbo].[Attribute]    Script Date: 1/5/2026 2:57:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE TABLE [dbo].[Attribute](
 	[Id] [int] IDENTITY(1,1) NOT NULL,
-	[Name] [nvarchar](150) NOT NULL,
-	[DataType] [nvarchar](30) NOT NULL,
-	[IsVariantAxis] [bit] NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+	[GuidId] [uniqueidentifier] NOT NULL,
+	[CreationTime] [datetime2](0) NOT NULL,
+	[UpdatedDate] [datetime2](0) NULL,
+	[CreationUserId] [int] NULL,
+	[UpdateUserId] [int] NULL,
+	[Name] [nvarchar](200) NOT NULL,
+	[SiteId] [int] NOT NULL,
  CONSTRAINT [PK_Attribute] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-/****** Object:  Table [dbo].[AttributeOption]    Script Date: 10/25/2025 2:14:45 AM ******/
+/****** Object:  Table [dbo].[AttributeValue]    Script Date: 1/5/2026 2:57:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE TABLE [dbo].[AttributeOption](
-	[Id] [int] IDENTITY(1,1) NOT NULL,
+CREATE TABLE [dbo].[AttributeValue](
 	[AttributeId] [int] NOT NULL,
-	[Value] [nvarchar](150) NOT NULL,
-	[SortOrder] [int] NOT NULL,
- CONSTRAINT [PK_AttributeOption] PRIMARY KEY CLUSTERED 
+	[Value] [nvarchar](200) NOT NULL,
+ CONSTRAINT [PK_AttributeValue] PRIMARY KEY CLUSTERED 
 (
-	[Id] ASC
+	[AttributeId] ASC,
+	[Value] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-/****** Object:  Table [dbo].[AuditLog]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[AuditLog](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[UserId] [int] NULL,
-	[Action] [nvarchar](200) NOT NULL,
-	[EntityName] [nvarchar](100) NOT NULL,
-	[EntityId] [bigint] NULL,
-	[Payload] [nvarchar](max) NULL,
-	[CreatedAt] [datetime2](7) NOT NULL,
- CONSTRAINT [PK_AuditLog] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[Brand]    Script Date: 10/25/2025 2:14:45 AM ******/
+/****** Object:  Table [dbo].[Brand]    Script Date: 1/5/2026 2:57:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE TABLE [dbo].[Brand](
 	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+	[CreationTime] [datetime2](0) NOT NULL,
+	[UpdatedDate] [datetime2](0) NULL,
+	[CreationUserId] [int] NULL,
+	[UpdateUserId] [int] NULL,
 	[Name] [nvarchar](200) NOT NULL,
-	[IsActive] [bit] NOT NULL,
+	[AccountId] [int] NULL,
  CONSTRAINT [PK_Brand] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-/****** Object:  Table [dbo].[BusinessType]    Script Date: 10/25/2025 2:14:45 AM ******/
+/****** Object:  Table [dbo].[BusinessType]    Script Date: 1/5/2026 2:57:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE TABLE [dbo].[BusinessType](
 	[Id] [int] IDENTITY(1,1) NOT NULL,
-	[Code] [nvarchar](50) NOT NULL,
-	[Name] [nvarchar](100) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+	[GuidId] [uniqueidentifier] NOT NULL,
+	[CreationTime] [datetime2](0) NOT NULL,
+	[UpdatedDate] [datetime2](0) NULL,
+	[CreationUserId] [int] NULL,
+	[UpdateUserId] [int] NULL,
+	[Name] [nvarchar](200) NOT NULL,
+	[Description] [nvarchar](2000) NULL,
+	[Icon] [nvarchar](200) NULL,
  CONSTRAINT [PK_BusinessType] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-/****** Object:  Table [dbo].[CategoryHierarchy]    Script Date: 10/25/2025 2:14:45 AM ******/
+/****** Object:  Table [dbo].[BusinessTypeCategory]    Script Date: 1/5/2026 2:57:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE TABLE [dbo].[CategoryHierarchy](
-	[ParentCategoryId] [int] NOT NULL,
-	[ChildCategoryId] [int] NOT NULL,
-	[SortOrder] [int] NOT NULL,
- CONSTRAINT [PK_CategoryHierarchy] PRIMARY KEY CLUSTERED 
-(
-	[ParentCategoryId] ASC,
-	[ChildCategoryId] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[EcomCategoryMap]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[EcomCategoryMap](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountCategoryId] [bigint] NOT NULL,
-	[RemoteCategoryId] [nvarchar](100) NOT NULL,
-	[SyncedAt] [datetime2](7) NOT NULL,
- CONSTRAINT [PK_EcomCategoryMap] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[EcomPlatform]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[EcomPlatform](
+CREATE TABLE [dbo].[BusinessTypeCategory](
 	[Id] [int] IDENTITY(1,1) NOT NULL,
-	[Code] [nvarchar](50) NOT NULL,
-	[Name] [nvarchar](100) NOT NULL,
- CONSTRAINT [PK_EcomPlatform] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[EcomProductMap]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[EcomProductMap](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountProductId] [bigint] NOT NULL,
-	[RemoteProductId] [nvarchar](100) NOT NULL,
-	[SyncedAt] [datetime2](7) NOT NULL,
- CONSTRAINT [PK_EcomProductMap] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[EcomVariantMap]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[EcomVariantMap](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountProductVariantId] [bigint] NOT NULL,
-	[RemoteVariantId] [nvarchar](100) NOT NULL,
-	[SyncedAt] [datetime2](7) NOT NULL,
- CONSTRAINT [PK_EcomVariantMap] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[ProductEditLog]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[ProductEditLog](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountProductId] [bigint] NOT NULL,
-	[UserId] [int] NOT NULL,
-	[FromStatus] [nvarchar](30) NOT NULL,
-	[ToStatus] [nvarchar](30) NOT NULL,
-	[Notes] [nvarchar](1000) NULL,
-	[CreatedAt] [datetime2](7) NOT NULL,
- CONSTRAINT [PK_ProductEditLog] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[ProductTemplateAttribute]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[ProductTemplateAttribute](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[ProductTemplateId] [bigint] NOT NULL,
-	[AttributeId] [int] NOT NULL,
-	[IsVariantAxis] [bit] NOT NULL,
- CONSTRAINT [PK_ProductTemplateAttribute] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[ProductTemplateAttributeOption]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[ProductTemplateAttributeOption](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[ProductTemplateAttributeId] [bigint] NOT NULL,
-	[AttributeOptionId] [int] NOT NULL,
- CONSTRAINT [PK_ProductTemplateAttributeOption] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[ProductTemplateBusinessType]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[ProductTemplateBusinessType](
-	[ProductTemplateId] [bigint] NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
 	[BusinessTypeId] [int] NOT NULL,
- CONSTRAINT [PK_ProductTemplateBusinessType] PRIMARY KEY CLUSTERED 
+	[Name] [nvarchar](200) NOT NULL,
+ CONSTRAINT [PK_BusinessTypeCategory] PRIMARY KEY CLUSTERED 
 (
-	[ProductTemplateId] ASC,
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[Category]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[Category](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+	[GuidId] [uniqueidentifier] NOT NULL,
+	[CreationTime] [datetime2](0) NOT NULL,
+	[UpdatedDate] [datetime2](0) NULL,
+	[CreationUserId] [int] NULL,
+	[UpdateUserId] [int] NULL,
+	[IsActive] [bit] NOT NULL,
+	[Name] [nvarchar](200) NOT NULL,
+	[ParentCategoryId] [int] NULL,
+	[Description] [nvarchar](2000) NULL,
+	[CustomName] [nvarchar](200) NULL,
+	[IsEnabled] [bit] NULL,
+	[SortOrder] [int] NULL,
+	[DisplayAsMain] [bit] NULL,
+	[AccountId] [int] NULL,
+	[SourceGlobalCategoryId] [int] NULL,
+ CONSTRAINT [PK_Category] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[CategorySite]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[CategorySite](
+	[CategoryId] [int] NOT NULL,
+	[SiteId] [int] NOT NULL,
+ CONSTRAINT [PK_CategorySite] PRIMARY KEY CLUSTERED 
+(
+	[CategoryId] ASC,
+	[SiteId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[ContentOwner]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[ContentOwner](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[Name] [nvarchar](30) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_ContentOwner] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
+(
+	[Name] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[GlobalCategory]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[GlobalCategory](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+	[GuidId] [uniqueidentifier] NOT NULL,
+	[CreationTime] [datetime2](0) NOT NULL,
+	[UpdatedDate] [datetime2](0) NULL,
+	[CreationUserId] [int] NULL,
+	[UpdateUserId] [int] NULL,
+	[Name] [nvarchar](200) NOT NULL,
+	[Description] [nvarchar](2000) NULL,
+	[ParentGlobalCategoryId] [int] NULL,
+	[SortOrder] [int] NULL,
+	[ProductCount] [int] NULL,
+ CONSTRAINT [PK_GlobalCategory] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[GlobalCategoryBusinessType]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[GlobalCategoryBusinessType](
+	[GlobalCategoryId] [int] NOT NULL,
+	[BusinessTypeId] [int] NOT NULL,
+ CONSTRAINT [PK_GlobalCategoryBusinessType] PRIMARY KEY CLUSTERED 
+(
+	[GlobalCategoryId] ASC,
 	[BusinessTypeId] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-/****** Object:  Table [dbo].[ProductTemplateCategory]    Script Date: 10/25/2025 2:14:45 AM ******/
+/****** Object:  Table [dbo].[Media]    Script Date: 1/5/2026 2:57:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE TABLE [dbo].[ProductTemplateCategory](
-	[ProductTemplateId] [bigint] NOT NULL,
-	[CategoryId] [int] NOT NULL,
- CONSTRAINT [PK_ProductTemplateCategory] PRIMARY KEY CLUSTERED 
+CREATE TABLE [dbo].[Media](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+	[CreationTime] [datetime2](0) NOT NULL,
+	[UpdatedDate] [datetime2](0) NULL,
+	[CreationUserId] [int] NULL,
+	[UpdateUserId] [int] NULL,
+	[Url] [nvarchar](1000) NOT NULL,
+	[Name] [nvarchar](300) NOT NULL,
+	[TypeId] [int] NULL,
+	[BusinessTypeId] [int] NULL,
+	[FileSize] [bigint] NULL,
+	[UsageCount] [int] NULL,
+	[AccountId] [int] NULL,
+ CONSTRAINT [PK_Media] PRIMARY KEY CLUSTERED 
 (
-	[ProductTemplateId] ASC,
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[MediaCategory]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[MediaCategory](
+	[MediaId] [int] NOT NULL,
+	[CategoryId] [int] NOT NULL,
+ CONSTRAINT [PK_MediaCategory] PRIMARY KEY CLUSTERED 
+(
+	[MediaId] ASC,
 	[CategoryId] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-/****** Object:  Table [dbo].[ProductTemplateMedia]    Script Date: 10/25/2025 2:14:45 AM ******/
+/****** Object:  Table [dbo].[MediaTag]    Script Date: 1/5/2026 2:57:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE TABLE [dbo].[ProductTemplateMedia](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[ProductTemplateId] [bigint] NOT NULL,
-	[Url] [nvarchar](1000) NOT NULL,
-	[AltText] [nvarchar](300) NULL,
-	[SortOrder] [int] NOT NULL,
-	[IsPrimary] [bit] NOT NULL,
- CONSTRAINT [PK_ProductTemplateMedia] PRIMARY KEY CLUSTERED 
+CREATE TABLE [dbo].[MediaTag](
+	[MediaId] [int] NOT NULL,
+	[TagId] [int] NOT NULL,
+ CONSTRAINT [PK_MediaTag] PRIMARY KEY CLUSTERED 
 (
-	[Id] ASC
+	[MediaId] ASC,
+	[TagId] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-/****** Object:  Table [dbo].[ProductTemplateSelectableWeight]    Script Date: 10/25/2025 2:14:45 AM ******/
+/****** Object:  Table [dbo].[MediaType]    Script Date: 1/5/2026 2:57:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE TABLE [dbo].[ProductTemplateSelectableWeight](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[ProductTemplateId] [bigint] NOT NULL,
-	[Label] [nvarchar](100) NOT NULL,
-	[WeightGrams] [decimal](18, 3) NOT NULL,
-	[SortOrder] [int] NOT NULL,
- CONSTRAINT [PK_ProductTemplateSelectableWeight] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[ProductType]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[ProductType](
+CREATE TABLE [dbo].[MediaType](
 	[Id] [int] IDENTITY(1,1) NOT NULL,
-	[Code] [nvarchar](40) NOT NULL,
+	[Name] [nvarchar](30) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_MediaType] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
+(
+	[Name] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[Product]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[Product](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+	[GuidId] [uniqueidentifier] NOT NULL,
+	[CreationTime] [datetime2](0) NOT NULL,
+	[UpdatedDate] [datetime2](0) NULL,
+	[CreationUserId] [int] NULL,
+	[UpdateUserId] [int] NULL,
+	[IsActive] [bit] NOT NULL,
+	[Name] [nvarchar](300) NOT NULL,
+	[ShortDescription] [nvarchar](2000) NULL,
+	[LongDescription] [nvarchar](max) NULL,
+	[Price] [decimal](18, 2) NULL,
+	[SalePrice] [decimal](18, 2) NULL,
+	[SalePriceStartDate] [datetime2](0) NULL,
+	[SalePriceEndDate] [datetime2](0) NULL,
+	[CostPrice] [decimal](18, 2) NULL,
+	[Sku] [nvarchar](100) NULL,
+	[StockManagementTypeId] [int] NULL,
+	[StockQuantity] [int] NULL,
+	[StockStatusId] [int] NULL,
+	[Weight] [decimal](18, 4) NULL,
+	[ShippingClassId] [int] NULL,
+	[StatusId] [int] NULL,
+	[VisibilityId] [int] NULL,
+	[SetupTypeId] [int] NULL,
+	[BrandId] [int] NULL,
+	[SupplierId] [int] NULL,
+	[IsKosher] [bit] NULL,
+	[IsWeighted] [bit] NULL,
+	[WeightConfigId] [int] NULL,
+	[SeoTitle] [nvarchar](300) NULL,
+	[SeoDescription] [nvarchar](2000) NULL,
+	[TemplateId] [nvarchar](100) NULL,
+	[SourceProductId] [nvarchar](100) NULL,
+	[AccountId] [int] NULL,
+ CONSTRAINT [PK_Product] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[ProductCategory]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[ProductCategory](
+	[ProductId] [int] NOT NULL,
+	[CategoryId] [int] NOT NULL,
+	[IsPrimary] [bit] NOT NULL,
+ CONSTRAINT [PK_ProductCategory] PRIMARY KEY CLUSTERED 
+(
+	[ProductId] ASC,
+	[CategoryId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[ProductImage]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[ProductImage](
+	[ProductId] [int] NOT NULL,
+	[SortOrder] [int] NOT NULL,
+	[Url] [nvarchar](1000) NOT NULL,
+ CONSTRAINT [PK_ProductImage] PRIMARY KEY CLUSTERED 
+(
+	[ProductId] ASC,
+	[Url] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[ProductOption]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[ProductOption](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[ProductId] [int] NOT NULL,
 	[Name] [nvarchar](100) NOT NULL,
- CONSTRAINT [PK_ProductType] PRIMARY KEY CLUSTERED 
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_ProductOption] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-/****** Object:  Table [dbo].[Role]    Script Date: 10/25/2025 2:14:45 AM ******/
+/****** Object:  Table [dbo].[ProductOptionValue]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[ProductOptionValue](
+	[ProductOptionId] [int] NOT NULL,
+	[Value] [nvarchar](100) NOT NULL,
+ CONSTRAINT [PK_ProductOptionValue] PRIMARY KEY CLUSTERED 
+(
+	[ProductOptionId] ASC,
+	[Value] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[ProductSite]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[ProductSite](
+	[ProductId] [int] NOT NULL,
+	[SiteId] [int] NOT NULL,
+ CONSTRAINT [PK_ProductSite] PRIMARY KEY CLUSTERED 
+(
+	[ProductId] ASC,
+	[SiteId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[ProductStatus]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[ProductStatus](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[Name] [nvarchar](30) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_ProductStatus] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
+(
+	[Name] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[ProductTag]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[ProductTag](
+	[ProductId] [int] NOT NULL,
+	[TagId] [int] NOT NULL,
+ CONSTRAINT [PK_ProductTag] PRIMARY KEY CLUSTERED 
+(
+	[ProductId] ASC,
+	[TagId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[ProductVariant]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[ProductVariant](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[ProductId] [int] NOT NULL,
+	[ImageUrl] [nvarchar](1000) NULL,
+	[Price] [decimal](18, 2) NULL,
+	[SalePrice] [decimal](18, 2) NULL,
+	[StockQuantity] [int] NULL,
+	[Sku] [nvarchar](100) NULL,
+	[Weight] [decimal](18, 4) NULL,
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_ProductVariant] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[ProductVariantOptionValue]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[ProductVariantOptionValue](
+	[ProductVariantId] [int] NOT NULL,
+	[OptionName] [nvarchar](100) NOT NULL,
+	[OptionValue] [nvarchar](100) NOT NULL,
+ CONSTRAINT [PK_ProductVariantOptionValue] PRIMARY KEY CLUSTERED 
+(
+	[ProductVariantId] ASC,
+	[OptionName] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[Role]    Script Date: 1/5/2026 2:57:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE TABLE [dbo].[Role](
-	[Id] [int] NOT NULL,
+	[Id] [int] IDENTITY(1,1) NOT NULL,
 	[Name] [nvarchar](50) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
  CONSTRAINT [PK_Role] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
+(
+	[Name] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[SetupType]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[SetupType](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[Name] [nvarchar](40) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_SetupType] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
+(
+	[Name] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[ShippingClass]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[ShippingClass](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[Name] [nvarchar](30) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_ShippingClass] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
+(
+	[Name] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[Site]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[Site](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+	[GuidId] [uniqueidentifier] NOT NULL,
+	[CreationTime] [datetime2](0) NOT NULL,
+	[UpdatedDate] [datetime2](0) NULL,
+	[CreationUserId] [int] NULL,
+	[UpdateUserId] [int] NULL,
+	[IsActive] [bit] NOT NULL,
+	[AccountId] [int] NOT NULL,
+	[SiteName] [nvarchar](200) NOT NULL,
+	[Location] [nvarchar](500) NULL,
+	[Description] [nvarchar](2000) NULL,
+	[Status] [nvarchar](20) NULL,
+	[ContactEmail] [nvarchar](250) NULL,
+	[ContactPhone] [nvarchar](50) NULL,
+	[IsKosherSite] [bit] NULL,
+	[AllowWeightedProducts] [bit] NULL,
+	[Currency] [nvarchar](10) NOT NULL,
+ CONSTRAINT [PK_Site] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-/****** Object:  Table [dbo].[Supplier]    Script Date: 10/25/2025 2:14:45 AM ******/
+/****** Object:  Table [dbo].[SiteBusinessType]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[SiteBusinessType](
+	[SiteId] [int] NOT NULL,
+	[BusinessTypeId] [int] NOT NULL,
+ CONSTRAINT [PK_SiteBusinessType] PRIMARY KEY CLUSTERED 
+(
+	[SiteId] ASC,
+	[BusinessTypeId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[SiteUser]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[SiteUser](
+	[SiteId] [int] NOT NULL,
+	[UserId] [int] NOT NULL,
+ CONSTRAINT [PK_SiteUser] PRIMARY KEY CLUSTERED 
+(
+	[SiteId] ASC,
+	[UserId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[StockManagementType]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[StockManagementType](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[Name] [nvarchar](30) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_StockManagementType] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
+(
+	[Name] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[StockStatus]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[StockStatus](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[Name] [nvarchar](30) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_StockStatus] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
+(
+	[Name] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[Supplier]    Script Date: 1/5/2026 2:57:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE TABLE [dbo].[Supplier](
 	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+	[CreationTime] [datetime2](0) NOT NULL,
+	[UpdatedDate] [datetime2](0) NULL,
+	[CreationUserId] [int] NULL,
+	[UpdateUserId] [int] NULL,
 	[Name] [nvarchar](200) NOT NULL,
-	[IsActive] [bit] NOT NULL,
+	[AccountId] [int] NULL,
  CONSTRAINT [PK_Supplier] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-/****** Object:  Table [dbo].[SyncJob]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[SyncJob](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountId] [bigint] NOT NULL,
-	[JobType] [nvarchar](50) NOT NULL,
-	[Status] [nvarchar](30) NOT NULL,
-	[RequestedBy] [int] NULL,
-	[CreatedAt] [datetime2](7) NOT NULL,
-	[StartedAt] [datetime2](7) NULL,
-	[CompletedAt] [datetime2](7) NULL,
-	[Message] [nvarchar](2000) NULL,
- CONSTRAINT [PK_SyncJob] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[SyncJobLog]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE TABLE [dbo].[SyncJobLog](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[SyncJobId] [bigint] NOT NULL,
-	[Level] [nvarchar](20) NOT NULL,
-	[Message] [nvarchar](2000) NOT NULL,
-	[CreatedAt] [datetime2](7) NOT NULL,
- CONSTRAINT [PK_SyncJobLog] PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[SystemConfiguration]    Script Date: 10/25/2025 2:14:45 AM ******/
+/****** Object:  Table [dbo].[SystemConfiguration]    Script Date: 1/5/2026 2:57:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -839,18 +708,308 @@ CREATE TABLE [dbo].[SystemConfiguration](
 	[Description] [nvarchar](max) NULL
 ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
 GO
-/****** Object:  Table [dbo].[User]    Script Date: 10/25/2025 2:14:45 AM ******/
+/****** Object:  Table [dbo].[Tag]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[Tag](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+	[CreationTime] [datetime2](0) NOT NULL,
+	[UpdatedDate] [datetime2](0) NULL,
+	[CreationUserId] [int] NULL,
+	[UpdateUserId] [int] NULL,
+	[Name] [nvarchar](200) NOT NULL,
+	[AccountId] [int] NULL,
+ CONSTRAINT [PK_Tag] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[TemplateAttribute]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[TemplateAttribute](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+	[GuidId] [uniqueidentifier] NOT NULL,
+	[CreationTime] [datetime2](0) NOT NULL,
+	[UpdatedDate] [datetime2](0) NULL,
+	[CreationUserId] [int] NULL,
+	[UpdateUserId] [int] NULL,
+	[Name] [nvarchar](200) NOT NULL,
+ CONSTRAINT [PK_TemplateAttribute] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[TemplateAttributeSite]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[TemplateAttributeSite](
+	[TemplateAttributeId] [int] NOT NULL,
+	[SiteId] [int] NOT NULL,
+ CONSTRAINT [PK_TemplateAttributeSite] PRIMARY KEY CLUSTERED 
+(
+	[TemplateAttributeId] ASC,
+	[SiteId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[TemplateAttributeValue]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[TemplateAttributeValue](
+	[TemplateAttributeId] [int] NOT NULL,
+	[Value] [nvarchar](200) NOT NULL,
+ CONSTRAINT [PK_TemplateAttributeValue] PRIMARY KEY CLUSTERED 
+(
+	[TemplateAttributeId] ASC,
+	[Value] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[TemplateProduct]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[TemplateProduct](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+	[GuidId] [uniqueidentifier] NOT NULL,
+	[CreationTime] [datetime2](0) NOT NULL,
+	[UpdatedDate] [datetime2](0) NULL,
+	[CreationUserId] [int] NULL,
+	[UpdateUserId] [int] NULL,
+	[TemplateId] [nvarchar](100) NULL,
+	[Name] [nvarchar](300) NOT NULL,
+	[ShortDescription] [nvarchar](2000) NULL,
+	[LongDescription] [nvarchar](max) NULL,
+	[Price] [decimal](18, 2) NULL,
+	[SalePrice] [decimal](18, 2) NULL,
+	[SalePriceStartDate] [datetime2](0) NULL,
+	[SalePriceEndDate] [datetime2](0) NULL,
+	[CostPrice] [decimal](18, 2) NULL,
+	[Sku] [nvarchar](100) NULL,
+	[StockManagementTypeId] [int] NULL,
+	[StockQuantity] [int] NULL,
+	[StockStatusId] [int] NULL,
+	[Weight] [decimal](18, 4) NULL,
+	[ShippingClassId] [int] NULL,
+	[StatusId] [int] NULL,
+	[VisibilityId] [int] NULL,
+	[BrandId] [int] NULL,
+	[SupplierId] [int] NULL,
+	[IsKosher] [bit] NULL,
+	[IsWeighted] [bit] NULL,
+	[SetupTypeId] [int] NULL,
+	[WeightConfigId] [int] NULL,
+	[SeoTitle] [nvarchar](300) NULL,
+	[SeoDescription] [nvarchar](2000) NULL,
+	[SourceProductId] [nvarchar](100) NULL,
+ CONSTRAINT [PK_TemplateProduct] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[TemplateProductCategory]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[TemplateProductCategory](
+	[TemplateProductId] [int] NOT NULL,
+	[CategoryId] [int] NOT NULL,
+	[IsPrimary] [bit] NOT NULL,
+ CONSTRAINT [PK_TemplateProductCategory] PRIMARY KEY CLUSTERED 
+(
+	[TemplateProductId] ASC,
+	[CategoryId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[TemplateProductImage]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[TemplateProductImage](
+	[TemplateProductId] [int] NOT NULL,
+	[SortOrder] [int] NOT NULL,
+	[Url] [nvarchar](1000) NOT NULL,
+ CONSTRAINT [PK_TemplateProductImage] PRIMARY KEY CLUSTERED 
+(
+	[TemplateProductId] ASC,
+	[Url] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[TemplateProductOption]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[TemplateProductOption](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[TemplateProductId] [int] NOT NULL,
+	[Name] [nvarchar](100) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_TemplateProductOption] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[TemplateProductOptionValue]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[TemplateProductOptionValue](
+	[TemplateProductOptionId] [int] NOT NULL,
+	[Value] [nvarchar](100) NOT NULL,
+ CONSTRAINT [PK_TemplateProductOptionValue] PRIMARY KEY CLUSTERED 
+(
+	[TemplateProductOptionId] ASC,
+	[Value] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[TemplateProductSite]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[TemplateProductSite](
+	[TemplateProductId] [int] NOT NULL,
+	[SiteId] [int] NOT NULL,
+ CONSTRAINT [PK_TemplateProductSite] PRIMARY KEY CLUSTERED 
+(
+	[TemplateProductId] ASC,
+	[SiteId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[TemplateProductTag]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[TemplateProductTag](
+	[TemplateProductId] [int] NOT NULL,
+	[TagId] [int] NOT NULL,
+ CONSTRAINT [PK_TemplateProductTag] PRIMARY KEY CLUSTERED 
+(
+	[TemplateProductId] ASC,
+	[TagId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[TemplateProductVariant]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[TemplateProductVariant](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[TemplateProductId] [int] NOT NULL,
+	[ImageUrl] [nvarchar](1000) NULL,
+	[Price] [decimal](18, 2) NULL,
+	[SalePrice] [decimal](18, 2) NULL,
+	[StockQuantity] [int] NULL,
+	[Sku] [nvarchar](100) NULL,
+	[Weight] [decimal](18, 4) NULL,
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_TemplateProductVariant] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[TemplateProductVariantOptionValue]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[TemplateProductVariantOptionValue](
+	[TemplateProductVariantId] [int] NOT NULL,
+	[OptionName] [nvarchar](100) NOT NULL,
+	[OptionValue] [nvarchar](100) NOT NULL,
+ CONSTRAINT [PK_TemplateProductVariantOptionValue] PRIMARY KEY CLUSTERED 
+(
+	[TemplateProductVariantId] ASC,
+	[OptionName] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[Unit]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[Unit](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[Name] [nvarchar](30) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_Unit] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
+(
+	[Name] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[UnitWeightMode]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[UnitWeightMode](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[Name] [nvarchar](30) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_UnitWeightMode] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
+(
+	[Name] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[User]    Script Date: 1/5/2026 2:57:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE TABLE [dbo].[User](
 	[Id] [int] IDENTITY(1,1) NOT NULL,
-	[StatusId] [int] NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+	[GuidId] [uniqueidentifier] NOT NULL,
+	[CreationTime] [datetime2](0) NOT NULL,
+	[UpdatedDate] [datetime2](0) NULL,
+	[CreationUserId] [int] NULL,
+	[UpdateUserId] [int] NULL,
 	[RoleId] [int] NOT NULL,
+	[AccountId] [int] NULL,
+	[StatusId] [int] NOT NULL,
 	[FirstName] [nvarchar](50) NOT NULL,
 	[LastName] [nvarchar](50) NOT NULL,
-	[FullName]  AS (([Firstname]+' ')+[LastName]) PERSISTED NOT NULL,
+	[FullName]  AS (([FirstName]+N' ')+[LastName]) PERSISTED NOT NULL,
 	[Email] [nvarchar](250) NULL,
 	[IsEmailVerified] [bit] NOT NULL,
 	[Password] [nvarchar](250) NULL,
@@ -860,892 +1019,929 @@ CREATE TABLE [dbo].[User](
 	[LockoutExpiration] [datetime2](0) NULL,
 	[RefreshToken] [nvarchar](250) NULL,
 	[RefreshTokenExpiration] [datetime2](0) NULL,
-	[IsMaster] [bit] NOT NULL,
-	[IsDeleted] [bit] NOT NULL,
 	[Phone] [nvarchar](50) NULL,
+	[AvatarUrl] [nvarchar](500) NULL,
+	[Notes] [nvarchar](max) NULL,
  CONSTRAINT [PK_User] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
 GO
-/****** Object:  Table [dbo].[UserStatus]    Script Date: 10/25/2025 2:14:45 AM ******/
+/****** Object:  Table [dbo].[UserStatus]    Script Date: 1/5/2026 2:57:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE TABLE [dbo].[UserStatus](
-	[Id] [int] NOT NULL,
-	[Name] [nvarchar](50) NOT NULL,
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[Name] [nvarchar](30) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
  CONSTRAINT [PK_UserStatus] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
+(
+	[Name] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-/****** Object:  Table [dbo].[WizardSession]    Script Date: 10/25/2025 2:14:45 AM ******/
+/****** Object:  Table [dbo].[Visibility]    Script Date: 1/5/2026 2:57:59 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE TABLE [dbo].[WizardSession](
-	[Id] [bigint] IDENTITY(1,1) NOT NULL,
-	[AccountId] [bigint] NOT NULL,
-	[StartedByUserId] [int] NOT NULL,
-	[Step] [int] NOT NULL,
-	[Status] [nvarchar](30) NOT NULL,
-	[CreatedAt] [datetime2](7) NOT NULL,
-	[CompletedAt] [datetime2](7) NULL,
-	[ContentOwner] [nvarchar](20) NOT NULL,
- CONSTRAINT [PK_WizardSession] PRIMARY KEY CLUSTERED 
+CREATE TABLE [dbo].[Visibility](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[Name] [nvarchar](30) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_Visibility] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
+(
+	[Name] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+/****** Object:  Table [dbo].[WeightConfig]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[WeightConfig](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+	[UnitId] [int] NULL,
+	[StartWeight] [nvarchar](50) NULL,
+	[Step] [nvarchar](50) NULL,
+	[FixedWeightPerUnit] [bit] NULL,
+	[UnitWeight] [nvarchar](50) NULL,
+	[UnitWeightModeId] [int] NULL,
+	[WeightOptions] [nvarchar](2000) NULL,
+	[WeightByVariant] [bit] NULL,
+	[ShowPricePer100g] [bit] NULL,
+ CONSTRAINT [PK_WeightConfig] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
-SET ANSI_PADDING ON
+/****** Object:  Table [dbo].[WizardStatus]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
 GO
-/****** Object:  Index [IX_Role_Name_Unique]    Script Date: 10/25/2025 2:14:45 AM ******/
-CREATE UNIQUE NONCLUSTERED INDEX [IX_Role_Name_Unique] ON [dbo].[Role]
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[WizardStatus](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[Name] [nvarchar](30) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_WizardStatus] PRIMARY KEY CLUSTERED 
+(
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
 (
 	[Name] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
 GO
-/****** Object:  Index [IX_FK_User_UserStatus_StatusId]    Script Date: 10/25/2025 2:14:45 AM ******/
-CREATE NONCLUSTERED INDEX [IX_FK_User_UserStatus_StatusId] ON [dbo].[User]
+/****** Object:  Table [dbo].[WizardType]    Script Date: 1/5/2026 2:57:59 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[WizardType](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[Name] [nvarchar](30) NOT NULL,
+	[IsDeleted] [bit] NOT NULL,
+ CONSTRAINT [PK_WizardType] PRIMARY KEY CLUSTERED 
 (
-	[StatusId] ASC
+	[Id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+UNIQUE NONCLUSTERED 
+(
+	[Name] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+SET ANSI_PADDING ON
+GO
+/****** Object:  Index [UX_Attribute_SiteId_Name_NotDeleted]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE UNIQUE NONCLUSTERED INDEX [UX_Attribute_SiteId_Name_NotDeleted] ON [dbo].[Attribute]
+(
+	[SiteId] ASC,
+	[Name] ASC
+)
+WHERE ([IsDeleted]=(0))
+WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+/****** Object:  Index [IX_Brand_AccountId]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE NONCLUSTERED INDEX [IX_Brand_AccountId] ON [dbo].[Brand]
+(
+	[AccountId] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 GO
 SET ANSI_PADDING ON
 GO
-/****** Object:  Index [IX_User_Email_Unique]    Script Date: 10/25/2025 2:14:45 AM ******/
-CREATE UNIQUE NONCLUSTERED INDEX [IX_User_Email_Unique] ON [dbo].[User]
+/****** Object:  Index [UX_Brand_AccountId_Name_NotDeleted]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE UNIQUE NONCLUSTERED INDEX [UX_Brand_AccountId_Name_NotDeleted] ON [dbo].[Brand]
 (
-	[Email] ASC
+	[AccountId] ASC,
+	[Name] ASC
 )
-WHERE ([IsDeleted]=(0) AND [Email] IS NOT NULL)
+WHERE ([IsDeleted]=(0) AND [AccountId] IS NOT NULL)
 WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+/****** Object:  Index [IX_Category_AccountId]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE NONCLUSTERED INDEX [IX_Category_AccountId] ON [dbo].[Category]
+(
+	[AccountId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+/****** Object:  Index [IX_Category_SourceGlobalCategoryId]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE NONCLUSTERED INDEX [IX_Category_SourceGlobalCategoryId] ON [dbo].[Category]
+(
+	[SourceGlobalCategoryId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
 GO
 SET ANSI_PADDING ON
 GO
-/****** Object:  Index [IX_UserStatus_Name_Unique]    Script Date: 10/25/2025 2:14:45 AM ******/
-CREATE UNIQUE NONCLUSTERED INDEX [IX_UserStatus_Name_Unique] ON [dbo].[UserStatus]
+/****** Object:  Index [UX_Category_Account_Parent_Name_NotDeleted]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE UNIQUE NONCLUSTERED INDEX [UX_Category_Account_Parent_Name_NotDeleted] ON [dbo].[Category]
 (
+	[AccountId] ASC,
+	[ParentCategoryId] ASC,
 	[Name] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+)
+WHERE ([IsDeleted]=(0) AND [AccountId] IS NOT NULL)
+WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+/****** Object:  Index [IX_CategorySite_SiteId]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE NONCLUSTERED INDEX [IX_CategorySite_SiteId] ON [dbo].[CategorySite]
+(
+	[SiteId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+/****** Object:  Index [IX_Media_AccountId]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE NONCLUSTERED INDEX [IX_Media_AccountId] ON [dbo].[Media]
+(
+	[AccountId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+/****** Object:  Index [IX_MediaTag_TagId]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE NONCLUSTERED INDEX [IX_MediaTag_TagId] ON [dbo].[MediaTag]
+(
+	[TagId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+/****** Object:  Index [IX_Product_AccountId]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE NONCLUSTERED INDEX [IX_Product_AccountId] ON [dbo].[Product]
+(
+	[AccountId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+SET ANSI_PADDING ON
+GO
+/****** Object:  Index [UX_Product_AccountId_Sku_NotDeleted]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE UNIQUE NONCLUSTERED INDEX [UX_Product_AccountId_Sku_NotDeleted] ON [dbo].[Product]
+(
+	[AccountId] ASC,
+	[Sku] ASC
+)
+WHERE ([IsDeleted]=(0) AND [Sku] IS NOT NULL AND [AccountId] IS NOT NULL)
+WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+/****** Object:  Index [IX_ProductCategory_CategoryId]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE NONCLUSTERED INDEX [IX_ProductCategory_CategoryId] ON [dbo].[ProductCategory]
+(
+	[CategoryId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+/****** Object:  Index [IX_ProductSite_SiteId]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE NONCLUSTERED INDEX [IX_ProductSite_SiteId] ON [dbo].[ProductSite]
+(
+	[SiteId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+/****** Object:  Index [IX_ProductTag_TagId]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE NONCLUSTERED INDEX [IX_ProductTag_TagId] ON [dbo].[ProductTag]
+(
+	[TagId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+/****** Object:  Index [IX_Supplier_AccountId]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE NONCLUSTERED INDEX [IX_Supplier_AccountId] ON [dbo].[Supplier]
+(
+	[AccountId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+SET ANSI_PADDING ON
+GO
+/****** Object:  Index [UX_Supplier_AccountId_Name_NotDeleted]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE UNIQUE NONCLUSTERED INDEX [UX_Supplier_AccountId_Name_NotDeleted] ON [dbo].[Supplier]
+(
+	[AccountId] ASC,
+	[Name] ASC
+)
+WHERE ([IsDeleted]=(0) AND [AccountId] IS NOT NULL)
+WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+/****** Object:  Index [IX_Tag_AccountId]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE NONCLUSTERED INDEX [IX_Tag_AccountId] ON [dbo].[Tag]
+(
+	[AccountId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+SET ANSI_PADDING ON
+GO
+/****** Object:  Index [UX_Tag_AccountId_Name_NotDeleted]    Script Date: 1/5/2026 2:57:59 PM ******/
+CREATE UNIQUE NONCLUSTERED INDEX [UX_Tag_AccountId_Name_NotDeleted] ON [dbo].[Tag]
+(
+	[AccountId] ASC,
+	[Name] ASC
+)
+WHERE ([IsDeleted]=(0) AND [AccountId] IS NOT NULL)
+WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+GO
+ALTER TABLE [dbo].[Account] ADD  CONSTRAINT [DF_Account_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+GO
+ALTER TABLE [dbo].[Account] ADD  CONSTRAINT [DF_Account_Guid]  DEFAULT (newid()) FOR [GuidId]
+GO
+ALTER TABLE [dbo].[Account] ADD  CONSTRAINT [DF_Account_CreationTime]  DEFAULT (sysutcdatetime()) FOR [CreationTime]
+GO
+ALTER TABLE [dbo].[Account] ADD  CONSTRAINT [DF_Account_ContentOwnerId]  DEFAULT ((1)) FOR [ContentOwnerId]
+GO
+ALTER TABLE [dbo].[Account] ADD  CONSTRAINT [DF_Account_StatusText]  DEFAULT ('Active') FOR [Status]
 GO
 ALTER TABLE [dbo].[Account] ADD  CONSTRAINT [DF_Account_IsActive]  DEFAULT ((1)) FOR [IsActive]
 GO
-ALTER TABLE [dbo].[Account] ADD  CONSTRAINT [DF_Account_IsKosherShop]  DEFAULT ((1)) FOR [IsKosherShop]
+ALTER TABLE [dbo].[AccountStatus] ADD  CONSTRAINT [DF_AccountStatus_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[Account] ADD  CONSTRAINT [DF_Account_AllowWeighted]  DEFAULT ((1)) FOR [AllowWeighted]
+ALTER TABLE [dbo].[Attribute] ADD  CONSTRAINT [DF_Attribute_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[Account] ADD  CONSTRAINT [DF_Account_CreatedAt]  DEFAULT (sysdatetime()) FOR [CreatedAt]
+ALTER TABLE [dbo].[Attribute] ADD  CONSTRAINT [DF_Attribute_Guid]  DEFAULT (newid()) FOR [GuidId]
 GO
-ALTER TABLE [dbo].[AccountBusinessType] ADD  CONSTRAINT [DF_AccountBusinessType_IsSelected]  DEFAULT ((1)) FOR [IsSelected]
+ALTER TABLE [dbo].[Attribute] ADD  CONSTRAINT [DF_Attribute_CreationTime]  DEFAULT (sysutcdatetime()) FOR [CreationTime]
 GO
-ALTER TABLE [dbo].[AccountCategory] ADD  CONSTRAINT [DF_AccountCategory_SortOrder]  DEFAULT ((0)) FOR [SortOrder]
+ALTER TABLE [dbo].[Brand] ADD  CONSTRAINT [DF_Brand_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[AccountCategory] ADD  CONSTRAINT [DF_AccountCategory_IsEnabled]  DEFAULT ((1)) FOR [IsEnabled]
+ALTER TABLE [dbo].[Brand] ADD  CONSTRAINT [DF_Brand_CreationTime]  DEFAULT (sysutcdatetime()) FOR [CreationTime]
 GO
-ALTER TABLE [dbo].[AccountEcomCredential] ADD  CONSTRAINT [DF_AccountEcomCredential_IsActive]  DEFAULT ((1)) FOR [IsActive]
+ALTER TABLE [dbo].[BusinessType] ADD  CONSTRAINT [DF_BusinessType_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[AccountEcomCredential] ADD  CONSTRAINT [DF_AccountEcomCredential_CreatedAt]  DEFAULT (sysdatetime()) FOR [CreatedAt]
+ALTER TABLE [dbo].[BusinessType] ADD  CONSTRAINT [DF_BusinessType_Guid]  DEFAULT (newid()) FOR [GuidId]
 GO
-ALTER TABLE [dbo].[AccountProduct] ADD  CONSTRAINT [DF_AccountProduct_IsEnabled]  DEFAULT ((1)) FOR [IsEnabled]
+ALTER TABLE [dbo].[BusinessType] ADD  CONSTRAINT [DF_BusinessType_CreationTime]  DEFAULT (sysutcdatetime()) FOR [CreationTime]
 GO
-ALTER TABLE [dbo].[AccountProduct] ADD  CONSTRAINT [DF_AccountProduct_EditingStatus]  DEFAULT ('NotEdited') FOR [EditingStatus]
+ALTER TABLE [dbo].[BusinessTypeCategory] ADD  CONSTRAINT [DF_BusinessTypeCategory_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[AccountProduct] ADD  CONSTRAINT [DF_AccountProduct_CreatedAt]  DEFAULT (sysdatetime()) FOR [CreatedAt]
+ALTER TABLE [dbo].[Category] ADD  CONSTRAINT [DF_Category_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[AccountProductAttribute] ADD  CONSTRAINT [DF_AccountProductAttribute_IsVariantAxis]  DEFAULT ((0)) FOR [IsVariantAxis]
+ALTER TABLE [dbo].[Category] ADD  CONSTRAINT [DF_Category_Guid]  DEFAULT (newid()) FOR [GuidId]
 GO
-ALTER TABLE [dbo].[AccountProductAttributeValue] ADD  CONSTRAINT [DF_AccountProductAttributeValue_SortOrder]  DEFAULT ((0)) FOR [SortOrder]
-GO
-ALTER TABLE [dbo].[AccountProductImportStaging] ADD  CONSTRAINT [DF_AccountProductImportStaging_UseClientImage]  DEFAULT ((0)) FOR [UseClientImage]
-GO
-ALTER TABLE [dbo].[AccountProductImportStaging] ADD  CONSTRAINT [DF_AccountProductImportStaging_Status]  DEFAULT ('Pending') FOR [Status]
-GO
-ALTER TABLE [dbo].[AccountProductMedia] ADD  CONSTRAINT [DF_AccountProductMedia_SortOrder]  DEFAULT ((0)) FOR [SortOrder]
-GO
-ALTER TABLE [dbo].[AccountProductMedia] ADD  CONSTRAINT [DF_AccountProductMedia_IsPrimary]  DEFAULT ((0)) FOR [IsPrimary]
-GO
-ALTER TABLE [dbo].[AccountProductVariant] ADD  CONSTRAINT [DF_AccountProductVariant_IsEnabled]  DEFAULT ((1)) FOR [IsEnabled]
-GO
-ALTER TABLE [dbo].[AccountProductVariant] ADD  CONSTRAINT [DF_AccountProductVariant_SortOrder]  DEFAULT ((0)) FOR [SortOrder]
-GO
-ALTER TABLE [dbo].[AccountUser] ADD  CONSTRAINT [DF_AccountUser_IsActive]  DEFAULT ((1)) FOR [IsActive]
-GO
-ALTER TABLE [dbo].[Attribute] ADD  CONSTRAINT [DF_Attribute_IsVariantAxis]  DEFAULT ((0)) FOR [IsVariantAxis]
-GO
-ALTER TABLE [dbo].[AttributeOption] ADD  CONSTRAINT [DF_AttributeOption_SortOrder]  DEFAULT ((0)) FOR [SortOrder]
-GO
-ALTER TABLE [dbo].[AuditLog] ADD  CONSTRAINT [DF_AuditLog_CreatedAt]  DEFAULT (sysdatetime()) FOR [CreatedAt]
-GO
-ALTER TABLE [dbo].[Brand] ADD  CONSTRAINT [DF_Brand_IsActive]  DEFAULT ((1)) FOR [IsActive]
+ALTER TABLE [dbo].[Category] ADD  CONSTRAINT [DF_Category_CreationTime]  DEFAULT (sysutcdatetime()) FOR [CreationTime]
 GO
 ALTER TABLE [dbo].[Category] ADD  CONSTRAINT [DF_Category_IsActive]  DEFAULT ((1)) FOR [IsActive]
 GO
-ALTER TABLE [dbo].[Category] ADD  CONSTRAINT [DF_Category_SortOrder]  DEFAULT ((0)) FOR [SortOrder]
+ALTER TABLE [dbo].[ContentOwner] ADD  CONSTRAINT [DF_ContentOwner_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[CategoryHierarchy] ADD  CONSTRAINT [DF_CategoryHierarchy_SortOrder]  DEFAULT ((0)) FOR [SortOrder]
+ALTER TABLE [dbo].[GlobalCategory] ADD  CONSTRAINT [DF_GlobalCategory_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[EcomCategoryMap] ADD  CONSTRAINT [DF_EcomCategoryMap_SyncedAt]  DEFAULT (sysdatetime()) FOR [SyncedAt]
+ALTER TABLE [dbo].[GlobalCategory] ADD  CONSTRAINT [DF_GlobalCategory_Guid]  DEFAULT (newid()) FOR [GuidId]
 GO
-ALTER TABLE [dbo].[EcomProductMap] ADD  CONSTRAINT [DF_EcomProductMap_SyncedAt]  DEFAULT (sysdatetime()) FOR [SyncedAt]
+ALTER TABLE [dbo].[GlobalCategory] ADD  CONSTRAINT [DF_GlobalCategory_CreationTime]  DEFAULT (sysutcdatetime()) FOR [CreationTime]
 GO
-ALTER TABLE [dbo].[EcomVariantMap] ADD  CONSTRAINT [DF_EcomVariantMap_SyncedAt]  DEFAULT (sysdatetime()) FOR [SyncedAt]
+ALTER TABLE [dbo].[Media] ADD  CONSTRAINT [DF_Media_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[ProductEditLog] ADD  CONSTRAINT [DF_ProductEditLog_CreatedAt]  DEFAULT (sysdatetime()) FOR [CreatedAt]
+ALTER TABLE [dbo].[Media] ADD  CONSTRAINT [DF_Media_CreationTime]  DEFAULT (sysutcdatetime()) FOR [CreationTime]
 GO
-ALTER TABLE [dbo].[ProductTemplate] ADD  CONSTRAINT [DF_ProductTemplate_IsKosherDefault]  DEFAULT ((1)) FOR [IsKosherDefault]
+ALTER TABLE [dbo].[MediaType] ADD  CONSTRAINT [DF_MediaType_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[ProductTemplate] ADD  CONSTRAINT [DF_ProductTemplate_ShowPricePer100g]  DEFAULT ((0)) FOR [ShowPricePer100g]
+ALTER TABLE [dbo].[Product] ADD  CONSTRAINT [DF_Product_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[ProductTemplate] ADD  CONSTRAINT [DF_ProductTemplate_IsActive]  DEFAULT ((1)) FOR [IsActive]
+ALTER TABLE [dbo].[Product] ADD  CONSTRAINT [DF_Product_Guid]  DEFAULT (newid()) FOR [GuidId]
 GO
-ALTER TABLE [dbo].[ProductTemplate] ADD  CONSTRAINT [DF_ProductTemplate_CreatedAt]  DEFAULT (sysdatetime()) FOR [CreatedAt]
+ALTER TABLE [dbo].[Product] ADD  CONSTRAINT [DF_Product_CreationTime]  DEFAULT (sysutcdatetime()) FOR [CreationTime]
 GO
-ALTER TABLE [dbo].[ProductTemplateAttribute] ADD  CONSTRAINT [DF_ProductTemplateAttribute_IsVariantAxis]  DEFAULT ((0)) FOR [IsVariantAxis]
+ALTER TABLE [dbo].[Product] ADD  CONSTRAINT [DF_Product_IsActive]  DEFAULT ((1)) FOR [IsActive]
 GO
-ALTER TABLE [dbo].[ProductTemplateMedia] ADD  CONSTRAINT [DF_ProductTemplateMedia_SortOrder]  DEFAULT ((0)) FOR [SortOrder]
+ALTER TABLE [dbo].[ProductCategory] ADD  CONSTRAINT [DF_ProductCategory_IsPrimary]  DEFAULT ((0)) FOR [IsPrimary]
 GO
-ALTER TABLE [dbo].[ProductTemplateMedia] ADD  CONSTRAINT [DF_ProductTemplateMedia_IsPrimary]  DEFAULT ((0)) FOR [IsPrimary]
+ALTER TABLE [dbo].[ProductImage] ADD  CONSTRAINT [DF_ProductImage_Sort]  DEFAULT ((0)) FOR [SortOrder]
 GO
-ALTER TABLE [dbo].[ProductTemplateSelectableWeight] ADD  CONSTRAINT [DF_ProductTemplateSelectableWeight_SortOrder]  DEFAULT ((0)) FOR [SortOrder]
+ALTER TABLE [dbo].[ProductOption] ADD  CONSTRAINT [DF_ProductOption_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[Supplier] ADD  CONSTRAINT [DF_Supplier_IsActive]  DEFAULT ((1)) FOR [IsActive]
+ALTER TABLE [dbo].[ProductStatus] ADD  CONSTRAINT [DF_ProductStatus_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[SyncJob] ADD  CONSTRAINT [DF_SyncJob_Status]  DEFAULT ('Pending') FOR [Status]
+ALTER TABLE [dbo].[ProductVariant] ADD  CONSTRAINT [DF_ProductVariant_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[SyncJob] ADD  CONSTRAINT [DF_SyncJob_CreatedAt]  DEFAULT (sysdatetime()) FOR [CreatedAt]
+ALTER TABLE [dbo].[Role] ADD  CONSTRAINT [DF_Role_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[SyncJobLog] ADD  CONSTRAINT [DF_SyncJobLog_CreatedAt]  DEFAULT (sysdatetime()) FOR [CreatedAt]
+ALTER TABLE [dbo].[SetupType] ADD  CONSTRAINT [DF_SetupType_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+GO
+ALTER TABLE [dbo].[ShippingClass] ADD  CONSTRAINT [DF_ShippingClass_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+GO
+ALTER TABLE [dbo].[Site] ADD  CONSTRAINT [DF_Site_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+GO
+ALTER TABLE [dbo].[Site] ADD  CONSTRAINT [DF_Site_Guid]  DEFAULT (newid()) FOR [GuidId]
+GO
+ALTER TABLE [dbo].[Site] ADD  CONSTRAINT [DF_Site_CreationTime]  DEFAULT (sysutcdatetime()) FOR [CreationTime]
+GO
+ALTER TABLE [dbo].[Site] ADD  CONSTRAINT [DF_Site_IsActive]  DEFAULT ((1)) FOR [IsActive]
+GO
+ALTER TABLE [dbo].[Site] ADD  CONSTRAINT [DF_Site_Currency]  DEFAULT ('ILS') FOR [Currency]
+GO
+ALTER TABLE [dbo].[StockManagementType] ADD  CONSTRAINT [DF_StockManagementType_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+GO
+ALTER TABLE [dbo].[StockStatus] ADD  CONSTRAINT [DF_StockStatus_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+GO
+ALTER TABLE [dbo].[Supplier] ADD  CONSTRAINT [DF_Supplier_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+GO
+ALTER TABLE [dbo].[Supplier] ADD  CONSTRAINT [DF_Supplier_CreationTime]  DEFAULT (sysutcdatetime()) FOR [CreationTime]
+GO
+ALTER TABLE [dbo].[Tag] ADD  CONSTRAINT [DF_Tag_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+GO
+ALTER TABLE [dbo].[Tag] ADD  CONSTRAINT [DF_Tag_CreationTime]  DEFAULT (sysutcdatetime()) FOR [CreationTime]
+GO
+ALTER TABLE [dbo].[TemplateAttribute] ADD  CONSTRAINT [DF_TemplateAttribute_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+GO
+ALTER TABLE [dbo].[TemplateAttribute] ADD  CONSTRAINT [DF_TemplateAttribute_Guid]  DEFAULT (newid()) FOR [GuidId]
+GO
+ALTER TABLE [dbo].[TemplateAttribute] ADD  CONSTRAINT [DF_TemplateAttribute_CreationTime]  DEFAULT (sysutcdatetime()) FOR [CreationTime]
+GO
+ALTER TABLE [dbo].[TemplateProduct] ADD  CONSTRAINT [DF_TemplateProduct_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+GO
+ALTER TABLE [dbo].[TemplateProduct] ADD  CONSTRAINT [DF_TemplateProduct_Guid]  DEFAULT (newid()) FOR [GuidId]
+GO
+ALTER TABLE [dbo].[TemplateProduct] ADD  CONSTRAINT [DF_TemplateProduct_CreationTime]  DEFAULT (sysutcdatetime()) FOR [CreationTime]
+GO
+ALTER TABLE [dbo].[TemplateProductCategory] ADD  CONSTRAINT [DF_TemplateProductCategory_IsPrimary]  DEFAULT ((0)) FOR [IsPrimary]
+GO
+ALTER TABLE [dbo].[TemplateProductImage] ADD  CONSTRAINT [DF_TemplateProductImage_Sort]  DEFAULT ((0)) FOR [SortOrder]
+GO
+ALTER TABLE [dbo].[TemplateProductOption] ADD  CONSTRAINT [DF_TemplateProductOption_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+GO
+ALTER TABLE [dbo].[TemplateProductVariant] ADD  CONSTRAINT [DF_TemplateProductVariant_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+GO
+ALTER TABLE [dbo].[Unit] ADD  CONSTRAINT [DF_Unit_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+GO
+ALTER TABLE [dbo].[UnitWeightMode] ADD  CONSTRAINT [DF_UnitWeightMode_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+GO
+ALTER TABLE [dbo].[User] ADD  CONSTRAINT [DF_User_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+GO
+ALTER TABLE [dbo].[User] ADD  CONSTRAINT [DF_User_Guid]  DEFAULT (newid()) FOR [GuidId]
+GO
+ALTER TABLE [dbo].[User] ADD  CONSTRAINT [DF_User_CreationTime]  DEFAULT (sysutcdatetime()) FOR [CreationTime]
 GO
 ALTER TABLE [dbo].[User] ADD  CONSTRAINT [DF_User_IsEmailVerified]  DEFAULT ((0)) FOR [IsEmailVerified]
 GO
 ALTER TABLE [dbo].[User] ADD  CONSTRAINT [DF_User_LockoutFailCount]  DEFAULT ((0)) FOR [LockoutFailCount]
 GO
-ALTER TABLE [dbo].[User] ADD  CONSTRAINT [DF_User_IsMaster]  DEFAULT ((0)) FOR [IsMaster]
+ALTER TABLE [dbo].[UserStatus] ADD  CONSTRAINT [DF_UserStatus_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[User] ADD  CONSTRAINT [DF_User_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
+ALTER TABLE [dbo].[Visibility] ADD  CONSTRAINT [DF_Visibility_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[WizardSession] ADD  CONSTRAINT [DF_WizardSession_Step]  DEFAULT ((1)) FOR [Step]
+ALTER TABLE [dbo].[WeightConfig] ADD  CONSTRAINT [DF_WeightConfig_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[WizardSession] ADD  CONSTRAINT [DF_WizardSession_Status]  DEFAULT ('InProgress') FOR [Status]
+ALTER TABLE [dbo].[WizardStatus] ADD  CONSTRAINT [DF_WizardStatus_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[WizardSession] ADD  CONSTRAINT [DF_WizardSession_CreatedAt]  DEFAULT (sysdatetime()) FOR [CreatedAt]
+ALTER TABLE [dbo].[WizardType] ADD  CONSTRAINT [DF_WizardType_IsDeleted]  DEFAULT ((0)) FOR [IsDeleted]
 GO
-ALTER TABLE [dbo].[WizardSession] ADD  CONSTRAINT [DF_WizardSession_ContentOwner]  DEFAULT ('Company') FOR [ContentOwner]
+ALTER TABLE [dbo].[Account]  WITH CHECK ADD  CONSTRAINT [FK_Account_ContentOwner] FOREIGN KEY([ContentOwnerId])
+REFERENCES [dbo].[ContentOwner] ([Id])
 GO
-ALTER TABLE [dbo].[AccountBusinessType]  WITH CHECK ADD  CONSTRAINT [FK_AccountBusinessType_Account] FOREIGN KEY([AccountId])
+ALTER TABLE [dbo].[Account] CHECK CONSTRAINT [FK_Account_ContentOwner]
+GO
+ALTER TABLE [dbo].[Account]  WITH CHECK ADD  CONSTRAINT [FK_Account_CreationUser] FOREIGN KEY([CreationUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[Account] CHECK CONSTRAINT [FK_Account_CreationUser]
+GO
+ALTER TABLE [dbo].[Account]  WITH CHECK ADD  CONSTRAINT [FK_Account_Manager] FOREIGN KEY([ManagerId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[Account] CHECK CONSTRAINT [FK_Account_Manager]
+GO
+ALTER TABLE [dbo].[Account]  WITH CHECK ADD  CONSTRAINT [FK_Account_Status] FOREIGN KEY([StatusId])
+REFERENCES [dbo].[AccountStatus] ([Id])
+GO
+ALTER TABLE [dbo].[Account] CHECK CONSTRAINT [FK_Account_Status]
+GO
+ALTER TABLE [dbo].[Account]  WITH CHECK ADD  CONSTRAINT [FK_Account_UpdateUser] FOREIGN KEY([UpdateUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[Account] CHECK CONSTRAINT [FK_Account_UpdateUser]
+GO
+ALTER TABLE [dbo].[Account]  WITH CHECK ADD  CONSTRAINT [FK_Account_WizardStatus] FOREIGN KEY([WizardStatusId])
+REFERENCES [dbo].[WizardStatus] ([Id])
+GO
+ALTER TABLE [dbo].[Account] CHECK CONSTRAINT [FK_Account_WizardStatus]
+GO
+ALTER TABLE [dbo].[Account]  WITH CHECK ADD  CONSTRAINT [FK_Account_WizardType] FOREIGN KEY([WizardTypeId])
+REFERENCES [dbo].[WizardType] ([Id])
+GO
+ALTER TABLE [dbo].[Account] CHECK CONSTRAINT [FK_Account_WizardType]
+GO
+ALTER TABLE [dbo].[Attribute]  WITH CHECK ADD  CONSTRAINT [FK_Attribute_CreationUser] FOREIGN KEY([CreationUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[Attribute] CHECK CONSTRAINT [FK_Attribute_CreationUser]
+GO
+ALTER TABLE [dbo].[Attribute]  WITH CHECK ADD  CONSTRAINT [FK_Attribute_Site] FOREIGN KEY([SiteId])
+REFERENCES [dbo].[Site] ([Id])
+GO
+ALTER TABLE [dbo].[Attribute] CHECK CONSTRAINT [FK_Attribute_Site]
+GO
+ALTER TABLE [dbo].[Attribute]  WITH CHECK ADD  CONSTRAINT [FK_Attribute_UpdateUser] FOREIGN KEY([UpdateUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[Attribute] CHECK CONSTRAINT [FK_Attribute_UpdateUser]
+GO
+ALTER TABLE [dbo].[AttributeValue]  WITH CHECK ADD  CONSTRAINT [FK_AttributeValue_Attribute] FOREIGN KEY([AttributeId])
+REFERENCES [dbo].[Attribute] ([Id])
+GO
+ALTER TABLE [dbo].[AttributeValue] CHECK CONSTRAINT [FK_AttributeValue_Attribute]
+GO
+ALTER TABLE [dbo].[Brand]  WITH CHECK ADD  CONSTRAINT [FK_Brand_Account] FOREIGN KEY([AccountId])
 REFERENCES [dbo].[Account] ([Id])
 GO
-ALTER TABLE [dbo].[AccountBusinessType] CHECK CONSTRAINT [FK_AccountBusinessType_Account]
+ALTER TABLE [dbo].[Brand] CHECK CONSTRAINT [FK_Brand_Account]
 GO
-ALTER TABLE [dbo].[AccountBusinessType]  WITH CHECK ADD  CONSTRAINT [FK_AccountBusinessType_BusinessType] FOREIGN KEY([BusinessTypeId])
+ALTER TABLE [dbo].[Brand]  WITH CHECK ADD  CONSTRAINT [FK_Brand_CreationUser] FOREIGN KEY([CreationUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[Brand] CHECK CONSTRAINT [FK_Brand_CreationUser]
+GO
+ALTER TABLE [dbo].[Brand]  WITH CHECK ADD  CONSTRAINT [FK_Brand_UpdateUser] FOREIGN KEY([UpdateUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[Brand] CHECK CONSTRAINT [FK_Brand_UpdateUser]
+GO
+ALTER TABLE [dbo].[BusinessType]  WITH CHECK ADD  CONSTRAINT [FK_BusinessType_CreationUser] FOREIGN KEY([CreationUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[BusinessType] CHECK CONSTRAINT [FK_BusinessType_CreationUser]
+GO
+ALTER TABLE [dbo].[BusinessType]  WITH CHECK ADD  CONSTRAINT [FK_BusinessType_UpdateUser] FOREIGN KEY([UpdateUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[BusinessType] CHECK CONSTRAINT [FK_BusinessType_UpdateUser]
+GO
+ALTER TABLE [dbo].[BusinessTypeCategory]  WITH CHECK ADD  CONSTRAINT [FK_BTC_BusinessType] FOREIGN KEY([BusinessTypeId])
 REFERENCES [dbo].[BusinessType] ([Id])
 GO
-ALTER TABLE [dbo].[AccountBusinessType] CHECK CONSTRAINT [FK_AccountBusinessType_BusinessType]
+ALTER TABLE [dbo].[BusinessTypeCategory] CHECK CONSTRAINT [FK_BTC_BusinessType]
 GO
-ALTER TABLE [dbo].[AccountCategory]  WITH CHECK ADD  CONSTRAINT [FK_AccountCategory_Account] FOREIGN KEY([AccountId])
+ALTER TABLE [dbo].[Category]  WITH CHECK ADD  CONSTRAINT [FK_Category_Account] FOREIGN KEY([AccountId])
 REFERENCES [dbo].[Account] ([Id])
 GO
-ALTER TABLE [dbo].[AccountCategory] CHECK CONSTRAINT [FK_AccountCategory_Account]
+ALTER TABLE [dbo].[Category] CHECK CONSTRAINT [FK_Category_Account]
 GO
-ALTER TABLE [dbo].[AccountCategory]  WITH CHECK ADD  CONSTRAINT [FK_AccountCategory_Category] FOREIGN KEY([CategoryId])
-REFERENCES [dbo].[Category] ([Id])
-GO
-ALTER TABLE [dbo].[AccountCategory] CHECK CONSTRAINT [FK_AccountCategory_Category]
-GO
-ALTER TABLE [dbo].[AccountCategory]  WITH CHECK ADD  CONSTRAINT [FK_AccountCategory_Parent] FOREIGN KEY([ParentAccountCategoryId])
-REFERENCES [dbo].[AccountCategory] ([Id])
-GO
-ALTER TABLE [dbo].[AccountCategory] CHECK CONSTRAINT [FK_AccountCategory_Parent]
-GO
-ALTER TABLE [dbo].[AccountEcomCredential]  WITH CHECK ADD  CONSTRAINT [FK_AccountEcomCredential_Account] FOREIGN KEY([AccountId])
-REFERENCES [dbo].[Account] ([Id])
-GO
-ALTER TABLE [dbo].[AccountEcomCredential] CHECK CONSTRAINT [FK_AccountEcomCredential_Account]
-GO
-ALTER TABLE [dbo].[AccountEcomCredential]  WITH CHECK ADD  CONSTRAINT [FK_AccountEcomCredential_EcomPlatform] FOREIGN KEY([EcomPlatformId])
-REFERENCES [dbo].[EcomPlatform] ([Id])
-GO
-ALTER TABLE [dbo].[AccountEcomCredential] CHECK CONSTRAINT [FK_AccountEcomCredential_EcomPlatform]
-GO
-ALTER TABLE [dbo].[AccountProduct]  WITH CHECK ADD  CONSTRAINT [FK_AccountProduct_Account] FOREIGN KEY([AccountId])
-REFERENCES [dbo].[Account] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProduct] CHECK CONSTRAINT [FK_AccountProduct_Account]
-GO
-ALTER TABLE [dbo].[AccountProduct]  WITH CHECK ADD  CONSTRAINT [FK_AccountProduct_Brand] FOREIGN KEY([BrandId])
-REFERENCES [dbo].[Brand] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProduct] CHECK CONSTRAINT [FK_AccountProduct_Brand]
-GO
-ALTER TABLE [dbo].[AccountProduct]  WITH CHECK ADD  CONSTRAINT [FK_AccountProduct_KosherStatus] FOREIGN KEY([KosherStatusId])
-REFERENCES [dbo].[KosherStatus] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProduct] CHECK CONSTRAINT [FK_AccountProduct_KosherStatus]
-GO
-ALTER TABLE [dbo].[AccountProduct]  WITH CHECK ADD  CONSTRAINT [FK_AccountProduct_ProductTemplate] FOREIGN KEY([ProductTemplateId])
-REFERENCES [dbo].[ProductTemplate] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProduct] CHECK CONSTRAINT [FK_AccountProduct_ProductTemplate]
-GO
-ALTER TABLE [dbo].[AccountProduct]  WITH CHECK ADD  CONSTRAINT [FK_AccountProduct_Supplier] FOREIGN KEY([SupplierId])
-REFERENCES [dbo].[Supplier] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProduct] CHECK CONSTRAINT [FK_AccountProduct_Supplier]
-GO
-ALTER TABLE [dbo].[AccountProduct]  WITH CHECK ADD  CONSTRAINT [FK_AccountProduct_Unit] FOREIGN KEY([BaseUnitId])
-REFERENCES [dbo].[Unit] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProduct] CHECK CONSTRAINT [FK_AccountProduct_Unit]
-GO
-ALTER TABLE [dbo].[AccountProduct]  WITH CHECK ADD  CONSTRAINT [FK_AccountProduct_WeightPricingModel] FOREIGN KEY([WeightPricingModelId])
-REFERENCES [dbo].[WeightPricingModel] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProduct] CHECK CONSTRAINT [FK_AccountProduct_WeightPricingModel]
-GO
-ALTER TABLE [dbo].[AccountProductAttribute]  WITH CHECK ADD  CONSTRAINT [FK_AccountProductAttribute_AccountProduct] FOREIGN KEY([AccountProductId])
-REFERENCES [dbo].[AccountProduct] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProductAttribute] CHECK CONSTRAINT [FK_AccountProductAttribute_AccountProduct]
-GO
-ALTER TABLE [dbo].[AccountProductAttribute]  WITH CHECK ADD  CONSTRAINT [FK_AccountProductAttribute_Attribute] FOREIGN KEY([AttributeId])
-REFERENCES [dbo].[Attribute] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProductAttribute] CHECK CONSTRAINT [FK_AccountProductAttribute_Attribute]
-GO
-ALTER TABLE [dbo].[AccountProductAttributeValue]  WITH CHECK ADD  CONSTRAINT [FK_AccountProductAttributeValue_AccountProductAttribute] FOREIGN KEY([AccountProductAttributeId])
-REFERENCES [dbo].[AccountProductAttribute] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProductAttributeValue] CHECK CONSTRAINT [FK_AccountProductAttributeValue_AccountProductAttribute]
-GO
-ALTER TABLE [dbo].[AccountProductAttributeValue]  WITH CHECK ADD  CONSTRAINT [FK_AccountProductAttributeValue_AttributeOption] FOREIGN KEY([AttributeOptionId])
-REFERENCES [dbo].[AttributeOption] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProductAttributeValue] CHECK CONSTRAINT [FK_AccountProductAttributeValue_AttributeOption]
-GO
-ALTER TABLE [dbo].[AccountProductCategory]  WITH CHECK ADD  CONSTRAINT [FK_AccountProductCategory_AccountCategory] FOREIGN KEY([AccountCategoryId])
-REFERENCES [dbo].[AccountCategory] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProductCategory] CHECK CONSTRAINT [FK_AccountProductCategory_AccountCategory]
-GO
-ALTER TABLE [dbo].[AccountProductCategory]  WITH CHECK ADD  CONSTRAINT [FK_AccountProductCategory_AccountProduct] FOREIGN KEY([AccountProductId])
-REFERENCES [dbo].[AccountProduct] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProductCategory] CHECK CONSTRAINT [FK_AccountProductCategory_AccountProduct]
-GO
-ALTER TABLE [dbo].[AccountProductImportStaging]  WITH CHECK ADD  CONSTRAINT [FK_AccountProductImportStaging_Account] FOREIGN KEY([AccountId])
-REFERENCES [dbo].[Account] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProductImportStaging] CHECK CONSTRAINT [FK_AccountProductImportStaging_Account]
-GO
-ALTER TABLE [dbo].[AccountProductImportStaging]  WITH CHECK ADD  CONSTRAINT [FK_AccountProductImportStaging_ProductTemplate] FOREIGN KEY([MatchedProductTemplateId])
-REFERENCES [dbo].[ProductTemplate] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProductImportStaging] CHECK CONSTRAINT [FK_AccountProductImportStaging_ProductTemplate]
-GO
-ALTER TABLE [dbo].[AccountProductMedia]  WITH CHECK ADD  CONSTRAINT [FK_AccountProductMedia_AccountProduct] FOREIGN KEY([AccountProductId])
-REFERENCES [dbo].[AccountProduct] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProductMedia] CHECK CONSTRAINT [FK_AccountProductMedia_AccountProduct]
-GO
-ALTER TABLE [dbo].[AccountProductVariant]  WITH CHECK ADD  CONSTRAINT [FK_AccountProductVariant_AccountProduct] FOREIGN KEY([AccountProductId])
-REFERENCES [dbo].[AccountProduct] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProductVariant] CHECK CONSTRAINT [FK_AccountProductVariant_AccountProduct]
-GO
-ALTER TABLE [dbo].[AccountProductVariantOption]  WITH CHECK ADD  CONSTRAINT [FK_AccountProductVariantOption_AccountProductVariant] FOREIGN KEY([AccountProductVariantId])
-REFERENCES [dbo].[AccountProductVariant] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProductVariantOption] CHECK CONSTRAINT [FK_AccountProductVariantOption_AccountProductVariant]
-GO
-ALTER TABLE [dbo].[AccountProductVariantOption]  WITH CHECK ADD  CONSTRAINT [FK_AccountProductVariantOption_Attribute] FOREIGN KEY([AttributeId])
-REFERENCES [dbo].[Attribute] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProductVariantOption] CHECK CONSTRAINT [FK_AccountProductVariantOption_Attribute]
-GO
-ALTER TABLE [dbo].[AccountProductVariantOption]  WITH CHECK ADD  CONSTRAINT [FK_AccountProductVariantOption_AttributeOption] FOREIGN KEY([AttributeOptionId])
-REFERENCES [dbo].[AttributeOption] ([Id])
-GO
-ALTER TABLE [dbo].[AccountProductVariantOption] CHECK CONSTRAINT [FK_AccountProductVariantOption_AttributeOption]
-GO
-ALTER TABLE [dbo].[AccountUser]  WITH CHECK ADD  CONSTRAINT [FK_AccountUser_Account] FOREIGN KEY([AccountId])
-REFERENCES [dbo].[Account] ([Id])
-GO
-ALTER TABLE [dbo].[AccountUser] CHECK CONSTRAINT [FK_AccountUser_Account]
-GO
-ALTER TABLE [dbo].[AccountUser]  WITH CHECK ADD  CONSTRAINT [FK_AccountUser_Role] FOREIGN KEY([RoleId])
-REFERENCES [dbo].[Role] ([Id])
-GO
-ALTER TABLE [dbo].[AccountUser] CHECK CONSTRAINT [FK_AccountUser_Role]
-GO
-ALTER TABLE [dbo].[AccountUser]  WITH CHECK ADD  CONSTRAINT [FK_AccountUser_User] FOREIGN KEY([UserId])
+ALTER TABLE [dbo].[Category]  WITH CHECK ADD  CONSTRAINT [FK_Category_CreationUser] FOREIGN KEY([CreationUserId])
 REFERENCES [dbo].[User] ([Id])
 GO
-ALTER TABLE [dbo].[AccountUser] CHECK CONSTRAINT [FK_AccountUser_User]
+ALTER TABLE [dbo].[Category] CHECK CONSTRAINT [FK_Category_CreationUser]
 GO
-ALTER TABLE [dbo].[AttributeOption]  WITH CHECK ADD  CONSTRAINT [FK_AttributeOption_Attribute] FOREIGN KEY([AttributeId])
-REFERENCES [dbo].[Attribute] ([Id])
-GO
-ALTER TABLE [dbo].[AttributeOption] CHECK CONSTRAINT [FK_AttributeOption_Attribute]
-GO
-ALTER TABLE [dbo].[AuditLog]  WITH CHECK ADD  CONSTRAINT [FK_AuditLog_User] FOREIGN KEY([UserId])
-REFERENCES [dbo].[User] ([Id])
-GO
-ALTER TABLE [dbo].[AuditLog] CHECK CONSTRAINT [FK_AuditLog_User]
-GO
-ALTER TABLE [dbo].[CategoryHierarchy]  WITH CHECK ADD  CONSTRAINT [FK_CategoryHierarchy_Child] FOREIGN KEY([ChildCategoryId])
+ALTER TABLE [dbo].[Category]  WITH CHECK ADD  CONSTRAINT [FK_Category_Parent] FOREIGN KEY([ParentCategoryId])
 REFERENCES [dbo].[Category] ([Id])
 GO
-ALTER TABLE [dbo].[CategoryHierarchy] CHECK CONSTRAINT [FK_CategoryHierarchy_Child]
+ALTER TABLE [dbo].[Category] CHECK CONSTRAINT [FK_Category_Parent]
 GO
-ALTER TABLE [dbo].[CategoryHierarchy]  WITH CHECK ADD  CONSTRAINT [FK_CategoryHierarchy_Parent] FOREIGN KEY([ParentCategoryId])
-REFERENCES [dbo].[Category] ([Id])
+ALTER TABLE [dbo].[Category]  WITH CHECK ADD  CONSTRAINT [FK_Category_SourceGlobalCategory] FOREIGN KEY([SourceGlobalCategoryId])
+REFERENCES [dbo].[GlobalCategory] ([Id])
 GO
-ALTER TABLE [dbo].[CategoryHierarchy] CHECK CONSTRAINT [FK_CategoryHierarchy_Parent]
+ALTER TABLE [dbo].[Category] CHECK CONSTRAINT [FK_Category_SourceGlobalCategory]
 GO
-ALTER TABLE [dbo].[EcomCategoryMap]  WITH CHECK ADD  CONSTRAINT [FK_EcomCategoryMap_AccountCategory] FOREIGN KEY([AccountCategoryId])
-REFERENCES [dbo].[AccountCategory] ([Id])
-GO
-ALTER TABLE [dbo].[EcomCategoryMap] CHECK CONSTRAINT [FK_EcomCategoryMap_AccountCategory]
-GO
-ALTER TABLE [dbo].[EcomProductMap]  WITH CHECK ADD  CONSTRAINT [FK_EcomProductMap_AccountProduct] FOREIGN KEY([AccountProductId])
-REFERENCES [dbo].[AccountProduct] ([Id])
-GO
-ALTER TABLE [dbo].[EcomProductMap] CHECK CONSTRAINT [FK_EcomProductMap_AccountProduct]
-GO
-ALTER TABLE [dbo].[EcomVariantMap]  WITH CHECK ADD  CONSTRAINT [FK_EcomVariantMap_AccountProductVariant] FOREIGN KEY([AccountProductVariantId])
-REFERENCES [dbo].[AccountProductVariant] ([Id])
-GO
-ALTER TABLE [dbo].[EcomVariantMap] CHECK CONSTRAINT [FK_EcomVariantMap_AccountProductVariant]
-GO
-ALTER TABLE [dbo].[ProductEditLog]  WITH CHECK ADD  CONSTRAINT [FK_ProductEditLog_AccountProduct] FOREIGN KEY([AccountProductId])
-REFERENCES [dbo].[AccountProduct] ([Id])
-GO
-ALTER TABLE [dbo].[ProductEditLog] CHECK CONSTRAINT [FK_ProductEditLog_AccountProduct]
-GO
-ALTER TABLE [dbo].[ProductEditLog]  WITH CHECK ADD  CONSTRAINT [FK_ProductEditLog_User] FOREIGN KEY([UserId])
+ALTER TABLE [dbo].[Category]  WITH CHECK ADD  CONSTRAINT [FK_Category_UpdateUser] FOREIGN KEY([UpdateUserId])
 REFERENCES [dbo].[User] ([Id])
 GO
-ALTER TABLE [dbo].[ProductEditLog] CHECK CONSTRAINT [FK_ProductEditLog_User]
+ALTER TABLE [dbo].[Category] CHECK CONSTRAINT [FK_Category_UpdateUser]
 GO
-ALTER TABLE [dbo].[ProductTemplate]  WITH CHECK ADD  CONSTRAINT [FK_ProductTemplate_Brand] FOREIGN KEY([BrandId])
-REFERENCES [dbo].[Brand] ([Id])
+ALTER TABLE [dbo].[CategorySite]  WITH CHECK ADD  CONSTRAINT [FK_CategorySite_Category] FOREIGN KEY([CategoryId])
+REFERENCES [dbo].[Category] ([Id])
 GO
-ALTER TABLE [dbo].[ProductTemplate] CHECK CONSTRAINT [FK_ProductTemplate_Brand]
+ALTER TABLE [dbo].[CategorySite] CHECK CONSTRAINT [FK_CategorySite_Category]
 GO
-ALTER TABLE [dbo].[ProductTemplate]  WITH CHECK ADD  CONSTRAINT [FK_ProductTemplate_KosherStatus] FOREIGN KEY([KosherStatusId])
-REFERENCES [dbo].[KosherStatus] ([Id])
+ALTER TABLE [dbo].[CategorySite]  WITH CHECK ADD  CONSTRAINT [FK_CategorySite_Site] FOREIGN KEY([SiteId])
+REFERENCES [dbo].[Site] ([Id])
 GO
-ALTER TABLE [dbo].[ProductTemplate] CHECK CONSTRAINT [FK_ProductTemplate_KosherStatus]
+ALTER TABLE [dbo].[CategorySite] CHECK CONSTRAINT [FK_CategorySite_Site]
 GO
-ALTER TABLE [dbo].[ProductTemplate]  WITH CHECK ADD  CONSTRAINT [FK_ProductTemplate_ProductType] FOREIGN KEY([ProductTypeId])
-REFERENCES [dbo].[ProductType] ([Id])
+ALTER TABLE [dbo].[GlobalCategory]  WITH CHECK ADD  CONSTRAINT [FK_GlobalCategory_CreationUser] FOREIGN KEY([CreationUserId])
+REFERENCES [dbo].[User] ([Id])
 GO
-ALTER TABLE [dbo].[ProductTemplate] CHECK CONSTRAINT [FK_ProductTemplate_ProductType]
+ALTER TABLE [dbo].[GlobalCategory] CHECK CONSTRAINT [FK_GlobalCategory_CreationUser]
 GO
-ALTER TABLE [dbo].[ProductTemplate]  WITH CHECK ADD  CONSTRAINT [FK_ProductTemplate_Supplier] FOREIGN KEY([SupplierId])
-REFERENCES [dbo].[Supplier] ([Id])
+ALTER TABLE [dbo].[GlobalCategory]  WITH CHECK ADD  CONSTRAINT [FK_GlobalCategory_Parent] FOREIGN KEY([ParentGlobalCategoryId])
+REFERENCES [dbo].[GlobalCategory] ([Id])
 GO
-ALTER TABLE [dbo].[ProductTemplate] CHECK CONSTRAINT [FK_ProductTemplate_Supplier]
+ALTER TABLE [dbo].[GlobalCategory] CHECK CONSTRAINT [FK_GlobalCategory_Parent]
 GO
-ALTER TABLE [dbo].[ProductTemplate]  WITH CHECK ADD  CONSTRAINT [FK_ProductTemplate_Unit] FOREIGN KEY([BaseUnitId])
-REFERENCES [dbo].[Unit] ([Id])
+ALTER TABLE [dbo].[GlobalCategory]  WITH CHECK ADD  CONSTRAINT [FK_GlobalCategory_UpdateUser] FOREIGN KEY([UpdateUserId])
+REFERENCES [dbo].[User] ([Id])
 GO
-ALTER TABLE [dbo].[ProductTemplate] CHECK CONSTRAINT [FK_ProductTemplate_Unit]
+ALTER TABLE [dbo].[GlobalCategory] CHECK CONSTRAINT [FK_GlobalCategory_UpdateUser]
 GO
-ALTER TABLE [dbo].[ProductTemplate]  WITH CHECK ADD  CONSTRAINT [FK_ProductTemplate_WeightPricingModel] FOREIGN KEY([WeightPricingModelId])
-REFERENCES [dbo].[WeightPricingModel] ([Id])
-GO
-ALTER TABLE [dbo].[ProductTemplate] CHECK CONSTRAINT [FK_ProductTemplate_WeightPricingModel]
-GO
-ALTER TABLE [dbo].[ProductTemplateAttribute]  WITH CHECK ADD  CONSTRAINT [FK_ProductTemplateAttribute_Attribute] FOREIGN KEY([AttributeId])
-REFERENCES [dbo].[Attribute] ([Id])
-GO
-ALTER TABLE [dbo].[ProductTemplateAttribute] CHECK CONSTRAINT [FK_ProductTemplateAttribute_Attribute]
-GO
-ALTER TABLE [dbo].[ProductTemplateAttribute]  WITH CHECK ADD  CONSTRAINT [FK_ProductTemplateAttribute_ProductTemplate] FOREIGN KEY([ProductTemplateId])
-REFERENCES [dbo].[ProductTemplate] ([Id])
-GO
-ALTER TABLE [dbo].[ProductTemplateAttribute] CHECK CONSTRAINT [FK_ProductTemplateAttribute_ProductTemplate]
-GO
-ALTER TABLE [dbo].[ProductTemplateAttributeOption]  WITH CHECK ADD  CONSTRAINT [FK_ProductTemplateAttributeOption_AttributeOption] FOREIGN KEY([AttributeOptionId])
-REFERENCES [dbo].[AttributeOption] ([Id])
-GO
-ALTER TABLE [dbo].[ProductTemplateAttributeOption] CHECK CONSTRAINT [FK_ProductTemplateAttributeOption_AttributeOption]
-GO
-ALTER TABLE [dbo].[ProductTemplateAttributeOption]  WITH CHECK ADD  CONSTRAINT [FK_ProductTemplateAttributeOption_ProductTemplateAttribute] FOREIGN KEY([ProductTemplateAttributeId])
-REFERENCES [dbo].[ProductTemplateAttribute] ([Id])
-GO
-ALTER TABLE [dbo].[ProductTemplateAttributeOption] CHECK CONSTRAINT [FK_ProductTemplateAttributeOption_ProductTemplateAttribute]
-GO
-ALTER TABLE [dbo].[ProductTemplateBusinessType]  WITH CHECK ADD  CONSTRAINT [FK_ProductTemplateBusinessType_BusinessType] FOREIGN KEY([BusinessTypeId])
+ALTER TABLE [dbo].[GlobalCategoryBusinessType]  WITH CHECK ADD  CONSTRAINT [FK_GCBT_BusinessType] FOREIGN KEY([BusinessTypeId])
 REFERENCES [dbo].[BusinessType] ([Id])
 GO
-ALTER TABLE [dbo].[ProductTemplateBusinessType] CHECK CONSTRAINT [FK_ProductTemplateBusinessType_BusinessType]
+ALTER TABLE [dbo].[GlobalCategoryBusinessType] CHECK CONSTRAINT [FK_GCBT_BusinessType]
 GO
-ALTER TABLE [dbo].[ProductTemplateBusinessType]  WITH CHECK ADD  CONSTRAINT [FK_ProductTemplateBusinessType_ProductTemplate] FOREIGN KEY([ProductTemplateId])
-REFERENCES [dbo].[ProductTemplate] ([Id])
+ALTER TABLE [dbo].[GlobalCategoryBusinessType]  WITH CHECK ADD  CONSTRAINT [FK_GCBT_GlobalCategory] FOREIGN KEY([GlobalCategoryId])
+REFERENCES [dbo].[GlobalCategory] ([Id])
 GO
-ALTER TABLE [dbo].[ProductTemplateBusinessType] CHECK CONSTRAINT [FK_ProductTemplateBusinessType_ProductTemplate]
+ALTER TABLE [dbo].[GlobalCategoryBusinessType] CHECK CONSTRAINT [FK_GCBT_GlobalCategory]
 GO
-ALTER TABLE [dbo].[ProductTemplateCategory]  WITH CHECK ADD  CONSTRAINT [FK_ProductTemplateCategory_Category] FOREIGN KEY([CategoryId])
-REFERENCES [dbo].[Category] ([Id])
-GO
-ALTER TABLE [dbo].[ProductTemplateCategory] CHECK CONSTRAINT [FK_ProductTemplateCategory_Category]
-GO
-ALTER TABLE [dbo].[ProductTemplateCategory]  WITH CHECK ADD  CONSTRAINT [FK_ProductTemplateCategory_ProductTemplate] FOREIGN KEY([ProductTemplateId])
-REFERENCES [dbo].[ProductTemplate] ([Id])
-GO
-ALTER TABLE [dbo].[ProductTemplateCategory] CHECK CONSTRAINT [FK_ProductTemplateCategory_ProductTemplate]
-GO
-ALTER TABLE [dbo].[ProductTemplateMedia]  WITH CHECK ADD  CONSTRAINT [FK_ProductTemplateMedia_ProductTemplate] FOREIGN KEY([ProductTemplateId])
-REFERENCES [dbo].[ProductTemplate] ([Id])
-GO
-ALTER TABLE [dbo].[ProductTemplateMedia] CHECK CONSTRAINT [FK_ProductTemplateMedia_ProductTemplate]
-GO
-ALTER TABLE [dbo].[ProductTemplateSelectableWeight]  WITH CHECK ADD  CONSTRAINT [FK_ProductTemplateSelectableWeight_ProductTemplate] FOREIGN KEY([ProductTemplateId])
-REFERENCES [dbo].[ProductTemplate] ([Id])
-GO
-ALTER TABLE [dbo].[ProductTemplateSelectableWeight] CHECK CONSTRAINT [FK_ProductTemplateSelectableWeight_ProductTemplate]
-GO
-ALTER TABLE [dbo].[SyncJob]  WITH CHECK ADD  CONSTRAINT [FK_SyncJob_Account] FOREIGN KEY([AccountId])
+ALTER TABLE [dbo].[Media]  WITH CHECK ADD  CONSTRAINT [FK_Media_Account] FOREIGN KEY([AccountId])
 REFERENCES [dbo].[Account] ([Id])
 GO
-ALTER TABLE [dbo].[SyncJob] CHECK CONSTRAINT [FK_SyncJob_Account]
+ALTER TABLE [dbo].[Media] CHECK CONSTRAINT [FK_Media_Account]
 GO
-ALTER TABLE [dbo].[SyncJob]  WITH CHECK ADD  CONSTRAINT [FK_SyncJob_RequestedBy] FOREIGN KEY([RequestedBy])
+ALTER TABLE [dbo].[Media]  WITH CHECK ADD  CONSTRAINT [FK_Media_BusinessType] FOREIGN KEY([BusinessTypeId])
+REFERENCES [dbo].[BusinessType] ([Id])
+GO
+ALTER TABLE [dbo].[Media] CHECK CONSTRAINT [FK_Media_BusinessType]
+GO
+ALTER TABLE [dbo].[Media]  WITH CHECK ADD  CONSTRAINT [FK_Media_CreationUser] FOREIGN KEY([CreationUserId])
 REFERENCES [dbo].[User] ([Id])
 GO
-ALTER TABLE [dbo].[SyncJob] CHECK CONSTRAINT [FK_SyncJob_RequestedBy]
+ALTER TABLE [dbo].[Media] CHECK CONSTRAINT [FK_Media_CreationUser]
 GO
-ALTER TABLE [dbo].[SyncJobLog]  WITH CHECK ADD  CONSTRAINT [FK_SyncJobLog_SyncJob] FOREIGN KEY([SyncJobId])
-REFERENCES [dbo].[SyncJob] ([Id])
+ALTER TABLE [dbo].[Media]  WITH CHECK ADD  CONSTRAINT [FK_Media_Type] FOREIGN KEY([TypeId])
+REFERENCES [dbo].[MediaType] ([Id])
 GO
-ALTER TABLE [dbo].[SyncJobLog] CHECK CONSTRAINT [FK_SyncJobLog_SyncJob]
+ALTER TABLE [dbo].[Media] CHECK CONSTRAINT [FK_Media_Type]
+GO
+ALTER TABLE [dbo].[Media]  WITH CHECK ADD  CONSTRAINT [FK_Media_UpdateUser] FOREIGN KEY([UpdateUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[Media] CHECK CONSTRAINT [FK_Media_UpdateUser]
+GO
+ALTER TABLE [dbo].[MediaCategory]  WITH CHECK ADD  CONSTRAINT [FK_MediaCategory_Category] FOREIGN KEY([CategoryId])
+REFERENCES [dbo].[Category] ([Id])
+GO
+ALTER TABLE [dbo].[MediaCategory] CHECK CONSTRAINT [FK_MediaCategory_Category]
+GO
+ALTER TABLE [dbo].[MediaCategory]  WITH CHECK ADD  CONSTRAINT [FK_MediaCategory_Media] FOREIGN KEY([MediaId])
+REFERENCES [dbo].[Media] ([Id])
+GO
+ALTER TABLE [dbo].[MediaCategory] CHECK CONSTRAINT [FK_MediaCategory_Media]
+GO
+ALTER TABLE [dbo].[MediaTag]  WITH CHECK ADD  CONSTRAINT [FK_MediaTag_Media] FOREIGN KEY([MediaId])
+REFERENCES [dbo].[Media] ([Id])
+GO
+ALTER TABLE [dbo].[MediaTag] CHECK CONSTRAINT [FK_MediaTag_Media]
+GO
+ALTER TABLE [dbo].[MediaTag]  WITH CHECK ADD  CONSTRAINT [FK_MediaTag_Tag] FOREIGN KEY([TagId])
+REFERENCES [dbo].[Tag] ([Id])
+GO
+ALTER TABLE [dbo].[MediaTag] CHECK CONSTRAINT [FK_MediaTag_Tag]
+GO
+ALTER TABLE [dbo].[Product]  WITH CHECK ADD  CONSTRAINT [FK_Product_Brand] FOREIGN KEY([BrandId])
+REFERENCES [dbo].[Brand] ([Id])
+GO
+ALTER TABLE [dbo].[Product] CHECK CONSTRAINT [FK_Product_Brand]
+GO
+ALTER TABLE [dbo].[Product]  WITH CHECK ADD  CONSTRAINT [FK_Product_CreationUser] FOREIGN KEY([CreationUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[Product] CHECK CONSTRAINT [FK_Product_CreationUser]
+GO
+ALTER TABLE [dbo].[Product]  WITH CHECK ADD  CONSTRAINT [FK_Product_SetupType] FOREIGN KEY([SetupTypeId])
+REFERENCES [dbo].[SetupType] ([Id])
+GO
+ALTER TABLE [dbo].[Product] CHECK CONSTRAINT [FK_Product_SetupType]
+GO
+ALTER TABLE [dbo].[Product]  WITH CHECK ADD  CONSTRAINT [FK_Product_ShippingClass] FOREIGN KEY([ShippingClassId])
+REFERENCES [dbo].[ShippingClass] ([Id])
+GO
+ALTER TABLE [dbo].[Product] CHECK CONSTRAINT [FK_Product_ShippingClass]
+GO
+ALTER TABLE [dbo].[Product]  WITH CHECK ADD  CONSTRAINT [FK_Product_Status] FOREIGN KEY([StatusId])
+REFERENCES [dbo].[ProductStatus] ([Id])
+GO
+ALTER TABLE [dbo].[Product] CHECK CONSTRAINT [FK_Product_Status]
+GO
+ALTER TABLE [dbo].[Product]  WITH CHECK ADD  CONSTRAINT [FK_Product_StockManagementType] FOREIGN KEY([StockManagementTypeId])
+REFERENCES [dbo].[StockManagementType] ([Id])
+GO
+ALTER TABLE [dbo].[Product] CHECK CONSTRAINT [FK_Product_StockManagementType]
+GO
+ALTER TABLE [dbo].[Product]  WITH CHECK ADD  CONSTRAINT [FK_Product_StockStatus] FOREIGN KEY([StockStatusId])
+REFERENCES [dbo].[StockStatus] ([Id])
+GO
+ALTER TABLE [dbo].[Product] CHECK CONSTRAINT [FK_Product_StockStatus]
+GO
+ALTER TABLE [dbo].[Product]  WITH CHECK ADD  CONSTRAINT [FK_Product_Supplier] FOREIGN KEY([SupplierId])
+REFERENCES [dbo].[Supplier] ([Id])
+GO
+ALTER TABLE [dbo].[Product] CHECK CONSTRAINT [FK_Product_Supplier]
+GO
+ALTER TABLE [dbo].[Product]  WITH CHECK ADD  CONSTRAINT [FK_Product_UpdateUser] FOREIGN KEY([UpdateUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[Product] CHECK CONSTRAINT [FK_Product_UpdateUser]
+GO
+ALTER TABLE [dbo].[Product]  WITH CHECK ADD  CONSTRAINT [FK_Product_Visibility] FOREIGN KEY([VisibilityId])
+REFERENCES [dbo].[Visibility] ([Id])
+GO
+ALTER TABLE [dbo].[Product] CHECK CONSTRAINT [FK_Product_Visibility]
+GO
+ALTER TABLE [dbo].[Product]  WITH CHECK ADD  CONSTRAINT [FK_Product_WeightConfig] FOREIGN KEY([WeightConfigId])
+REFERENCES [dbo].[WeightConfig] ([Id])
+GO
+ALTER TABLE [dbo].[Product] CHECK CONSTRAINT [FK_Product_WeightConfig]
+GO
+ALTER TABLE [dbo].[ProductCategory]  WITH CHECK ADD  CONSTRAINT [FK_ProductCategory_Category] FOREIGN KEY([CategoryId])
+REFERENCES [dbo].[Category] ([Id])
+GO
+ALTER TABLE [dbo].[ProductCategory] CHECK CONSTRAINT [FK_ProductCategory_Category]
+GO
+ALTER TABLE [dbo].[ProductCategory]  WITH CHECK ADD  CONSTRAINT [FK_ProductCategory_Product] FOREIGN KEY([ProductId])
+REFERENCES [dbo].[Product] ([Id])
+GO
+ALTER TABLE [dbo].[ProductCategory] CHECK CONSTRAINT [FK_ProductCategory_Product]
+GO
+ALTER TABLE [dbo].[ProductImage]  WITH CHECK ADD  CONSTRAINT [FK_ProductImage_Product] FOREIGN KEY([ProductId])
+REFERENCES [dbo].[Product] ([Id])
+GO
+ALTER TABLE [dbo].[ProductImage] CHECK CONSTRAINT [FK_ProductImage_Product]
+GO
+ALTER TABLE [dbo].[ProductOption]  WITH CHECK ADD  CONSTRAINT [FK_ProductOption_Product] FOREIGN KEY([ProductId])
+REFERENCES [dbo].[Product] ([Id])
+GO
+ALTER TABLE [dbo].[ProductOption] CHECK CONSTRAINT [FK_ProductOption_Product]
+GO
+ALTER TABLE [dbo].[ProductOptionValue]  WITH CHECK ADD  CONSTRAINT [FK_ProductOptionValue_ProductOption] FOREIGN KEY([ProductOptionId])
+REFERENCES [dbo].[ProductOption] ([Id])
+GO
+ALTER TABLE [dbo].[ProductOptionValue] CHECK CONSTRAINT [FK_ProductOptionValue_ProductOption]
+GO
+ALTER TABLE [dbo].[ProductSite]  WITH CHECK ADD  CONSTRAINT [FK_ProductSite_Product] FOREIGN KEY([ProductId])
+REFERENCES [dbo].[Product] ([Id])
+GO
+ALTER TABLE [dbo].[ProductSite] CHECK CONSTRAINT [FK_ProductSite_Product]
+GO
+ALTER TABLE [dbo].[ProductSite]  WITH CHECK ADD  CONSTRAINT [FK_ProductSite_Site] FOREIGN KEY([SiteId])
+REFERENCES [dbo].[Site] ([Id])
+GO
+ALTER TABLE [dbo].[ProductSite] CHECK CONSTRAINT [FK_ProductSite_Site]
+GO
+ALTER TABLE [dbo].[ProductTag]  WITH CHECK ADD  CONSTRAINT [FK_ProductTag_Product] FOREIGN KEY([ProductId])
+REFERENCES [dbo].[Product] ([Id])
+GO
+ALTER TABLE [dbo].[ProductTag] CHECK CONSTRAINT [FK_ProductTag_Product]
+GO
+ALTER TABLE [dbo].[ProductTag]  WITH CHECK ADD  CONSTRAINT [FK_ProductTag_Tag] FOREIGN KEY([TagId])
+REFERENCES [dbo].[Tag] ([Id])
+GO
+ALTER TABLE [dbo].[ProductTag] CHECK CONSTRAINT [FK_ProductTag_Tag]
+GO
+ALTER TABLE [dbo].[ProductVariant]  WITH CHECK ADD  CONSTRAINT [FK_ProductVariant_Product] FOREIGN KEY([ProductId])
+REFERENCES [dbo].[Product] ([Id])
+GO
+ALTER TABLE [dbo].[ProductVariant] CHECK CONSTRAINT [FK_ProductVariant_Product]
+GO
+ALTER TABLE [dbo].[ProductVariantOptionValue]  WITH CHECK ADD  CONSTRAINT [FK_ProductVariantOptionValue_ProductVariant] FOREIGN KEY([ProductVariantId])
+REFERENCES [dbo].[ProductVariant] ([Id])
+GO
+ALTER TABLE [dbo].[ProductVariantOptionValue] CHECK CONSTRAINT [FK_ProductVariantOptionValue_ProductVariant]
+GO
+ALTER TABLE [dbo].[Site]  WITH CHECK ADD  CONSTRAINT [FK_Site_Account] FOREIGN KEY([AccountId])
+REFERENCES [dbo].[Account] ([Id])
+GO
+ALTER TABLE [dbo].[Site] CHECK CONSTRAINT [FK_Site_Account]
+GO
+ALTER TABLE [dbo].[Site]  WITH CHECK ADD  CONSTRAINT [FK_Site_CreationUser] FOREIGN KEY([CreationUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[Site] CHECK CONSTRAINT [FK_Site_CreationUser]
+GO
+ALTER TABLE [dbo].[Site]  WITH CHECK ADD  CONSTRAINT [FK_Site_UpdateUser] FOREIGN KEY([UpdateUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[Site] CHECK CONSTRAINT [FK_Site_UpdateUser]
+GO
+ALTER TABLE [dbo].[SiteBusinessType]  WITH CHECK ADD  CONSTRAINT [FK_SiteBusinessType_BusinessType] FOREIGN KEY([BusinessTypeId])
+REFERENCES [dbo].[BusinessType] ([Id])
+GO
+ALTER TABLE [dbo].[SiteBusinessType] CHECK CONSTRAINT [FK_SiteBusinessType_BusinessType]
+GO
+ALTER TABLE [dbo].[SiteBusinessType]  WITH CHECK ADD  CONSTRAINT [FK_SiteBusinessType_Site] FOREIGN KEY([SiteId])
+REFERENCES [dbo].[Site] ([Id])
+GO
+ALTER TABLE [dbo].[SiteBusinessType] CHECK CONSTRAINT [FK_SiteBusinessType_Site]
+GO
+ALTER TABLE [dbo].[SiteUser]  WITH CHECK ADD  CONSTRAINT [FK_SiteUser_Site] FOREIGN KEY([SiteId])
+REFERENCES [dbo].[Site] ([Id])
+GO
+ALTER TABLE [dbo].[SiteUser] CHECK CONSTRAINT [FK_SiteUser_Site]
+GO
+ALTER TABLE [dbo].[SiteUser]  WITH CHECK ADD  CONSTRAINT [FK_SiteUser_User] FOREIGN KEY([UserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[SiteUser] CHECK CONSTRAINT [FK_SiteUser_User]
+GO
+ALTER TABLE [dbo].[Supplier]  WITH CHECK ADD  CONSTRAINT [FK_Supplier_Account] FOREIGN KEY([AccountId])
+REFERENCES [dbo].[Account] ([Id])
+GO
+ALTER TABLE [dbo].[Supplier] CHECK CONSTRAINT [FK_Supplier_Account]
+GO
+ALTER TABLE [dbo].[Supplier]  WITH CHECK ADD  CONSTRAINT [FK_Supplier_CreationUser] FOREIGN KEY([CreationUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[Supplier] CHECK CONSTRAINT [FK_Supplier_CreationUser]
+GO
+ALTER TABLE [dbo].[Supplier]  WITH CHECK ADD  CONSTRAINT [FK_Supplier_UpdateUser] FOREIGN KEY([UpdateUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[Supplier] CHECK CONSTRAINT [FK_Supplier_UpdateUser]
+GO
+ALTER TABLE [dbo].[Tag]  WITH CHECK ADD  CONSTRAINT [FK_Tag_Account] FOREIGN KEY([AccountId])
+REFERENCES [dbo].[Account] ([Id])
+GO
+ALTER TABLE [dbo].[Tag] CHECK CONSTRAINT [FK_Tag_Account]
+GO
+ALTER TABLE [dbo].[Tag]  WITH CHECK ADD  CONSTRAINT [FK_Tag_CreationUser] FOREIGN KEY([CreationUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[Tag] CHECK CONSTRAINT [FK_Tag_CreationUser]
+GO
+ALTER TABLE [dbo].[Tag]  WITH CHECK ADD  CONSTRAINT [FK_Tag_UpdateUser] FOREIGN KEY([UpdateUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[Tag] CHECK CONSTRAINT [FK_Tag_UpdateUser]
+GO
+ALTER TABLE [dbo].[TemplateAttribute]  WITH CHECK ADD  CONSTRAINT [FK_TemplateAttribute_CreationUser] FOREIGN KEY([CreationUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateAttribute] CHECK CONSTRAINT [FK_TemplateAttribute_CreationUser]
+GO
+ALTER TABLE [dbo].[TemplateAttribute]  WITH CHECK ADD  CONSTRAINT [FK_TemplateAttribute_UpdateUser] FOREIGN KEY([UpdateUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateAttribute] CHECK CONSTRAINT [FK_TemplateAttribute_UpdateUser]
+GO
+ALTER TABLE [dbo].[TemplateAttributeSite]  WITH CHECK ADD  CONSTRAINT [FK_TAS_Site] FOREIGN KEY([SiteId])
+REFERENCES [dbo].[Site] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateAttributeSite] CHECK CONSTRAINT [FK_TAS_Site]
+GO
+ALTER TABLE [dbo].[TemplateAttributeSite]  WITH CHECK ADD  CONSTRAINT [FK_TAS_TemplateAttribute] FOREIGN KEY([TemplateAttributeId])
+REFERENCES [dbo].[TemplateAttribute] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateAttributeSite] CHECK CONSTRAINT [FK_TAS_TemplateAttribute]
+GO
+ALTER TABLE [dbo].[TemplateAttributeValue]  WITH CHECK ADD  CONSTRAINT [FK_TemplateAttributeValue_TemplateAttribute] FOREIGN KEY([TemplateAttributeId])
+REFERENCES [dbo].[TemplateAttribute] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateAttributeValue] CHECK CONSTRAINT [FK_TemplateAttributeValue_TemplateAttribute]
+GO
+ALTER TABLE [dbo].[TemplateProduct]  WITH CHECK ADD  CONSTRAINT [FK_TemplateProduct_Brand] FOREIGN KEY([BrandId])
+REFERENCES [dbo].[Brand] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProduct] CHECK CONSTRAINT [FK_TemplateProduct_Brand]
+GO
+ALTER TABLE [dbo].[TemplateProduct]  WITH CHECK ADD  CONSTRAINT [FK_TemplateProduct_CreationUser] FOREIGN KEY([CreationUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProduct] CHECK CONSTRAINT [FK_TemplateProduct_CreationUser]
+GO
+ALTER TABLE [dbo].[TemplateProduct]  WITH CHECK ADD  CONSTRAINT [FK_TemplateProduct_SetupType] FOREIGN KEY([SetupTypeId])
+REFERENCES [dbo].[SetupType] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProduct] CHECK CONSTRAINT [FK_TemplateProduct_SetupType]
+GO
+ALTER TABLE [dbo].[TemplateProduct]  WITH CHECK ADD  CONSTRAINT [FK_TemplateProduct_ShippingClass] FOREIGN KEY([ShippingClassId])
+REFERENCES [dbo].[ShippingClass] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProduct] CHECK CONSTRAINT [FK_TemplateProduct_ShippingClass]
+GO
+ALTER TABLE [dbo].[TemplateProduct]  WITH CHECK ADD  CONSTRAINT [FK_TemplateProduct_Status] FOREIGN KEY([StatusId])
+REFERENCES [dbo].[ProductStatus] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProduct] CHECK CONSTRAINT [FK_TemplateProduct_Status]
+GO
+ALTER TABLE [dbo].[TemplateProduct]  WITH CHECK ADD  CONSTRAINT [FK_TemplateProduct_StockManagementType] FOREIGN KEY([StockManagementTypeId])
+REFERENCES [dbo].[StockManagementType] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProduct] CHECK CONSTRAINT [FK_TemplateProduct_StockManagementType]
+GO
+ALTER TABLE [dbo].[TemplateProduct]  WITH CHECK ADD  CONSTRAINT [FK_TemplateProduct_StockStatus] FOREIGN KEY([StockStatusId])
+REFERENCES [dbo].[StockStatus] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProduct] CHECK CONSTRAINT [FK_TemplateProduct_StockStatus]
+GO
+ALTER TABLE [dbo].[TemplateProduct]  WITH CHECK ADD  CONSTRAINT [FK_TemplateProduct_Supplier] FOREIGN KEY([SupplierId])
+REFERENCES [dbo].[Supplier] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProduct] CHECK CONSTRAINT [FK_TemplateProduct_Supplier]
+GO
+ALTER TABLE [dbo].[TemplateProduct]  WITH CHECK ADD  CONSTRAINT [FK_TemplateProduct_UpdateUser] FOREIGN KEY([UpdateUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProduct] CHECK CONSTRAINT [FK_TemplateProduct_UpdateUser]
+GO
+ALTER TABLE [dbo].[TemplateProduct]  WITH CHECK ADD  CONSTRAINT [FK_TemplateProduct_Visibility] FOREIGN KEY([VisibilityId])
+REFERENCES [dbo].[Visibility] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProduct] CHECK CONSTRAINT [FK_TemplateProduct_Visibility]
+GO
+ALTER TABLE [dbo].[TemplateProduct]  WITH CHECK ADD  CONSTRAINT [FK_TemplateProduct_WeightConfig] FOREIGN KEY([WeightConfigId])
+REFERENCES [dbo].[WeightConfig] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProduct] CHECK CONSTRAINT [FK_TemplateProduct_WeightConfig]
+GO
+ALTER TABLE [dbo].[TemplateProductCategory]  WITH CHECK ADD  CONSTRAINT [FK_TPC_Category] FOREIGN KEY([CategoryId])
+REFERENCES [dbo].[Category] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProductCategory] CHECK CONSTRAINT [FK_TPC_Category]
+GO
+ALTER TABLE [dbo].[TemplateProductCategory]  WITH CHECK ADD  CONSTRAINT [FK_TPC_TemplateProduct] FOREIGN KEY([TemplateProductId])
+REFERENCES [dbo].[TemplateProduct] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProductCategory] CHECK CONSTRAINT [FK_TPC_TemplateProduct]
+GO
+ALTER TABLE [dbo].[TemplateProductImage]  WITH CHECK ADD  CONSTRAINT [FK_TemplateProductImage_TemplateProduct] FOREIGN KEY([TemplateProductId])
+REFERENCES [dbo].[TemplateProduct] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProductImage] CHECK CONSTRAINT [FK_TemplateProductImage_TemplateProduct]
+GO
+ALTER TABLE [dbo].[TemplateProductOption]  WITH CHECK ADD  CONSTRAINT [FK_TemplateProductOption_TemplateProduct] FOREIGN KEY([TemplateProductId])
+REFERENCES [dbo].[TemplateProduct] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProductOption] CHECK CONSTRAINT [FK_TemplateProductOption_TemplateProduct]
+GO
+ALTER TABLE [dbo].[TemplateProductOptionValue]  WITH CHECK ADD  CONSTRAINT [FK_TemplateProductOptionValue_TemplateProductOption] FOREIGN KEY([TemplateProductOptionId])
+REFERENCES [dbo].[TemplateProductOption] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProductOptionValue] CHECK CONSTRAINT [FK_TemplateProductOptionValue_TemplateProductOption]
+GO
+ALTER TABLE [dbo].[TemplateProductSite]  WITH CHECK ADD  CONSTRAINT [FK_TPS_Site] FOREIGN KEY([SiteId])
+REFERENCES [dbo].[Site] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProductSite] CHECK CONSTRAINT [FK_TPS_Site]
+GO
+ALTER TABLE [dbo].[TemplateProductSite]  WITH CHECK ADD  CONSTRAINT [FK_TPS_TemplateProduct] FOREIGN KEY([TemplateProductId])
+REFERENCES [dbo].[TemplateProduct] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProductSite] CHECK CONSTRAINT [FK_TPS_TemplateProduct]
+GO
+ALTER TABLE [dbo].[TemplateProductTag]  WITH CHECK ADD  CONSTRAINT [FK_TPT_Tag] FOREIGN KEY([TagId])
+REFERENCES [dbo].[Tag] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProductTag] CHECK CONSTRAINT [FK_TPT_Tag]
+GO
+ALTER TABLE [dbo].[TemplateProductTag]  WITH CHECK ADD  CONSTRAINT [FK_TPT_TemplateProduct] FOREIGN KEY([TemplateProductId])
+REFERENCES [dbo].[TemplateProduct] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProductTag] CHECK CONSTRAINT [FK_TPT_TemplateProduct]
+GO
+ALTER TABLE [dbo].[TemplateProductVariant]  WITH CHECK ADD  CONSTRAINT [FK_TemplateProductVariant_TemplateProduct] FOREIGN KEY([TemplateProductId])
+REFERENCES [dbo].[TemplateProduct] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProductVariant] CHECK CONSTRAINT [FK_TemplateProductVariant_TemplateProduct]
+GO
+ALTER TABLE [dbo].[TemplateProductVariantOptionValue]  WITH CHECK ADD  CONSTRAINT [FK_TPVOV_TemplateProductVariant] FOREIGN KEY([TemplateProductVariantId])
+REFERENCES [dbo].[TemplateProductVariant] ([Id])
+GO
+ALTER TABLE [dbo].[TemplateProductVariantOptionValue] CHECK CONSTRAINT [FK_TPVOV_TemplateProductVariant]
+GO
+ALTER TABLE [dbo].[User]  WITH CHECK ADD  CONSTRAINT [FK_User_Account] FOREIGN KEY([AccountId])
+REFERENCES [dbo].[Account] ([Id])
+GO
+ALTER TABLE [dbo].[User] CHECK CONSTRAINT [FK_User_Account]
+GO
+ALTER TABLE [dbo].[User]  WITH CHECK ADD  CONSTRAINT [FK_User_CreationUser] FOREIGN KEY([CreationUserId])
+REFERENCES [dbo].[User] ([Id])
+GO
+ALTER TABLE [dbo].[User] CHECK CONSTRAINT [FK_User_CreationUser]
 GO
 ALTER TABLE [dbo].[User]  WITH CHECK ADD  CONSTRAINT [FK_User_Role] FOREIGN KEY([RoleId])
 REFERENCES [dbo].[Role] ([Id])
-ON UPDATE CASCADE
 GO
 ALTER TABLE [dbo].[User] CHECK CONSTRAINT [FK_User_Role]
 GO
-ALTER TABLE [dbo].[User]  WITH CHECK ADD  CONSTRAINT [FK_User_UserStatus] FOREIGN KEY([StatusId])
+ALTER TABLE [dbo].[User]  WITH CHECK ADD  CONSTRAINT [FK_User_Status] FOREIGN KEY([StatusId])
 REFERENCES [dbo].[UserStatus] ([Id])
-ON UPDATE CASCADE
 GO
-ALTER TABLE [dbo].[User] CHECK CONSTRAINT [FK_User_UserStatus]
+ALTER TABLE [dbo].[User] CHECK CONSTRAINT [FK_User_Status]
 GO
-ALTER TABLE [dbo].[WizardSession]  WITH CHECK ADD  CONSTRAINT [FK_WizardSession_Account] FOREIGN KEY([AccountId])
-REFERENCES [dbo].[Account] ([Id])
-GO
-ALTER TABLE [dbo].[WizardSession] CHECK CONSTRAINT [FK_WizardSession_Account]
-GO
-ALTER TABLE [dbo].[WizardSession]  WITH CHECK ADD  CONSTRAINT [FK_WizardSession_StartedByUser] FOREIGN KEY([StartedByUserId])
+ALTER TABLE [dbo].[User]  WITH CHECK ADD  CONSTRAINT [FK_User_UpdateUser] FOREIGN KEY([UpdateUserId])
 REFERENCES [dbo].[User] ([Id])
 GO
-ALTER TABLE [dbo].[WizardSession] CHECK CONSTRAINT [FK_WizardSession_StartedByUser]
+ALTER TABLE [dbo].[User] CHECK CONSTRAINT [FK_User_UpdateUser]
 GO
-/****** Object:  StoredProcedure [dbo].[usp_OnboardAccountFromTemplates]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
+ALTER TABLE [dbo].[WeightConfig]  WITH CHECK ADD  CONSTRAINT [FK_WeightConfig_Unit] FOREIGN KEY([UnitId])
+REFERENCES [dbo].[Unit] ([Id])
 GO
-SET QUOTED_IDENTIFIER ON
+ALTER TABLE [dbo].[WeightConfig] CHECK CONSTRAINT [FK_WeightConfig_Unit]
 GO
-CREATE PROCEDURE [dbo].[usp_OnboardAccountFromTemplates]
-(
-    @AccountId BIGINT,
-    @StartedByUserId INT
-)
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    /* 1. Create WizardSession row (step 1 start) */
-    INSERT INTO [dbo].[WizardSession] (
-        [AccountId],
-        [StartedByUserId],
-        [Step],
-        [Status]
-    )
-    VALUES
-    (@AccountId, @StartedByUserId, 1, N'InProgress');
-
-    /* 2. Clone categories -> AccountCategory
-          Each global Category becomes enabled by default, same name, same sort.
-          (Later user can rename, reorder, disable.)
-    */
-    INSERT INTO [dbo].[AccountCategory] (
-        [AccountId],
-        [CategoryId],
-        [ParentAccountCategoryId],
-        [CustomName],
-        [SortOrder],
-        [IsEnabled]
-    )
-    SELECT
-        @AccountId,
-        c.[Id],
-        NULL,               -- we'll do hierarchy link in a second pass
-        NULL,               -- CustomName defaults to null (use global name)
-        c.[SortOrder],
-        1                   -- default enabled
-    FROM [dbo].[Category] c
-    WHERE c.[IsActive] = 1;
-
-    /* Rebuild parent-child links at account-level.
-       We'll join CategoryHierarchy to map Parent/Child to the newly inserted AccountCategory rows.
-       We'll UPDATE after INSERT because we need all AccountCategory rows first.
-    */
-    ;WITH cat_ac AS (
-        SELECT ac.[Id] AS AccountCategoryId, ac.[CategoryId]
-        FROM [dbo].[AccountCategory] ac
-        WHERE ac.[AccountId] = @AccountId
-    )
-    UPDATE acChild
-    SET acChild.[ParentAccountCategoryId] = acParent.[AccountCategoryId]
-    FROM [dbo].[AccountCategory] acChild
-    JOIN [dbo].[CategoryHierarchy] ch
-         ON ch.[ChildCategoryId] = acChild.[CategoryId]
-    JOIN cat_ac acParent
-         ON acParent.[CategoryId] = ch.[ParentCategoryId]
-    WHERE acChild.[AccountId] = @AccountId;
-
-    /* 3. Clone ProductTemplate into AccountProduct.
-
-       This is where you'll filter later:
-       - by Account.IsKosherShop? Then skip templates where IsKosherDefault=0 or KosherStatus=NotKosher.
-       - by chosen BusinessTypes (meat/fish/spices) from wizard step 1 (we don't have that yet here).
-    */
-
-    INSERT INTO [dbo].[AccountProduct] (
-        [AccountId],
-        [ProductTemplateId],
-        [IsEnabled],
-        [EditingStatus],
-        [Title],
-        [ShortDescription],
-        [DescriptionHtml],
-        [BrandId],
-        [SupplierId],
-        [IsKosher],
-        [KosherStatusId],
-        [WeightPricingModelId],
-        [ShowPricePer100g],
-        [BaseUnitPrice],
-        [BaseUnitId],
-        [BaseWeightGrams],
-        [StockQuantity],
-        [Sku]
-    )
-    SELECT
-        @AccountId,
-        pt.[Id],
-        1,                       -- default: enabled
-        N'NotEdited',
-        pt.[Title],
-        pt.[ShortDescription],
-        pt.[DescriptionHtml],
-        pt.[BrandId],
-        pt.[SupplierId],
-        pt.[IsKosherDefault],
-        pt.[KosherStatusId],
-        pt.[WeightPricingModelId],
-        pt.[ShowPricePer100g],
-        pt.[BaseUnitPrice],
-        pt.[BaseUnitId],
-        pt.[BaseWeightGrams],
-        NULL,                    -- initial stock unknown
-        pt.[Sku]
-    FROM [dbo].[ProductTemplate] pt
-    WHERE pt.[IsActive] = 1;
-
-    /* 4. Map products to account categories:
-          For each AccountProduct that came from ProductTemplate T,
-          add rows in AccountProductCategory corresponding to each Category of T.
-    */
-    INSERT INTO [dbo].[AccountProductCategory] (
-        [AccountProductId],
-        [AccountCategoryId]
-    )
-    SELECT
-        ap.[Id] AS AccountProductId,
-        ac.[Id] AS AccountCategoryId
-    FROM [dbo].[AccountProduct] ap
-    JOIN [dbo].[ProductTemplateCategory] ptc
-      ON ptc.[ProductTemplateId] = ap.[ProductTemplateId]
-    JOIN [dbo].[AccountCategory] ac
-      ON ac.[AccountId] = ap.[AccountId]
-     AND ac.[CategoryId] = ptc.[CategoryId]
-    WHERE ap.[AccountId] = @AccountId;
-
-    /* 5. Copy media (primary image etc.) from template to account product */
-    INSERT INTO [dbo].[AccountProductMedia] (
-        [AccountProductId],
-        [Url],
-        [AltText],
-        [SortOrder],
-        [IsPrimary]
-    )
-    SELECT
-        ap.[Id],
-        ptm.[Url],
-        ptm.[AltText],
-        ptm.[SortOrder],
-        ptm.[IsPrimary]
-    FROM [dbo].[AccountProduct] ap
-    JOIN [dbo].[ProductTemplateMedia] ptm
-      ON ptm.[ProductTemplateId] = ap.[ProductTemplateId]
-    WHERE ap.[AccountId] = @AccountId;
-
-    /* 6. Copy attributes and allowed options
-          - ProductTemplateAttribute -> AccountProductAttribute
-          - ProductTemplateAttributeOption -> AccountProductAttributeValue
-    */
-    ;WITH TemplateAttr AS (
-        SELECT
-            ap.[Id]                        AS AccountProductId,
-            pta.[Id]                       AS ProductTemplateAttributeId,
-            pta.[AttributeId],
-            pta.[IsVariantAxis]
-        FROM [dbo].[AccountProduct] ap
-        JOIN [dbo].[ProductTemplateAttribute] pta
-          ON pta.[ProductTemplateId] = ap.[ProductTemplateId]
-        WHERE ap.[AccountId] = @AccountId
-    )
-    INSERT INTO [dbo].[AccountProductAttribute] (
-        [AccountProductId],
-        [AttributeId],
-        [IsVariantAxis]
-    )
-    SELECT
-        t.[AccountProductId],
-        t.[AttributeId],
-        t.[IsVariantAxis]
-    FROM TemplateAttr t;
-
-    /* Now copy the options.
-       We need to join the newly inserted AccountProductAttribute rows by (AccountProductId, AttributeId),
-       and match them back to ProductTemplateAttributeOption.
-    */
-    INSERT INTO [dbo].[AccountProductAttributeValue] (
-        [AccountProductAttributeId],
-        [AttributeOptionId],
-        [ValueText],
-        [SortOrder]
-    )
-    SELECT
-        apa.[Id] AS AccountProductAttributeId,
-        ptao.[AttributeOptionId],
-        NULL,
-        0
-    FROM [dbo].[AccountProductAttribute] apa
-    JOIN [dbo].[AccountProduct] ap
-      ON ap.[Id] = apa.[AccountProductId]
-    JOIN [dbo].[ProductTemplateAttribute] pta
-      ON pta.[ProductTemplateId] = ap.[ProductTemplateId]
-     AND pta.[AttributeId] = apa.[AttributeId]
-    JOIN [dbo].[ProductTemplateAttributeOption] ptao
-      ON ptao.[ProductTemplateAttributeId] = pta.[Id]
-    WHERE ap.[AccountId] = @AccountId;
-
-    /* 7. Pre-build AccountProductVariant from ProductTemplateSelectableWeight,
-          so the butcher immediately sees 300g / 500g etc as variant rows.
-          We don't yet set AttributeOption links. That could be a later enhancement.
-    */
-    INSERT INTO [dbo].[AccountProductVariant] (
-        [AccountProductId],
-        [VariantSku],
-        [VariantTitle],
-        [Price],
-        [StockQuantity],
-        [WeightGrams],
-        [IsEnabled],
-        [SortOrder]
-    )
-    SELECT
-        ap.[Id],
-        CONCAT(pt.[Sku], N'-', REPLACE(psw.[Label], N' ', N'')) AS VariantSku,
-        psw.[Label] AS VariantTitle,
-        NULL AS Price,           -- butcher will fill
-        NULL AS StockQuantity,   -- butcher will fill
-        psw.[WeightGrams],
-        1 AS IsEnabled,
-        psw.[SortOrder]
-    FROM [dbo].[AccountProduct] ap
-    JOIN [dbo].[ProductTemplateSelectableWeight] psw
-      ON psw.[ProductTemplateId] = ap.[ProductTemplateId]
-    JOIN [dbo].[ProductTemplate] pt
-      ON pt.[Id] = ap.[ProductTemplateId]
-    WHERE ap.[AccountId] = @AccountId;
-
-    /* 8. Log "NotEdited" state in ProductEditLog for auditing */
-    INSERT INTO [dbo].[ProductEditLog] (
-        [AccountProductId],
-        [UserId],
-        [FromStatus],
-        [ToStatus],
-        [Notes]
-    )
-    SELECT
-        ap.[Id],
-        @StartedByUserId,
-        N'',
-        N'NotEdited',
-        N'initial onboarding from templates'
-    FROM [dbo].[AccountProduct] ap
-    WHERE ap.[AccountId] = @AccountId;
-
-END
+ALTER TABLE [dbo].[WeightConfig]  WITH CHECK ADD  CONSTRAINT [FK_WeightConfig_UnitWeightMode] FOREIGN KEY([UnitWeightModeId])
+REFERENCES [dbo].[UnitWeightMode] ([Id])
 GO
-/****** Object:  StoredProcedure [dbo].[usp_PushAccountProductsToWooCommerce]    Script Date: 10/25/2025 2:14:45 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-CREATE PROCEDURE [dbo].[usp_PushAccountProductsToWooCommerce]
-(
-    @AccountId BIGINT,
-    @RequestedBy INT
-)
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    /* 0. Create SyncJob row in Pending status for traceability */
-    INSERT INTO [dbo].[SyncJob] (
-        [AccountId],
-        [JobType],
-        [Status],
-        [RequestedBy],
-        [Message]
-    )
-    VALUES
-    (@AccountId, N'PushProducts', N'Pending', @RequestedBy, N'Preparing product payload for WooCommerce');
-
-    DECLARE @SyncJobId BIGINT = SCOPE_IDENTITY();
-
-    /* 1. Temp table of products that should be published:
-        - Enabled
-        - EditingStatus = 'Published'
-        - Not already mapped in EcomProductMap
-    */
-    IF OBJECT_ID('tempdb..#ToPublish') IS NOT NULL DROP TABLE #ToPublish;
-
-    CREATE TABLE #ToPublish (
-        AccountProductId BIGINT PRIMARY KEY,
-        Sku              NVARCHAR(100),
-        Title            NVARCHAR(300),
-        DescriptionHtml  NVARCHAR(MAX),
-        Price            DECIMAL(18,2),
-        StockQuantity    DECIMAL(18,3),
-        WeightGrams      DECIMAL(18,3),
-        CategoryNames    NVARCHAR(MAX),
-        PrimaryImageUrl  NVARCHAR(1000)
-    );
-
-    ;WITH catmap AS (
-        SELECT
-            apc.[AccountProductId],
-            STUFF((
-                SELECT N', ' + COALESCE(ac.[CustomName], c.[Name])
-                FROM [dbo].[AccountProductCategory] apc2
-                JOIN [dbo].[AccountCategory] ac
-                  ON ac.[Id] = apc2.[AccountCategoryId]
-                JOIN [dbo].[Category] c
-                  ON c.[Id] = ac.[CategoryId]
-                WHERE apc2.[AccountProductId] = apc.[AccountProductId]
-                  AND ac.[IsEnabled] = 1
-                FOR XML PATH(''), TYPE
-            ).value('.', 'nvarchar(max)'), 1, 2, N'') AS [CategoryNames]
-        FROM [dbo].[AccountProductCategory] apc
-        GROUP BY apc.[AccountProductId]
-    ),
-    primary_image AS (
-        SELECT
-            apm.[AccountProductId],
-            apm.[Url] AS [PrimaryImageUrl],
-            ROW_NUMBER() OVER (PARTITION BY apm.[AccountProductId] ORDER BY apm.[IsPrimary] DESC, apm.[SortOrder]) AS rn
-        FROM [dbo].[AccountProductMedia] apm
-    ),
-    first_image AS (
-        SELECT [AccountProductId], [PrimaryImageUrl]
-        FROM primary_image
-        WHERE rn = 1
-    ),
-    first_variant AS (
-        -- We'll just grab first enabled variant for price/weight defaults
-        SELECT
-            apv.[AccountProductId],
-            apv.[Price],
-            apv.[StockQuantity],
-            apv.[WeightGrams],
-            ROW_NUMBER() OVER (PARTITION BY apv.[AccountProductId] ORDER BY apv.[SortOrder]) AS rn
-        FROM [dbo].[AccountProductVariant] apv
-        WHERE apv.[IsEnabled] = 1
-    ),
-    fv AS (
-        SELECT [AccountProductId],[Price],[StockQuantity],[WeightGrams]
-        FROM first_variant
-        WHERE rn = 1
-    )
-    INSERT INTO #ToPublish (
-        AccountProductId, Sku, Title, DescriptionHtml,
-        Price, StockQuantity, WeightGrams,
-        CategoryNames, PrimaryImageUrl
-    )
-    SELECT
-        ap.[Id],
-        ap.[Sku],
-        COALESCE(ap.[Title], pt.[Title]) AS Title,
-        COALESCE(ap.[DescriptionHtml], pt.[DescriptionHtml]) AS DescriptionHtml,
-        fv.[Price],
-        fv.[StockQuantity],
-        fv.[WeightGrams],
-        catmap.[CategoryNames],
-        fi.[PrimaryImageUrl]
-    FROM [dbo].[AccountProduct] ap
-    JOIN [dbo].[ProductTemplate] pt
-      ON pt.[Id] = ap.[ProductTemplateId]
-    LEFT JOIN catmap
-      ON catmap.[AccountProductId] = ap.[Id]
-    LEFT JOIN fi
-      ON fi.[AccountProductId] = ap.[Id]
-    LEFT JOIN fv
-      ON fv.[AccountProductId] = ap.[Id]
-    WHERE ap.[AccountId] = @AccountId
-      AND ap.[IsEnabled] = 1
-      AND ap.[EditingStatus] = N'Published'
-      AND NOT EXISTS (
-            SELECT 1
-            FROM [dbo].[EcomProductMap] m
-            WHERE m.[AccountProductId] = ap.[Id]
-      );
-
-    /* 2. Log how many products are going out */
-    INSERT INTO [dbo].[SyncJobLog] (
-        [SyncJobId],
-        [Level],
-        [Message]
-    )
-    SELECT
-        @SyncJobId,
-        N'Info',
-        CONCAT(N'Prepared ', COUNT(1), N' products for publish')
-    FROM #ToPublish;
-
-    /* 3. Return rows to caller (C# layer will call Woo API using this data)
-          NOTE: This proc does not INSERT into EcomProductMap / EcomVariantMap.
-          That should happen AFTER Woo says "OK, product created with ID X".
-    */
-    SELECT
-        t.*,
-        @SyncJobId AS SyncJobId
-    FROM #ToPublish t;
-
-END;
+ALTER TABLE [dbo].[WeightConfig] CHECK CONSTRAINT [FK_WeightConfig_UnitWeightMode]
 GO

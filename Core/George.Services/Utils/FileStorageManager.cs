@@ -28,30 +28,32 @@ namespace George.Services
 		//**************************    Construction    **************************//
 		public FileStorageManager(ILogger<FileStorageManager> logger)
 		{
-			_bucket = SysConfig.Data.AWSBucket ?? string.Empty;
-			_env = SysConfig.Data.EnvironmentName.Trim('/').Trim('\\');
+			// Safely access SysConfig.Data with null checks
+			var configData = SysConfig.Data;
+			_bucket = configData?.AWSBucket ?? string.Empty;
+			_env = (configData?.EnvironmentName ?? "PROD").Trim('/').Trim('\\');
 			_logger = logger;
 
 			// Check if local storage should be used
 			// Priority: 1. UseLocalStorage flag from appsettings, 2. Check if AWS credentials are configured
-			if (SysConfig.Data.UseLocalStorage)
+			if (configData?.UseLocalStorage == true)
 			{
 				_useLocalStorage = true;
 			}
 			else
 			{
 				// If AWS credentials are not configured, use local storage
-				_useLocalStorage = string.IsNullOrEmpty(SysConfig.Data.AWSBucket) ||
-								  string.IsNullOrEmpty(SysConfig.Data.AWSAccessKey) ||
-								  string.IsNullOrEmpty(SysConfig.Data.AWSKeySecret);
+				_useLocalStorage = string.IsNullOrEmpty(configData?.AWSBucket) ||
+								  string.IsNullOrEmpty(configData?.AWSAccessKey) ||
+								  string.IsNullOrEmpty(configData?.AWSKeySecret);
 			}
 
 			if (!_useLocalStorage)
 			{
 				try
 				{
-					_awsClient = new AmazonS3Client(SysConfig.Data.AWSAccessKey,
-													SysConfig.Data.AWSKeySecret,
+					_awsClient = new AmazonS3Client(configData?.AWSAccessKey,
+													configData?.AWSKeySecret,
 													Amazon.RegionEndpoint.EUCentral1);
 					_logger.LogInformation("Using S3 file storage");
 				}
@@ -66,7 +68,7 @@ namespace George.Services
 			{
 				_logger.LogInformation("Using local file storage");
 				// Ensure local storage directory exists
-				string basePath = SysConfig.Data.StorageLocalInternalBasePath ?? "./FileStorage";
+				string basePath = configData?.StorageLocalInternalBasePath ?? "./FileStorage";
 				if (!Directory.Exists(basePath))
 				{
 					Directory.CreateDirectory(basePath);
@@ -98,7 +100,7 @@ namespace George.Services
 			try
 			{
 				// Get local storage base path
-				string basePath = SysConfig.Data.StorageLocalInternalBasePath ?? "./FileStorage";
+				string basePath = SysConfig.Data?.StorageLocalInternalBasePath ?? "./FileStorage";
 
 				// Create unique file path
 				filePath = CreateUniqueFilePath(file, path);
@@ -241,7 +243,7 @@ namespace George.Services
 
 			try
 			{
-				string basePath = SysConfig.Data.StorageLocalInternalBasePath ?? "./FileStorage";
+				string basePath = SysConfig.Data?.StorageLocalInternalBasePath ?? "./FileStorage";
 				string srcFullPath = Path.Combine(basePath, srcPath.Replace('/', Path.DirectorySeparatorChar));
 				string destFullPath = Path.Combine(basePath, AddEnvToPath(destPath).Replace('/', Path.DirectorySeparatorChar));
 
@@ -322,16 +324,23 @@ namespace George.Services
 			return res;
 		}
 
-		public async Task<FileManagerRes> DeleteFileAsync(string path, CancellationToken cancelToken = default)
+	public async Task<FileManagerRes> DeleteFileAsync(string path, CancellationToken cancelToken = default)
+	{
+		FileManagerRes res = new();
+
+		if (_useLocalStorage)
 		{
-			FileManagerRes res = new();
+			return await DeleteFileLocalAsync(path, cancelToken);
+		}
 
-			var request = new DeleteObjectRequest {
-				BucketName = _bucket,
-				Key = path
-			};
+		var request = new DeleteObjectRequest {
+			BucketName = _bucket,
+			Key = path
+		};
 
-			try
+		try
+		{
+			if (_awsClient != null)
 			{
 				var response = await _awsClient.DeleteObjectAsync(request, cancelToken);
 				if (response.HttpStatusCode == System.Net.HttpStatusCode.NoContent)
@@ -340,13 +349,43 @@ namespace George.Services
 					res.FilePath = path;
 				}
 			}
-			catch (DeleteObjectsException ex)
-			{
-				_logger.LogError($"DeleteFileAsync() failed, when try to remove file from S3, path = {path}", ex);
-			}
-
-			return res;
 		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, $"DeleteFileAsync() failed, when try to remove file from S3, path = {path}");
+		}
+
+		return res;
+	}
+
+	private async Task<FileManagerRes> DeleteFileLocalAsync(string path, CancellationToken cancelToken = default)
+	{
+		FileManagerRes res = new();
+
+		try
+		{
+			string basePath = SysConfig.Data?.StorageLocalInternalBasePath ?? "./FileStorage";
+			string fullPath = Path.Combine(basePath, path.Replace('/', Path.DirectorySeparatorChar));
+
+			if (File.Exists(fullPath))
+			{
+				await Task.Run(() => File.Delete(fullPath), cancelToken);
+				res.IsSuccessful = true;
+				res.FilePath = path;
+			}
+			else
+			{
+				_logger.LogWarning($"File not found for deletion: {fullPath}");
+			}
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, $"DeleteFileLocalAsync() failed to delete file, path = {path}");
+			res.Exception = ex;
+		}
+
+		return res;
+	}
 
 
 		//*************************    Private/Protected Methods    *************************//
