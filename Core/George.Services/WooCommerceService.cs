@@ -70,7 +70,7 @@ namespace George.Services
                 using var httpClient = _httpClientFactory.CreateClient();
                 httpClient.DefaultRequestHeaders.Clear();
                 httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
-                httpClient.DefaultRequestHeaders.Add("Content-Type", "application/json");
+                // Note: Content-Type is set on HttpContent objects (StringContent), not on DefaultRequestHeaders
 
                 // Sync categories first
                 var categoryMap = await SyncCategoriesAsync(baseUrl, req.SiteId, httpClient, cancelToken);
@@ -105,14 +105,22 @@ namespace George.Services
         {
             var categoryMap = new Dictionary<int, int>();
 
-            // Get all categories for the site
-            var categories = await _categoryStorage.GetCategoriesAsync(
+            // Get all categories linked to this site through the CategorySite junction table
+            var categoriesResult = await _categoryStorage.GetCategoriesAsync(
                 new CategoryFilter { SiteId = siteId },
                 new PagingExDto { Skip = 0, Take = 10000, IncludeTotal = false },
                 cancelToken);
 
+            // Filter out deleted and inactive categories
+            var categories = categoriesResult.Items
+                .Where(c => !c.IsDeleted && c.IsActive)
+                .ToList();
+
+            _logger.LogInformation("Found {Count} categories to sync for site {SiteId} (from CategorySite table)", 
+                categories.Count, siteId);
+
             // Sync main categories first
-            var mainCategories = categories.Items
+            var mainCategories = categories
                 .Where(c => c.ParentCategoryId == null)
                 .ToList();
 
@@ -134,7 +142,7 @@ namespace George.Services
             }
 
             // Sync subcategories
-            var subCategories = categories.Items
+            var subCategories = categories
                 .Where(c => c.ParentCategoryId != null && categoryMap.ContainsKey(c.ParentCategoryId.Value))
                 .ToList();
 
@@ -160,42 +168,35 @@ namespace George.Services
         }
 
         private async Task<int?> SyncCategoryAsync(
-            string baseUrl,
-            Category category,
-            int? parentWooId,
-            HttpClient httpClient,
-            CancellationToken cancelToken)
+    string baseUrl,
+    Category category,
+    int? parentWooId,
+    HttpClient httpClient,
+    CancellationToken cancelToken)
         {
             var wooCatData = new
             {
                 name = category.Name,
                 description = category.Description ?? "",
-                parent = parentWooId
+                parent = parentWooId ?? 0
+                // ?????????: slug = Slugify(category.Name)
             };
 
+            // 1) ?? ?? ??? WooCommerceId - ???? update
             if (category.WooCommerceId.HasValue)
             {
-                // Try to update existing
-                var updateUrl = $"{baseUrl}/products/categories/{category.WooCommerceId.Value}";
-                var updateJson = JsonSerializer.Serialize(wooCatData);
-                var updateContent = new StringContent(updateJson, Encoding.UTF8, "application/json");
-
-                var updateResponse = await httpClient.PutAsync(updateUrl, updateContent, cancelToken);
-                if (updateResponse.IsSuccessStatusCode)
-                {
-                    var updated = await JsonSerializer.DeserializeAsync<WooCommerceCategoryResponse>(
-                        await updateResponse.Content.ReadAsStreamAsync(cancelToken),
-                        cancellationToken: cancelToken);
-                    return updated?.id;
-                }
+                var updatedId = await TryUpdateCategoryAsync(baseUrl, category.WooCommerceId.Value, wooCatData, httpClient, cancelToken);
+                if (updatedId.HasValue) return updatedId.Value;
             }
 
-            // Create new category
+            // 2) ???? ???? create
             var createUrl = $"{baseUrl}/products/categories";
             var createJson = JsonSerializer.Serialize(wooCatData);
-            var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
+            using var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
 
             var createResponse = await httpClient.PostAsync(createUrl, createContent, cancelToken);
+
+            // Success
             if (createResponse.IsSuccessStatusCode)
             {
                 var created = await JsonSerializer.DeserializeAsync<WooCommerceCategoryResponse>(
@@ -204,8 +205,46 @@ namespace George.Services
                 return created?.id;
             }
 
-            var errorContent = await createResponse.Content.ReadAsStringAsync(cancelToken);
-            throw new Exception($"WooCommerce API error ({createResponse.StatusCode}): {errorContent}");
+            // Error -> read body
+            var errorBody = await createResponse.Content.ReadAsStringAsync(cancelToken);
+
+            // term_exists -> return resource_id (and optionally update it)
+            var wooErr = TryDeserialize<WooErrorResponse>(errorBody);
+            if (wooErr?.code == "term_exists" && wooErr.data?.resource_id is int existingId)
+            {
+                // ?????????: ????? ??existing category ?? description ???'
+                var updatedId = await TryUpdateCategoryAsync(baseUrl, existingId, wooCatData, httpClient, cancelToken);
+                return updatedId ?? existingId;
+            }
+
+            throw new Exception($"WooCommerce API error ({createResponse.StatusCode}): {errorBody}");
+        }
+
+        private async Task<int?> TryUpdateCategoryAsync(
+            string baseUrl,
+            int wooCategoryId,
+            object wooCatData,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            var updateUrl = $"{baseUrl}/products/categories/{wooCategoryId}";
+            var updateJson = JsonSerializer.Serialize(wooCatData);
+            using var updateContent = new StringContent(updateJson, Encoding.UTF8, "application/json");
+
+            var updateResponse = await httpClient.PutAsync(updateUrl, updateContent, cancelToken);
+            if (!updateResponse.IsSuccessStatusCode) return null;
+
+            var updated = await JsonSerializer.DeserializeAsync<WooCommerceCategoryResponse>(
+                await updateResponse.Content.ReadAsStreamAsync(cancelToken),
+                cancellationToken: cancelToken);
+
+            return updated?.id;
+        }
+
+        private static T? TryDeserialize<T>(string json)
+        {
+            try { return JsonSerializer.Deserialize<T>(json); }
+            catch { return default; }
         }
 
         private async Task<List<WooCommerceSyncResult>> SyncProductsAsync(
@@ -298,10 +337,11 @@ namespace George.Services
 
                 // Map images
                 var images = product.ProductImages?
-                    .OrderBy(pi => pi.SortOrder)
-                    .Select((pi, index) => new { src = pi.Url, position = index })
-                    .Cast<object>()
-                    .ToList() ?? new List<object>();
+    .OrderBy(pi => pi.SortOrder)
+    .Where(pi => IsPublicImageUrl(pi.Url))
+    .Select((pi, index) => new { src = pi.Url, position = index })
+    .Cast<object>()
+    .ToList() ?? new List<object>();
 
                 // Map tags
                 var tags = product.Tags?
@@ -378,12 +418,15 @@ namespace George.Services
                     ["catalog_visibility"] = catalogVisibility,
                     ["weight"] = product.Weight?.ToString() ?? "",
                     ["shipping_class"] = shippingClass,
-                    ["images"] = images,
+                    //["images"] = images,
                     ["categories"] = allCategoryIds,
                     ["tags"] = tags,
                     ["status"] = product.Status?.Name == "published" ? "publish" : "draft",
                     ["meta_data"] = metaData
                 };
+
+                if (images.Count > 0)
+                    wooProduct["images"] = images;
 
                 // For simple products, add pricing and stock
                 if (product.ProductVariants == null || !product.ProductVariants.Any(v => !v.IsDeleted))
@@ -452,17 +495,25 @@ namespace George.Services
                     var createJson = JsonSerializer.Serialize(wooProduct);
                     var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
 
-                    var createResponse = await httpClient.PostAsync(createUrl, createContent, cancelToken);
-                    if (!createResponse.IsSuccessStatusCode)
+                    try
                     {
-                        var errorContent = await createResponse.Content.ReadAsStringAsync(cancelToken);
-                        throw new Exception($"WooCommerce API error ({createResponse.StatusCode}): {errorContent}");
-                    }
 
-                    var created = await JsonSerializer.DeserializeAsync<WooCommerceProductResponse>(
-                        await createResponse.Content.ReadAsStreamAsync(cancelToken),
-                        cancellationToken: cancelToken);
-                    wooCommerceId = created?.id;
+                        var createResponse = await httpClient.PostAsync(createUrl, createContent, cancelToken);
+                        if (!createResponse.IsSuccessStatusCode)
+                        {
+                            var errorContent = await createResponse.Content.ReadAsStringAsync(cancelToken);
+                            throw new Exception($"WooCommerce API error ({createResponse.StatusCode}): {errorContent}");
+                        }
+
+                        var created = await JsonSerializer.DeserializeAsync<WooCommerceProductResponse>(
+                            await createResponse.Content.ReadAsStreamAsync(cancelToken),
+                            cancellationToken: cancelToken);
+                        wooCommerceId = created?.id;
+                    }
+                    catch(Exception e)
+                    {
+                        Console.Write(e);
+                    }
                 }
 
                 // Update product with WooCommerce ID
@@ -587,6 +638,20 @@ namespace George.Services
             }
         }
 
+        private static bool IsPublicImageUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+
+            if (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp) return false;
+
+            var host = uri.Host.ToLowerInvariant();
+            if (host == "localhost" || host == "127.0.0.1" || host == "::1") return false;
+
+            // ?????????: ????? ?? private ranges ??? ????
+            return true;
+        }
+
         // Helper classes for WooCommerce API responses
         private class WooCommerceCategoryResponse
         {
@@ -601,6 +666,19 @@ namespace George.Services
         private class WooCommerceVariationResponse
         {
             public int id { get; set; }
+        }
+
+        public class WooErrorResponse
+        {
+            public string? code { get; set; }
+            public string? message { get; set; }
+            public WooErrorData? data { get; set; }
+
+            public class WooErrorData
+            {
+                public int? status { get; set; }
+                public int? resource_id { get; set; }
+            }
         }
     }
 }
