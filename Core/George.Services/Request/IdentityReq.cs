@@ -50,6 +50,16 @@ namespace George.Services
         [EmailAddress]
         public string Email { get; set; } = null!;
     }
+    public class LoginWithOtpReq
+    {
+        [RequiredNotEmpty]
+        [Phone]
+        public string Phone { get; set; } = null!;
+
+        [RequiredNotEmpty]
+        [StringLength(6)]
+        public string Otp { get; set; } = null!;
+    }
 
 
     public class ProfileReq

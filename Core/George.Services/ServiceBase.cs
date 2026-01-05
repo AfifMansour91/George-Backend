@@ -70,88 +70,101 @@ namespace George.Services
 		protected async Task<T?> GetFromCacheOrDBAsync<T>(string cacheKey, Func<Task<T>> f, int cacheInterval = DEFAULT_CACHE_INTERVAL_IN_SEC) where T : class
 		{
 			return await _cache.GetFromCacheOrDBAsync(cacheKey, f, cacheInterval);
-		}
+        }
 
-		//public async Task<UserPermissions> GetPermissionAsync(int userId, CancellationToken cancelToken = default)
-		//{
-		//	if(_authManager == null)
-		//		throw new GeorgeNotInitializedException($"AuthorizationManager is not initialized for service {this.GetType().Name}.");
+        public bool IsValidOtp(string? userOtp, string? otpRequested, DateTime? expiration)
+        {
+            if (!userOtp.HasValue() || !otpRequested.HasValue())
+                return false;
 
-		//	return await _authManager.GetUserPermissionsAsync(userId, cancelToken);
-		//}
+            // Check if the otp is expired.
+            if (expiration == null || DateTime.UtcNow > expiration)
+                return false;
 
-		//public async Task<bool> ValidatePermissionAsync(EntityType entityType, int entityId, AuthAction action, CancellationToken cancelToken = default)
-		//{
-		//	if(_authManager == null)
-		//		throw new GeorgeNotInitializedException($"AuthorizationManager is not initialized for service {this.GetType().Name}.");
+            // Check if the otp is valid.
+            return userOtp == otpRequested;
+        }
 
-		//	if (_authUser == null)
-		//		return false;
-		//	else if (_authUser.IsMaster)
-		//		return true; // Override permissions.
+        //public async Task<UserPermissions> GetPermissionAsync(int userId, CancellationToken cancelToken = default)
+        //{
+        //	if(_authManager == null)
+        //		throw new GeorgeNotInitializedException($"AuthorizationManager is not initialized for service {this.GetType().Name}.");
 
-		//	bool res = await _authManager.ValidatePermissionAsync(_authUser!.Id, entityType, entityId, action, cancelToken);
-		//	if(res == false)
-		//	{
-		//		// In most cases, when the user is not authorized it is one of two reasons:
-		//		//		1. The cache data is old.
-		//		//		2. It is a bug.
-		//		// We assume that the common case is that the cache is old and therefore we clear the cache and try again.
-		//		_authManager.ClearUserPermissionsCache(_authUser!.Id);
+        //	return await _authManager.GetUserPermissionsAsync(userId, cancelToken);
+        //}
 
-		//		res = await _authManager.ValidatePermissionAsync(_authUser!.Id, entityType, entityId, action, cancelToken);
-		//	}
+        //public async Task<bool> ValidatePermissionAsync(EntityType entityType, int entityId, AuthAction action, CancellationToken cancelToken = default)
+        //{
+        //	if(_authManager == null)
+        //		throw new GeorgeNotInitializedException($"AuthorizationManager is not initialized for service {this.GetType().Name}.");
 
-		//	return res;
+        //	if (_authUser == null)
+        //		return false;
+        //	else if (_authUser.IsMaster)
+        //		return true; // Override permissions.
 
-			
-		//}
+        //	bool res = await _authManager.ValidatePermissionAsync(_authUser!.Id, entityType, entityId, action, cancelToken);
+        //	if(res == false)
+        //	{
+        //		// In most cases, when the user is not authorized it is one of two reasons:
+        //		//		1. The cache data is old.
+        //		//		2. It is a bug.
+        //		// We assume that the common case is that the cache is old and therefore we clear the cache and try again.
+        //		_authManager.ClearUserPermissionsCache(_authUser!.Id);
 
-		//public async Task<bool> ValidatePermissionAsync(EntityType entityType, List<int> entityIds, AuthAction action, CancellationToken cancelToken = default)
-		//{
-		//	if(_authManager == null)
-		//		throw new GeorgeNotInitializedException($"AuthorizationManager is not initialized for service {this.GetType().Name}.");
+        //		res = await _authManager.ValidatePermissionAsync(_authUser!.Id, entityType, entityId, action, cancelToken);
+        //	}
 
-		//	if (_authUser == null)
-		//		return false;
-		//	else if (_authUser.IsMaster)
-		//		return true; // Override permissions.
-
-		//	bool res = await _authManager.ValidatePermissionAsync(_authUser!.Id, entityType, entityIds, action, cancelToken);
-		//	if(res == false)
-		//	{
-		//		// In most cases, when the user is not authorized it is one of two reasons:
-		//		//		1. The cache data is old.
-		//		//		2. It is a bug.
-		//		// We assume that the common case is that the cache is old and therefore we clear the cache and try again.
-		//		_authManager.ClearUserPermissionsCache(_authUser!.Id);
-
-		//		res = await _authManager.ValidatePermissionAsync(_authUser!.Id, entityType, entityIds, action, cancelToken);
-		//	}
-
-		//	return res;
-		//}
+        //	return res;
 
 
-		//protected bool IsValidPassword(/*User user, */string password)
-		//{
-		//	//// Check that the password does not contain the username.
-		//	//if (password.Contains(user.Email, StringComparison.OrdinalIgnoreCase))
-		//	//	return false;
+        //}
 
-		//	//// Check password pattern.
-		//	//var match = Regex.Match(password, PASSWORD_REGEX, RegexOptions.IgnoreCase);
-		//	//if (!match.Success)
-		//	//	return false;
+        //public async Task<bool> ValidatePermissionAsync(EntityType entityType, List<int> entityIds, AuthAction action, CancellationToken cancelToken = default)
+        //{
+        //	if(_authManager == null)
+        //		throw new GeorgeNotInitializedException($"AuthorizationManager is not initialized for service {this.GetType().Name}.");
 
-		//	// Check password length.
-		//	if (password.Trim().Length < MIN_PASSWORD_LENGTH)
-		//		return false;
+        //	if (_authUser == null)
+        //		return false;
+        //	else if (_authUser.IsMaster)
+        //		return true; // Override permissions.
 
-		//	return true;
-		//}
+        //	bool res = await _authManager.ValidatePermissionAsync(_authUser!.Id, entityType, entityIds, action, cancelToken);
+        //	if(res == false)
+        //	{
+        //		// In most cases, when the user is not authorized it is one of two reasons:
+        //		//		1. The cache data is old.
+        //		//		2. It is a bug.
+        //		// We assume that the common case is that the cache is old and therefore we clear the cache and try again.
+        //		_authManager.ClearUserPermissionsCache(_authUser!.Id);
 
-		public bool IsValidPassword(string? userOtp, string? otpRequested, DateTime? expiration)
+        //		res = await _authManager.ValidatePermissionAsync(_authUser!.Id, entityType, entityIds, action, cancelToken);
+        //	}
+
+        //	return res;
+        //}
+
+
+        //protected bool IsValidPassword(/*User user, */string password)
+        //{
+        //	//// Check that the password does not contain the username.
+        //	//if (password.Contains(user.Email, StringComparison.OrdinalIgnoreCase))
+        //	//	return false;
+
+        //	//// Check password pattern.
+        //	//var match = Regex.Match(password, PASSWORD_REGEX, RegexOptions.IgnoreCase);
+        //	//if (!match.Success)
+        //	//	return false;
+
+        //	// Check password length.
+        //	if (password.Trim().Length < MIN_PASSWORD_LENGTH)
+        //		return false;
+
+        //	return true;
+        //}
+
+        public bool IsValidPassword(string? userOtp, string? otpRequested, DateTime? expiration)
 		{
 			if(!userOtp.HasValue() || !otpRequested.HasValue())
 				return false;

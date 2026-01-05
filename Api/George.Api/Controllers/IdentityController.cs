@@ -48,27 +48,43 @@ namespace George.Api.Controllers
 		public async Task<IActionResult> LogoutAsync(CancellationToken cancelToken = default)
 		{
 			return await SafeCallWithErrorCatchingAsync(() => _identitySvc.LogoutAsync(cancelToken));
-		}
+        }
 
-		//[AllowAnonymous]
-		//[HttpPost("Login/Otp/Send")]
-		//[ProducesResponseType(typeof(IApiResponse<bool>), 200)]
-		//public async Task<IActionResult> SendLoginOtpAsync(SendLoginOtpReq request, CancellationToken cancelToken = default)
-		//{
-		//	return await SafeCallWithErrorCatchingAsync(() => _identitySvc.SendLoginOtpAsync(request, cancelToken));
-		//}
+        [AllowAnonymous]
+        [HttpPost("Login/Otp/Send")]
+        [ProducesResponseType(typeof(IApiResponse<bool>), 200)]
+        public async Task<IActionResult> SendLoginOtpAsync(SendLoginOtpReq request, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _identitySvc.SendLoginOtpAsync(request, cancelToken));
+        }
+
+        [AllowAnonymous]
+        [HttpPost("LoginWithOtpAsync")]
+        [ProducesResponseType(typeof(IApiResponse<AuthRes>), 200)]
+        public async Task<IActionResult> LoginWithOtpAsync(LoginWithOtpReq request, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _identitySvc.LoginWithOtpAsync(request, cancelToken));
+        }
+
+        //[AllowAnonymous]
+        //[HttpPost("Login/Otp/Send")]
+        //[ProducesResponseType(typeof(IApiResponse<bool>), 200)]
+        //public async Task<IActionResult> SendLoginOtpAsync(SendLoginOtpReq request, CancellationToken cancelToken = default)
+        //{
+        //	return await SafeCallWithErrorCatchingAsync(() => _identitySvc.SendLoginOtpAsync(request, cancelToken));
+        //}
 
 
 
 
-		//[HttpGet("Permissions")]
-		//[ProducesResponseType(typeof(IApiResponse<UserPermissions>), 200)]
-		//public async Task<IActionResult> GetPermissionsAsync(CancellationToken cancelToken = default)
-		//{
-		//	return await SafeCallWithErrorCatchingAsync(() => _identitySvc.GetPermissionsAsync(cancelToken));
-		//}
+        //[HttpGet("Permissions")]
+        //[ProducesResponseType(typeof(IApiResponse<UserPermissions>), 200)]
+        //public async Task<IActionResult> GetPermissionsAsync(CancellationToken cancelToken = default)
+        //{
+        //	return await SafeCallWithErrorCatchingAsync(() => _identitySvc.GetPermissionsAsync(cancelToken));
+        //}
 
-		[HttpGet("Profile")]
+        [HttpGet("Profile")]
 		[ProducesResponseType(typeof(IApiResponse<ProfileRes>), 200)]
 		public async Task<IActionResult> GetProfileAsync(CancellationToken cancelToken = default)
 		{

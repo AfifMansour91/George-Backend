@@ -65,11 +65,14 @@ namespace George.Common
 		
 		public bool UseLocalStorage { get; set; } = false;
 
+        public int StaticUserId { get; set; } = 999999999;
+        public string? StaticUserOtp { get; set; } = "181818";
 
 
 
-		//*************************    Public Methods    *************************//
-		public string? GetParameter(string parameterName, string? defaultValue = default)
+
+        //*************************    Public Methods    *************************//
+        public string? GetParameter(string parameterName, string? defaultValue = default)
 		{
 			var config = this.Configs.Where(a => a.Key.Equals(parameterName, StringComparison.OrdinalIgnoreCase)).FirstOrDefault();
 			if (config == null)

@@ -134,11 +134,124 @@ namespace George.Services
 			}
 
 			return response;
-		}
+        }
+
+        public async Task<IApiResponse<bool>> SendLoginOtpAsync(SendLoginOtpReq request, CancellationToken cancelToken = default)
+        {
+            IApiResponse<bool> response = new ApiResponse<bool>();
+
+            // format the phone number.
+            //request.Phone = PhoneUtils.FormatPhone(request.Phone)!;
+
+            // Get the data from the DB.
+            User? model = await _userStorage.GetUserByPhoneAsync(request.Phone, cancelToken).ConfigureAwait(false);
+            if (model == null)
+                return CreateResponse(response, StatusCode.InvalidRequest);
+
+            // Check if the user is active/pending.
+            if (model.StatusId != (int)UserStatus.Active && model.StatusId != (int)UserStatus.Pending)
+                return CreateResponse(response, StatusCode.BlockedUser);
+
+            // Verify user lockout.
+            if (model.LockoutExpiration.HasValue && DateTime.UtcNow <= model.LockoutExpiration)
+                return CreateResponse(response, StatusCode.UserLockedOut);
+
+            // Check if the lock out expiration time has passed.
+            if (model.LockoutExpiration.HasValue && DateTime.UtcNow > model.LockoutExpiration)
+                // Reset the lockout fail count.
+                model.LockoutFailCount = 0;
+            else
+                // Increment the lockout fail count.
+                model.LockoutFailCount++;
+
+            // Update the lockout fail count.
+            await UpdateUserLockoutFailCountAsync(model.Id, model.LockoutFailCount, cancelToken);
+
+            // Check again if the user is locked out. (After LockoutFailCount changed)
+            if (model.LockoutFailCount > SysConfig.Data.MaxFailCountBeforeLockout)
+                return CreateResponse(response, StatusCode.UserLockedOut);
+
+            //// Should override?
+            //string? overrideOtp;
+            //if (model.Id == SysConfig.Data.StaticUserId)
+            //    overrideOtp = SysConfig.Data.StaticUserOtp;
+            //else
+            //    overrideOtp = Globals.OverrideOtp;
+            //if (overrideOtp.HasValue())
+            //{
+            //    // Set the override otp.
+            //    await _dbStorage.Users.SetOverrideLoginUserOtpAsync(model.Id, overrideOtp, cancelToken).ConfigureAwait(false);
+
+            //    // Set the response.
+            //    response.Data = true;
+            //}
+            //else
+            //{
+                // Set user otp.
+                //string? otp = await _userStorage.SetLoginUserOtpAsync(model.Id, cancelToken).ConfigureAwait(false);
+                //if (otp.HasValue())
+                //{
+                //    //string phone = await GetFormattedPhone(model.CountryId, model.Phone, cancelToken)!;
+
+                //    // Send the otp and set the response.
+                //    //response.Data = await _smsProvider.SendLoginMessageAsync(model.Phone, model.LanguageId, otp!, cancelToken).ConfigureAwait(false);
+                //}
+            //}
+
+            return response;
+        }
+        public async Task<IApiResponse<AuthRes>> LoginWithOtpAsync(LoginWithOtpReq request, CancellationToken cancelToken = default)
+        {
+            IApiResponse<AuthRes> response = new ApiResponse<AuthRes>();
+
+            // format the phone number.
+            //request.Phone = PhoneUtils.FormatPhone(request.Phone)!;
+
+            // Get the data from the DB.
+            User? user = await _userStorage.GetUserByPhoneAsync(request.Phone, cancelToken).ConfigureAwait(false);
+            if (user == null)
+                return CreateResponse(response, StatusCode.InvalidCredentials);
+
+            // Check if the user's status can be changed from Pending to Active.
+            if (user.StatusId == (int)UserStatus.Pending)
+                user.StatusId = (int)UserStatus.Active;
+
+            if (user.StatusId == (int)UserStatus.Blocked)
+                return CreateResponse(response, StatusCode.BlockedUser);
+
+            // Verify user lockout.
+            if (user.LockoutExpiration.HasValue && DateTime.UtcNow <= user.LockoutExpiration)
+                return CreateResponse(response, StatusCode.UserLockedOut);
+
+            //// Verify the otp.
+            //bool isValid = IsValidOtp(user.Otp, request.Otp, user.OtpExpiration);
+            //if (!isValid)
+            //{
+            //    // Increment the lockout fail count.
+            //    user.LockoutFailCount++;
+
+            //    // Update the lockout fail count.
+            //    await UpdateUserLockoutFailCountAsync(user.Id, user.LockoutFailCount, cancelToken);
+
+            //    return CreateResponse(response, StatusCode.InvalidOtp);
+            //}
+
+            //// Create the token.
+            //response.Data = _authHelper.CreateAuthenticationToken(user.Id, /*user.IsMaster,*/ user.LanguageId/*, request.DeviceId*/);
+
+            //// Set the user's status.
+            //response.Data.StatusId = (UserStatus)user.StatusId;
+
+            //// Update user's login.
+            //var res = await _dbStorage.Users.UpdateUserLoginAsync(user.Id, response.Data.RefreshToken!, response.Data.RefreshTokenExpiration,
+            //    (UserStatus)user.StatusId, cancelToken).ConfigureAwait(false);
+
+            return response;
+        }
 
 
 
-		public async Task<IApiResponse<ProfileRes>> GetProfileAsync(CancellationToken cancelToken = default)
+        public async Task<IApiResponse<ProfileRes>> GetProfileAsync(CancellationToken cancelToken = default)
 		{
 			IApiResponse<ProfileRes> response = new ApiResponse<ProfileRes>();
 

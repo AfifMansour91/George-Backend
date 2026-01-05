@@ -109,10 +109,22 @@ namespace George.Data
 			// Get the data from the DB.
 			return await _dbContext.Users.AsNoTracking()
 					.FirstOrDefaultAsync(a => a.Email == email, cancelToken).ConfigureAwait(false);
-		}
+        }
+
+        public async Task<User?> GetUserByPhoneAsync(string phone, CancellationToken cancelToken = default)
+        {
+            return await _dbContext.Users.AsNoTracking()
+                            .FirstOrDefaultAsync(a => a.Phone == phone, cancelToken);
+        }
+
+        //public async Task<string?> SetLoginUserOtpAsync(int id, CancellationToken cancelToken = default)
+        //{
+        //    // Set the otp in the DB.
+        //    return await _dbContext.StoredProcedures.SetLoginUserOtpAsync(id, SysConfig.Data.OtpExpirationInMin, cancelToken).ConfigureAwait(false);
+        //}
 
 
-		public async Task<bool> IsEmailExistAsync(string email, CancellationToken cancelToken = default)
+        public async Task<bool> IsEmailExistAsync(string email, CancellationToken cancelToken = default)
 		{
 			if (!email.HasValue())
 				return false;
