@@ -152,6 +152,14 @@ namespace George.Api.Core
 			app.UseAuthentication();
 
 			app.UseRouting();
+#if DEBUG
+            //// Serve C:\FileStorage as /files
+            //app.UseStaticFiles(new StaticFileOptions
+            //{
+            //    FileProvider = new PhysicalFileProvider(@"C:\FileStorage"),
+            //    RequestPath = "/files"
+            //});
+#endif
 			app.UseCors("AllowAllPolicy");
 			app.UseAuthorization();
 
