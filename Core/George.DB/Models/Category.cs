@@ -51,6 +51,8 @@ public partial class Category
 
     public int? SourceGlobalCategoryId { get; set; }
 
+    public int? WooCommerceId { get; set; }
+
     [ForeignKey("AccountId")]
     [InverseProperty("Categories")]
     public virtual Account? Account { get; set; }

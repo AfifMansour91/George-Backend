@@ -33,6 +33,8 @@ public partial class ProductVariant
 
     public bool IsDeleted { get; set; }
 
+    public int? WooCommerceVariationId { get; set; }
+
     [ForeignKey("ProductId")]
     [InverseProperty("ProductVariants")]
     public virtual Product Product { get; set; } = null!;

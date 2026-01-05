@@ -96,6 +96,8 @@ public partial class Product
 
     public int? AccountId { get; set; }
 
+    public int? WooCommerceId { get; set; }
+
     [ForeignKey("BrandId")]
     [InverseProperty("Products")]
     public virtual Brand? Brand { get; set; }

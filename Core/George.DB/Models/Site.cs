@@ -55,6 +55,15 @@ public partial class Site
     [StringLength(10)]
     public string Currency { get; set; } = null!;
 
+    [StringLength(500)]
+    public string? WooCommerceUrl { get; set; }
+
+    [StringLength(250)]
+    public string? WooCommerceKey { get; set; }
+
+    [StringLength(250)]
+    public string? WooCommerceSecret { get; set; }
+
     [ForeignKey("AccountId")]
     [InverseProperty("Sites")]
     public virtual Account Account { get; set; } = null!;
