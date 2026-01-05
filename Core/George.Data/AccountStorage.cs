@@ -22,7 +22,7 @@ namespace George.Data
             var query = _dbContext.Accounts
                 .Include(a => a.Users)
                 .Include(a => a.Manager)
-                .Include(a => a.Status)
+                //.Include(a => a.Status)
                 .Include(a => a.WizardStatus)
                 .Include(a => a.WizardType)
                 .Include(a => a.ContentOwner)
@@ -80,7 +80,7 @@ namespace George.Data
             return await _dbContext.Accounts
                 .Include(a => a.Users)
                 .Include(a => a.Manager)
-                .Include(a => a.Status)
+                //.Include(a => a.Status)
                 .Include(a => a.WizardStatus)
                 .Include(a => a.WizardType)
                 .Include(a => a.ContentOwner)

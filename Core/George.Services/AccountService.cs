@@ -103,6 +103,8 @@ namespace George.Services
 
             // ensure or create a user for the manager
             var managerUser = await _userStorage.GetUserByEmailAsync(req.ManagerEmail, cancelToken);
+            var isExistingUser = managerUser != null;
+            
             if (managerUser == null)
             {
                 // Hash password
@@ -139,6 +141,7 @@ namespace George.Services
                 Phone = req.AccountPhone,
                 ManagerName = req.ManagerName,
                 ManagerEmail = req.ManagerEmail,
+                ManagerId = managerUser.Id, // Set the manager ID
                 //contentOwnerId = req.ContentOwnerId, TODO: lookup later
                 Status = req.Status,
                 //WizardStatus = req.WizardStatus, TODO: lookup later
@@ -147,10 +150,29 @@ namespace George.Services
 
                 IsActive = true,
                 CreationTime = DateTime.UtcNow,
-                Users = new List<User> { managerUser },
+                //Users = new List<User> { managerUser },
             };
 
             acc = await _accountStorage.CreateAccountAsync(acc, cancelToken);
+
+            // If using an existing user, update their AccountId to link them to this account
+            if (isExistingUser)
+            {
+                managerUser.AccountId = acc.Id;
+                // Optionally update role to AccountAdmin if not already set
+                if (managerUser.RoleId != (int)UserRole.AccountAdmin && managerUser.RoleId != (int)UserRole.Admin)
+                {
+                    managerUser.RoleId = (int)UserRole.AccountAdmin;
+                }
+                await _userStorage.UpdateUserAsync(managerUser, cancelToken);
+            }
+            else
+            {
+                // For new users, the AccountId should already be set via the Users collection relationship
+                // But let's also set it explicitly to be safe
+                managerUser.AccountId = acc.Id;
+                await _userStorage.UpdateUserAsync(managerUser, cancelToken);
+            }
 
             // link account-user as Admin
             //await _accountStorage.AddAccountUserAsync(acc.Id, managerUser.Id, (int)UserRole.Admin, cancelToken);
@@ -201,10 +223,17 @@ namespace George.Services
         {
             var response = new ApiResponse<AccountRes>();
 
+            // Get existing account to preserve fields not being updated
+            var existingAccount = await _accountStorage.GetAccountAsync(accountId, cancelToken);
+            if (existingAccount == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
+
             var model = new Account
             {
                 Id = accountId,
-                Name = req.Name,
+                // Preserve existing name if not provided or empty, otherwise use provided name
+                Name = string.IsNullOrWhiteSpace(req.Name) ? existingAccount.Name : req.Name,
+                // Update IsActive (required field in UpdateAccountReq, so always provided)
                 IsActive = req.IsActive,
                 UpdatedDate = DateTime.UtcNow
             };

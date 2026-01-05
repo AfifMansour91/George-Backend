@@ -91,6 +91,7 @@ namespace George.Services
             CreateMap<Site, SiteRes>()
                 .AfterMap((src, dest, context) =>
                 {
+                    dest.Id = src.Id;
                     // Map business types
                     if (src.BusinessTypes != null && src.BusinessTypes.Any())
                     {

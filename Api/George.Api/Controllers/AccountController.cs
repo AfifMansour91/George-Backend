@@ -51,6 +51,13 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _accountSvc.UpdateAccountAsync(accountId, req, cancelToken));
         }
 
+        [HttpDelete("{accountId:int}")]
+        [ProducesResponseType(typeof(IApiResponse<AccountRes?>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> DeleteAccountAsync([FromRoute] int accountId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _accountSvc.DeleteAccountAsync(accountId, cancelToken));
+        }
+
         //[HttpGet("{accountId:long}/WizardSession")]
         //[ProducesResponseType(typeof(IApiResponse<WizardSessionRes>), 200)]
         //public async Task<IActionResult> GetWizardSessionAsync([FromRoute] long accountId, CancellationToken cancelToken = default)
