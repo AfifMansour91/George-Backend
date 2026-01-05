@@ -413,7 +413,7 @@ export interface Category {
 
 export interface Site {
   id?: string;
-  account_id: string;
+  accountIdd: string;
   site_name: string;
   location?: string;
   description?: string;

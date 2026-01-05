@@ -60,7 +60,7 @@ namespace George.Data
             query = query.OrderBy(a => a.Name);
 
             // Add paging.
-            query = query.Skip(paging.Skip).Take(paging.Take);
+            //query = query.Skip(paging.Skip).Take(paging.Take);
 
             //// Add includes.
             //query = query.Include(a => a.Organization)
