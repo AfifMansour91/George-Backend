@@ -109,7 +109,7 @@
 
 **Expected Client Schema:**
 - `client_role`: enum `["super_admin", "account_admin", "site_admin"]`
-- `accountIdd`: string
+- `accountId`: string
 - `site_ids`: array of strings
 - `status`: enum `["active", "inactive", "suspended"]`
 
