@@ -116,7 +116,7 @@ namespace George.Services
                     FirstName = req.ManagerName, // later split
                     LastName = "",
                     Email = req.ManagerEmail,
-                    Password = passwordHash,
+                    Password = password,//passwordHash,
                     IsEmailVerified = false,
                     StatusId = (int)Common.UserStatus.Active,
                     RoleId = (int)UserRole.AccountAdmin, // or whatever role means client admin

@@ -235,7 +235,7 @@ namespace George.Services
 			string newPasswordHash = Cryptography.GeneratePasswordHash(request.NewPassword);
 
 			// Update password
-			user.Password = newPasswordHash;
+			user.Password = request.NewPassword; // newPasswordHash;
 			await _userStorage.UpdateUserPasswordAsync(user.Id, newPasswordHash, cancelToken).ConfigureAwait(false);
 
 			response.Data = true;
