@@ -159,5 +159,18 @@ namespace George.Data
             await _dbContext.SaveChangesAsync(cancelToken);
             return true;
         }
+
+        public async Task<bool> UpdateCategoryWooCommerceIdAsync(int categoryId, int? wooCommerceId, CancellationToken cancelToken)
+        {
+            var category = await _dbContext.Categories
+                .FirstOrDefaultAsync(c => c.Id == categoryId, cancelToken);
+
+            if (category == null) return false;
+
+            category.WooCommerceId = wooCommerceId;
+            category.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return true;
+        }
     }
 }

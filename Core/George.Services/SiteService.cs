@@ -81,14 +81,28 @@ namespace George.Services
         }
 
         // 3. Update site settings (kosher/weighted/shop name)
+        // Note: siteId comes from route parameter, ensuring updates are always by ID, not by name
         public async Task<IApiResponse<SiteRes>> UpdateSiteAsync(int siteId, UpdateSiteReq req, CancellationToken cancelToken)
         {
             var response = new ApiResponse<SiteRes>();
 
+            // Get existing site to preserve AccountId if not provided
+            // Always use the ID from the route parameter, not from the request body
+            var existingSite = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+            if (existingSite == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
+
             // Convert to EF model
             Site? model = _mapper.Map<Site>(req);
+            // Always use the ID from the route parameter to ensure updates are by ID, not by name
             model.Id = siteId;
             model.UpdateUserId = AuthUser.Id;
+            
+            // Preserve AccountId from existing site if not provided in request
+            if (model.AccountId == 0)
+            {
+                model.AccountId = existingSite.AccountId;
+            }
 
             // Update the data in the DB.
             model = await _siteStorage.UpdateSiteAsync(model, req.BusinessTypeIds, cancelToken).ConfigureAwait(false);

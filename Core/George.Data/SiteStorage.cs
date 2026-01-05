@@ -97,17 +97,20 @@ namespace George.Data
 
             if (dbSite == null) return null;
 
-            dbSite.SiteName = updated.SiteName;
+            dbSite.SiteName = updated.SiteName ?? dbSite.SiteName;
             dbSite.AccountId = updated.AccountId;
-            dbSite.Location = updated.Location;
-            dbSite.Description = updated.Description;
-            dbSite.Status = updated.Status;
-            dbSite.ContactEmail = updated.ContactEmail;
-            dbSite.ContactPhone = updated.ContactPhone;
-            dbSite.IsKosherSite = updated.IsKosherSite;
-            dbSite.AllowWeightedProducts = updated.AllowWeightedProducts;
-            dbSite.Currency = updated.Currency;
-            dbSite.IsActive = updated.IsActive;
+            dbSite.Location = updated.Location ?? dbSite.Location;
+            dbSite.Description = updated.Description ?? dbSite.Description;
+            dbSite.Status = updated.Status ?? dbSite.Status;
+            dbSite.ContactEmail = updated.ContactEmail ?? dbSite.ContactEmail;
+            dbSite.ContactPhone = updated.ContactPhone ?? dbSite.ContactPhone;
+            dbSite.IsKosherSite = updated.IsKosherSite ?? dbSite.IsKosherSite;
+            dbSite.AllowWeightedProducts = updated.AllowWeightedProducts ?? dbSite.AllowWeightedProducts;
+            dbSite.Currency = updated.Currency ?? dbSite.Currency;
+            dbSite.WooCommerceUrl = updated.WooCommerceUrl ?? dbSite.WooCommerceUrl;
+            dbSite.WooCommerceKey = updated.WooCommerceKey ?? dbSite.WooCommerceKey;
+            dbSite.WooCommerceSecret = updated.WooCommerceSecret ?? dbSite.WooCommerceSecret;
+            dbSite.IsActive = updated.IsActive || dbSite.IsActive;
             dbSite.UpdatedDate = DateTime.UtcNow;
 
             // Update business types

@@ -7,9 +7,7 @@ namespace George.Services.Request
     {
         [Required]
         public int AccountId { get; set; }
-        
-        [Required]
-        public string SiteName { get; set; } = null!;
+        public string? SiteName { get; set; } = null!;
         
         public string? Location { get; set; }
         public string? Description { get; set; }
@@ -20,6 +18,9 @@ namespace George.Services.Request
         public bool? IsKosherSite { get; set; }
         public bool? AllowWeightedProducts { get; set; }
         public string Currency { get; set; } = "ILS";
+        public string? WooCommerceUrl { get; set; }
+        public string? WooCommerceKey { get; set; }
+        public string? WooCommerceSecret { get; set; }
     }
 
     public class CreateSiteReq : SiteReq
@@ -28,8 +29,7 @@ namespace George.Services.Request
 
     public class UpdateSiteReq : SiteReq
     {
-        [Required]
-        [ValidId]
-        public int Id { get; set; }
+        // Note: Id is not included here because it comes from the route parameter, not the request body
+        // This ensures updates are always by ID from the route, not from the request body
     }
 }

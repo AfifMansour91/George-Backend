@@ -17,5 +17,8 @@
         public bool? IsKosherSite { get; set; }
         public bool? AllowWeightedProducts { get; set; }
         public string Currency { get; set; } = "ILS";
+        public string? WooCommerceUrl { get; set; }
+        public string? WooCommerceKey { get; set; }
+        public string? WooCommerceSecret { get; set; }
     }
 }

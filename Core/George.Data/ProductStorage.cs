@@ -287,6 +287,31 @@ namespace George.Data
             return true;
         }
 
+        public async Task<bool> UpdateProductWooCommerceIdAsync(int productId, int? wooCommerceId, CancellationToken cancelToken)
+        {
+            var product = await _dbContext.Products
+                .FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
+
+            if (product == null) return false;
+
+            product.WooCommerceId = wooCommerceId;
+            product.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return true;
+        }
+
+        public async Task<bool> UpdateProductVariantWooCommerceIdAsync(int variantId, int? wooCommerceVariationId, CancellationToken cancelToken)
+        {
+            var variant = await _dbContext.ProductVariants
+                .FirstOrDefaultAsync(pv => pv.Id == variantId, cancelToken);
+
+            if (variant == null) return false;
+
+            variant.WooCommerceVariationId = wooCommerceVariationId;
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return true;
+        }
+
         // Helper methods for service layer
         public async Task CreateProductImagesAsync(int productId, List<string> imageUrls, CancellationToken cancelToken)
         {
