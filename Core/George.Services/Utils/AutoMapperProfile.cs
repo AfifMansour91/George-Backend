@@ -55,9 +55,9 @@ namespace George.Services
                             Name = src.WizardStatus.Name
                         }
                         : null;
-                    dest.WizardStatus = src.Status == null
-                        ? "Not Started"
-                        : (src.Status == "Completed" ? "Completed" : "In Progress");
+                    dest.WizardStatus = src.WizardStatus != null
+                        ? src.WizardStatus.Name
+                        : "Not Started";
 
                     dest.WizardTypeIdNamePair = src.WizardType != null
                         ? new IdNamePair

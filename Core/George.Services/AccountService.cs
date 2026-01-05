@@ -228,6 +228,24 @@ namespace George.Services
             if (existingAccount == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
 
+            // Map WizardStatus string to WizardStatusId
+            // 1 = "Not Started", 2 = "In Progress", 3 = "Completed"
+            int? wizardStatusId = null;
+            if (!string.IsNullOrWhiteSpace(req.WizardStatus))
+            {
+                wizardStatusId = req.WizardStatus switch
+                {
+                    "Not Started" => 1,
+                    "In Progress" => 2,
+                    "Completed" => 3,
+                    _ => existingAccount.WizardStatusId
+                };
+            }
+            else
+            {
+                wizardStatusId = existingAccount.WizardStatusId;
+            }
+
             var model = new Account
             {
                 Id = accountId,
@@ -235,6 +253,10 @@ namespace George.Services
                 Name = string.IsNullOrWhiteSpace(req.Name) ? existingAccount.Name : req.Name,
                 // Update IsActive (required field in UpdateAccountReq, so always provided)
                 IsActive = req.IsActive,
+                // Update WizardStep if provided, otherwise preserve existing
+                WizardStep = req.WizardStep ?? existingAccount.WizardStep,
+                // Update WizardStatusId if provided, otherwise preserve existing
+                WizardStatusId = wizardStatusId,
                 UpdatedDate = DateTime.UtcNow
             };
 
@@ -242,12 +264,12 @@ namespace George.Services
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
 
-            response.Data = new AccountRes
-            {
-                Id = updated.Id,
-                AccountName = updated.Name,
-                IsActive = updated.IsActive,
-            };
+            // Reload account with includes to get full details
+            var fullAccount = await _accountStorage.GetAccountAsync(accountId, cancelToken);
+            if (fullAccount == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
+
+            response.Data = _mapper.Map<AccountRes>(fullAccount);
 
             return response;
         }

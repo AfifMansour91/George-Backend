@@ -229,6 +229,8 @@
         public bool IsActive { get; set; }
         public bool IsKosherShop { get; set; }
         public bool AllowWeighted { get; set; }
+        public int? WizardStep { get; set; }
+        public string? WizardStatus { get; set; }
     }
 
     public class UpdateWizardSessionReq

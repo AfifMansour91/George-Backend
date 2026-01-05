@@ -105,6 +105,18 @@ namespace George.Data
             dbAcc.Name = updated.Name;
             dbAcc.IsActive = updated.IsActive;
             dbAcc.UpdatedDate = DateTime.UtcNow;
+            
+            // Update WizardStep if provided
+            if (updated.WizardStep.HasValue)
+            {
+                dbAcc.WizardStep = updated.WizardStep;
+            }
+            
+            // Update WizardStatusId if provided
+            if (updated.WizardStatusId.HasValue)
+            {
+                dbAcc.WizardStatusId = updated.WizardStatusId;
+            }
 
             await _dbContext.SaveChangesAsync(cancelToken);
             return dbAcc;
