@@ -485,3 +485,4 @@ export interface Site {
 - **Performance:** Consider indexing on SiteId in junction tables
 - **Backward Compatibility:** Keep AccountId for existing queries if needed
 
+

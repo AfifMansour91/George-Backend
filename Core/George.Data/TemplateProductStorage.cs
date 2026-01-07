@@ -518,16 +518,56 @@ namespace George.Data
             if (req.Brand.HasValue())
             {
                 var brand = await _dbContext.Brands
-                    .FirstOrDefaultAsync(b => b.Name == req.Brand, cancelToken);
-                templateProduct.BrandId = brand?.Id;
+                    .FirstOrDefaultAsync(b => b.Name == req.Brand && !b.IsDeleted, cancelToken);
+                
+                if (brand == null)
+                {
+                    // Create brand if it doesn't exist (for template products, AccountId is null)
+                    brand = new Brand
+                    {
+                        Name = req.Brand.Trim(),
+                        AccountId = null, // Template products use global brands
+                        IsDeleted = false,
+                        CreationTime = DateTime.UtcNow,
+                        CreationUserId = null
+                    };
+                    _dbContext.Brands.Add(brand);
+                    await _dbContext.SaveChangesAsync(cancelToken);
+                }
+                templateProduct.BrandId = brand.Id;
+            }
+            else
+            {
+                // If empty or null, set to null
+                templateProduct.BrandId = null;
             }
 
             // Map supplier
             if (req.Supplier.HasValue())
             {
                 var supplier = await _dbContext.Suppliers
-                    .FirstOrDefaultAsync(s => s.Name == req.Supplier, cancelToken);
-                templateProduct.SupplierId = supplier?.Id;
+                    .FirstOrDefaultAsync(s => s.Name == req.Supplier && !s.IsDeleted, cancelToken);
+                
+                if (supplier == null)
+                {
+                    // Create supplier if it doesn't exist (for template products, AccountId is null)
+                    supplier = new Supplier
+                    {
+                        Name = req.Supplier.Trim(),
+                        AccountId = null, // Template products use global suppliers
+                        IsDeleted = false,
+                        CreationTime = DateTime.UtcNow,
+                        CreationUserId = null
+                    };
+                    _dbContext.Suppliers.Add(supplier);
+                    await _dbContext.SaveChangesAsync(cancelToken);
+                }
+                templateProduct.SupplierId = supplier.Id;
+            }
+            else
+            {
+                // If empty or null, set to null
+                templateProduct.SupplierId = null;
             }
 
             // Map weight config
