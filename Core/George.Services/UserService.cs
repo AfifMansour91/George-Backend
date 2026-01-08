@@ -256,23 +256,33 @@ namespace George.Services
 				}
 			}
 
-			// Update user model
-			var user = new User
-			{
-				Id = request.Id,
-				FirstName = request.FirstName ?? existingUser.FirstName,
-				LastName = request.LastName ?? existingUser.LastName,
-				Email = request.Email ?? existingUser.Email,
-				Phone = request.Phone ?? existingUser.Phone,
-				AccountId = request.AccountId ?? existingUser.AccountId,
-				RoleId = request.RoleId ?? existingUser.RoleId,
-				StatusId = request.StatusId ?? existingUser.StatusId,
-				AvatarUrl = request.AvatarUrl ?? existingUser.AvatarUrl,
-				UpdateUserId = _authUser?.Id,
-			};
+		// Update user model
+		var user = new User
+		{
+			Id = request.Id,
+			FirstName = request.FirstName ?? existingUser.FirstName,
+			LastName = request.LastName ?? existingUser.LastName,
+			Email = request.Email ?? existingUser.Email,
+			Phone = request.Phone ?? existingUser.Phone,
+			AccountId = request.AccountId ?? existingUser.AccountId,
+			RoleId = request.RoleId ?? existingUser.RoleId,
+			StatusId = request.StatusId ?? existingUser.StatusId,
+			AvatarUrl = request.AvatarUrl ?? existingUser.AvatarUrl,
+			UpdateUserId = _authUser?.Id,
+		};
 
-			// Update in DB
-			User? updatedUser = await _userStorage.UpdateUserAsync(user, cancelToken).ConfigureAwait(false);
+		// Update password only if provided (not null or empty)
+		if (!string.IsNullOrWhiteSpace(request.Password))
+		{
+			user.Password = request.Password; // Store as plain text (same as CreateUserAsync)
+		}
+		else
+		{
+			user.Password = existingUser.Password; // Keep existing password
+		}
+
+		// Update in DB
+		User? updatedUser = await _userStorage.UpdateUserAsync(user, cancelToken).ConfigureAwait(false);
 
 			if (updatedUser != null)
 			{

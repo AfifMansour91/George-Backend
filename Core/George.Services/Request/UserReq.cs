@@ -58,6 +58,8 @@ namespace George.Services
 		[StringLength(50)]
 		public string? Phone { get; set; }
 
+		public string? Password { get; set; }
+
 		public int? AccountId { get; set; }
 
 		public int? RoleId { get; set; } // UserRole: 1=Admin, 2=AccountAdmin, 3=SiteAdmin

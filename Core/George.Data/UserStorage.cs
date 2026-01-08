@@ -398,15 +398,20 @@ namespace George.Data
 				dbModel.Email = user.Email;
 			}
 
-			if (user.Phone != null)
-			{
-				dbModel.Phone = user.Phone;
-			}
+		if (user.Phone != null)
+		{
+			dbModel.Phone = user.Phone;
+		}
 
-			if (user.AccountId.HasValue)
-			{
-				dbModel.AccountId = user.AccountId;
-			}
+		if (user.Password != null)
+		{
+			dbModel.Password = user.Password;
+		}
+
+		if (user.AccountId.HasValue)
+		{
+			dbModel.AccountId = user.AccountId;
+		}
 
 			if (user.RoleId > 0)
 			{
