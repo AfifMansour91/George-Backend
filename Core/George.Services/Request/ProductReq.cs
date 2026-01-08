@@ -67,6 +67,8 @@ namespace George.Services.Request
         public WeightConfigReq? WeightConfig { get; set; }
         public List<int>? SiteIds { get; set; } // Empty = all sites
         public int? AccountId { get; set; }
+        public string? SeoTitle { get; set; }
+        public string? SeoDescription { get; set; }
     }
 
     public class CreateProductReq : ProductReq

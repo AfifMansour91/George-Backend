@@ -205,6 +205,8 @@ namespace George.Data
             dbProduct.ShippingClassId = updated.ShippingClassId;
             dbProduct.SetupTypeId = updated.SetupTypeId;
             dbProduct.WeightConfigId = updated.WeightConfigId;
+            dbProduct.SeoTitle = updated.SeoTitle;
+            dbProduct.SeoDescription = updated.SeoDescription;
             dbProduct.UpdatedDate = DateTime.UtcNow;
             dbProduct.UpdateUserId = updated.UpdateUserId;
 

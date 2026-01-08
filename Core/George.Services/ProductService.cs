@@ -209,7 +209,9 @@ namespace George.Services
                 Weight = req.Weight,
                 IsKosher = req.IsKosher,
                 IsWeighted = req.IsWeighted,
-                AccountId = req.AccountId
+                AccountId = req.AccountId,
+                SeoTitle = req.SeoTitle,
+                SeoDescription = req.SeoDescription
             };
         }
 
@@ -235,7 +237,9 @@ namespace George.Services
                 Weight = product.Weight,
                 IsKosher = product.IsKosher,
                 IsWeighted = product.IsWeighted,
-                AccountId = product.AccountId
+                AccountId = product.AccountId,
+                SeoTitle = product.SeoTitle,
+                SeoDescription = product.SeoDescription
             };
 
             // Map images

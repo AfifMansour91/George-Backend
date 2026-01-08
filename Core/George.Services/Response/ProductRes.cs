@@ -66,6 +66,8 @@ namespace George.Services.Response
         public WeightConfigRes? WeightConfig { get; set; }
         public List<int> SiteIds { get; set; } = new(); // Empty = all sites
         public int? AccountId { get; set; }
+        public string? SeoTitle { get; set; }
+        public string? SeoDescription { get; set; }
     }
 }
 
