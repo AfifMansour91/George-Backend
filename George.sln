@@ -28,6 +28,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tools", "Tools", "{009793E8
 EndProject
 Project("{00D1A9C2-B5F0-4AF3-8072-F6C62B433612}") = "George.DB.Tools", "Tools\George.DB.Tools\George.DB.Tools.sqlproj", "{F9DCF9BD-0574-42DA-A3DF-CED10AAAA8A8}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "George.Providers", "George.Providers\George.Providers.csproj", "{111DC262-83C8-4305-BCEF-2C193D9E7E1D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -64,6 +66,10 @@ Global
 		{F9DCF9BD-0574-42DA-A3DF-CED10AAAA8A8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F9DCF9BD-0574-42DA-A3DF-CED10AAAA8A8}.Release|Any CPU.Build.0 = Release|Any CPU
 		{F9DCF9BD-0574-42DA-A3DF-CED10AAAA8A8}.Release|Any CPU.Deploy.0 = Release|Any CPU
+		{111DC262-83C8-4305-BCEF-2C193D9E7E1D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{111DC262-83C8-4305-BCEF-2C193D9E7E1D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{111DC262-83C8-4305-BCEF-2C193D9E7E1D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{111DC262-83C8-4305-BCEF-2C193D9E7E1D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -76,6 +82,7 @@ Global
 		{ED52B9C4-C4EC-475F-8184-D77DAAFC8D66} = {B976C1DB-5F80-4801-AD7F-78A8C9380750}
 		{431FCFDF-CF2B-4735-BAFE-E974AE43756B} = {B976C1DB-5F80-4801-AD7F-78A8C9380750}
 		{F9DCF9BD-0574-42DA-A3DF-CED10AAAA8A8} = {009793E8-00AF-463A-A649-C3CFBFE1B728}
+		{111DC262-83C8-4305-BCEF-2C193D9E7E1D} = {1F7C486A-509D-4238-961E-DC21921C7075}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {948DF026-15BF-4ABF-B4EF-FA49D86A89E0}

@@ -74,6 +74,9 @@ public partial class User
 
     public string? Notes { get; set; }
 
+    [Precision(0)]
+    public DateTime? OtpExpiration { get; set; }
+
     [ForeignKey("AccountId")]
     [InverseProperty("Users")]
     public virtual Account? Account { get; set; }

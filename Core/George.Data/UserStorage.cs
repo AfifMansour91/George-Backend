@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using George.Common;
 using George.Common.Utils;
 using George.DB;
+using System;
 
 using Task = System.Threading.Tasks.Task;
 
@@ -117,11 +118,27 @@ namespace George.Data
                             .FirstOrDefaultAsync(a => a.Phone == phone, cancelToken);
         }
 
-        //public async Task<string?> SetLoginUserOtpAsync(int id, CancellationToken cancelToken = default)
-        //{
-        //    // Set the otp in the DB.
-        //    return await _dbContext.StoredProcedures.SetLoginUserOtpAsync(id, SysConfig.Data.OtpExpirationInMin, cancelToken).ConfigureAwait(false);
-        //}
+        public async Task<string?> SetLoginUserOtpAsync(int id, CancellationToken cancelToken = default)
+        {
+            // Generate a 6-digit OTP
+            Random random = new Random();
+            string otp = random.Next(100000, 999999).ToString();
+
+            // Get the user from the DB
+            User? dbModel = await _dbContext.Users
+                                    .Where(a => a.Id == id)
+                                    .FirstOrDefaultAsync(cancelToken);
+            if (dbModel == null)
+                return null;
+
+            // Update OTP
+            dbModel.Otp = otp;
+
+            // Save to the DB
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+
+            return otp;
+        }
 
 
         public async Task<bool> IsEmailExistAsync(string email, CancellationToken cancelToken = default)
@@ -283,7 +300,9 @@ namespace George.Data
 				dbModel.LockoutFailCount = 0;
 				dbModel.RefreshToken = refreshToken;
 				dbModel.RefreshTokenExpiration = refreshTokenExpiration;
-				if (statusId.HasValue)
+                dbModel.Otp = null;
+                dbModel.OtpExpiration = null;
+                if (statusId.HasValue)
 					dbModel.StatusId = (int)statusId.Value;
 
 				// Save to the DB.

@@ -7,6 +7,7 @@ using George.Data;
 using George.DB;
 using Task = System.Threading.Tasks.Task;
 using UserStatus = George.Common.UserStatus;
+using George.Providers;
 
 namespace George.Services
 {
@@ -17,17 +18,19 @@ namespace George.Services
 		private readonly UserStorage _userStorage;
 		private readonly IConfiguration _configuration;
 		private readonly FileStorageManager _fileStorage;
+		private readonly SmsProvider _smsProvider;
 
 
 		//**************************    Construction    **************************//
 		public IdentityService(ILogger<IdentityService> logger, IMapper mapper, CacheManager cache, IConfiguration configuration,
 				UserStorage userStorage, AuthHelper authHelper, /*AuthorizationManager authManager, */
-				FileStorageManager fileStorage) : base(logger, mapper, cache)
+				FileStorageManager fileStorage, SmsProvider smsProvider) : base(logger, mapper, cache)
 		{
 			_authHelper = authHelper;
 			_userStorage = userStorage;
 			_configuration = configuration;
 			_fileStorage = fileStorage;
+			_smsProvider = smsProvider;
 		}
 
 
@@ -171,32 +174,45 @@ namespace George.Services
             if (model.LockoutFailCount > SysConfig.Data.MaxFailCountBeforeLockout)
                 return CreateResponse(response, StatusCode.UserLockedOut);
 
-            //// Should override?
-            //string? overrideOtp;
-            //if (model.Id == SysConfig.Data.StaticUserId)
-            //    overrideOtp = SysConfig.Data.StaticUserOtp;
-            //else
-            //    overrideOtp = Globals.OverrideOtp;
-            //if (overrideOtp.HasValue())
-            //{
-            //    // Set the override otp.
-            //    await _dbStorage.Users.SetOverrideLoginUserOtpAsync(model.Id, overrideOtp, cancelToken).ConfigureAwait(false);
-
-            //    // Set the response.
-            //    response.Data = true;
-            //}
-            //else
-            //{
+            // Should override?
+            string? overrideOtp = null;
+            if (model.Id == SysConfig.Data.StaticUserId)
+                overrideOtp = SysConfig.Data.StaticUserOtp;
+            
+            if (overrideOtp.HasValue())
+            {
+                // Set the override otp directly in the user model
+                model.Otp = overrideOtp;
+                await _userStorage.UpdateUserAsync(model, cancelToken).ConfigureAwait(false);
+                response.Data = true;
+            }
+            else
+            {
                 // Set user otp.
-                //string? otp = await _userStorage.SetLoginUserOtpAsync(model.Id, cancelToken).ConfigureAwait(false);
-                //if (otp.HasValue())
-                //{
-                //    //string phone = await GetFormattedPhone(model.CountryId, model.Phone, cancelToken)!;
-
-                //    // Send the otp and set the response.
-                //    //response.Data = await _smsProvider.SendLoginMessageAsync(model.Phone, model.LanguageId, otp!, cancelToken).ConfigureAwait(false);
-                //}
-            //}
+                string? otp = await _userStorage.SetLoginUserOtpAsync(model.Id, cancelToken).ConfigureAwait(false);
+                if (otp.HasValue() && model.Phone.HasValue())
+                {
+                    // Send the otp via SMS
+                    // Using default language ID (1 for English, can be adjusted based on user preference)
+                    int languageId = 1; // Default to English, can be retrieved from user model if available
+                    bool smsSent = await _smsProvider.SendOtpMessageAsync(model.Phone, languageId, otp!, cancelToken).ConfigureAwait(false);
+                    
+                    if (smsSent)
+                    {
+                        response.Data = true;
+                    }
+                    else
+                    {
+                        _logger.LogError($"Failed to send OTP SMS to phone: {model.Phone}");
+                        return CreateResponse(response, StatusCode.GeneralError, "Failed to send OTP SMS");
+                    }
+                }
+                else
+                {
+                    _logger.LogError($"Failed to generate OTP or phone number is missing for user ID: {model.Id}");
+                    return CreateResponse(response, StatusCode.GeneralError, "Failed to generate OTP");
+                }
+            }
 
             return response;
         }
@@ -223,28 +239,28 @@ namespace George.Services
             if (user.LockoutExpiration.HasValue && DateTime.UtcNow <= user.LockoutExpiration)
                 return CreateResponse(response, StatusCode.UserLockedOut);
 
-            //// Verify the otp.
-            //bool isValid = IsValidOtp(user.Otp, request.Otp, user.OtpExpiration);
-            //if (!isValid)
-            //{
-            //    // Increment the lockout fail count.
-            //    user.LockoutFailCount++;
+			// Verify the otp.
+			bool isValid = IsValidOtp(user.Otp, request.Otp, user.OtpExpiration);
+			if (!isValid)
+			{
+				// Increment the lockout fail count.
+				user.LockoutFailCount++;
 
-            //    // Update the lockout fail count.
-            //    await UpdateUserLockoutFailCountAsync(user.Id, user.LockoutFailCount, cancelToken);
+				// Update the lockout fail count.
+				await UpdateUserLockoutFailCountAsync(user.Id, user.LockoutFailCount, cancelToken);
 
-            //    return CreateResponse(response, StatusCode.InvalidOtp);
-            //}
+				return CreateResponse(response, StatusCode.InvalidOtp);
+			}
 
-            //// Create the token.
-            //response.Data = _authHelper.CreateAuthenticationToken(user.Id, /*user.IsMaster,*/ user.LanguageId/*, request.DeviceId*/);
+			// Create the token.
+			response.Data = _authHelper.CreateAuthenticationToken(user.Id, (UserRole)user.RoleId);
 
-            //// Set the user's status.
-            //response.Data.StatusId = (UserStatus)user.StatusId;
+			// Set the user's status.
+			response.Data.StatusId = (UserStatus)user.StatusId;
 
-            //// Update user's login.
-            //var res = await _dbStorage.Users.UpdateUserLoginAsync(user.Id, response.Data.RefreshToken!, response.Data.RefreshTokenExpiration,
-            //    (UserStatus)user.StatusId, cancelToken).ConfigureAwait(false);
+            // Update user's login.
+            var res = await _userStorage.UpdateUserLoginAsync(user.Id, response.Data.RefreshToken!, response.Data.RefreshTokenExpiration,
+                false, (UserStatus)user.StatusId, cancelToken).ConfigureAwait(false);
 
             return response;
         }

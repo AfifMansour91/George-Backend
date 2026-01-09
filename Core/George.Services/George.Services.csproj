@@ -18,6 +18,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\..\George.Providers\George.Providers.csproj" />
 		<ProjectReference Include="..\George.Data\George.Data.csproj" />
 	</ItemGroup>
 

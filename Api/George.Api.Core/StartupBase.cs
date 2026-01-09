@@ -1,7 +1,8 @@
-﻿using System;
-using System.IO;
-using System.IdentityModel.Tokens.Jwt;
-using System.Text;
+﻿using George.Common;
+using George.Data;
+using George.DB;
+using George.Providers;
+using George.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
@@ -18,10 +19,10 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
-using George.Common;
-using George.Data;
-using George.DB;
-using George.Services;
+using System;
+using System.IdentityModel.Tokens.Jwt;
+using System.IO;
+using System.Text;
 
 namespace George.Api.Core
 {
@@ -342,6 +343,8 @@ namespace George.Api.Core
 			services.AddSingleton<FileStorageManager>();
 			services.AddSingleton<DataUpdater>();
 			
+			// Providers.
+			services.AddScoped<George.Providers.SmsProvider>();
 
 			// SQL Storage/Repositories.
 			services.AddScoped<AuthStorage>();
@@ -449,10 +452,16 @@ namespace George.Api.Core
 			CacheManager.SetCacheInterval(SysConfig.Data.CacheIntervalInSec);
 
 
+            SmsProvider.Init("https://webapi.mymarketing.co.il/api/smscampaign/OperationalMessage",
+                "0X4B21D228F65E576F8AEFF4344D2D5E55C0B6EFDC1884A5B2176D6FB236C74F961A5133EBBF6392DAAAD4813BBC2BBD0A",
+				"George",
+				"0545555555",
+				"",
+				"George");
+ 
 
-
-			// Set globals.
-			Globals.OverrideAuthentication = Configuration["Auth:Override"].ToBool(false);
+            // Set globals.
+            Globals.OverrideAuthentication = Configuration["Auth:Override"].ToBool(false);
 			Globals.OverrideUserId = Configuration["Auth:OverrideUserId"].ToInt(AuthHelper.INVALID_ID);
 			Globals.OverrideIsMaster = Configuration["Auth:OverrideIsMaster"].ToBool(false);
 			Globals.MachineName = Environment.MachineName;
