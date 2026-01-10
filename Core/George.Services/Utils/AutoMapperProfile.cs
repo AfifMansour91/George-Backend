@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using George.Common;
 using George.Common.Request;
 using George.Data;
@@ -76,15 +76,20 @@ namespace George.Services
 
                     dest.CreatedById = null;
                     dest.CreatedBy = null;
+                    
+                    dest.LogoUrl = src.LogoUrl;
 
                 });
             CreateMap<CreateAccountReq, Account>()
                 .AfterMap((src, dest, context) =>
                 {
+                    dest.LogoUrl = src.LogoUrl;
                 });
             CreateMap<UpdateAccountReq, Account>()
                 .AfterMap((src, dest, context) =>
                 {
+                    // LogoUrl is handled explicitly in AccountService.UpdateAccountAsync
+                    // to preserve existing value if not provided in request
                 });
 
             /////////////////////////// Site

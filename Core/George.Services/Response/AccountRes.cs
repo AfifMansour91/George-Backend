@@ -1,4 +1,4 @@
-﻿using George.Data;
+using George.Data;
 
 namespace George.Services.Response
 {
@@ -33,6 +33,8 @@ namespace George.Services.Response
 
         public int? CreatedById { get; set; }
         public string? CreatedBy { get; set; }
+        
+        public string? LogoUrl { get; set; }
     }
 
     //public class AccountRes

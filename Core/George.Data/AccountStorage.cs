@@ -1,4 +1,4 @@
-﻿using George.Common;
+using George.Common;
 using George.DB;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -117,6 +117,12 @@ namespace George.Data
             {
                 dbAcc.WizardStatusId = updated.WizardStatusId;
             }
+            
+            // Update LogoUrl - the service layer handles null preservation logic
+            // If LogoUrl is set (even if null), update it
+            // Note: The service layer sets LogoUrl = req.LogoUrl ?? existingAccount.LogoUrl
+            // So if req.LogoUrl is null, it preserves existing. If not null, it uses the new value
+            dbAcc.LogoUrl = updated.LogoUrl;
 
             await _dbContext.SaveChangesAsync(cancelToken);
             return dbAcc;

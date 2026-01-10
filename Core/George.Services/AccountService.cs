@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using George.Common;
 using George.Common.Request;
 using George.Common.Utils;
@@ -85,7 +85,9 @@ namespace George.Services
                         UpdatedDate = account.UpdatedDate,
 
                         CreatedById = null,
-                        CreatedBy = null
+                        CreatedBy = null,
+                        
+                        LogoUrl = account.LogoUrl
                     };
                 })
                 .ToList();
@@ -147,6 +149,7 @@ namespace George.Services
                 //WizardStatus = req.WizardStatus, TODO: lookup later
                 WizardStep = req.WizardStep,
                 //WizardType = req.WizardType,  TODO: lookup later
+                LogoUrl = req.LogoUrl,
 
                 IsActive = true,
                 CreationTime = DateTime.UtcNow,
@@ -257,6 +260,15 @@ namespace George.Services
                 WizardStep = req.WizardStep ?? existingAccount.WizardStep,
                 // Update WizardStatusId if provided, otherwise preserve existing
                 WizardStatusId = wizardStatusId,
+                // Handle LogoUrl:
+                // - If LogoUrl is provided (property exists in JSON, even if null or empty), use it
+                // - Empty string or null in request means clear the logo (set to null)
+                // - Non-empty string means set the logo URL
+                // Note: We can't distinguish "property not provided" vs "property is null" in JSON,
+                // so we'll treat null as "clear logo" and only preserve existing if LogoUrl is not in the request
+                // But since ASP.NET Core will set it to null if not provided, we need to check if it was explicitly set
+                // For now, treat null or empty string as "clear logo"
+                LogoUrl = req.LogoUrl != null ? (string.IsNullOrWhiteSpace(req.LogoUrl) ? null : req.LogoUrl) : existingAccount.LogoUrl,
                 UpdatedDate = DateTime.UtcNow
             };
 

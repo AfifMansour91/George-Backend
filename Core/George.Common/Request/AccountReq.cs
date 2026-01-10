@@ -1,4 +1,4 @@
-﻿namespace George.Common.Request
+namespace George.Common.Request
 {
 
     public class UpdateAccountCategoriesReq
@@ -231,6 +231,8 @@
         public bool AllowWeighted { get; set; }
         public int? WizardStep { get; set; }
         public string? WizardStatus { get; set; }
+        
+        public string? LogoUrl { get; set; }
     }
 
     public class UpdateWizardSessionReq
@@ -345,5 +347,7 @@
         public bool SendInviteToClient { get; set; } = false;
         public bool IsKosherShop { get; set; } = false;
         public bool AllowWeighted { get; set; } = false;
+        
+        public string? LogoUrl { get; set; }
     }
 }
