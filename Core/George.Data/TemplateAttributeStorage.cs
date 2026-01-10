@@ -53,7 +53,7 @@ namespace George.Data
 
             query = query.OrderBy(ta => ta.Name);
 
-            query = query.Skip(paging.Skip).Take(paging.Take);
+            //query = query.Skip(paging.Skip).Take(paging.Take);
 
             res.Items = await query.ToListAsync(cancelToken).ConfigureAwait(false);
 

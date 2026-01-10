@@ -46,7 +46,7 @@ namespace George.Data
 			query = query.OrderBy(a => a.FullName);
 
 			// Add paging.
-			query = query.Skip(paging.Skip).Take(paging.Take);
+			//query = query.Skip(paging.Skip).Take(paging.Take);
 
 			// Add includes.
 
