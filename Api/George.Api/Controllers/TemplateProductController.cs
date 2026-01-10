@@ -94,6 +94,15 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _templateProductSvc.GetTemplateProductsAsync(request, cancelToken));
         }
 
+        [HttpPost("BulkImport")]
+        [ProducesResponseType(typeof(IApiResponse<BulkImportTemplateProductRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> BulkImportTemplateProductsAsync(
+            [FromBody] BulkImportTemplateProductReq req,
+            CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _templateProductSvc.BulkImportTemplateProductsAsync(req, cancelToken));
+        }
+
         [ApiExplorerSettings(IgnoreApi = true)]
         public void SetAuthUser()
         {

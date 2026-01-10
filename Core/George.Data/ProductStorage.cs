@@ -338,6 +338,13 @@ namespace George.Data
 
         public async Task CreateProductOptionsAsync(int productId, List<ProductOptionDto> options, CancellationToken cancelToken)
         {
+            // Get product's sites to create attributes for each site
+            var product = await _dbContext.Products
+                .Include(p => p.Sites)
+                .FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
+            
+            var siteIds = product?.Sites?.Select(s => s.Id).ToList() ?? new List<int>();
+
             foreach (var opt in options)
             {
                 var productOption = new ProductOption
@@ -360,6 +367,55 @@ namespace George.Data
                         });
                     }
                     await _dbContext.SaveChangesAsync(cancelToken);
+                }
+
+                // Create/find Attribute and AttributeValue for each site
+                foreach (var siteId in siteIds)
+                {
+                    // Find or create Attribute (use fully qualified name to avoid ambiguity)
+                    var attribute = await _dbContext.Attributes
+                        .Include(a => a.AttributeValues)
+                        .FirstOrDefaultAsync(a => a.Name == opt.Name && a.SiteId == siteId && !a.IsDeleted, cancelToken);
+
+                    if (attribute == null)
+                    {
+                        attribute = new George.DB.Attribute
+                        {
+                            Name = opt.Name,
+                            SiteId = siteId,
+                            CreationTime = DateTime.UtcNow,
+                            IsDeleted = false,
+                            GuidId = Guid.NewGuid()
+                        };
+                        _dbContext.Attributes.Add(attribute);
+                        await _dbContext.SaveChangesAsync(cancelToken);
+                        
+                        // Reload to get AttributeValues collection
+                        attribute = await _dbContext.Attributes
+                            .Include(a => a.AttributeValues)
+                            .FirstOrDefaultAsync(a => a.Id == attribute.Id, cancelToken);
+                    }
+
+                    // Create AttributeValues for each option value
+                    if (opt.Values != null && opt.Values.Any() && attribute != null)
+                    {
+                        foreach (var value in opt.Values)
+                        {
+                            // Check if AttributeValue already exists
+                            var existingValue = attribute.AttributeValues
+                                .FirstOrDefault(av => av.Value == value);
+
+                            if (existingValue == null)
+                            {
+                                _dbContext.AttributeValues.Add(new AttributeValue
+                                {
+                                    AttributeId = attribute.Id,
+                                    Value = value
+                                });
+                            }
+                        }
+                        await _dbContext.SaveChangesAsync(cancelToken);
+                    }
                 }
             }
         }
@@ -431,6 +487,23 @@ namespace George.Data
             await _dbContext.SaveChangesAsync(cancelToken);
 
             await CreateProductVariantsAsync(productId, variants, options, cancelToken);
+        }
+
+        public async Task<Product?> GetProductBySkuAsync(string sku, int? accountId, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(sku)) return null;
+
+            var query = _dbContext.Products
+                .Where(p => !p.IsDeleted && p.Sku != null && p.Sku.ToLower().Trim() == sku.ToLower().Trim());
+
+            if (accountId.HasValue)
+            {
+                query = query.Where(p => p.AccountId == accountId.Value);
+            }
+
+            return await query
+                .AsNoTracking()
+                .FirstOrDefaultAsync(cancelToken);
         }
 
         public async Task<WeightConfig?> CreateOrUpdateWeightConfigAsync(WeightConfigDto req, CancellationToken cancelToken)

@@ -90,6 +90,16 @@ namespace George.Data
             return res;
         }
 
+        public async Task<TemplateProduct?> GetTemplateProductBySkuAsync(string sku, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(sku)) return null;
+
+            return await _dbContext.TemplateProducts
+                .Where(tp => !tp.IsDeleted && tp.Sku != null && tp.Sku.ToLower().Trim() == sku.ToLower().Trim())
+                .AsNoTracking()
+                .FirstOrDefaultAsync(cancelToken);
+        }
+
         public async Task<TemplateProduct?> GetTemplateProductAsync(int templateProductId, CancellationToken cancelToken)
         {
             return await _dbContext.TemplateProducts
@@ -336,6 +346,13 @@ namespace George.Data
 
         public async Task CreateTemplateProductOptionsAsync(int templateProductId, List<ProductOptionDto> options, CancellationToken cancelToken)
         {
+            // Get template product's sites to create attributes for each site
+            var templateProduct = await _dbContext.TemplateProducts
+                .Include(tp => tp.Sites)
+                .FirstOrDefaultAsync(tp => tp.Id == templateProductId, cancelToken);
+            
+            var siteIds = templateProduct?.Sites?.Select(s => s.Id).ToList() ?? new List<int>();
+
             foreach (var opt in options)
             {
                 var templateProductOption = new TemplateProductOption
@@ -358,6 +375,61 @@ namespace George.Data
                         });
                     }
                     await _dbContext.SaveChangesAsync(cancelToken);
+                }
+
+                // Create/find TemplateAttribute and TemplateAttributeValue for each site
+                foreach (var siteId in siteIds)
+                {
+                    // Find or create TemplateAttribute
+                    var templateAttribute = await _dbContext.TemplateAttributes
+                        .Include(ta => ta.TemplateAttributeValues)
+                        .Include(ta => ta.Sites)
+                        .FirstOrDefaultAsync(ta => ta.Name == opt.Name && !ta.IsDeleted, cancelToken);
+
+                    if (templateAttribute == null)
+                    {
+                        templateAttribute = new TemplateAttribute
+                        {
+                            Name = opt.Name,
+                            CreationTime = DateTime.UtcNow,
+                            IsDeleted = false,
+                            GuidId = Guid.NewGuid()
+                        };
+                        _dbContext.TemplateAttributes.Add(templateAttribute);
+                        await _dbContext.SaveChangesAsync(cancelToken);
+                    }
+
+                    // Add site to TemplateAttribute if not already added
+                    if (!templateAttribute.Sites.Any(s => s.Id == siteId))
+                    {
+                        var site = await _dbContext.Sites.FindAsync(new object[] { siteId }, cancelToken);
+                        if (site != null)
+                        {
+                            templateAttribute.Sites.Add(site);
+                            await _dbContext.SaveChangesAsync(cancelToken);
+                        }
+                    }
+
+                    // Create TemplateAttributeValues for each option value
+                    if (opt.Values != null && opt.Values.Any())
+                    {
+                        foreach (var value in opt.Values)
+                        {
+                            // Check if TemplateAttributeValue already exists
+                            var existingValue = templateAttribute.TemplateAttributeValues
+                                .FirstOrDefault(tav => tav.Value == value);
+
+                            if (existingValue == null)
+                            {
+                                _dbContext.TemplateAttributeValues.Add(new TemplateAttributeValue
+                                {
+                                    TemplateAttributeId = templateAttribute.Id,
+                                    Value = value
+                                });
+                            }
+                        }
+                        await _dbContext.SaveChangesAsync(cancelToken);
+                    }
                 }
             }
         }

@@ -13,15 +13,18 @@ namespace George.Services
     public class TemplateProductService : ServiceBase
     {
         private readonly TemplateProductStorage _templateProductStorage;
+        private readonly GlobalCategoryStorage _globalCategoryStorage;
 
         public TemplateProductService(
             ILogger<TemplateProductService> logger,
             IMapper mapper,
             CacheManager cache,
-            TemplateProductStorage templateProductStorage
+            TemplateProductStorage templateProductStorage,
+            GlobalCategoryStorage globalCategoryStorage
         ) : base(logger, mapper, cache)
         {
             _templateProductStorage = templateProductStorage;
+            _globalCategoryStorage = globalCategoryStorage;
         }
 
         public async Task<IApiResponse<ApiListResponse<TemplateProductRes>>> GetTemplateProductsAsync(
@@ -194,6 +197,298 @@ namespace George.Services
             response.Data = result;
 
             return response;
+        }
+
+        public async Task<IApiResponse<BulkImportTemplateProductRes>> BulkImportTemplateProductsAsync(
+            BulkImportTemplateProductReq req,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<BulkImportTemplateProductRes>
+            {
+                Data = new BulkImportTemplateProductRes()
+            };
+
+            if (req.Products == null || !req.Products.Any())
+            {
+                return CreateResponse(response, StatusCode.InvalidRequest, "No products provided");
+            }
+
+            var results = new List<BulkImportTemplateProductItemRes>();
+            int created = 0;
+            int updated = 0;
+            int failed = 0;
+
+            // Dictionary to cache global category lookups/resolutions
+            var categoryCache = new Dictionary<string, GlobalCategory>();
+
+            // Process each product
+            foreach (var productReqItem in req.Products)
+            {
+                CreateTemplateProductReq productReq = productReqItem;
+                var itemResult = new BulkImportTemplateProductItemRes
+                {
+                    Name = productReq.Name,
+                    Sku = productReq.Sku,
+                    Success = false,
+                    Action = "failed"
+                };
+
+                try
+                {
+                    TemplateProduct? existingProduct = null;
+
+                    // Check if product exists by SKU
+                    if (req.UpdateIfExists && !string.IsNullOrWhiteSpace(productReq.Sku))
+                    {
+                        existingProduct = await _templateProductStorage.GetTemplateProductBySkuAsync(
+                            productReq.Sku,
+                            cancelToken);
+                    }
+
+                    // Resolve global categories - find or create them by path or ID
+                    List<int>? resolvedCategoryIds = null;
+                    List<int>? resolvedSubcategoryIds = null;
+
+                    BulkImportTemplateProductItemReq? bulkProductReq = productReqItem as BulkImportTemplateProductItemReq;
+
+                    // If category paths provided, resolve them first
+                    if (bulkProductReq?.CategoryPaths != null && bulkProductReq.CategoryPaths.Any())
+                    {
+                        var allResolvedCategoryIds = new HashSet<int>(); // Use HashSet to avoid duplicates
+                        
+                        foreach (var categoryPath in bulkProductReq.CategoryPaths)
+                        {
+                            if (string.IsNullOrWhiteSpace(categoryPath)) continue;
+
+                            // Find or create the leaf category (last in hierarchy)
+                            var leafCategory = await _globalCategoryStorage.FindOrCreateGlobalCategoryByPathAsync(
+                                categoryPath,
+                                AuthUser?.Id,
+                                cancelToken);
+
+                            if (leafCategory != null)
+                            {
+                                // Add the leaf category and all its parents recursively
+                                var categoryToAdd = leafCategory;
+                                while (categoryToAdd != null)
+                                {
+                                    allResolvedCategoryIds.Add(categoryToAdd.Id);
+                                    
+                                    // Get parent if exists
+                                    if (categoryToAdd.ParentGlobalCategoryId.HasValue)
+                                    {
+                                        categoryToAdd = await _globalCategoryStorage.GetGlobalCategoryAsync(
+                                            categoryToAdd.ParentGlobalCategoryId.Value, 
+                                            cancelToken);
+                                    }
+                                    else
+                                    {
+                                        categoryToAdd = null;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (allResolvedCategoryIds.Any())
+                        {
+                            // Separate main categories from subcategories
+                            resolvedCategoryIds = new List<int>();
+                            resolvedSubcategoryIds = new List<int>();
+
+                            foreach (var catId in allResolvedCategoryIds)
+                            {
+                                var cat = await _globalCategoryStorage.GetGlobalCategoryAsync(catId, cancelToken);
+                                if (cat?.ParentGlobalCategoryId == null)
+                                {
+                                    resolvedCategoryIds.Add(catId);
+                                }
+                                else
+                                {
+                                    resolvedSubcategoryIds.Add(catId);
+                                }
+                            }
+                        }
+                    }
+                    // Otherwise use existing category IDs
+                    else if (productReq.CategoryIds != null || productReq.SubcategoryIds != null)
+                    {
+                        var allCategoryIds = CombineCategoryIds(productReq.CategoryIds, productReq.SubcategoryIds);
+                        var resolvedIds = await ResolveGlobalCategoryIdsAsync(allCategoryIds, cancelToken);
+
+                        // Separate main categories from subcategories
+                        resolvedCategoryIds = new List<int>();
+                        resolvedSubcategoryIds = new List<int>();
+
+                        foreach (var catId in resolvedIds)
+                        {
+                            var cat = await _globalCategoryStorage.GetGlobalCategoryAsync(catId, cancelToken);
+                            if (cat?.ParentGlobalCategoryId == null)
+                            {
+                                resolvedCategoryIds.Add(catId);
+                            }
+                            else
+                            {
+                                resolvedSubcategoryIds.Add(catId);
+                                // Also add parent as main category if not already included
+                                if (cat.ParentGlobalCategoryId.HasValue && !resolvedCategoryIds.Contains(cat.ParentGlobalCategoryId.Value))
+                                {
+                                    resolvedCategoryIds.Add(cat.ParentGlobalCategoryId.Value);
+                                }
+                            }
+                        }
+                    }
+
+                    if (existingProduct != null)
+                    {
+                        // Update existing product
+                        var templateProduct = MapReqToTemplateProduct(productReq);
+                        templateProduct.Id = existingProduct.Id;
+                        templateProduct.UpdateUserId = AuthUser?.Id;
+
+                        var lookupDto = MapToLookupDto(productReq);
+                        await _templateProductStorage.MapLookupsAsync(templateProduct, lookupDto, cancelToken);
+
+                        templateProduct = await _templateProductStorage.UpdateTemplateProductAsync(
+                            templateProduct,
+                            req.SiteIds ?? productReq.SiteIds,
+                            CombineCategoryIds(resolvedCategoryIds, resolvedSubcategoryIds),
+                            productReq.Tags,
+                            cancelToken);
+
+                        if (templateProduct != null)
+                        {
+                            // Update images, options, variants
+                            if (productReq.ImageUrls != null)
+                            {
+                                await _templateProductStorage.CreateTemplateProductImagesAsync(templateProduct.Id, productReq.ImageUrls, cancelToken);
+                            }
+
+                            if (productReq.ProductOptions != null)
+                            {
+                                var optionDtos = productReq.ProductOptions.Select(o => new ProductOptionDto { Name = o.Name, Values = o.Values ?? new List<string>() }).ToList();
+                                await _templateProductStorage.UpdateTemplateProductOptionsAsync(templateProduct.Id, optionDtos, cancelToken);
+                            }
+
+                            if (productReq.Variants != null)
+                            {
+                                var variantDtos = productReq.Variants.Select(v => new ProductVariantDto
+                                {
+                                    ImageUrl = v.ImageUrl,
+                                    OptionValues = v.OptionValues,
+                                    Price = v.Price,
+                                    SalePrice = v.SalePrice,
+                                    StockQuantity = v.StockQuantity,
+                                    Sku = v.Sku,
+                                    Weight = v.Weight
+                                }).ToList();
+                                var optionDtos = productReq.ProductOptions?.Select(o => new ProductOptionDto { Name = o.Name, Values = o.Values ?? new List<string>() }).ToList();
+                                await _templateProductStorage.UpdateTemplateProductVariantsAsync(templateProduct.Id, variantDtos, optionDtos, cancelToken);
+                            }
+
+                            itemResult.Success = true;
+                            itemResult.Action = "updated";
+                            itemResult.ProductId = templateProduct.Id;
+                            updated++;
+                        }
+                    }
+                    else
+                    {
+                        // Create new product
+                        var templateProduct = MapReqToTemplateProduct(productReq);
+                        templateProduct.CreationUserId = AuthUser?.Id;
+                        templateProduct.CreationTime = DateTime.UtcNow;
+                        templateProduct.IsDeleted = false;
+
+                        var lookupDto = MapToLookupDto(productReq);
+                        await _templateProductStorage.MapLookupsAsync(templateProduct, lookupDto, cancelToken);
+
+                        templateProduct = await _templateProductStorage.CreateTemplateProductAsync(
+                            templateProduct,
+                            req.SiteIds ?? productReq.SiteIds,
+                            CombineCategoryIds(resolvedCategoryIds, resolvedSubcategoryIds),
+                            productReq.Tags,
+                            cancelToken);
+
+                        if (templateProduct != null)
+                        {
+                            // Create images, options, variants
+                            if (productReq.ImageUrls != null && productReq.ImageUrls.Any())
+                            {
+                                await _templateProductStorage.CreateTemplateProductImagesAsync(templateProduct.Id, productReq.ImageUrls, cancelToken);
+                            }
+
+                            if (productReq.ProductOptions != null && productReq.ProductOptions.Any())
+                            {
+                                var optionDtos = productReq.ProductOptions.Select(o => new ProductOptionDto { Name = o.Name, Values = o.Values ?? new List<string>() }).ToList();
+                                await _templateProductStorage.CreateTemplateProductOptionsAsync(templateProduct.Id, optionDtos, cancelToken);
+                            }
+
+                            if (productReq.Variants != null && productReq.Variants.Any())
+                            {
+                                var variantDtos = productReq.Variants.Select(v => new ProductVariantDto
+                                {
+                                    ImageUrl = v.ImageUrl,
+                                    OptionValues = v.OptionValues,
+                                    Price = v.Price,
+                                    SalePrice = v.SalePrice,
+                                    StockQuantity = v.StockQuantity,
+                                    Sku = v.Sku,
+                                    Weight = v.Weight
+                                }).ToList();
+                                var optionDtos = productReq.ProductOptions?.Select(o => new ProductOptionDto { Name = o.Name, Values = o.Values ?? new List<string>() }).ToList();
+                                await _templateProductStorage.CreateTemplateProductVariantsAsync(templateProduct.Id, variantDtos, optionDtos, cancelToken);
+                            }
+
+                            itemResult.Success = true;
+                            itemResult.Action = "created";
+                            itemResult.ProductId = templateProduct.Id;
+                            created++;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    itemResult.Success = false;
+                    itemResult.Action = "failed";
+                    itemResult.ErrorMessage = ex.Message;
+                    failed++;
+                    _logger.LogError(ex, $"Failed to import template product '{productReq.Name}' (SKU: {productReq.Sku})");
+                }
+
+                results.Add(itemResult);
+            }
+
+            response.Data.Total = req.Products.Count;
+            response.Data.Created = created;
+            response.Data.Updated = updated;
+            response.Data.Failed = failed;
+            response.Data.Results = results;
+
+            return response;
+        }
+
+        /// <summary>
+        /// Resolve global category IDs - verify they exist
+        /// </summary>
+        private async Task<List<int>> ResolveGlobalCategoryIdsAsync(
+            List<int>? categoryIds,
+            CancellationToken cancelToken)
+        {
+            var resolvedIds = new List<int>();
+
+            if (categoryIds == null || !categoryIds.Any()) return resolvedIds;
+
+            // Verify categories exist
+            foreach (var categoryId in categoryIds)
+            {
+                var category = await _globalCategoryStorage.GetGlobalCategoryAsync(categoryId, cancelToken);
+                if (category != null && !category.IsDeleted)
+                {
+                    resolvedIds.Add(category.Id);
+                }
+            }
+
+            return resolvedIds;
         }
 
         // Helper methods

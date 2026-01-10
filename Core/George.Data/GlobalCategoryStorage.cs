@@ -155,6 +155,83 @@ namespace George.Data
             await _dbContext.SaveChangesAsync(cancelToken);
             return true;
         }
+
+        /// <summary>
+        /// Find global category by name, optionally with parent
+        /// </summary>
+        public async Task<GlobalCategory?> FindGlobalCategoryByNameAsync(
+            string name,
+            int? parentGlobalCategoryId,
+            CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return null;
+
+            var query = _dbContext.GlobalCategories
+                .Where(gc => !gc.IsDeleted && gc.Name.ToLower().Trim() == name.ToLower().Trim());
+
+            if (parentGlobalCategoryId.HasValue)
+            {
+                query = query.Where(gc => gc.ParentGlobalCategoryId == parentGlobalCategoryId.Value);
+            }
+            else
+            {
+                query = query.Where(gc => gc.ParentGlobalCategoryId == null);
+            }
+
+            return await query
+                .AsNoTracking()
+                .FirstOrDefaultAsync(cancelToken);
+        }
+
+        /// <summary>
+        /// Find or create global category by hierarchical path (e.g., "Parent > Child")
+        /// </summary>
+        public async Task<GlobalCategory?> FindOrCreateGlobalCategoryByPathAsync(
+            string categoryPath,
+            int? creationUserId,
+            CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(categoryPath)) return null;
+
+            var parts = categoryPath.Split('>')
+                .Select(p => p.Trim())
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .ToList();
+
+            if (!parts.Any()) return null;
+
+            GlobalCategory? currentCategory = null;
+
+            foreach (var part in parts)
+            {
+                var parentId = currentCategory?.Id;
+                var existing = await FindGlobalCategoryByNameAsync(part, parentId, cancelToken);
+
+                if (existing != null)
+                {
+                    currentCategory = existing;
+                }
+                else
+                {
+                    // Create new global category
+                    var newCategory = new GlobalCategory
+                    {
+                        Name = part,
+                        ParentGlobalCategoryId = parentId,
+                        Description = null,
+                        IsDeleted = false,
+                        CreationTime = DateTime.UtcNow,
+                        CreationUserId = creationUserId,
+                        GuidId = Guid.NewGuid(),
+                        SortOrder = 0
+                    };
+
+                    currentCategory = await CreateGlobalCategoryAsync(newCategory, null, cancelToken);
+                }
+            }
+
+            return currentCategory;
+        }
     }
 }
 

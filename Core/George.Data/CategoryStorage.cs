@@ -172,5 +172,98 @@ namespace George.Data
             await _dbContext.SaveChangesAsync(cancelToken);
             return true;
         }
+
+        /// <summary>
+        /// Find category by name, optionally with parent and site filters
+        /// </summary>
+        public async Task<Category?> FindCategoryByNameAsync(
+            string name, 
+            int? parentCategoryId, 
+            int? accountId, 
+            List<int>? siteIds, 
+            CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return null;
+
+            var query = _dbContext.Categories
+                .Where(c => !c.IsDeleted && c.Name.ToLower().Trim() == name.ToLower().Trim());
+
+            if (parentCategoryId.HasValue)
+            {
+                query = query.Where(c => c.ParentCategoryId == parentCategoryId.Value);
+            }
+            else
+            {
+                query = query.Where(c => c.ParentCategoryId == null);
+            }
+
+            if (accountId.HasValue)
+            {
+                query = query.Where(c => c.AccountId == accountId.Value);
+            }
+
+            if (siteIds != null && siteIds.Any())
+            {
+                query = query.Where(c => c.Sites.Any(s => siteIds.Contains(s.Id)) || !c.Sites.Any());
+            }
+
+            return await query
+                .AsNoTracking()
+                .FirstOrDefaultAsync(cancelToken);
+        }
+
+        /// <summary>
+        /// Find or create category by hierarchical path (e.g., "Parent > Child")
+        /// </summary>
+        public async Task<Category?> FindOrCreateCategoryByPathAsync(
+            string categoryPath, 
+            int? accountId, 
+            List<int>? siteIds, 
+            int? creationUserId,
+            CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(categoryPath)) return null;
+
+            var parts = categoryPath.Split('>')
+                .Select(p => p.Trim())
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .ToList();
+
+            if (!parts.Any()) return null;
+
+            Category? currentCategory = null;
+
+            foreach (var part in parts)
+            {
+                var parentId = currentCategory?.Id;
+                var existing = await FindCategoryByNameAsync(part, parentId, accountId, siteIds, cancelToken);
+
+                if (existing != null)
+                {
+                    currentCategory = existing;
+                }
+                else
+                {
+                    // Create new category
+                    var newCategory = new Category
+                    {
+                        Name = part,
+                        ParentCategoryId = parentId,
+                        AccountId = accountId,
+                        Description = null,
+                        IsEnabled = true,
+                        IsDeleted = false,
+                        IsActive = true,
+                        CreationTime = DateTime.UtcNow,
+                        CreationUserId = creationUserId,
+                        GuidId = Guid.NewGuid()
+                    };
+
+                    currentCategory = await CreateCategoryAsync(newCategory, siteIds, cancelToken);
+                }
+            }
+
+            return currentCategory;
+        }
     }
 }
