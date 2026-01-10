@@ -116,6 +116,12 @@ namespace George.Data
 
         public async Task<Product> CreateProductAsync(Product product, List<int>? siteIds, List<int>? categoryIds, List<string>? tags, CancellationToken cancelToken)
         {
+            // Normalize empty SKU to NULL to avoid unique constraint violations
+            if (string.IsNullOrWhiteSpace(product.Sku))
+            {
+                product.Sku = null;
+            }
+            
             _dbContext.Products.Add(product);
 
             // Add sites
@@ -191,7 +197,8 @@ namespace George.Data
             dbProduct.SalePriceStartDate = updated.SalePriceStartDate;
             dbProduct.SalePriceEndDate = updated.SalePriceEndDate;
             dbProduct.CostPrice = updated.CostPrice;
-            dbProduct.Sku = updated.Sku;
+            // Normalize empty SKU to NULL to avoid unique constraint violations
+            dbProduct.Sku = string.IsNullOrWhiteSpace(updated.Sku) ? null : updated.Sku;
             dbProduct.StockQuantity = updated.StockQuantity;
             dbProduct.Weight = updated.Weight;
             dbProduct.IsKosher = updated.IsKosher;
@@ -448,7 +455,7 @@ namespace George.Data
                     Price = variant.Price,
                     SalePrice = variant.SalePrice,
                     StockQuantity = variant.StockQuantity,
-                    Sku = variant.Sku,
+                    Sku = string.IsNullOrWhiteSpace(variant.Sku) ? null : variant.Sku,
                     Weight = variant.Weight,
                     IsDeleted = false
                 };
@@ -561,8 +568,21 @@ namespace George.Data
             if (req.StockManagementType.HasValue())
             {
                 var smt = await _dbContext.StockManagementTypes
-                    .FirstOrDefaultAsync(s => s.Name == req.StockManagementType, cancelToken);
-                product.StockManagementTypeId = smt?.Id;
+                    .FirstOrDefaultAsync(s => s.Name == req.StockManagementType && !s.IsDeleted, cancelToken);
+                
+                if (smt == null)
+                {
+                    // Create the stock management type if it doesn't exist
+                    smt = new StockManagementType
+                    {
+                        Name = req.StockManagementType,
+                        IsDeleted = false
+                    };
+                    _dbContext.StockManagementTypes.Add(smt);
+                    await _dbContext.SaveChangesAsync(cancelToken);
+                }
+                
+                product.StockManagementTypeId = smt.Id;
             }
 
             // Map stock status
