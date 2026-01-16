@@ -8,24 +8,27 @@ namespace George.Providers.ActiveTrail
 	{
 		public class DetailsReq
 		{
-			[JsonProperty("unsubscribe_text")]
-			public string? UnsubscribeText { get; set; }
+			//[JsonProperty("unsubscribe_text")]
+			//public string? UnsubscribeText { get; set; }
 
 			[JsonProperty("can_unsubscribe")]
 			public bool? CanUnsubscribe { get; set; }
 
-			[JsonProperty("name")]
-			public string CampaignName { get; set; } = null!;
+			//[JsonProperty("name")]
+			//public string CampaignName { get; set; } = null!;
 
 			[JsonProperty("from_name")]
 			public string FromName { get; set; } = null!;
 
-			[JsonProperty("sms_sending_profile_id")]
-			public int? SmsSendingProfileId { get; set; }
+			//[JsonProperty("sms_sending_profile_id")]
+			//public int? SmsSendingProfileId { get; set; }
 
 			[JsonProperty("content")]
 			public string Content { get; set; } = null!;
-		}
+
+            [JsonProperty("name")]
+            public string Name { get; set; } = null!;
+        }
 
 		public class SchedulingReq
 		{

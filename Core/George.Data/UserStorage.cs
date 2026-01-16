@@ -133,6 +133,7 @@ namespace George.Data
 
             // Update OTP
             dbModel.Otp = otp;
+			dbModel.OtpExpiration = DateTime.Now.AddMinutes(5);
 
             // Save to the DB
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);

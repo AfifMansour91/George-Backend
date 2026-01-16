@@ -453,11 +453,11 @@ namespace George.Api.Core
 
 
             SmsProvider.Init("https://webapi.mymarketing.co.il/api/smscampaign/OperationalMessage",
-                "0X4B21D228F65E576F8AEFF4344D2D5E55C0B6EFDC1884A5B2176D6FB236C74F961A5133EBBF6392DAAAD4813BBC2BBD0A",
-				"George",
+                "0X614FC42DF9E797A0738F2BC8F3211E35EBC29E247603CDFBD9865FC00C7FF0ECEBE00C4034D90AEAF27B45498AF9453C",
+				"StoreOS",
 				"0545555555",
-				"",
-				"George");
+                "StoreOS",
+				"StoreOS");
  
 
             // Set globals.

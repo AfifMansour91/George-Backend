@@ -59,7 +59,7 @@ namespace George.Services
 			if (!isValid)
 			{
 				// Increment the lockout fail count.
-				user.LockoutFailCount++;
+				//user.LockoutFailCount++;
 
 				// Update the lockout fail count.
 				await UpdateUserLockoutFailCountAsync(user.Id, user.LockoutFailCount, cancelToken);
@@ -163,9 +163,9 @@ namespace George.Services
             if (model.LockoutExpiration.HasValue && DateTime.UtcNow > model.LockoutExpiration)
                 // Reset the lockout fail count.
                 model.LockoutFailCount = 0;
-            else
-                // Increment the lockout fail count.
-                model.LockoutFailCount++;
+            //else
+            //    // Increment the lockout fail count.
+            //    model.LockoutFailCount++;
 
             // Update the lockout fail count.
             await UpdateUserLockoutFailCountAsync(model.Id, model.LockoutFailCount, cancelToken);
@@ -244,7 +244,7 @@ namespace George.Services
 			if (!isValid)
 			{
 				// Increment the lockout fail count.
-				user.LockoutFailCount++;
+				//user.LockoutFailCount++;
 
 				// Update the lockout fail count.
 				await UpdateUserLockoutFailCountAsync(user.Id, user.LockoutFailCount, cancelToken);
@@ -378,9 +378,9 @@ namespace George.Services
 		{
 			DateTime? lockoutExpiration = null;
 
-			// Check if the user should be locked.
-			if (lockoutFailCount > SysConfig.Data.MaxFailCountBeforeLockout)
-				lockoutExpiration = DateTime.UtcNow.AddMinutes(SysConfig.Data.LockoutExpirationInMin);				
+			//// Check if the user should be locked.
+			//if (lockoutFailCount > SysConfig.Data.MaxFailCountBeforeLockout)
+			//	lockoutExpiration = DateTime.UtcNow.AddMinutes(SysConfig.Data.LockoutExpirationInMin);				
 
 			// Update user lockout fail count.
 			await _userStorage.UpdateUserLockoutFailCountAsync(userId, lockoutFailCount, lockoutExpiration, cancelToken);

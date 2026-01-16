@@ -50,8 +50,10 @@ namespace George.Providers.ActiveTrail
 			var body = new ActiveTrailSmsReq {
 				Details = new DetailsReq {
 					Content = text,
-					CampaignName = campaignName,
-					FromName = _displayName
+					Name = _displayName,
+					//CampaignName = campaignName,
+					FromName = _displayName,
+					CanUnsubscribe = false,
 				},
 				Mobiles = new List<MobileReq>
 				{
@@ -66,7 +68,7 @@ namespace George.Providers.ActiveTrail
 			};
 
 			// Send it.
-			return await ExecuteAsync(_apiBaseUrl + _campaignUrl, body);
+			return await ExecuteAsync(_apiBaseUrl, body);
 		}
 
 
