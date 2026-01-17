@@ -15,6 +15,7 @@ namespace George.Services
         private readonly ProductStorage _productStorage;
         private readonly CategoryStorage _categoryStorage;
         private readonly UserStorage _userStorage;
+        private readonly WooCommerceService _wooCommerceService;
 
         public ProductService(
             ILogger<ProductService> logger,
@@ -22,12 +23,14 @@ namespace George.Services
             CacheManager cache,
             ProductStorage productStorage,
             CategoryStorage categoryStorage,
-            UserStorage userStorage
+            UserStorage userStorage,
+            WooCommerceService wooCommerceService
         ) : base(logger, mapper, cache)
         {
             _productStorage = productStorage;
             _categoryStorage = categoryStorage;
             _userStorage = userStorage;
+            _wooCommerceService = wooCommerceService;
         }
 
         public async Task<IApiResponse<ApiListResponse<ProductRes>>> GetProductsAsync(
@@ -119,6 +122,12 @@ namespace George.Services
                 // Reload with all relationships
                 product = await _productStorage.GetProductAsync(product.Id, cancelToken);
                 response.Data = MapProductToRes(product!);
+                
+                // Sync to WooCommerce for enabled sites
+                if (product != null && product.Sites != null && product.Sites.Any())
+                {
+                    await SyncProductToWooCommerceForEnabledSitesAsync(product.Id, product.Sites, cancelToken);
+                }
             }
 
             return response;
@@ -182,6 +191,12 @@ namespace George.Services
                 // Reload with all relationships
                 product = await _productStorage.GetProductAsync(productId, cancelToken);
                 response.Data = MapProductToRes(product!);
+                
+                // Sync to WooCommerce for enabled sites
+                if (product != null && product.Sites != null && product.Sites.Any())
+                {
+                    await SyncProductToWooCommerceForEnabledSitesAsync(product.Id, product.Sites, cancelToken);
+                }
             }
 
             return response;
@@ -703,6 +718,48 @@ namespace George.Services
                     ShowPricePer100g = req.WeightConfig.ShowPricePer100g
                 } : null
             };
+        }
+
+        private async Task SyncProductToWooCommerceForEnabledSitesAsync(int productId, ICollection<Site> sites, CancellationToken cancelToken)
+        {
+            var enabledSites = sites?.Where(s => s.WooCommerceEnabled == true).ToList();
+            if (enabledSites == null || !enabledSites.Any())
+                return;
+
+            // Sync product to WooCommerce for each enabled site
+            // Catch errors so they don't block the product create/update operation
+            foreach (var site in enabledSites)
+            {
+                try
+                {
+                    var syncReq = new WooCommerceSyncReq
+                    {
+                        SiteId = site.Id,
+                        ProductIds = new List<int> { productId }
+                    };
+                    var syncResponse = await _wooCommerceService.SyncToWooCommerceAsync(syncReq, cancelToken);
+
+                    if (syncResponse.Data?.Success == null || !syncResponse.Data.Success.Any())
+                    {
+                        _logger.LogWarning(
+                            "Failed to sync product {ProductId} to WooCommerce for site {SiteId}: {Message}",
+                            productId, site.Id, syncResponse.Data?.Message ?? "Unknown error");
+                    }
+                    else
+                    {
+                        _logger.LogInformation(
+                            "Successfully synced product {ProductId} to WooCommerce for site {SiteId}",
+                            productId, site.Id);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Log error but don't throw - we don't want WooCommerce sync failures to block product operations
+                    _logger.LogError(ex,
+                        "Error syncing product {ProductId} to WooCommerce for site {SiteId}",
+                        productId, site.Id);
+                }
+            }
         }
 
     }
