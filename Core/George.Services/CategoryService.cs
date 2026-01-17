@@ -11,15 +11,18 @@ namespace George.Services
     public class CategoryService : ServiceBase
     {
         private readonly CategoryStorage _categoryStorage;
+        private readonly WooCommerceService _wooCommerceService;
 
         public CategoryService(
             ILogger<CategoryService> logger,
             IMapper mapper,
             CacheManager cache,
-            CategoryStorage categoryStorage
+            CategoryStorage categoryStorage,
+            WooCommerceService wooCommerceService
         ) : base(logger, mapper, cache)
         {
             _categoryStorage = categoryStorage;
+            _wooCommerceService = wooCommerceService;
         }
 
         public async Task<IApiResponse<ApiListResponse<CategoryRes>>> GetCategoriesAsync(
@@ -74,6 +77,12 @@ namespace George.Services
                 model = await _categoryStorage.GetCategoryAsync(model.Id, cancelToken);
                 // Convert to response.
                 response.Data = MapCategoryToRes(model);
+
+                // Sync to WooCommerce if enabled for any linked sites
+                if (model.Sites != null && model.Sites.Any())
+                {
+                    await SyncCategoryToWooCommerceForEnabledSitesAsync(model.Id, model.Sites, cancelToken);
+                }
             }
 
             return response;
@@ -100,6 +109,12 @@ namespace George.Services
                 model = await _categoryStorage.GetCategoryAsync(model.Id, cancelToken);
                 // Convert to response.
                 response.Data = MapCategoryToRes(model);
+
+                // Sync to WooCommerce if enabled for any linked sites
+                if (model.Sites != null && model.Sites.Any())
+                {
+                    await SyncCategoryToWooCommerceForEnabledSitesAsync(model.Id, model.Sites, cancelToken);
+                }
             }
 
             return response;
@@ -140,6 +155,54 @@ namespace George.Services
             }
 
             return res;
+        }
+
+        /// <summary>
+        /// Syncs a category to WooCommerce for all enabled sites
+        /// </summary>
+        private async Task SyncCategoryToWooCommerceForEnabledSitesAsync(
+            int categoryId,
+            ICollection<Site> sites,
+            CancellationToken cancelToken)
+        {
+            // Find sites with WooCommerce enabled
+            var enabledSites = sites.Where(s => s.WooCommerceEnabled == true).ToList();
+
+            if (!enabledSites.Any())
+                return;
+
+            // Sync to each enabled site
+            // Catch errors so they don't block the category create/update operation
+            foreach (var site in enabledSites)
+            {
+                try
+                {
+                    var syncResponse = await _wooCommerceService.SyncCategoryToWooCommerceAsync(
+                        categoryId,
+                        site.Id,
+                        cancelToken);
+
+                    if (!syncResponse.Data?.Success == true)
+                    {
+                        _logger.LogWarning(
+                            "Failed to sync category {CategoryId} to WooCommerce for site {SiteId}: {Message}",
+                            categoryId, site.Id, syncResponse.Data?.Message ?? "Unknown error");
+                    }
+                    else
+                    {
+                        _logger.LogInformation(
+                            "Successfully synced category {CategoryId} to WooCommerce for site {SiteId}",
+                            categoryId, site.Id);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Log error but don't throw - we don't want WooCommerce sync failures to block category operations
+                    _logger.LogError(ex, 
+                        "Error syncing category {CategoryId} to WooCommerce for site {SiteId}", 
+                        categoryId, site.Id);
+                }
+            }
         }
     }
 }

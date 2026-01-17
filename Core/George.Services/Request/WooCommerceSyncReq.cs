@@ -5,5 +5,11 @@ namespace George.Services.Request
         public int SiteId { get; set; }
         public List<int>? ProductIds { get; set; } // If null, sync all products for the site
     }
+
+    public class WooCommerceSyncCategoryReq
+    {
+        public int CategoryId { get; set; }
+        public int SiteId { get; set; }
+    }
 }
 

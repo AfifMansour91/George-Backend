@@ -16,5 +16,13 @@ namespace George.Services.Response
         public List<WooCommerceSyncResult> Success { get; set; } = new();
         public List<WooCommerceSyncResult> Failed { get; set; } = new();
     }
+
+    public class WooCommerceCategorySyncRes
+    {
+        public int CategoryId { get; set; }
+        public int? WooCommerceId { get; set; }
+        public bool Success { get; set; }
+        public string Message { get; set; } = string.Empty;
+    }
 }
 

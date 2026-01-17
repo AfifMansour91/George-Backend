@@ -167,6 +167,92 @@ namespace George.Services
             return categoryMap;
         }
 
+        /// <summary>
+        /// Syncs a single category to WooCommerce for a specific site
+        /// </summary>
+        public async Task<IApiResponse<WooCommerceCategorySyncRes>> SyncCategoryToWooCommerceAsync(
+            int categoryId,
+            int siteId,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<WooCommerceCategorySyncRes>
+            {
+                Data = new WooCommerceCategorySyncRes()
+            };
+
+            try
+            {
+                // Get category
+                var category = await _categoryStorage.GetCategoryAsync(categoryId, cancelToken);
+                if (category == null)
+                {
+                    return CreateResponse(response, StatusCode.ItemNotFound, "Category not found");
+                }
+
+                // Get site
+                var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+                if (site == null)
+                {
+                    return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
+                }
+
+                // Check if WooCommerce is enabled for this site
+                if (site.WooCommerceEnabled != true ||
+                    string.IsNullOrEmpty(site.WooCommerceUrl) ||
+                    string.IsNullOrEmpty(site.WooCommerceKey) ||
+                    string.IsNullOrEmpty(site.WooCommerceSecret))
+                {
+                    return CreateResponse(response, StatusCode.InvalidRequest,
+                        "WooCommerce is not enabled or configured for this site");
+                }
+
+                // Setup WooCommerce API client
+                var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
+                var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
+
+                using var httpClient = _httpClientFactory.CreateClient();
+                httpClient.DefaultRequestHeaders.Clear();
+                httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+
+                // Get parent WooCommerce ID if category has a parent
+                int? parentWooId = null;
+                if (category.ParentCategoryId.HasValue)
+                {
+                    var parentCategory = await _categoryStorage.GetCategoryAsync(category.ParentCategoryId.Value, cancelToken);
+                    if (parentCategory?.WooCommerceId.HasValue == true)
+                    {
+                        parentWooId = parentCategory.WooCommerceId.Value;
+                    }
+                }
+
+                // Sync the category
+                var wooCatId = await SyncCategoryAsync(baseUrl, category, parentWooId, httpClient, cancelToken);
+
+                if (wooCatId.HasValue)
+                {
+                    // Update category with WooCommerce ID
+                    await _categoryStorage.UpdateCategoryWooCommerceIdAsync(categoryId, wooCatId.Value, cancelToken);
+
+                    response.Data.CategoryId = categoryId;
+                    response.Data.WooCommerceId = wooCatId.Value;
+                    response.Data.Success = true;
+                    response.Data.Message = "Category synced successfully";
+                }
+                else
+                {
+                    response.Data.Success = false;
+                    response.Data.Message = "Failed to sync category to WooCommerce";
+                }
+
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error syncing category {CategoryId} to WooCommerce for site {SiteId}", categoryId, siteId);
+                return CreateResponse(response, StatusCode.UnknownError, ex.Message);
+            }
+        }
+
         private async Task<int?> SyncCategoryAsync(
     string baseUrl,
     Category category,
@@ -195,18 +281,17 @@ namespace George.Services
             using var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
 
             var createResponse = await httpClient.PostAsync(createUrl, createContent, cancelToken);
+            var responseBody = await createResponse.Content.ReadAsStringAsync(cancelToken);
 
             // Success
             if (createResponse.IsSuccessStatusCode)
             {
-                var created = await JsonSerializer.DeserializeAsync<WooCommerceCategoryResponse>(
-                    await createResponse.Content.ReadAsStreamAsync(cancelToken),
-                    cancellationToken: cancelToken);
+                var created = TryDeserializeFromResponse<WooCommerceCategoryResponse>(responseBody, createUrl, "POST");
                 return created?.id;
             }
 
-            // Error -> read body
-            var errorBody = await createResponse.Content.ReadAsStringAsync(cancelToken);
+            // Error -> read body (already in responseBody)
+            var errorBody = responseBody;
 
             // term_exists -> return resource_id (and optionally update it)
             var wooErr = TryDeserialize<WooErrorResponse>(errorBody);
@@ -232,13 +317,32 @@ namespace George.Services
             using var updateContent = new StringContent(updateJson, Encoding.UTF8, "application/json");
 
             var updateResponse = await httpClient.PutAsync(updateUrl, updateContent, cancelToken);
+            var responseBody = await updateResponse.Content.ReadAsStringAsync(cancelToken);
             if (!updateResponse.IsSuccessStatusCode) return null;
 
-            var updated = await JsonSerializer.DeserializeAsync<WooCommerceCategoryResponse>(
-                await updateResponse.Content.ReadAsStreamAsync(cancelToken),
-                cancellationToken: cancelToken);
-
+            var updated = TryDeserializeFromResponse<WooCommerceCategoryResponse>(responseBody, updateUrl, "PUT");
             return updated?.id;
+        }
+
+        /// <summary>
+        /// Deserializes JSON from WooCommerce API response. If the response is HTML (e.g. error page, redirect)
+        /// instead of JSON, throws a clear exception to avoid JsonException on '&lt;' invalid start.
+        /// </summary>
+        private static T? TryDeserializeFromResponse<T>(string responseBody, string requestUrl, string method)
+        {
+            if (string.IsNullOrWhiteSpace(responseBody))
+                return default;
+            var trimmed = responseBody.TrimStart();
+            if (trimmed.StartsWith("<"))
+                throw new Exception($"WooCommerce returned HTML instead of JSON for {method} {requestUrl}. Check that the WooCommerce URL points to the site root and the REST API is enabled. Response starts with: {(responseBody.Length > 120 ? responseBody.Substring(0, 120) + "..." : responseBody)}");
+            try
+            {
+                return JsonSerializer.Deserialize<T>(responseBody);
+            }
+            catch (JsonException ex)
+            {
+                throw new Exception($"WooCommerce response is not valid JSON for {method} {requestUrl}. {ex.Message}. Response starts with: {(responseBody.Length > 150 ? responseBody.Substring(0, 150) + "..." : responseBody)}", ex);
+            }
         }
 
         private static T? TryDeserialize<T>(string json)

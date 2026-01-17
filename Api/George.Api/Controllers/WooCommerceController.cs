@@ -31,6 +31,19 @@ namespace George.Api.Controllers
                 _wooCommerceService.SyncToWooCommerceAsync(request, cancelToken));
         }
 
+        [HttpPost("SyncCategory")]
+        [ProducesResponseType(typeof(IApiResponse<WooCommerceCategorySyncRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> SyncCategoryToWooCommerceAsync(
+            [FromBody] WooCommerceSyncCategoryReq request,
+            CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _wooCommerceService.SyncCategoryToWooCommerceAsync(
+                    request.CategoryId, 
+                    request.SiteId, 
+                    cancelToken));
+        }
+
         [ApiExplorerSettings(IgnoreApi = true)]
         public void SetAuthUser()
         {
