@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -63,6 +63,8 @@ public partial class Site
 
     [StringLength(250)]
     public string? WooCommerceSecret { get; set; }
+
+    public bool? WooCommerceEnabled { get; set; }
 
     [ForeignKey("AccountId")]
     [InverseProperty("Sites")]

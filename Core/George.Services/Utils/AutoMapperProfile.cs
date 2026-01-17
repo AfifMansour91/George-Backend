@@ -112,6 +112,9 @@ namespace George.Services
                     {
                         dest.Status = src.IsActive ? "active" : "inactive";
                     }
+                    
+                    // Explicitly map WooCommerceEnabled to ensure it's included
+                    dest.WooCommerceEnabled = src.WooCommerceEnabled;
                 });
             CreateMap<CreateSiteReq, Site>()
                 .AfterMap((src, dest, context) =>

@@ -1,4 +1,4 @@
-﻿using George.Common;
+using George.Common;
 using System.ComponentModel.DataAnnotations;
 
 namespace George.Services.Request
@@ -21,6 +21,7 @@ namespace George.Services.Request
         public string? WooCommerceUrl { get; set; }
         public string? WooCommerceKey { get; set; }
         public string? WooCommerceSecret { get; set; }
+        public bool? WooCommerceEnabled { get; set; }
     }
 
     public class CreateSiteReq : SiteReq

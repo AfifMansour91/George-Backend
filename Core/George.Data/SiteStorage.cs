@@ -1,4 +1,4 @@
-﻿using George.Common;
+using George.Common;
 using George.DB;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -110,6 +110,10 @@ namespace George.Data
             dbSite.WooCommerceUrl = updated.WooCommerceUrl ?? dbSite.WooCommerceUrl;
             dbSite.WooCommerceKey = updated.WooCommerceKey ?? dbSite.WooCommerceKey;
             dbSite.WooCommerceSecret = updated.WooCommerceSecret ?? dbSite.WooCommerceSecret;
+            if (updated.WooCommerceEnabled.HasValue)
+            {
+                dbSite.WooCommerceEnabled = updated.WooCommerceEnabled;
+            }
             dbSite.IsActive = updated.IsActive || dbSite.IsActive;
             dbSite.UpdatedDate = DateTime.UtcNow;
 
