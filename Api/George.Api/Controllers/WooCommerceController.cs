@@ -44,6 +44,19 @@ namespace George.Api.Controllers
                     cancelToken));
         }
 
+        [HttpPost("SyncAttribute")]
+        [ProducesResponseType(typeof(IApiResponse<WooCommerceAttributeSyncRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> SyncAttributeToWooCommerceAsync(
+            [FromBody] WooCommerceSyncAttributeReq request,
+            CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _wooCommerceService.SyncAttributeToWooCommerceAsync(
+                    request.AttributeId,
+                    request.SiteId,
+                    cancelToken));
+        }
+
         [ApiExplorerSettings(IgnoreApi = true)]
         public void SetAuthUser()
         {

@@ -24,5 +24,13 @@ namespace George.Services.Response
         public bool Success { get; set; }
         public string Message { get; set; } = string.Empty;
     }
+
+    public class WooCommerceAttributeSyncRes
+    {
+        public int AttributeId { get; set; }
+        public int? WooCommerceId { get; set; }
+        public bool Success { get; set; }
+        public string Message { get; set; } = string.Empty;
+    }
 }
 

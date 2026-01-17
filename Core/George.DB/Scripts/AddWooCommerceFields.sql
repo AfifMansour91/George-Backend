@@ -98,6 +98,22 @@ END
 GO
 
 -- =============================================
+-- 5. Add WooCommerceId to Attribute table
+-- =============================================
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[Attribute]') AND name = 'WooCommerceId')
+BEGIN
+    ALTER TABLE [dbo].[Attribute]
+    ADD [WooCommerceId] [int] NULL;
+    
+    PRINT 'Added WooCommerceId column to Attribute table';
+END
+ELSE
+BEGIN
+    PRINT 'WooCommerceId column already exists in Attribute table';
+END
+GO
+
+-- =============================================
 -- Verification: Check all columns were added
 -- =============================================
 PRINT '';
@@ -110,6 +126,7 @@ IF EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[Site]'
     AND EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[Category]') AND name = 'WooCommerceId')
     AND EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[Product]') AND name = 'WooCommerceId')
     AND EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[ProductVariant]') AND name = 'WooCommerceVariationId')
+    AND EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[Attribute]') AND name = 'WooCommerceId')
 BEGIN
     PRINT 'SUCCESS: All WooCommerce fields have been added successfully!';
 END

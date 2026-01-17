@@ -1,4 +1,4 @@
-﻿using George.Common;
+using George.Common;
 using George.Common.Request;
 using George.Data.Models;
 using George.DB;
@@ -127,6 +127,19 @@ namespace George.Data
 
             await _dbContext.SaveChangesAsync(cancelToken);
             return dbAttr;
+        }
+
+        public async Task<bool> UpdateAttributeWooCommerceIdAsync(int attributeId, int? wooCommerceId, CancellationToken cancelToken)
+        {
+            var attribute = await _dbContext.Attributes
+                .FirstOrDefaultAsync(a => a.Id == attributeId, cancelToken);
+
+            if (attribute == null) return false;
+
+            attribute.WooCommerceId = wooCommerceId;
+            attribute.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return true;
         }
 
         public async Task<bool> DeleteAttributeAsync(int id, CancellationToken cancelToken = default)

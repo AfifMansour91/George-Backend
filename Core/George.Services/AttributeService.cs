@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using George.Common;
 using George.Common.Request;
 using George.Data;
@@ -14,15 +14,21 @@ namespace George.Services
     public class AttributeService : ServiceBase
     {
         private readonly AttributeStorage _attributeStorage;
+        private readonly WooCommerceService _wooCommerceService;
+        private readonly SiteStorage _siteStorage;
 
         public AttributeService(
             ILogger<AttributeService> logger,
             IMapper mapper,
             CacheManager cache,
-            AttributeStorage attributeStorage
+            AttributeStorage attributeStorage,
+            WooCommerceService wooCommerceService,
+            SiteStorage siteStorage
         ) : base(logger, mapper, cache)
         {
             _attributeStorage = attributeStorage;
+            _wooCommerceService = wooCommerceService;
+            _siteStorage = siteStorage;
         }
 
         public async Task<IApiResponse<ApiListResponse<AttributeRes>>> GetAttributesAsync(
@@ -76,6 +82,9 @@ namespace George.Services
                 model = await _attributeStorage.GetAttributeAsync(model.Id, cancelToken);
                 // Convert to response.
                 response.Data = MapAttributeToRes(model);
+
+                // Sync to WooCommerce if enabled for the site
+                await SyncAttributeToWooCommerceWhenEnabledAsync(model.Id, model.SiteId, cancelToken);
             }
 
             return response;
@@ -136,6 +145,25 @@ namespace George.Services
             }
 
             return res;
+        }
+
+        private async Task SyncAttributeToWooCommerceWhenEnabledAsync(int attributeId, int siteId, CancellationToken cancelToken)
+        {
+            try
+            {
+                var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+                if (site?.WooCommerceEnabled != true) return;
+
+                var syncRes = await _wooCommerceService.SyncAttributeToWooCommerceAsync(attributeId, siteId, cancelToken);
+                if (syncRes.Data?.Success == true)
+                    _logger.LogInformation("Synced attribute {AttributeId} to WooCommerce for site {SiteId}", attributeId, siteId);
+                else
+                    _logger.LogWarning("Failed to sync attribute {AttributeId} to WooCommerce for site {SiteId}: {Message}", attributeId, siteId, syncRes.Data?.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error syncing attribute {AttributeId} to WooCommerce for site {SiteId}", attributeId, siteId);
+            }
         }
     }
 }

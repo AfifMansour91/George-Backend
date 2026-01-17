@@ -3,6 +3,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using George.Common;
 using George.Data;
 using George.DB;
@@ -11,6 +12,7 @@ using George.Services.Response;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
+using Attribute = George.DB.Attribute;
 
 namespace George.Services
 {
@@ -19,6 +21,7 @@ namespace George.Services
         private readonly SiteStorage _siteStorage;
         private readonly CategoryStorage _categoryStorage;
         private readonly ProductStorage _productStorage;
+        private readonly AttributeStorage _attributeStorage;
         private readonly IHttpClientFactory _httpClientFactory;
 
         public WooCommerceService(
@@ -28,12 +31,14 @@ namespace George.Services
             SiteStorage siteStorage,
             CategoryStorage categoryStorage,
             ProductStorage productStorage,
+            AttributeStorage attributeStorage,
             IHttpClientFactory httpClientFactory
         ) : base(logger, mapper, cache)
         {
             _siteStorage = siteStorage;
             _categoryStorage = categoryStorage;
             _productStorage = productStorage;
+            _attributeStorage = attributeStorage;
             _httpClientFactory = httpClientFactory;
         }
 
@@ -250,6 +255,149 @@ namespace George.Services
             {
                 _logger.LogError(ex, "Error syncing category {CategoryId} to WooCommerce for site {SiteId}", categoryId, siteId);
                 return CreateResponse(response, StatusCode.UnknownError, ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Syncs a single site attribute to WooCommerce product attributes and terms for that site.
+        /// </summary>
+        public async Task<IApiResponse<WooCommerceAttributeSyncRes>> SyncAttributeToWooCommerceAsync(
+            int attributeId,
+            int siteId,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<WooCommerceAttributeSyncRes>
+            {
+                Data = new WooCommerceAttributeSyncRes()
+            };
+
+            try
+            {
+                var attribute = await _attributeStorage.GetAttributeAsync(attributeId, cancelToken);
+                if (attribute == null)
+                {
+                    return CreateResponse(response, StatusCode.ItemNotFound, "Attribute not found");
+                }
+
+                if (attribute.SiteId != siteId)
+                {
+                    return CreateResponse(response, StatusCode.InvalidRequest, "Attribute does not belong to this site");
+                }
+
+                var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+                if (site == null)
+                {
+                    return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
+                }
+
+                if (site.WooCommerceEnabled != true ||
+                    string.IsNullOrEmpty(site.WooCommerceUrl) ||
+                    string.IsNullOrEmpty(site.WooCommerceKey) ||
+                    string.IsNullOrEmpty(site.WooCommerceSecret))
+                {
+                    return CreateResponse(response, StatusCode.InvalidRequest,
+                        "WooCommerce is not enabled or configured for this site");
+                }
+
+                var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
+                var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
+
+                using var httpClient = _httpClientFactory.CreateClient();
+                httpClient.DefaultRequestHeaders.Clear();
+                httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+
+                var wooAttrId = await SyncAttributeAsync(baseUrl, attribute, httpClient, cancelToken);
+
+                if (wooAttrId.HasValue)
+                {
+                    await _attributeStorage.UpdateAttributeWooCommerceIdAsync(attributeId, wooAttrId.Value, cancelToken);
+                    response.Data.AttributeId = attributeId;
+                    response.Data.WooCommerceId = wooAttrId.Value;
+                    response.Data.Success = true;
+                    response.Data.Message = "Attribute synced successfully";
+                }
+                else
+                {
+                    response.Data.Success = false;
+                    response.Data.Message = "Failed to sync attribute to WooCommerce";
+                }
+
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error syncing attribute {AttributeId} to WooCommerce for site {SiteId}", attributeId, siteId);
+                return CreateResponse(response, StatusCode.UnknownError, ex.Message);
+            }
+        }
+
+        private static string SlugifyAttributeName(string name)
+        {
+            var slug = Regex.Replace(name ?? "", @"[^a-zA-Z0-9]+", "_").ToLowerInvariant().Trim('_');
+            return string.IsNullOrEmpty(slug) ? "attr" : slug;
+        }
+
+        private async Task<int?> SyncAttributeAsync(string baseUrl, Attribute attribute, HttpClient httpClient, CancellationToken cancelToken)
+        {
+            var slug = "pa_" + SlugifyAttributeName(attribute.Name);
+            var wooAttrData = new { name = attribute.Name, slug, type = "select", order_by = "menu_order", has_archives = false };
+
+            if (attribute.WooCommerceId.HasValue)
+            {
+                var updatedId = await TryUpdateProductAttributeAsync(baseUrl, attribute.WooCommerceId.Value, wooAttrData, httpClient, cancelToken);
+                if (updatedId.HasValue)
+                {
+                    await SyncAttributeTermsAsync(baseUrl, updatedId.Value, attribute, httpClient, cancelToken);
+                    return updatedId.Value;
+                }
+            }
+
+            var createUrl = $"{baseUrl}/products/attributes";
+            var createJson = JsonSerializer.Serialize(wooAttrData);
+            using var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
+            var createResponse = await httpClient.PostAsync(createUrl, createContent, cancelToken);
+            var responseBody = await createResponse.Content.ReadAsStringAsync(cancelToken);
+
+            if (createResponse.IsSuccessStatusCode)
+            {
+                var created = TryDeserializeFromResponse<WooCommerceAttributeResponse>(responseBody, createUrl, "POST");
+                if (created?.id is int id)
+                {
+                    await SyncAttributeTermsAsync(baseUrl, id, attribute, httpClient, cancelToken);
+                    return id;
+                }
+            }
+
+            throw new Exception($"WooCommerce API error ({createResponse.StatusCode}): {responseBody}");
+        }
+
+        private async Task<int?> TryUpdateProductAttributeAsync(string baseUrl, int wooAttrId, object wooAttrData, HttpClient httpClient, CancellationToken cancelToken)
+        {
+            var updateUrl = $"{baseUrl}/products/attributes/{wooAttrId}";
+            var updateJson = JsonSerializer.Serialize(wooAttrData);
+            using var updateContent = new StringContent(updateJson, Encoding.UTF8, "application/json");
+            var updateResponse = await httpClient.PutAsync(updateUrl, updateContent, cancelToken);
+            var responseBody = await updateResponse.Content.ReadAsStringAsync(cancelToken);
+            if (!updateResponse.IsSuccessStatusCode) return null;
+
+            var updated = TryDeserializeFromResponse<WooCommerceAttributeResponse>(responseBody, updateUrl, "PUT");
+            return updated?.id;
+        }
+
+        private async Task SyncAttributeTermsAsync(string baseUrl, int wooAttrId, Attribute attribute, HttpClient httpClient, CancellationToken cancelToken)
+        {
+            var values = attribute.AttributeValues?.Select(av => av.Value).Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? new List<string>();
+            foreach (var value in values)
+            {
+                var termUrl = $"{baseUrl}/products/attributes/{wooAttrId}/terms";
+                var termBody = JsonSerializer.Serialize(new { name = value.Trim() });
+                using var termContent = new StringContent(termBody, Encoding.UTF8, "application/json");
+                var termRes = await httpClient.PostAsync(termUrl, termContent, cancelToken);
+                if (!termRes.IsSuccessStatusCode)
+                {
+                    var err = await termRes.Content.ReadAsStringAsync(cancelToken);
+                    _logger.LogWarning("Failed to create attribute term {Value} for WooCommerce attribute {WooAttrId}: {Error}", value, wooAttrId, err);
+                }
             }
         }
 
@@ -758,6 +906,11 @@ namespace George.Services
 
         // Helper classes for WooCommerce API responses
         private class WooCommerceCategoryResponse
+        {
+            public int id { get; set; }
+        }
+
+        private class WooCommerceAttributeResponse
         {
             public int id { get; set; }
         }

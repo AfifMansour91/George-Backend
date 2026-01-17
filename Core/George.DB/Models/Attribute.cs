@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -30,6 +30,8 @@ public partial class Attribute
     public string Name { get; set; } = null!;
 
     public int SiteId { get; set; }
+
+    public int? WooCommerceId { get; set; }
 
     [InverseProperty("Attribute")]
     public virtual ICollection<AttributeValue> AttributeValues { get; set; } = new List<AttributeValue>();

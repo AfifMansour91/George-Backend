@@ -11,5 +11,11 @@ namespace George.Services.Request
         public int CategoryId { get; set; }
         public int SiteId { get; set; }
     }
+
+    public class WooCommerceSyncAttributeReq
+    {
+        public int AttributeId { get; set; }
+        public int SiteId { get; set; }
+    }
 }
 
