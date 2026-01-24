@@ -521,6 +521,7 @@ namespace George.Data
                 WeightOptions = req.WeightOptions,
                 WeightByVariant = req.WeightByVariant,
                 ShowPricePer100g = req.ShowPricePer100g,
+                ShowUnitPrice = req.ShowUnitPrice,
                 IsDeleted = false
             };
 

@@ -126,7 +126,7 @@ SET IDENTITY_INSERT [dbo].[UnitWeightMode] OFF
 GO
 SET IDENTITY_INSERT [dbo].[WeightConfig] ON 
 GO
-INSERT [dbo].[WeightConfig] ([Id], [IsDeleted], [UnitId], [StartWeight], [Step], [FixedWeightPerUnit], [UnitWeight], [UnitWeightModeId], [WeightOptions], [WeightByVariant], [ShowPricePer100g]) VALUES (1, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
+INSERT [dbo].[WeightConfig] ([Id], [IsDeleted], [UnitId], [StartWeight], [Step], [FixedWeightPerUnit], [UnitWeight], [UnitWeightModeId], [WeightOptions], [WeightByVariant], [ShowPricePer100g], [ShowUnitPrice]) VALUES (1, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
 GO
 SET IDENTITY_INSERT [dbo].[WeightConfig] OFF
 GO

@@ -640,7 +640,8 @@ namespace George.Services
                     UnitWeightMode = templateProduct.WeightConfig.UnitWeightMode?.Name,
                     WeightOptions = templateProduct.WeightConfig.WeightOptions,
                     WeightByVariant = templateProduct.WeightConfig.WeightByVariant,
-                    ShowPricePer100g = templateProduct.WeightConfig.ShowPricePer100g
+                    ShowPricePer100g = templateProduct.WeightConfig.ShowPricePer100g,
+                    ShowUnitPrice = templateProduct.WeightConfig.ShowUnitPrice
                 };
             }
 
@@ -677,7 +678,8 @@ namespace George.Services
                     UnitWeightMode = req.WeightConfig.UnitWeightMode,
                     WeightOptions = req.WeightConfig.WeightOptions,
                     WeightByVariant = req.WeightConfig.WeightByVariant,
-                    ShowPricePer100g = req.WeightConfig.ShowPricePer100g
+                    ShowPricePer100g = req.WeightConfig.ShowPricePer100g,
+                    ShowUnitPrice = req.WeightConfig.ShowUnitPrice
                 } : null
             };
         }

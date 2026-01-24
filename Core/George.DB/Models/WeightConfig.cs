@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -35,6 +35,8 @@ public partial class WeightConfig
     public bool? WeightByVariant { get; set; }
 
     public bool? ShowPricePer100g { get; set; }
+
+    public bool? ShowUnitPrice { get; set; }
 
     [InverseProperty("WeightConfig")]
     public virtual ICollection<Product> Products { get; set; } = new List<Product>();

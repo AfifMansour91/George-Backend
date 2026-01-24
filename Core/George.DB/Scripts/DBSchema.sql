@@ -1089,6 +1089,7 @@ CREATE TABLE [dbo].[WeightConfig](
 	[WeightOptions] [nvarchar](2000) NULL,
 	[WeightByVariant] [bit] NULL,
 	[ShowPricePer100g] [bit] NULL,
+	[ShowUnitPrice] [bit] NULL,
  CONSTRAINT [PK_WeightConfig] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC

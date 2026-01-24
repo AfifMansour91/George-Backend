@@ -32,6 +32,7 @@ namespace George.Services.Request
         public string? WeightOptions { get; set; }
         public bool? WeightByVariant { get; set; }
         public bool? ShowPricePer100g { get; set; }
+        public bool? ShowUnitPrice { get; set; }
     }
 
     public class ProductReq

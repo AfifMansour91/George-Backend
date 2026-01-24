@@ -28,6 +28,7 @@ namespace George.Data.Dto
         public string? WeightOptions { get; set; }
         public bool? WeightByVariant { get; set; }
         public bool? ShowPricePer100g { get; set; }
+        public bool? ShowUnitPrice { get; set; }
     }
 
     public class ProductLookupDto
