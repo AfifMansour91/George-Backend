@@ -1,4 +1,4 @@
-﻿
+
 GO
 SET IDENTITY_INSERT [dbo].[UserStatus] ON 
 GO
@@ -98,11 +98,11 @@ SET IDENTITY_INSERT [dbo].[Media] OFF
 GO
 SET IDENTITY_INSERT [dbo].[Visibility] ON 
 GO
-INSERT [dbo].[Visibility] ([Id], [Name], [IsDeleted]) VALUES (1, N'public', 0)
+INSERT [dbo].[Visibility] ([Id], [Name], [IsDeleted]) VALUES (1, N'active', 0)
 GO
 INSERT [dbo].[Visibility] ([Id], [Name], [IsDeleted]) VALUES (2, N'hidden', 0)
 GO
-INSERT [dbo].[Visibility] ([Id], [Name], [IsDeleted]) VALUES (3, N'private', 0)
+INSERT [dbo].[Visibility] ([Id], [Name], [IsDeleted]) VALUES (3, N'outOfStock', 0)
 GO
 SET IDENTITY_INSERT [dbo].[Visibility] OFF
 GO
@@ -132,11 +132,11 @@ SET IDENTITY_INSERT [dbo].[WeightConfig] OFF
 GO
 SET IDENTITY_INSERT [dbo].[ProductStatus] ON 
 GO
-INSERT [dbo].[ProductStatus] ([Id], [Name], [IsDeleted]) VALUES (1, N'published', 0)
+INSERT [dbo].[ProductStatus] ([Id], [Name], [IsDeleted]) VALUES (1, N'active', 0)
 GO
-INSERT [dbo].[ProductStatus] ([Id], [Name], [IsDeleted]) VALUES (2, N'draft', 0)
+INSERT [dbo].[ProductStatus] ([Id], [Name], [IsDeleted]) VALUES (2, N'outOfStock', 0)
 GO
-INSERT [dbo].[ProductStatus] ([Id], [Name], [IsDeleted]) VALUES (3, N'archived', 0)
+INSERT [dbo].[ProductStatus] ([Id], [Name], [IsDeleted]) VALUES (3, N'hidden', 0)
 GO
 SET IDENTITY_INSERT [dbo].[ProductStatus] OFF
 GO

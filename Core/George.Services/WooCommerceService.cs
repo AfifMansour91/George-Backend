@@ -560,17 +560,30 @@ namespace George.Services
             {
                 // Map stock status
                 var stockStatus = "instock";
-                if (product.StockStatus?.Name == "out_of_stock")
+                if (product.StockStatus?.Name == "out_of_stock" || product.Status?.Name == "outOfStock")
                     stockStatus = "outofstock";
                 else if (product.StockStatus?.Name == "on_backorder")
                     stockStatus = "onbackorder";
 
                 // Map visibility
                 var catalogVisibility = "visible";
-                if (product.Visibility?.Name == "hidden")
+                if (product.Visibility?.Name == "hidden" || product.Status?.Name == "hidden")
                     catalogVisibility = "hidden";
-                else if (product.Visibility?.Name == "private")
-                    catalogVisibility = "catalog";
+                else if (product.Visibility?.Name == "outOfStock")
+                    catalogVisibility = "visible"; // Still visible even if out of stock
+
+                // Map WooCommerce status
+                var wooStatus = "publish";
+                if (product.Status?.Name == "hidden")
+                    wooStatus = "private";
+                else if (product.Status?.Name == "outOfStock")
+                    wooStatus = "publish";
+                else if (product.Status?.Name == "active")
+                    wooStatus = "publish";
+                else if (product.Status?.Name == "draft")
+                    wooStatus = "draft";
+                else if (product.Status?.Name == "archived")
+                    wooStatus = "private";
 
                 // Map shipping class
                 var shippingClass = "";
@@ -673,7 +686,7 @@ namespace George.Services
                     //["images"] = images,
                     ["categories"] = allCategoryIds,
                     ["tags"] = tags,
-                    ["status"] = product.Status?.Name == "published" ? "publish" : "draft",
+                    ["status"] = wooStatus,
                     ["meta_data"] = metaData
                 };
 

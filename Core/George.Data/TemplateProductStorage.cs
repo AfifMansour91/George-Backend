@@ -548,16 +548,30 @@ namespace George.Data
             // Map status
             if (req.Status.HasValue())
             {
+                var statusName = req.Status;
+                // Normalize status names from client
+                if (statusName == "public") statusName = "active";
+                if (statusName == "published") statusName = "active";
+                if (statusName == "draft") statusName = "hidden";
+                if (statusName == "archived") statusName = "hidden";
+
                 var status = await _dbContext.ProductStatuses
-                    .FirstOrDefaultAsync(s => s.Name == req.Status, cancelToken);
+                    .FirstOrDefaultAsync(s => s.Name.ToLower() == statusName.ToLower().Trim(), cancelToken);
                 templateProduct.StatusId = status?.Id;
             }
 
             // Map visibility
             if (req.Visibility.HasValue())
             {
+                var visibilityName = req.Visibility;
+                // Normalize visibility names from client
+                if (visibilityName == "public") visibilityName = "active";
+                if (visibilityName == "published") visibilityName = "active";
+                if (visibilityName == "draft") visibilityName = "hidden";
+                if (visibilityName == "archived") visibilityName = "hidden";
+
                 var visibility = await _dbContext.Visibilities
-                    .FirstOrDefaultAsync(v => v.Name == req.Visibility, cancelToken);
+                    .FirstOrDefaultAsync(v => v.Name.ToLower() == visibilityName.ToLower().Trim(), cancelToken);
                 templateProduct.VisibilityId = visibility?.Id;
             }
 
