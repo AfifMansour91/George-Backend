@@ -32,8 +32,14 @@ namespace George.Data
             {
                 if (filter.GlobalOnly == true)
                 {
-                    // Global media: only media not used by any account (super-admin pool). Exclude media in AccountMedia.
-                    query = query.Where(m => !_dbContext.AccountMedia.Any(am => am.MediaId == m.Id));
+                    // Global media: only media not used by any account (super-admin pool). Exclude all account media.
+                    var usedMediaIds = await _dbContext.AccountMedia
+                        .Select(am => am.MediaId)
+                        .Distinct()
+                        .ToListAsync(cancelToken)
+                        .ConfigureAwait(false);
+                    if (usedMediaIds.Count > 0)
+                        query = query.Where(m => !usedMediaIds.Contains(m.Id));
                 }
                 else if (filter.AccountId.HasValue)
                 {

@@ -25,8 +25,14 @@ namespace George.Api.Controllers
         [ProducesResponseType(typeof(IApiResponse<ApiListResponse<MediaRes>>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetMediaAsync(
             [FromQuery] ApiListReq<MediaFilter> request,
+            [FromQuery] bool? globalOnly,
             CancellationToken cancelToken = default)
         {
+            if (globalOnly == true)
+            {
+                request.Filter ??= new MediaFilter();
+                request.Filter.GlobalOnly = true;
+            }
             return await SafeCallWithErrorCatchingAsync(() => _mediaSvc.GetMediaAsync(request, cancelToken));
         }
 
