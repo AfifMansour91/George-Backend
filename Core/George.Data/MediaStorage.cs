@@ -21,7 +21,6 @@ namespace George.Data
             var res = new DataListResult<Medium>();
 
             var query = _dbContext.Media
-                .Include(m => m.Account)
                 .Include(m => m.BusinessType)
                 .Include(m => m.Type)
                 .Include(m => m.Categories)
@@ -31,9 +30,17 @@ namespace George.Data
             // Apply filters
             if (filter != null)
             {
-                if (filter.AccountId.HasValue)
+                if (filter.GlobalOnly == true)
                 {
-                    query = query.Where(m => m.AccountId == filter.AccountId.Value);
+                    // Global media: only media not used by any account (super-admin pool). Exclude media in AccountMedia.
+                    query = query.Where(m => !_dbContext.AccountMedia.Any(am => am.MediaId == m.Id));
+                }
+                else if (filter.AccountId.HasValue)
+                {
+                    var aid = filter.AccountId.Value;
+                    // Media this account uses (AccountMedia only; Media has no AccountId)
+                    query = query.Where(m =>
+                        _dbContext.AccountMedia.Any(am => am.AccountId == aid && am.MediaId == m.Id));
                 }
 
                 if (filter.BusinessTypeId.HasValue)
@@ -76,7 +83,6 @@ namespace George.Data
         public async Task<Medium?> GetMediaAsync(int mediaId, CancellationToken cancelToken)
         {
             return await _dbContext.Media
-                .Include(m => m.Account)
                 .Include(m => m.BusinessType)
                 .Include(m => m.Type)
                 .Include(m => m.Categories)
@@ -89,6 +95,7 @@ namespace George.Data
             Medium media,
             List<int>? categoryIds,
             List<string>? tags,
+            int? accountIdForTags,
             CancellationToken cancelToken)
         {
             _dbContext.Media.Add(media);
@@ -106,20 +113,20 @@ namespace George.Data
                 }
             }
 
-            // Add tags if provided
-            if (tags != null && tags.Any())
+            // Add tags if provided (use accountIdForTags for per-account tag lookup)
+            if (tags != null && tags.Any() && accountIdForTags.HasValue)
             {
                 foreach (var tagName in tags)
                 {
                     var tag = await _dbContext.Tags
-                        .FirstOrDefaultAsync(t => t.Name == tagName && t.AccountId == media.AccountId, cancelToken);
+                        .FirstOrDefaultAsync(t => t.Name == tagName && t.AccountId == accountIdForTags.Value, cancelToken);
                     
                     if (tag == null)
                     {
                         tag = new Tag
                         {
                             Name = tagName,
-                            AccountId = media.AccountId,
+                            AccountId = accountIdForTags.Value,
                             CreationTime = DateTime.UtcNow
                         };
                         _dbContext.Tags.Add(tag);
@@ -136,6 +143,7 @@ namespace George.Data
             Medium updated,
             List<int>? categoryIds,
             List<string>? tags,
+            int? accountIdForTags,
             CancellationToken cancelToken)
         {
             var dbMedia = await _dbContext.Media
@@ -145,14 +153,13 @@ namespace George.Data
 
             if (dbMedia == null) return null;
 
-            // Update basic properties
+            // Update basic properties (no AccountId on Media)
             dbMedia.Url = updated.Url;
             dbMedia.Name = updated.Name;
             dbMedia.TypeId = updated.TypeId;
             dbMedia.BusinessTypeId = updated.BusinessTypeId;
             dbMedia.FileSize = updated.FileSize;
             dbMedia.UsageCount = updated.UsageCount;
-            dbMedia.AccountId = updated.AccountId;
             dbMedia.UpdatedDate = DateTime.UtcNow;
             dbMedia.UpdateUserId = updated.UpdateUserId;
 
@@ -173,23 +180,23 @@ namespace George.Data
                 }
             }
 
-            // Update tags
+            // Update tags (use accountIdForTags for per-account tag lookup)
             if (tags != null)
             {
                 dbMedia.Tags.Clear();
-                if (tags.Any())
+                if (tags.Any() && accountIdForTags.HasValue)
                 {
                     foreach (var tagName in tags)
                     {
                         var tag = await _dbContext.Tags
-                            .FirstOrDefaultAsync(t => t.Name == tagName && t.AccountId == dbMedia.AccountId, cancelToken);
+                            .FirstOrDefaultAsync(t => t.Name == tagName && t.AccountId == accountIdForTags.Value, cancelToken);
                         
                         if (tag == null)
                         {
                             tag = new Tag
                             {
                                 Name = tagName,
-                                AccountId = dbMedia.AccountId,
+                                AccountId = accountIdForTags.Value,
                                 CreationTime = DateTime.UtcNow
                             };
                             _dbContext.Tags.Add(tag);
@@ -214,6 +221,23 @@ namespace George.Data
             media.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken);
             return true;
+        }
+
+        /// <summary>Record that an account uses a media item. Idempotent.</summary>
+        public async Task AddAccountMediaUsageAsync(int accountId, int mediaId, CancellationToken cancelToken)
+        {
+            var exists = await _dbContext.AccountMedia
+                .AnyAsync(am => am.AccountId == accountId && am.MediaId == mediaId, cancelToken)
+                .ConfigureAwait(false);
+            if (exists) return;
+
+            _dbContext.AccountMedia.Add(new AccountMedia
+            {
+                AccountId = accountId,
+                MediaId = mediaId,
+                CreationTime = DateTime.UtcNow
+            });
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
         }
 
         // Helper method to get or create MediaType

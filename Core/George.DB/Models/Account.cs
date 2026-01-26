@@ -96,7 +96,7 @@ public partial class Account
     public virtual User? Manager { get; set; }
 
     [InverseProperty("Account")]
-    public virtual ICollection<Medium> Media { get; set; } = new List<Medium>();
+    public virtual ICollection<AccountMedia> AccountMedia { get; set; } = new List<AccountMedia>();
 
     [InverseProperty("Account")]
     public virtual ICollection<Site> Sites { get; set; } = new List<Site>();

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Index("AccountId", Name = "IX_Media_AccountId")]
 public partial class Medium
 {
     [Key]
@@ -38,12 +37,6 @@ public partial class Medium
 
     public int? UsageCount { get; set; }
 
-    public int? AccountId { get; set; }
-
-    [ForeignKey("AccountId")]
-    [InverseProperty("Media")]
-    public virtual Account? Account { get; set; }
-
     [ForeignKey("BusinessTypeId")]
     [InverseProperty("Media")]
     public virtual BusinessType? BusinessType { get; set; }
@@ -59,6 +52,9 @@ public partial class Medium
     [ForeignKey("UpdateUserId")]
     [InverseProperty("MediumUpdateUsers")]
     public virtual User? UpdateUser { get; set; }
+
+    [InverseProperty("Media")]
+    public virtual ICollection<AccountMedia> AccountMedia { get; set; } = new List<AccountMedia>();
 
     [ForeignKey("MediaId")]
     [InverseProperty("Media")]

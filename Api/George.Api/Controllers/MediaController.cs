@@ -58,6 +58,13 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _mediaSvc.DeleteMediaAsync(mediaId, cancelToken));
         }
 
+        [HttpPost("{mediaId:int}/Use")]
+        [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> UseMediaAsync([FromRoute] int mediaId, [FromBody] UseMediaReq req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _mediaSvc.UseMediaAsync(mediaId, req, cancelToken));
+        }
+
         [HttpGet("Account/{accountId:int}")]
         [ProducesResponseType(typeof(IApiResponse<ApiListResponse<MediaRes>>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetMediaByAccountAsync(

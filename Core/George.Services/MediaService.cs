@@ -74,11 +74,16 @@ namespace George.Services
             // Combine category IDs
             var categoryIds = CombineCategoryIds(req.CategoryIds, req.SubcategoryIds);
 
-            // Create the data in the DB
-            media = await _mediaStorage.CreateMediaAsync(media, categoryIds, req.Tags, cancelToken).ConfigureAwait(false);
+            // Create the data in the DB (accountIdForTags used for per-account tag lookup)
+            media = await _mediaStorage.CreateMediaAsync(media, categoryIds, req.Tags, req.AccountId, cancelToken).ConfigureAwait(false);
             
             if (media != null)
             {
+                // When account uploads media, record usage so it appears in AccountMedia (consistent with "Add to my media")
+                if (req.AccountId.HasValue)
+                {
+                    await _mediaStorage.AddAccountMediaUsageAsync(req.AccountId.Value, media.Id, cancelToken).ConfigureAwait(false);
+                }
                 // Load with relationships for mapping
                 media = await _mediaStorage.GetMediaAsync(media.Id, cancelToken);
                 // Convert to response
@@ -110,8 +115,8 @@ namespace George.Services
             // Combine category IDs
             var categoryIds = CombineCategoryIds(req.CategoryIds, req.SubcategoryIds);
 
-            // Update media
-            media = await _mediaStorage.UpdateMediaAsync(media, categoryIds, req.Tags, cancelToken);
+            // Update media (accountIdForTags used for per-account tag lookup)
+            media = await _mediaStorage.UpdateMediaAsync(media, categoryIds, req.Tags, req.AccountId, cancelToken);
 
             if (media != null)
             {
@@ -133,6 +138,20 @@ namespace George.Services
             return response;
         }
 
+        /// <summary>Record that an account uses a media item (idempotent).</summary>
+        public async Task<IApiResponse<bool>> UseMediaAsync(int mediaId, UseMediaReq req, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<bool>();
+
+            var media = await _mediaStorage.GetMediaAsync(mediaId, cancelToken);
+            if (media == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
+
+            await _mediaStorage.AddAccountMediaUsageAsync(req.AccountId, mediaId, cancelToken).ConfigureAwait(false);
+            response.Data = true;
+            return response;
+        }
+
         // Helper methods
         private Medium MapReqToMedia(MediaReq req)
         {
@@ -142,8 +161,7 @@ namespace George.Services
                 Name = req.Name,
                 BusinessTypeId = req.BusinessTypeId,
                 FileSize = req.FileSize,
-                UsageCount = req.UsageCount,
-                AccountId = req.AccountId
+                UsageCount = req.UsageCount
             };
         }
 
@@ -159,8 +177,7 @@ namespace George.Services
                 Name = media.Name,
                 BusinessTypeId = media.BusinessTypeId,
                 FileSize = media.FileSize,
-                UsageCount = media.UsageCount,
-                AccountId = media.AccountId
+                UsageCount = media.UsageCount
             };
 
             // Map type

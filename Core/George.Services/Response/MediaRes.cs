@@ -15,7 +15,6 @@ namespace George.Services.Response
         public List<string> Tags { get; set; } = new();
         public long? FileSize { get; set; }
         public int? UsageCount { get; set; }
-        public int? AccountId { get; set; }
     }
 }
 

@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using George.DB;
 using System;
 using System.Collections.Generic;
@@ -101,6 +101,8 @@ namespace George.Common
     public class MediaFilter
     {
         public int? AccountId { get; set; }
+        /// <summary>When true, return only global media (AccountId is null). Super-admin use.</summary>
+        public bool? GlobalOnly { get; set; }
         public int? BusinessTypeId { get; set; }
         public int? CategoryId { get; set; }
         public string? Type { get; set; } // "image" | "video" | "document"

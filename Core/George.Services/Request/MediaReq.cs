@@ -38,5 +38,12 @@ namespace George.Services.Request
         [ValidId]
         public int Id { get; set; }
     }
+
+    /// <summary>Request to record that an account uses a media item.</summary>
+    public class UseMediaReq
+    {
+        [Required]
+        public int AccountId { get; set; }
+    }
 }
 

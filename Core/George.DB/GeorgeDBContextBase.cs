@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 
@@ -12,6 +12,8 @@ public partial class GeorgeDBContextBase : DbContext
     }
 
     public virtual DbSet<Account> Accounts { get; set; }
+
+    public virtual DbSet<AccountMedia> AccountMedia { get; set; }
 
     public virtual DbSet<AccountStatus> AccountStatuses { get; set; }
 
@@ -126,6 +128,21 @@ public partial class GeorgeDBContextBase : DbContext
             entity.HasOne(d => d.WizardStatus).WithMany(p => p.Accounts).HasConstraintName("FK_Account_WizardStatus");
 
             entity.HasOne(d => d.WizardType).WithMany(p => p.Accounts).HasConstraintName("FK_Account_WizardType");
+        });
+
+        modelBuilder.Entity<AccountMedia>(entity =>
+        {
+            entity.HasKey(e => new { e.AccountId, e.MediaId });
+
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.Account).WithMany(p => p.AccountMedia)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_AccountMedia_Account");
+
+            entity.HasOne(d => d.Media).WithMany(p => p.AccountMedia)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_AccountMedia_Media");
         });
 
         modelBuilder.Entity<Attribute>(entity =>
@@ -256,8 +273,6 @@ public partial class GeorgeDBContextBase : DbContext
         modelBuilder.Entity<Medium>(entity =>
         {
             entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
-
-            entity.HasOne(d => d.Account).WithMany(p => p.Media).HasConstraintName("FK_Media_Account");
 
             entity.HasOne(d => d.BusinessType).WithMany(p => p.Media).HasConstraintName("FK_Media_BusinessType");
 
