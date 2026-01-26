@@ -87,7 +87,9 @@ namespace George.Services
                         CreatedById = null,
                         CreatedBy = null,
                         
-                        LogoUrl = account.LogoUrl
+                        LogoUrl = account.LogoUrl,
+                        IsKosherShop = account.IsKosherShop,
+                        AllowWeighted = account.AllowWeighted
                     };
                 })
                 .ToList();
@@ -150,6 +152,8 @@ namespace George.Services
                 WizardStep = req.WizardStep,
                 //WizardType = req.WizardType,  TODO: lookup later
                 LogoUrl = req.LogoUrl,
+                IsKosherShop = req.IsKosherShop,
+                AllowWeighted = req.AllowWeighted,
 
                 IsActive = true,
                 CreationTime = DateTime.UtcNow,
@@ -269,6 +273,9 @@ namespace George.Services
                 // But since ASP.NET Core will set it to null if not provided, we need to check if it was explicitly set
                 // For now, treat null or empty string as "clear logo"
                 LogoUrl = req.LogoUrl != null ? (string.IsNullOrWhiteSpace(req.LogoUrl) ? null : req.LogoUrl) : existingAccount.LogoUrl,
+                // Update IsKosherShop and AllowWeighted
+                IsKosherShop = req.IsKosherShop,
+                AllowWeighted = req.AllowWeighted,
                 UpdatedDate = DateTime.UtcNow
             };
 

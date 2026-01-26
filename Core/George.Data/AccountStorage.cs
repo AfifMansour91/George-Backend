@@ -123,6 +123,10 @@ namespace George.Data
             // Note: The service layer sets LogoUrl = req.LogoUrl ?? existingAccount.LogoUrl
             // So if req.LogoUrl is null, it preserves existing. If not null, it uses the new value
             dbAcc.LogoUrl = updated.LogoUrl;
+            
+            // Update IsKosherShop and AllowWeighted
+            dbAcc.IsKosherShop = updated.IsKosherShop;
+            dbAcc.AllowWeighted = updated.AllowWeighted;
 
             await _dbContext.SaveChangesAsync(cancelToken);
             return dbAcc;

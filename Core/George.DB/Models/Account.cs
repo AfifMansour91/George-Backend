@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -72,6 +72,10 @@ public partial class Account
     public string Status { get; set; } = null!;
 
     public bool IsActive { get; set; }
+
+    public bool IsKosherShop { get; set; }
+
+    public bool AllowWeighted { get; set; }
 
     [InverseProperty("Account")]
     public virtual ICollection<Brand> Brands { get; set; } = new List<Brand>();

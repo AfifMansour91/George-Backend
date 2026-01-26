@@ -78,6 +78,8 @@ namespace George.Services
                     dest.CreatedBy = null;
                     
                     dest.LogoUrl = src.LogoUrl;
+                    dest.IsKosherShop = src.IsKosherShop;
+                    dest.AllowWeighted = src.AllowWeighted;
 
                 });
             CreateMap<CreateAccountReq, Account>()
