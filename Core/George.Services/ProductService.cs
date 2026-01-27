@@ -7,6 +7,7 @@ using George.DB;
 using George.Services.Request;
 using George.Services.Response;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace George.Services
 {
@@ -16,6 +17,7 @@ namespace George.Services
         private readonly CategoryStorage _categoryStorage;
         private readonly UserStorage _userStorage;
         private readonly WooCommerceService _wooCommerceService;
+        private readonly IServiceScopeFactory _serviceScopeFactory;
 
         public ProductService(
             ILogger<ProductService> logger,
@@ -24,13 +26,15 @@ namespace George.Services
             ProductStorage productStorage,
             CategoryStorage categoryStorage,
             UserStorage userStorage,
-            WooCommerceService wooCommerceService
+            WooCommerceService wooCommerceService,
+            IServiceScopeFactory serviceScopeFactory
         ) : base(logger, mapper, cache)
         {
             _productStorage = productStorage;
             _categoryStorage = categoryStorage;
             _userStorage = userStorage;
             _wooCommerceService = wooCommerceService;
+            _serviceScopeFactory = serviceScopeFactory;
         }
 
         public async Task<IApiResponse<ApiListResponse<ProductRes>>> GetProductsAsync(
@@ -123,10 +127,20 @@ namespace George.Services
                 product = await _productStorage.GetProductAsync(product.Id, cancelToken);
                 response.Data = MapProductToRes(product!);
                 
-                // Sync to WooCommerce for enabled sites
-                if (product != null && product.Sites != null && product.Sites.Any())
+                // Sync to WooCommerce only for the product's assigned sites (fire-and-forget to avoid blocking the response)
+                if (product != null && req.SiteIds != null && req.SiteIds.Any())
                 {
-                    await SyncProductToWooCommerceForEnabledSitesAsync(product.Id, product.Sites, cancelToken);
+                    var productIdForSync = product.Id;
+                    // Use the site IDs from the request (the sites the product is actually assigned to)
+                    var assignedSiteIds = req.SiteIds.ToList();
+                    
+                    if (assignedSiteIds.Any())
+                    {
+                        _ = Task.Run(async () =>
+                        {
+                            await SyncProductToWooCommerceForAssignedSitesAsync(productIdForSync, assignedSiteIds, CancellationToken.None);
+                        }, CancellationToken.None);
+                    }
                 }
             }
 
@@ -192,10 +206,20 @@ namespace George.Services
                 product = await _productStorage.GetProductAsync(productId, cancelToken);
                 response.Data = MapProductToRes(product!);
                 
-                // Sync to WooCommerce for enabled sites
-                if (product != null && product.Sites != null && product.Sites.Any())
+                // Sync to WooCommerce only for the product's assigned sites (fire-and-forget to avoid blocking the response)
+                if (product != null && req.SiteIds != null && req.SiteIds.Any())
                 {
-                    await SyncProductToWooCommerceForEnabledSitesAsync(product.Id, product.Sites, cancelToken);
+                    var productIdForSync = product.Id;
+                    // Use the site IDs from the request (the sites the product is actually assigned to)
+                    var assignedSiteIds = req.SiteIds.ToList();
+                    
+                    if (assignedSiteIds.Any())
+                    {
+                        _ = Task.Run(async () =>
+                        {
+                            await SyncProductToWooCommerceForAssignedSitesAsync(productIdForSync, assignedSiteIds, CancellationToken.None);
+                        }, CancellationToken.None);
+                    }
                 }
             }
 
@@ -721,36 +745,49 @@ namespace George.Services
             };
         }
 
-        private async Task SyncProductToWooCommerceForEnabledSitesAsync(int productId, ICollection<Site> sites, CancellationToken cancelToken)
+        private async Task SyncProductToWooCommerceForAssignedSitesAsync(int productId, List<int> assignedSiteIds, CancellationToken cancelToken)
         {
-            var enabledSites = sites?.Where(s => s.WooCommerceEnabled == true).ToList();
-            if (enabledSites == null || !enabledSites.Any())
+            if (assignedSiteIds == null || !assignedSiteIds.Any())
                 return;
 
-            // Sync product to WooCommerce for each enabled site
-            // Catch errors so they don't block the product create/update operation
-            foreach (var site in enabledSites)
+            // Create a scope for the background task to ensure services are available
+            using var scope = _serviceScopeFactory.CreateScope();
+            var wooCommerceService = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
+            var siteStorage = scope.ServiceProvider.GetRequiredService<SiteStorage>();
+
+            // Sync product to WooCommerce only for assigned sites that have WooCommerce enabled
+            foreach (var siteId in assignedSiteIds)
             {
                 try
                 {
+                    // Check if this site has WooCommerce enabled
+                    var site = await siteStorage.GetSiteAsync(siteId, cancelToken);
+                    if (site == null || !site.WooCommerceEnabled.HasValue || !site.WooCommerceEnabled.Value)
+                    {
+                        _logger.LogDebug(
+                            "Skipping WooCommerce sync for product {ProductId} to site {SiteId} - WooCommerce not enabled",
+                            productId, siteId);
+                        continue;
+                    }
+
                     var syncReq = new WooCommerceSyncReq
                     {
-                        SiteId = site.Id,
+                        SiteId = siteId,
                         ProductIds = new List<int> { productId }
                     };
-                    var syncResponse = await _wooCommerceService.SyncToWooCommerceAsync(syncReq, cancelToken);
+                    var syncResponse = await wooCommerceService.SyncToWooCommerceAsync(syncReq, cancelToken);
 
                     if (syncResponse.Data?.Success == null || !syncResponse.Data.Success.Any())
                     {
                         _logger.LogWarning(
                             "Failed to sync product {ProductId} to WooCommerce for site {SiteId}: {Message}",
-                            productId, site.Id, syncResponse.Data?.Message ?? "Unknown error");
+                            productId, siteId, syncResponse.Data?.Message ?? "Unknown error");
                     }
                     else
                     {
                         _logger.LogInformation(
                             "Successfully synced product {ProductId} to WooCommerce for site {SiteId}",
-                            productId, site.Id);
+                            productId, siteId);
                     }
                 }
                 catch (Exception ex)
@@ -758,7 +795,7 @@ namespace George.Services
                     // Log error but don't throw - we don't want WooCommerce sync failures to block product operations
                     _logger.LogError(ex,
                         "Error syncing product {ProductId} to WooCommerce for site {SiteId}",
-                        productId, site.Id);
+                        productId, siteId);
                 }
             }
         }
