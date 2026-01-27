@@ -40,7 +40,8 @@ namespace George.Data
                     .ThenInclude(po => po.ProductOptionValues)
                 .Include(p => p.ProductVariants)
                     .ThenInclude(pv => pv.ProductVariantOptionValues)
-                .AsNoTracking();
+                .AsNoTracking()
+                .Where(p => !p.IsDeleted);
 
             // Apply filters
             if (filter != null)
