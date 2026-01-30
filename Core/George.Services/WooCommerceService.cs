@@ -656,6 +656,9 @@ namespace George.Services
                 productsToSync = products.Items.Where(p => p.Sites.Any(s => s.Id == siteId) || p.Sites.Count == 0).ToList();
             }
 
+
+            //productsToSync = productsToSync.Where(x => x.Id == 1255).ToList();
+
             // Sync products in batches of 5
             const int batchSize = 5;
             for (int i = 0; i < productsToSync.Count; i += batchSize)
@@ -749,48 +752,43 @@ namespace George.Services
                 if (!string.IsNullOrEmpty(product.SeoDescription))
                     metaData.Add(new { key = "_yoast_wpseo_metadesc", value = product.SeoDescription });
 
-                // Weighted product fields
-                if (product.IsWeighted == true)
+                // Weighted product fields - "זה מוצר שקיל". Keys must match WordPress admin POST (post.php): leading _ and no trailing _.
+                var isWeighted = product.IsWeighted == true;
+                var weighableValue = isWeighted ? "yes" : "no";
+                metaData.Add(new { key = "_ocwsu_weighable", value = weighableValue });
+                metaData.Add(new { key = "ocwsu_weighable_", value = weighableValue });
+                metaData.Add(new { key = "ocwsu_weightable", value = weighableValue });
+
+                if (isWeighted)
                 {
-                    metaData.Add(new { key = "ocwsu_weightable", value = "yes" });
                     var setupType = product.SetupType?.Name ?? "";
-                    metaData.Add(new { key = "ocwsu_sold_by_units_", value = (setupType == "by_unit" || setupType == "by_unit_and_weight") ? "yes" : "no" });
-                    metaData.Add(new { key = "ocwsu_sold_by_weight_", value = (setupType == "by_weight" || setupType == "by_unit_and_weight") ? "yes" : "no" });
+                    var soldByUnits = (setupType == "by_unit" || setupType == "by_unit_and_weight") ? "yes" : "no";
+                    var soldByWeight = (setupType == "by_weight" || setupType == "by_unit_and_weight") ? "yes" : "no";
+                    metaData.Add(new { key = "_ocwsu_sold_by_units", value = soldByUnits });
+                    metaData.Add(new { key = "ocwsu_sold_by_units_", value = soldByUnits });
+                    metaData.Add(new { key = "_ocwsu_sold_by_weight", value = soldByWeight });
+                    metaData.Add(new { key = "ocwsu_sold_by_weight_", value = soldByWeight });
 
                     if (product.WeightConfig != null)
                     {
-                        // Load WeightConfig with Unit and UnitWeightMode if not already loaded
                         var weightConfig = product.WeightConfig;
-                        if (weightConfig.UnitId.HasValue && weightConfig.Unit == null)
-                        {
-                            // Unit not loaded, skip it for now (would need to query separately)
-                        }
-                        else if (weightConfig.Unit != null && !string.IsNullOrEmpty(weightConfig.Unit.Name))
-                        {
-                            metaData.Add(new { key = "ocwsu_product_weight_units_", value = weightConfig.Unit.Name });
-                        }
-
+                        metaData.Add(new { key = "_ocwsu_product_weight_units", value = weightConfig.Unit?.Name ?? "" });
+                        metaData.Add(new { key = "ocwsu_product_weight_units_", value = weightConfig.Unit?.Name ?? "" });
+                        metaData.Add(new { key = "_ocwsu_display_price_per_100g", value = weightConfig.ShowPricePer100g == true ? "yes" : "no" });
                         metaData.Add(new { key = "ocwsu_display_price_per_100g_", value = weightConfig.ShowPricePer100g == true ? "yes" : "no" });
-                        
-                        if (!string.IsNullOrEmpty(weightConfig.StartWeight))
-                            metaData.Add(new { key = "ocwsu_min_weight_", value = weightConfig.StartWeight });
-                        if (!string.IsNullOrEmpty(weightConfig.Step))
-                            metaData.Add(new { key = "ocwsu_weight_step_", value = weightConfig.Step });
-                        
-                        if (weightConfig.UnitWeightModeId.HasValue && weightConfig.UnitWeightMode == null)
-                        {
-                            // UnitWeightMode not loaded, skip it for now
-                        }
-                        else if (weightConfig.UnitWeightMode != null && !string.IsNullOrEmpty(weightConfig.UnitWeightMode.Name))
-                        {
-                            metaData.Add(new { key = "ocwsu_unit_weight_type_", value = weightConfig.UnitWeightMode.Name });
-                        }
-                        
-                        if (!string.IsNullOrEmpty(weightConfig.UnitWeight))
-                            metaData.Add(new { key = "ocwsu_unit_weight_", value = weightConfig.UnitWeight });
-                        if (!string.IsNullOrEmpty(weightConfig.WeightOptions))
-                            metaData.Add(new { key = "ocwsu_unit_weight_options_", value = weightConfig.WeightOptions });
-                        metaData.Add(new { key = "ocwsu_get_weight_from_variation_", value = weightConfig.WeightByVariant == true ? "yes" : "no" });
+                        metaData.Add(new { key = "_ocwsu_min_weight", value = weightConfig.StartWeight ?? "" });
+                        metaData.Add(new { key = "ocwsu_min_weight_", value = weightConfig.StartWeight ?? "" });
+                        metaData.Add(new { key = "_ocwsu_weight_step", value = weightConfig.Step ?? "" });
+                        metaData.Add(new { key = "ocwsu_weight_step_", value = weightConfig.Step ?? "" });
+                        metaData.Add(new { key = "_ocwsu_unit_weight_type", value = weightConfig.UnitWeightMode?.Name ?? "" });
+                        metaData.Add(new { key = "ocwsu_unit_weight_type_", value = weightConfig.UnitWeightMode?.Name ?? "" });
+                        metaData.Add(new { key = "_ocwsu_unit_weight", value = weightConfig.UnitWeight ?? "" });
+                        metaData.Add(new { key = "ocwsu_unit_weight_", value = weightConfig.UnitWeight ?? "" });
+                        metaData.Add(new { key = "_ocwsu_unit_weight_options", value = weightConfig.WeightOptions ?? "" });
+                        metaData.Add(new { key = "ocwsu_unit_weight_options_", value = weightConfig.WeightOptions ?? "" });
+                        var getWeightFromVariation = weightConfig.WeightByVariant == true ? "yes" : "no";
+                        metaData.Add(new { key = "_ocwsu_get_weight_from_variation", value = getWeightFromVariation });
+                        metaData.Add(new { key = "ocwsu_get_weight_from_variation_", value = getWeightFromVariation });
                     }
                 }
 
