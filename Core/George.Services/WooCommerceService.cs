@@ -306,7 +306,7 @@ namespace George.Services
                 httpClient.DefaultRequestHeaders.Clear();
                 httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
 
-                var wooAttrId = await SyncAttributeAsync(baseUrl, attribute, httpClient, cancelToken);
+                var (wooAttrId, _) = await SyncAttributeAsync(baseUrl, attribute, httpClient, cancelToken);
 
                 if (wooAttrId.HasValue)
                 {
@@ -333,21 +333,42 @@ namespace George.Services
 
         private static string SlugifyAttributeName(string name)
         {
-            var slug = Regex.Replace(name ?? "", @"[^a-zA-Z0-9]+", "_").ToLowerInvariant().Trim('_');
-            return string.IsNullOrEmpty(slug) ? "attr" : slug;
+            name ??= "";
+
+            // Keep ASCII letters/digits for "normal" names
+            var ascii = Regex.Replace(name, @"[^a-zA-Z0-9]+", "_")
+                .ToLowerInvariant()
+                .Trim('_');
+
+            if (!string.IsNullOrEmpty(ascii))
+                return TruncateWooSlug(ascii);
+
+            // Hebrew/Arabic/etc: generate stable slug from hash to avoid collisions
+            using var sha1 = System.Security.Cryptography.SHA1.Create();
+            var bytes = sha1.ComputeHash(Encoding.UTF8.GetBytes(name.Trim()));
+            var hash = BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant();
+
+            return TruncateWooSlug("a_" + hash.Substring(0, 24)); // total <= 28
         }
+
+        private static string TruncateWooSlug(string slug)
+        {
+            // Woo attribute slug limit is ~28 chars
+            return slug.Length <= 28 ? slug : slug.Substring(0, 28);
+        }
+
 
         /// <summary>
         /// Finds an existing WooCommerce global attribute by name or slug.
-        /// Returns the attribute ID if found, null otherwise.
+        /// Returns (id, slug) if found; (null, null) otherwise. Slug is the actual WooCommerce taxonomy slug (e.g. pa_xxx).
         /// </summary>
-        private async Task<int?> FindExistingAttributeAsync(string baseUrl, string attributeName, HttpClient httpClient, CancellationToken cancelToken)
+        private async Task<(int? id, string? slug)> FindExistingAttributeAsync(string baseUrl, string attributeName, HttpClient httpClient, CancellationToken cancelToken)
         {
             try
             {
-                var slug = "pa_" + SlugifyAttributeName(attributeName);
-                // Try to find by slug first (more reliable)
+                var slug = SlugifyAttributeName(attributeName);
                 var searchUrl = $"{baseUrl}/products/attributes?slug={Uri.EscapeDataString(slug)}";
+
                 var searchResponse = await httpClient.GetAsync(searchUrl, cancelToken);
                 
                 if (searchResponse.IsSuccessStatusCode)
@@ -356,18 +377,18 @@ namespace George.Services
                     var attributes = TryDeserialize<List<WooCommerceAttributeResponse>>(searchBody);
                     if (attributes != null && attributes.Count > 0)
                     {
-                        // Check if name matches (slug might match but name might differ)
                         var matchingAttr = attributes.FirstOrDefault(a => 
                             string.Equals(a.name, attributeName, StringComparison.OrdinalIgnoreCase));
                         if (matchingAttr != null)
                         {
-                            return matchingAttr.id;
+                            return (matchingAttr.id, matchingAttr.slug ?? slug);
                         }
                     }
                 }
 
-                // Also try searching by name (in case slug doesn't match exactly)
-                var nameSearchUrl = $"{baseUrl}/products/attributes";
+                // Also try searching by name (Hebrew names don't slug well; WooCommerce may have different slug)
+                var nameSearchUrl = $"{baseUrl}/products/attributes?per_page=100&page=1";
+
                 var nameSearchResponse = await httpClient.GetAsync(nameSearchUrl, cancelToken);
                 
                 if (nameSearchResponse.IsSuccessStatusCode)
@@ -380,7 +401,7 @@ namespace George.Services
                             string.Equals(a.name, attributeName, StringComparison.OrdinalIgnoreCase));
                         if (matchingByName != null)
                         {
-                            return matchingByName.id;
+                            return (matchingByName.id, matchingByName.slug ?? slug);
                         }
                     }
                 }
@@ -390,32 +411,34 @@ namespace George.Services
                 _logger.LogWarning(ex, "Error searching for existing WooCommerce attribute with name {AttributeName}", attributeName);
             }
 
-            return null;
+            return (null, null);
         }
 
-        private async Task<int?> SyncAttributeAsync(string baseUrl, Attribute attribute, HttpClient httpClient, CancellationToken cancelToken)
+        /// <summary>
+        /// Syncs an attribute to WooCommerce. Returns (id, slug) - slug is the actual WooCommerce taxonomy slug.
+        /// </summary>
+        private async Task<(int? id, string? slug)> SyncAttributeAsync(string baseUrl, Attribute attribute, HttpClient httpClient, CancellationToken cancelToken)
         {
-            var slug = "pa_" + SlugifyAttributeName(attribute.Name);
+            var slug = SlugifyAttributeName(attribute.Name);
             var wooAttrData = new { name = attribute.Name, slug, type = "select", order_by = "menu_order", has_archives = false };
 
             // First, check if we have a stored WooCommerceId and try to update
             if (attribute.WooCommerceId.HasValue)
             {
-                var updatedId = await TryUpdateProductAttributeAsync(baseUrl, attribute.WooCommerceId.Value, wooAttrData, httpClient, cancelToken);
+                var (updatedId, updatedSlug) = await TryUpdateProductAttributeAsync(baseUrl, attribute.WooCommerceId.Value, wooAttrData, httpClient, cancelToken);
                 if (updatedId.HasValue)
                 {
                     await SyncAttributeTermsAsync(baseUrl, updatedId.Value, attribute, httpClient, cancelToken);
-                    return updatedId.Value;
+                    return (updatedId.Value, updatedSlug ?? slug);
                 }
             }
 
             // If update failed or no WooCommerceId, try to find existing attribute by name/slug
-            var existingId = await FindExistingAttributeAsync(baseUrl, attribute.Name, httpClient, cancelToken);
+            var (existingId, existingSlug) = await FindExistingAttributeAsync(baseUrl, attribute.Name, httpClient, cancelToken);
             if (existingId.HasValue)
             {
-                // Found existing attribute, sync terms and return the ID
                 await SyncAttributeTermsAsync(baseUrl, existingId.Value, attribute, httpClient, cancelToken);
-                return existingId.Value;
+                return (existingId.Value, existingSlug ?? slug);
             }
 
             // No existing attribute found, create a new one
@@ -431,24 +454,24 @@ namespace George.Services
                 if (created?.id is int id)
                 {
                     await SyncAttributeTermsAsync(baseUrl, id, attribute, httpClient, cancelToken);
-                    return id;
+                    return (id, created.slug ?? slug);
                 }
             }
 
             throw new Exception($"WooCommerce API error ({createResponse.StatusCode}): {responseBody}");
         }
 
-        private async Task<int?> TryUpdateProductAttributeAsync(string baseUrl, int wooAttrId, object wooAttrData, HttpClient httpClient, CancellationToken cancelToken)
+        private async Task<(int? id, string? slug)> TryUpdateProductAttributeAsync(string baseUrl, int wooAttrId, object wooAttrData, HttpClient httpClient, CancellationToken cancelToken)
         {
             var updateUrl = $"{baseUrl}/products/attributes/{wooAttrId}";
             var updateJson = JsonSerializer.Serialize(wooAttrData);
             using var updateContent = new StringContent(updateJson, Encoding.UTF8, "application/json");
             var updateResponse = await httpClient.PutAsync(updateUrl, updateContent, cancelToken);
             var responseBody = await updateResponse.Content.ReadAsStringAsync(cancelToken);
-            if (!updateResponse.IsSuccessStatusCode) return null;
+            if (!updateResponse.IsSuccessStatusCode) return (null, null);
 
             var updated = TryDeserializeFromResponse<WooCommerceAttributeResponse>(responseBody, updateUrl, "PUT");
-            return updated?.id;
+            return updated != null ? (updated.id, updated.slug) : (null, null);
         }
 
         private async Task SyncAttributeTermsAsync(string baseUrl, int wooAttrId, Attribute attribute, HttpClient httpClient, CancellationToken cancelToken)
@@ -463,16 +486,21 @@ namespace George.Services
                 if (!termRes.IsSuccessStatusCode)
                 {
                     var err = await termRes.Content.ReadAsStringAsync(cancelToken);
-                    _logger.LogWarning("Failed to create attribute term {Value} for WooCommerce attribute {WooAttrId}: {Error}", value, wooAttrId, err);
+                    var wooErr = TryDeserialize<WooErrorResponse>(err);
+
+                    if (wooErr?.code == "term_exists")
+                        continue; // OK
+
+                    _logger.LogWarning("Failed to create attribute term ... {Error}", err);
                 }
             }
         }
 
         /// <summary>
         /// Ensures a global attribute exists in the database and is synced to WooCommerce.
-        /// Returns the WooCommerce attribute ID.
+        /// Returns (WooCommerce attribute ID, taxonomy slug). Slug is the actual slug from WooCommerce (e.g. pa_xxx for Hebrew names).
         /// </summary>
-        private async Task<int?> EnsureGlobalAttributeAsync(
+        private async Task<(int? id, string? slug)> EnsureGlobalAttributeAsync(
             string baseUrl,
             string attributeName,
             List<string> attributeValues,
@@ -509,16 +537,15 @@ namespace George.Services
                     cancelToken);
             }
 
-            // Sync to WooCommerce
-            var wooCommerceId = await SyncAttributeAsync(baseUrl, attribute, httpClient, cancelToken);
+            // Sync to WooCommerce; get actual (id, slug) from API
+            var (wooCommerceId, wooSlug) = await SyncAttributeAsync(baseUrl, attribute, httpClient, cancelToken);
             
-            // Update Attribute.WooCommerceId in DB if it changed
             if (wooCommerceId.HasValue && attribute.WooCommerceId != wooCommerceId.Value)
             {
                 await _attributeStorage.UpdateAttributeWooCommerceIdAsync(attribute.Id, wooCommerceId.Value, cancelToken);
             }
 
-            return wooCommerceId;
+            return (wooCommerceId, wooSlug);
         }
 
         private async Task<int?> SyncCategoryAsync(
@@ -656,8 +683,8 @@ namespace George.Services
                 productsToSync = products.Items.Where(p => p.Sites.Any(s => s.Id == siteId) || p.Sites.Count == 0).ToList();
             }
 
-
-            //productsToSync = productsToSync.Where(x => x.Id == 1255).ToList();
+            //TODO: Remove it
+            productsToSync = productsToSync.Where(x => x.Id == 1255).ToList();
 
             // Sync products in batches of 5
             const int batchSize = 5;
@@ -812,8 +839,9 @@ namespace George.Services
                 if (images.Count > 0)
                     wooProduct["images"] = images;
 
-                // For variable products, ensure global attributes exist and use their IDs
-                var attributeMap = new Dictionary<string, int?>(); // Maps attribute name to WooCommerce ID
+                // For variable products, ensure global attributes exist and use their IDs + actual slugs from WooCommerce
+                var attributeMap = new Dictionary<string, int?>();   // attribute name -> WooCommerce ID
+                var attributeSlugMap = new Dictionary<string, string>(); // attribute name -> WooCommerce taxonomy slug (e.g. pa_xxx)
 
                 // For simple products, add pricing and stock
                 if (product.ProductVariants == null || !product.ProductVariants.Any(v => !v.IsDeleted))
@@ -842,8 +870,8 @@ namespace George.Services
 
                             if (attributeValues.Any())
                             {
-                                // Ensure global attribute exists in DB and WooCommerce
-                                var wooAttrId = await EnsureGlobalAttributeAsync(
+                                // Ensure global attribute exists in DB and WooCommerce; get actual (id, slug) from API
+                                var (wooAttrId, wooSlug) = await EnsureGlobalAttributeAsync(
                                     baseUrl,
                                     option.Name,
                                     attributeValues,
@@ -853,28 +881,40 @@ namespace George.Services
                                 
                                 if (wooAttrId.HasValue)
                                 {
-                                    attributeMap[option.Name] = wooAttrId.Value;
+                                    var key = NormalizeOptionKey(option.Name);
+                                    attributeMap[key] = wooAttrId.Value;
+                                    if (!string.IsNullOrEmpty(wooSlug))
+                                        attributeSlugMap[key] = wooSlug;
                                 }
                             }
                         }
                     }
 
-                    // Build attributes array using global attribute IDs
+                    // Build attributes array using global attribute IDs. Use actual WooCommerce taxonomy slug as name
+                    // (from API) so WooCommerce links variations correctly; options remain display names for the dropdown.
                     var attributes = product.ProductOptions?
-                        .Where(po => !po.IsDeleted && attributeMap.ContainsKey(po.Name))
+                        .Where(po => !po.IsDeleted && attributeMap.ContainsKey(NormalizeOptionKey(po.Name)))
                         .Select((option, index) => new
                         {
-                            id = attributeMap[option.Name]!.Value,
-                            name = option.Name,
+                            id = attributeMap[NormalizeOptionKey(option.Name)]!.Value,
+                            // you can omit "name" entirely when using "id"
                             position = index,
                             visible = true,
                             variation = true,
-                            options = option.ProductOptionValues?.Select(pov => pov.Value).Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? new List<string>()
+                            options = option.ProductOptionValues?
+                                .Select(pov => pov.Value)
+                                .Where(v => !string.IsNullOrWhiteSpace(v))
+                                .Select(v => v.Trim())
+                                .Distinct()
+                                .ToList() ?? new List<string>()
                         })
                         .Cast<object>()
                         .ToList() ?? new List<object>();
 
+
                     wooProduct["attributes"] = attributes;
+
+
                 }
 
                 // Create or update product
@@ -942,7 +982,7 @@ namespace George.Services
                 // Sync variations for variable products
                 if (wooCommerceId.HasValue && product.ProductVariants != null && product.ProductVariants.Any(v => !v.IsDeleted))
                 {
-                    await SyncProductVariantsAsync(baseUrl, wooCommerceId.Value, product, attributeMap, httpClient, cancelToken);
+                    await SyncProductVariantsAsync(baseUrl, wooCommerceId.Value, product, attributeMap, attributeSlugMap, httpClient, cancelToken);
                 }
 
                 return new WooCommerceSyncResult
@@ -972,37 +1012,75 @@ namespace George.Services
             int wooProductId,
             Product product,
             Dictionary<string, int?> attributeMap,
+            Dictionary<string, string> attributeSlugMap,
             HttpClient httpClient,
             CancellationToken cancelToken)
         {
             var variants = product.ProductVariants?.Where(v => !v.IsDeleted).ToList() ?? new List<ProductVariant>();
 
+            // When stock is not managed per variation ("במלאי" / "מלאי לפי כמות"), variations must not have their own stock column so they inherit from product.
+            var stockManagedPerVariation = string.Equals(product.StockManagementType?.Name, "variation", StringComparison.OrdinalIgnoreCase);
+            var productStockStatus = "instock";
+            if (product.StockStatus?.Name == "out_of_stock" || product.Status?.Name == "outOfStock")
+                productStockStatus = "outofstock";
+            else if (product.StockStatus?.Name == "on_backorder")
+                productStockStatus = "onbackorder";
+
             foreach (var variant in variants)
             {
                 try
                 {
-                    var variantStockStatus = (variant.StockQuantity ?? 0) > 0 ? "instock" : "outofstock";
+                    var variantStockStatus = stockManagedPerVariation
+                        ? ((variant.StockQuantity ?? 0) > 0 ? "instock" : "outofstock")
+                        : productStockStatus;
 
                     var variantOptionValues = variant.ProductVariantOptionValues?
-                        .ToDictionary(pvov => pvov.OptionName, pvov => pvov.OptionValue) ?? new Dictionary<string, string>();
+    .Where(x => !string.IsNullOrWhiteSpace(x.OptionName))
+    .ToDictionary(
+        x => NormalizeOptionKey(x.OptionName),
+        x => (x.OptionValue ?? "").Trim()
+    ) ?? new Dictionary<string, string>();
 
-                    // Build variation attributes using global attribute IDs
-                    var variationAttributes = variantOptionValues
-                        .Where(kvp => attributeMap.ContainsKey(kvp.Key) && attributeMap[kvp.Key].HasValue)
-                        .Select(kvp => new { id = attributeMap[kvp.Key]!.Value, option = kvp.Value })
-                        .ToList();
+
+                    // Build variation attributes per WooCommerce API: id, name (taxonomy slug), slug, option (term value).
+                    // Use actual WooCommerce slug from attributeSlugMap (kvp.Key = attribute name e.g. "צורת חיתוך").
+                    // SlugifyAttributeName strips Hebrew and gives "pa_attr"; WooCommerce returns the real slug (e.g. pa_xxxx).
+                    var variationAttributesList = new List<object>();
+                    foreach (var kvp in variantOptionValues)
+                    {
+                        if (!attributeMap.TryGetValue(kvp.Key, out var attrIdNullable) || !attrIdNullable.HasValue)
+                            continue;
+
+                        var attrId = attrIdNullable.Value;
+
+                        variationAttributesList.Add(new Dictionary<string, object>
+                        {
+                            ["id"] = attrId,
+                            ["option"] = kvp.Value
+                        });
+                    }
+
+
+                    if (variationAttributesList.Count == 0)
+                    {
+                        _logger.LogWarning("Variation {VariantId} for product {ProductId} has no matching attributes (attributeMap or ProductVariantOptionValues). Skipping this variation.", variant.Id, product.Id);
+                        continue;
+                    }
 
                     var wooVariation = new Dictionary<string, object>
                     {
                         ["regular_price"] = variant.Price?.ToString() ?? product.Price?.ToString() ?? "0",
                         ["sale_price"] = variant.SalePrice?.ToString() ?? "",
                         ["sku"] = variant.Sku ?? "",
-                        ["manage_stock"] = true,
-                        ["stock_quantity"] = variant.StockQuantity ?? 0,
+                        ["manage_stock"] = stockManagedPerVariation,
                         ["stock_status"] = variantStockStatus,
                         ["weight"] = variant.Weight?.ToString() ?? "",
-                        ["attributes"] = variationAttributes
+                        ["attributes"] = variationAttributesList
                     };
+                    if (stockManagedPerVariation)
+                    {
+                        wooVariation["stock_quantity"] = variant.StockQuantity ?? 0;
+                    }
 
                     if (!string.IsNullOrEmpty(variant.ImageUrl))
                     {
@@ -1098,7 +1176,14 @@ namespace George.Services
         {
             public int id { get; set; }
         }
-
+        private static string NormalizeOptionKey(string? s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return "";
+            s = s.Trim();
+            // collapse multiple spaces (including Hebrew/RTL spacing issues)
+            s = Regex.Replace(s, @"\s+", " ");
+            return s;
+        }
         public class WooErrorResponse
         {
             public string? code { get; set; }
