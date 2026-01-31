@@ -5,6 +5,8 @@ using George.Services.Request;
 using George.Services.Response;
 using Microsoft.AspNetCore.Mvc;
 using System.Net;
+using System.Text;
+using System.Text.Json;
 
 namespace George.Api.Controllers
 {
@@ -13,6 +15,7 @@ namespace George.Api.Controllers
     public class WooCommerceController : GeorgeControllerBase, IAuthUserProvider
     {
         private readonly WooCommerceService _wooCommerceService;
+        private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
         public WooCommerceController(
             WooCommerceService wooCommerceService,
@@ -29,6 +32,53 @@ namespace George.Api.Controllers
         {
             return await SafeCallWithErrorCatchingAsync(() =>
                 _wooCommerceService.SyncToWooCommerceAsync(request, cancelToken));
+        }
+
+        /// <summary>Sync with streaming progress (NDJSON). Response: progress lines then one "done" line with result.</summary>
+        [HttpPost("SyncStream")]
+        [ProducesResponseType((int)HttpStatusCode.OK)]
+        public async Task<IActionResult> SyncToWooCommerceStreamAsync(
+            [FromBody] WooCommerceSyncReq request,
+            CancellationToken cancelToken = default)
+        {
+            if (request == null)
+            {
+                return BadRequest();
+            }
+
+            Response.ContentType = "application/x-ndjson; charset=utf-8";
+            Response.Headers.CacheControl = "no-cache";
+
+            var streamLock = new object();
+            void WriteLine(object obj)
+            {
+                lock (streamLock)
+                {
+                    var json = JsonSerializer.Serialize(obj, JsonOptions);
+                    var line = json + "\n";
+                    var bytes = Encoding.UTF8.GetBytes(line);
+                    Response.Body.WriteAsync(bytes, 0, bytes.Length, cancelToken).GetAwaiter().GetResult();
+                    Response.Body.FlushAsync(cancelToken).GetAwaiter().GetResult();
+                }
+            }
+
+            try
+            {
+                var progress = new Progress<WooCommerceSyncProgress>(p =>
+                {
+                    WriteLine(new { type = "progress", total = p.Total, completed = p.Completed, failed = p.Failed });
+                });
+
+                var result = await _wooCommerceService.SyncToWooCommerceWithProgressAsync(request, progress, cancelToken);
+                WriteLine(new { type = "done", message = result.Message, success = result.Success, failed = result.Failed });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "WooCommerce SyncStream error");
+                WriteLine(new { type = "error", message = ex.Message });
+            }
+
+            return new EmptyResult();
         }
 
         [HttpPost("SyncCategory")]

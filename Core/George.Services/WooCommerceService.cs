@@ -1,4 +1,5 @@
 using AutoMapper;
+using System;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -91,7 +92,8 @@ namespace George.Services
                     req.ProductIds,
                     categoryMap,
                     httpClient,
-                    cancelToken);
+                    cancelToken,
+                    progress: null);
 
                 response.Data.Success = syncResults.Where(r => r.Success).ToList();
                 response.Data.Failed = syncResults.Where(r => !r.Success).ToList();
@@ -107,6 +109,50 @@ namespace George.Services
                 _logger.LogError(ex, "Error syncing to WooCommerce");
                 return CreateResponse(response, StatusCode.UnknownError, ex.Message);
             }
+        }
+
+        /// <summary>Syncs to WooCommerce and reports progress. Used by streaming endpoint. Throws on validation failure.</summary>
+        public async Task<WooCommerceSyncRes> SyncToWooCommerceWithProgressAsync(
+            WooCommerceSyncReq req,
+            IProgress<WooCommerceSyncProgress> progress,
+            CancellationToken cancelToken)
+        {
+            var site = await _siteStorage.GetSiteAsync(req.SiteId, cancelToken);
+            if (site == null)
+                throw new InvalidOperationException("Site not found");
+            if (string.IsNullOrEmpty(site.WooCommerceUrl) || string.IsNullOrEmpty(site.WooCommerceKey) || string.IsNullOrEmpty(site.WooCommerceSecret))
+                throw new InvalidOperationException("WooCommerce integration not configured. Please set up your credentials in Store Settings.");
+
+            var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
+            var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
+
+            using var httpClient = _httpClientFactory.CreateClient();
+            httpClient.DefaultRequestHeaders.Clear();
+            httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+
+            var categoryMap = await SyncCategoriesAsync(baseUrl, req.SiteId, httpClient, cancelToken);
+            var syncResults = await SyncProductsAsync(
+                baseUrl,
+                req.SiteId,
+                req.ProductIds,
+                categoryMap,
+                httpClient,
+                cancelToken,
+                progress);
+
+            var successList = syncResults.Where(r => r.Success).ToList();
+            var failedList = syncResults.Where(r => !r.Success).ToList();
+            var totalAttempted = syncResults.Count;
+            var message = totalAttempted == 0
+                ? "No products to sync."
+                : $"Attempted {totalAttempted} products: {successList.Count} succeeded, {failedList.Count} failed.";
+
+            return new WooCommerceSyncRes
+            {
+                Message = message,
+                Success = successList,
+                Failed = failedList
+            };
         }
 
         private async Task<Dictionary<int, int>> SyncCategoriesAsync(
@@ -698,7 +744,8 @@ namespace George.Services
             List<int>? productIds,
             Dictionary<int, int> categoryMap,
             HttpClient httpClient,
-            CancellationToken cancelToken)
+            CancellationToken cancelToken,
+            IProgress<WooCommerceSyncProgress>? progress = null)
         {
             var results = new List<WooCommerceSyncResult>();
 
@@ -746,6 +793,12 @@ namespace George.Services
                 });
                 var batchResults = await Task.WhenAll(batchTasks);
                 results.AddRange(batchResults);
+                progress?.Report(new WooCommerceSyncProgress
+                {
+                    Total = productsToSync.Count,
+                    Completed = results.Count,
+                    Failed = results.Count(r => !r.Success)
+                });
             }
 
             return results;

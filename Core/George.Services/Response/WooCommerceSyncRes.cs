@@ -1,5 +1,13 @@
 namespace George.Services.Response
 {
+    /// <summary>Progress update during WooCommerce sync (streamed to client).</summary>
+    public class WooCommerceSyncProgress
+    {
+        public int Total { get; set; }
+        public int Completed { get; set; }
+        public int Failed { get; set; }
+    }
+
     public class WooCommerceSyncResult
     {
         public bool Success { get; set; }
