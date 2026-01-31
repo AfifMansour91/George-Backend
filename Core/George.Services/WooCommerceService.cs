@@ -9,6 +9,7 @@ using George.Data;
 using George.DB;
 using George.Services.Request;
 using George.Services.Response;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
@@ -23,6 +24,7 @@ namespace George.Services
         private readonly ProductStorage _productStorage;
         private readonly AttributeStorage _attributeStorage;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly IServiceScopeFactory _scopeFactory;
 
         public WooCommerceService(
             ILogger<WooCommerceService> logger,
@@ -32,7 +34,8 @@ namespace George.Services
             CategoryStorage categoryStorage,
             ProductStorage productStorage,
             AttributeStorage attributeStorage,
-            IHttpClientFactory httpClientFactory
+            IHttpClientFactory httpClientFactory,
+            IServiceScopeFactory scopeFactory
         ) : base(logger, mapper, cache)
         {
             _siteStorage = siteStorage;
@@ -40,6 +43,7 @@ namespace George.Services
             _productStorage = productStorage;
             _attributeStorage = attributeStorage;
             _httpClientFactory = httpClientFactory;
+            _scopeFactory = scopeFactory;
         }
 
         public async Task<IApiResponse<WooCommerceSyncRes>> SyncToWooCommerceAsync(
@@ -91,7 +95,10 @@ namespace George.Services
 
                 response.Data.Success = syncResults.Where(r => r.Success).ToList();
                 response.Data.Failed = syncResults.Where(r => !r.Success).ToList();
-                response.Data.Message = $"Synced {response.Data.Success.Count} products successfully, {response.Data.Failed.Count} failed";
+                var totalAttempted = syncResults.Count;
+                response.Data.Message = totalAttempted == 0
+                    ? "No products to sync."
+                    : $"Attempted {totalAttempted} products: {response.Data.Success.Count} succeeded, {response.Data.Failed.Count} failed.";
 
                 return response;
             }
@@ -458,7 +465,7 @@ namespace George.Services
                 }
             }
 
-            throw new Exception($"WooCommerce API error ({createResponse.StatusCode}): {responseBody}");
+            throw new Exception(GetUserFriendlyWooCommerceError((int)createResponse.StatusCode, responseBody));
         }
 
         private async Task<(int? id, string? slug)> TryUpdateProductAttributeAsync(string baseUrl, int wooAttrId, object wooAttrData, HttpClient httpClient, CancellationToken cancelToken)
@@ -597,7 +604,7 @@ namespace George.Services
                 return updatedId ?? existingId;
             }
 
-            throw new Exception($"WooCommerce API error ({createResponse.StatusCode}): {errorBody}");
+            throw new Exception(GetUserFriendlyWooCommerceError((int)createResponse.StatusCode, errorBody));
         }
 
         private async Task<int?> TryUpdateCategoryAsync(
@@ -646,6 +653,45 @@ namespace George.Services
             catch { return default; }
         }
 
+        /// <summary>
+        /// Parses WooCommerce REST API error response and returns a user-friendly message (Hebrew when applicable).
+        /// </summary>
+        private static string GetUserFriendlyWooCommerceError(int statusCode, string responseBody)
+        {
+            if (string.IsNullOrWhiteSpace(responseBody))
+                return "שגיאת WooCommerce (ללא פרטים).";
+
+            try
+            {
+                using var doc = JsonDocument.Parse(responseBody);
+                var root = doc.RootElement;
+                string? message = null;
+                string? code = null;
+                if (root.TryGetProperty("message", out var msgEl))
+                    message = msgEl.GetString()?.Trim();
+                if (root.TryGetProperty("code", out var codeEl))
+                    code = codeEl.GetString();
+
+                // WooCommerce often returns Hebrew in "message" - use it as-is
+                if (!string.IsNullOrWhiteSpace(message))
+                    return message;
+
+                return code switch
+                {
+                    "product_invalid_sku" => "מק\"ט לא תקף או כפול. וודא שהמק\"ט ייחודי בכל החנות (כולל מוצרים ווריאציות).",
+                    "product_invalid_data" => "נתוני מוצר לא תקינים.",
+                    "woocommerce_rest_product_invalid_id" => "מזהה מוצר לא תקין.",
+                    "woocommerce_rest_term_invalid" => "ערך תכונה או קטגוריה לא תקין.",
+                    _ => $"שגיאת WooCommerce (קוד {statusCode})."
+                };
+            }
+            catch
+            {
+                var preview = responseBody.Length > 200 ? responseBody.Substring(0, 200) + "…" : responseBody;
+                return $"שגיאת WooCommerce (קוד {statusCode}): {preview}";
+            }
+        }
+
         private async Task<List<WooCommerceSyncResult>> SyncProductsAsync(
             string baseUrl,
             int siteId,
@@ -661,16 +707,14 @@ namespace George.Services
             
             if (productIds != null && productIds.Any())
             {
-                // Load specific products
-                productsToSync = new List<Product>();
-                foreach (var productId in productIds)
-                {
-                    var product = await _productStorage.GetProductAsync(productId, cancelToken);
-                    if (product != null && (product.Sites.Any(s => s.Id == siteId) || product.Sites.Count == 0))
-                    {
-                        productsToSync.Add(product);
-                    }
-                }
+                // Load specific products in parallel to avoid sequential DB round-trips
+                var distinctIds = productIds.Distinct().ToList();
+                var loadTasks = distinctIds.Select(id => _productStorage.GetProductAsync(id, cancelToken));
+                var loaded = await Task.WhenAll(loadTasks);
+                productsToSync = loaded
+                    .Where(p => p != null && (p!.Sites.Any(s => s.Id == siteId) || p.Sites.Count == 0))
+                    .Cast<Product>()
+                    .ToList();
             }
             else
             {
@@ -683,20 +727,42 @@ namespace George.Services
                 productsToSync = products.Items.Where(p => p.Sites.Any(s => s.Id == siteId) || p.Sites.Count == 0).ToList();
             }
 
-            //TODO: Remove it
-            productsToSync = productsToSync.Where(x => x.Id == 1255).ToList();
+            // Deduplicate by product Id so we don't count the same product twice
+            productsToSync = productsToSync
+                .GroupBy(p => p.Id)
+                .Select(g => g.First())
+                .ToList();
 
-            // Sync products in batches of 5
-            const int batchSize = 5;
+            // Sync products in parallel batches; each product runs in its own scope (own DbContext) to avoid EF Core concurrent-use errors
+            const int batchSize = 16;
             for (int i = 0; i < productsToSync.Count; i += batchSize)
             {
                 var batch = productsToSync.Skip(i).Take(batchSize).ToList();
-                var batchTasks = batch.Select(p => SyncProductAsync(baseUrl, siteId, p, categoryMap, httpClient, cancelToken));
+                var batchTasks = batch.Select(async product =>
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var wooService = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
+                    return await wooService.SyncSingleProductAsync(baseUrl, siteId, product, categoryMap, httpClient, cancelToken);
+                });
                 var batchResults = await Task.WhenAll(batchTasks);
                 results.AddRange(batchResults);
             }
 
             return results;
+        }
+
+        /// <summary>
+        /// Syncs a single product to WooCommerce. Public so it can be invoked from a scoped WooCommerceService (each scope has its own DbContext).
+        /// </summary>
+        public async Task<WooCommerceSyncResult> SyncSingleProductAsync(
+            string baseUrl,
+            int siteId,
+            Product product,
+            Dictionary<int, int> categoryMap,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            return await SyncProductAsync(baseUrl, siteId, product, categoryMap, httpClient, cancelToken);
         }
 
         private async Task<WooCommerceSyncResult> SyncProductAsync(
@@ -945,6 +1011,27 @@ namespace George.Services
                     }
                 }
 
+                if (!wooCommerceId.HasValue && !string.IsNullOrWhiteSpace(product.Sku))
+                {
+                    // Product may already exist in WooCommerce (e.g. WooCommerceId was lost in our DB). Find by SKU and update instead of create to avoid product_invalid_sku.
+                    var existingId = await FindProductIdBySkuAsync(baseUrl, product.Sku, httpClient, cancelToken);
+                    if (existingId.HasValue)
+                    {
+                        var updateUrl = $"{baseUrl}/products/{existingId.Value}";
+                        var updateJson = JsonSerializer.Serialize(wooProduct);
+                        using var updateContent = new StringContent(updateJson, Encoding.UTF8, "application/json");
+                        var updateResponse = await httpClient.PutAsync(updateUrl, updateContent, cancelToken);
+                        if (updateResponse.IsSuccessStatusCode)
+                        {
+                            var updated = await JsonSerializer.DeserializeAsync<WooCommerceProductResponse>(
+                                await updateResponse.Content.ReadAsStreamAsync(cancelToken),
+                                cancellationToken: cancelToken);
+                            wooCommerceId = updated?.id;
+                            action = "updated";
+                        }
+                    }
+                }
+
                 if (!wooCommerceId.HasValue)
                 {
                     // Create new product
@@ -952,25 +1039,17 @@ namespace George.Services
                     var createJson = JsonSerializer.Serialize(wooProduct);
                     var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
 
-                    try
+                    var createResponse = await httpClient.PostAsync(createUrl, createContent, cancelToken);
+                    if (!createResponse.IsSuccessStatusCode)
                     {
-
-                        var createResponse = await httpClient.PostAsync(createUrl, createContent, cancelToken);
-                        if (!createResponse.IsSuccessStatusCode)
-                        {
-                            var errorContent = await createResponse.Content.ReadAsStringAsync(cancelToken);
-                            throw new Exception($"WooCommerce API error ({createResponse.StatusCode}): {errorContent}");
-                        }
-
-                        var created = await JsonSerializer.DeserializeAsync<WooCommerceProductResponse>(
-                            await createResponse.Content.ReadAsStreamAsync(cancelToken),
-                            cancellationToken: cancelToken);
-                        wooCommerceId = created?.id;
+                        var errorContent = await createResponse.Content.ReadAsStringAsync(cancelToken);
+                        throw new Exception(GetUserFriendlyWooCommerceError((int)createResponse.StatusCode, errorContent));
                     }
-                    catch(Exception e)
-                    {
-                        Console.Write(e);
-                    }
+
+                    var created = await JsonSerializer.DeserializeAsync<WooCommerceProductResponse>(
+                        await createResponse.Content.ReadAsStreamAsync(cancelToken),
+                        cancellationToken: cancelToken);
+                    wooCommerceId = created?.id;
                 }
 
                 // Update product with WooCommerce ID
@@ -985,13 +1064,16 @@ namespace George.Services
                     await SyncProductVariantsAsync(baseUrl, wooCommerceId.Value, product, attributeMap, attributeSlugMap, httpClient, cancelToken);
                 }
 
+                // Only count as success when we actually got a WooCommerce ID (created or updated)
+                var isSuccess = wooCommerceId.HasValue;
                 return new WooCommerceSyncResult
                 {
-                    Success = true,
+                    Success = isSuccess,
                     ProductId = product.Id,
-                    ProductName = product.Name,
+                    ProductName = product.Name ?? "",
                     WooCommerceId = wooCommerceId,
-                    Action = action
+                    Action = action,
+                    Error = isSuccess ? null : "No WooCommerce ID returned (create/update may have failed)."
                 };
             }
             catch (Exception ex)
@@ -1001,7 +1083,7 @@ namespace George.Services
                 {
                     Success = false,
                     ProductId = product.Id,
-                    ProductName = product.Name,
+                    ProductName = product.Name ?? "",
                     Error = ex.Message
                 };
             }
@@ -1137,6 +1219,28 @@ namespace George.Services
                 {
                     _logger.LogError(ex, "Failed to sync variation {VariantId} for product {ProductId}", variant.Id, product.Id);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Finds a product in WooCommerce by SKU. Returns its ID if found, so we can update instead of create (avoids product_invalid_sku when product already exists).
+        /// </summary>
+        private static async Task<int?> FindProductIdBySkuAsync(string baseUrl, string sku, HttpClient httpClient, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(sku)) return null;
+            try
+            {
+                var url = $"{baseUrl}/products?sku={Uri.EscapeDataString(sku.Trim())}&per_page=1";
+                var response = await httpClient.GetAsync(url, cancelToken);
+                if (!response.IsSuccessStatusCode) return null;
+                var body = await response.Content.ReadAsStringAsync(cancelToken);
+                var list = TryDeserialize<List<WooCommerceProductResponse>>(body);
+                var first = list?.FirstOrDefault();
+                return first?.id;
+            }
+            catch
+            {
+                return null;
             }
         }
 
