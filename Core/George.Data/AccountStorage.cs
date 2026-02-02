@@ -18,8 +18,9 @@ namespace George.Data
         {
             var res = new DataListResult<Account>();
 
-            // Base accounts query
+            // Base accounts query (exclude soft-deleted)
             var query = _dbContext.Accounts
+                .Where(a => !a.IsDeleted)
                 .Include(a => a.Users)
                 .Include(a => a.Manager)
                 //.Include(a => a.Status)
@@ -78,6 +79,7 @@ namespace George.Data
         public async Task<Account?> GetAccountAsync(long accountId, CancellationToken cancelToken)
         {
             return await _dbContext.Accounts
+                .Where(a => a.Id == accountId && !a.IsDeleted)
                 .Include(a => a.Users)
                 .Include(a => a.Manager)
                 //.Include(a => a.Status)
@@ -85,7 +87,7 @@ namespace George.Data
                 .Include(a => a.WizardType)
                 .Include(a => a.ContentOwner)
                 .AsNoTracking()
-                .FirstOrDefaultAsync(a => a.Id == accountId, cancelToken);
+                .FirstOrDefaultAsync(cancelToken);
         }
 
         public async Task<Account> CreateAccountAsync(Account account, CancellationToken cancelToken)
@@ -134,20 +136,28 @@ namespace George.Data
 
         public async Task<Account?> DeleteAccountAsync(int id, CancellationToken cancelToken = default)
         {
-            // Get the data from the DB.
             var dbModel = await _dbContext.Accounts
-                                .Where(a => a.Id == id)
-                                .FirstOrDefaultAsync(cancelToken)
-                                .ConfigureAwait(false);
-            if (dbModel != null)
-            {
-                // Delete the entity.
-                _dbContext.Accounts.Remove(dbModel);
+                .Where(a => a.Id == id)
+                .FirstOrDefaultAsync(cancelToken)
+                .ConfigureAwait(false);
+            if (dbModel == null)
+                return null;
 
-                // Save to the DB.
-                await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            // Soft delete: mark account and its sites as deleted
+            dbModel.IsDeleted = true;
+            dbModel.UpdatedDate = DateTime.UtcNow;
+
+            var sites = await _dbContext.Sites
+                .Where(s => s.AccountId == id)
+                .ToListAsync(cancelToken)
+                .ConfigureAwait(false);
+            foreach (var site in sites)
+            {
+                site.IsDeleted = true;
+                site.UpdatedDate = DateTime.UtcNow;
             }
 
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
             return dbModel;
         }
 

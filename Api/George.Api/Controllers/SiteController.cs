@@ -1,4 +1,4 @@
-﻿using George.Api.Core;
+using George.Api.Core;
 using George.Common;
 using George.Services;
 using George.Services.Request;
