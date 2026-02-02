@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using George.Common;
 using George.Common.Utils;
@@ -28,7 +28,7 @@ namespace George.Data
 			DataListResult<User> res = new DataListResult<User>();
 
 			// Build the query.
-			var query = _dbContext.Users.AsNoTracking();
+			var query = _dbContext.Users.Include(u => u.Sites).AsNoTracking();
 
 			// Filter
 			if (filter.StatusId.HasValue)
@@ -90,6 +90,7 @@ namespace George.Data
 		public async Task<User?> GetUserAsync(int id, CancellationToken cancelToken = default)
 		{
 			return await _dbContext.Users.AsNoTracking()
+				.Include(u => u.Sites)
 				.Where(a => a.Id == id)
 				.FirstOrDefaultAsync(cancelToken);
 		}
@@ -354,6 +355,11 @@ namespace George.Data
 
 		public async Task<User> CreateUserAsync(User user, CancellationToken cancelToken = default)
 		{
+			return await CreateUserAsync(user, null, cancelToken);
+		}
+
+		public async Task<User> CreateUserAsync(User user, List<int>? siteIds, CancellationToken cancelToken = default)
+		{
 			// Set required fields
 			if (string.IsNullOrWhiteSpace(user.FullName))
 			{
@@ -384,13 +390,32 @@ namespace George.Data
 			_dbContext.Users.Add(user);
 			await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
 
+			// Add site associations for site_admin role
+			if (siteIds != null && siteIds.Any())
+			{
+				var sites = await _dbContext.Sites
+					.Where(s => siteIds.Contains(s.Id))
+					.ToListAsync(cancelToken);
+				foreach (var site in sites)
+				{
+					user.Sites.Add(site);
+				}
+				await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+			}
+
 			return user;
 		}
 
 		public async Task<User?> UpdateUserAsync(User user, CancellationToken cancelToken = default)
 		{
-			// Get the data from the DB.
+			return await UpdateUserAsync(user, null, cancelToken);
+		}
+
+		public async Task<User?> UpdateUserAsync(User user, List<int>? siteIds, CancellationToken cancelToken = default)
+		{
+			// Get the data from the DB (include Sites for site_admin updates)
 			User? dbModel = await _dbContext.Users
+									.Include(u => u.Sites)
 									.Where(a => a.Id == user.Id)
 									.FirstOrDefaultAsync(cancelToken);
 			if (dbModel == null)
@@ -446,6 +471,22 @@ namespace George.Data
 			if (user.AvatarUrl != null)
 			{
 				dbModel.AvatarUrl = user.AvatarUrl;
+			}
+
+			// Update site associations for site_admin role
+			if (siteIds != null)
+			{
+				dbModel.Sites.Clear();
+				if (siteIds.Any())
+				{
+					var sites = await _dbContext.Sites
+						.Where(s => siteIds.Contains(s.Id))
+						.ToListAsync(cancelToken);
+					foreach (var site in sites)
+					{
+						dbModel.Sites.Add(site);
+					}
+				}
 			}
 
 			// Update timestamp

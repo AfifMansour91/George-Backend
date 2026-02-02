@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using Microsoft.Extensions.Logging;
 using George.Common;
 using George.Common.Utils;
@@ -224,8 +224,8 @@ namespace George.Services
 				CreationUserId = _authUser?.Id,
 			};
 
-			// Create in DB
-			user = await _userStorage.CreateUserAsync(user, cancelToken).ConfigureAwait(false);
+			// Create in DB (with site associations for site_admin)
+			user = await _userStorage.CreateUserAsync(user, request.SiteIds, cancelToken).ConfigureAwait(false);
 
 			if (user != null)
 			{
@@ -281,8 +281,8 @@ namespace George.Services
 			user.Password = existingUser.Password; // Keep existing password
 		}
 
-		// Update in DB
-		User? updatedUser = await _userStorage.UpdateUserAsync(user, cancelToken).ConfigureAwait(false);
+		// Update in DB (with site associations for site_admin)
+		User? updatedUser = await _userStorage.UpdateUserAsync(user, request.SiteIds, cancelToken).ConfigureAwait(false);
 
 			if (updatedUser != null)
 			{

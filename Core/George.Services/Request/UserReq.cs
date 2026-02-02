@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using George.Common;
 using Newtonsoft.Json;
 
@@ -38,6 +38,9 @@ namespace George.Services
 
 		[StringLength(500)]
 		public string? AvatarUrl { get; set; }
+
+		/// <summary>Site IDs for site_admin role. Empty/null = no sites assigned.</summary>
+		public List<int>? SiteIds { get; set; }
 	}
 
 	public class UpdateUserReq
@@ -68,6 +71,9 @@ namespace George.Services
 
 		[StringLength(500)]
 		public string? AvatarUrl { get; set; }
+
+		/// <summary>Site IDs for site_admin role. Empty/null = no sites assigned.</summary>
+		public List<int>? SiteIds { get; set; }
 	}
 
 }

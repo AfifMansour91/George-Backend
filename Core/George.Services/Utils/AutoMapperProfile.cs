@@ -200,9 +200,10 @@ namespace George.Services
                 .ForMember(dest => dest.FileUrl, opt => opt.MapFrom(src => src.FilePath.HasValue() ? FileHelper.GetFileExternalPath(src.FilePath) : default));
 
 
-            ////////////////////////// User
-            CreateMap<User, InnerUserRes>();
-            CreateMap<User, UserRes>();
+			////////////////////////// User
+			CreateMap<User, InnerUserRes>();
+			CreateMap<User, UserRes>()
+				.ForMember(dest => dest.SiteIds, opt => opt.MapFrom(src => src.Sites != null ? src.Sites.Select(s => s.Id).ToList() : new List<int>()));
 
         }
 

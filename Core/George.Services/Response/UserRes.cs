@@ -1,4 +1,4 @@
-﻿using George.Common;
+using George.Common;
 
 namespace George.Services
 {
@@ -19,6 +19,9 @@ namespace George.Services
 		public DateTime? LastLoginDate { get; set; } // Added: Last login date
 		public DateTime CreationTime { get; set; }
 		public DateTime UpdateTime { get; set; }
+
+		/// <summary>Site IDs for site_admin role.</summary>
+		public List<int> SiteIds { get; set; } = new();
 
 		//public bool? CanBlock { get; set; }
 		//public bool? CanUnblock { get; set; }
