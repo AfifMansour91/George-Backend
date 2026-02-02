@@ -88,6 +88,7 @@ namespace George.Services
                         CreatedBy = null,
                         
                         LogoUrl = account.LogoUrl,
+                        Website = account.Website,
                         IsKosherShop = account.IsKosherShop,
                         AllowWeighted = account.AllowWeighted
                     };
@@ -139,25 +140,20 @@ namespace George.Services
                 Description = req.AccountDescription,
                 Address = req.AccountAddress,
                 City = req.AccountCity,
-
                 State = req.AccountState,
                 Zip = req.AccountZip,
                 Phone = req.AccountPhone,
                 ManagerName = req.ManagerName,
                 ManagerEmail = req.ManagerEmail,
-                ManagerId = managerUser.Id, // Set the manager ID
-                //contentOwnerId = req.ContentOwnerId, TODO: lookup later
+                ManagerId = managerUser.Id,
                 Status = req.Status,
-                //WizardStatus = req.WizardStatus, TODO: lookup later
                 WizardStep = req.WizardStep,
-                //WizardType = req.WizardType,  TODO: lookup later
                 LogoUrl = req.LogoUrl,
+                Website = req.Website,
                 IsKosherShop = req.IsKosherShop,
                 AllowWeighted = req.AllowWeighted,
-
                 IsActive = true,
                 CreationTime = DateTime.UtcNow,
-                //Users = new List<User> { managerUser },
             };
 
             acc = await _accountStorage.CreateAccountAsync(acc, cancelToken);
@@ -268,14 +264,17 @@ namespace George.Services
                 // - If LogoUrl is provided (property exists in JSON, even if null or empty), use it
                 // - Empty string or null in request means clear the logo (set to null)
                 // - Non-empty string means set the logo URL
-                // Note: We can't distinguish "property not provided" vs "property is null" in JSON,
-                // so we'll treat null as "clear logo" and only preserve existing if LogoUrl is not in the request
-                // But since ASP.NET Core will set it to null if not provided, we need to check if it was explicitly set
-                // For now, treat null or empty string as "clear logo"
                 LogoUrl = req.LogoUrl != null ? (string.IsNullOrWhiteSpace(req.LogoUrl) ? null : req.LogoUrl) : existingAccount.LogoUrl,
                 // Update IsKosherShop and AllowWeighted
                 IsKosherShop = req.IsKosherShop,
                 AllowWeighted = req.AllowWeighted,
+                // Address fields: use request value if provided, otherwise preserve existing
+                Address = req.Address ?? existingAccount.Address,
+                City = req.City ?? existingAccount.City,
+                State = req.State ?? existingAccount.State,
+                Zip = req.Zip ?? existingAccount.Zip,
+                Phone = req.Phone ?? existingAccount.Phone,
+                Website = req.Website ?? existingAccount.Website,
                 UpdatedDate = DateTime.UtcNow
             };
 

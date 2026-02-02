@@ -233,6 +233,13 @@ namespace George.Common.Request
         public string? WizardStatus { get; set; }
         
         public string? LogoUrl { get; set; }
+
+        public string? Address { get; set; }
+        public string? City { get; set; }
+        public string? State { get; set; }
+        public string? Zip { get; set; }
+        public string? Phone { get; set; }
+        public string? Website { get; set; }
     }
 
     public class UpdateWizardSessionReq
@@ -349,5 +356,6 @@ namespace George.Common.Request
         public bool AllowWeighted { get; set; } = false;
         
         public string? LogoUrl { get; set; }
+        public string? Website { get; set; }
     }
 }

@@ -78,6 +78,7 @@ namespace George.Services
                     dest.CreatedBy = null;
                     
                     dest.LogoUrl = src.LogoUrl;
+                    dest.Website = src.Website;
                     dest.IsKosherShop = src.IsKosherShop;
                     dest.AllowWeighted = src.AllowWeighted;
 

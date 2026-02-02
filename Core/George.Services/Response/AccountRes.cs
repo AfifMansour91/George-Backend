@@ -35,6 +35,7 @@ namespace George.Services.Response
         public string? CreatedBy { get; set; }
         
         public string? LogoUrl { get; set; }
+        public string? Website { get; set; }
         
         public bool IsKosherShop { get; set; }
         

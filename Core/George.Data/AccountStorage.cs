@@ -120,15 +120,20 @@ namespace George.Data
                 dbAcc.WizardStatusId = updated.WizardStatusId;
             }
             
-            // Update LogoUrl - the service layer handles null preservation logic
-            // If LogoUrl is set (even if null), update it
-            // Note: The service layer sets LogoUrl = req.LogoUrl ?? existingAccount.LogoUrl
-            // So if req.LogoUrl is null, it preserves existing. If not null, it uses the new value
+            // Update LogoUrl
             dbAcc.LogoUrl = updated.LogoUrl;
             
             // Update IsKosherShop and AllowWeighted
             dbAcc.IsKosherShop = updated.IsKosherShop;
             dbAcc.AllowWeighted = updated.AllowWeighted;
+
+            // Update address and website fields
+            dbAcc.Address = updated.Address;
+            dbAcc.City = updated.City;
+            dbAcc.State = updated.State;
+            dbAcc.Zip = updated.Zip;
+            dbAcc.Phone = updated.Phone;
+            dbAcc.Website = updated.Website;
 
             await _dbContext.SaveChangesAsync(cancelToken);
             return dbAcc;

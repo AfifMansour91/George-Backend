@@ -68,6 +68,9 @@ public partial class Account
     [StringLength(1000)]
     public string? LogoUrl { get; set; }
 
+    [StringLength(500)]
+    public string? Website { get; set; }
+
     [StringLength(20)]
     public string Status { get; set; } = null!;
 
