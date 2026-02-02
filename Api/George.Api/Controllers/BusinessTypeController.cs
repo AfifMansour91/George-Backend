@@ -1,4 +1,4 @@
-﻿using Azure.Core;
+using Azure.Core;
 using George.Api.Core;
 using George.Common;
 using George.Common.Request;
@@ -55,6 +55,13 @@ namespace George.Api.Controllers
                 return CreateHttpResponse(Common.StatusCode.InvalidRequest, "Mismatching IDs.");
 
             return await SafeCallWithErrorCatchingAsync(() => _businessTypeSvc.UpdateBusinessTypeAsync(request, cancelToken));
+        }
+
+        [HttpDelete("{BusinessTypeId:long}")]
+        [ProducesResponseType(typeof(IApiResponse<BusinessTypeRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> DeleteBusinessTypeAsync([FromRoute] int businessTypeId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _businessTypeSvc.DeleteBusinessTypeAsync(businessTypeId, cancelToken));
         }
 
         [ApiExplorerSettings(IgnoreApi = true)]

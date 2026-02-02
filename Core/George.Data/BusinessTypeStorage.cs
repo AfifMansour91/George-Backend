@@ -1,4 +1,5 @@
-﻿using George.Common;
+using System;
+using George.Common;
 using George.Common.Request;
 using George.Data.Models;
 using George.DB;
@@ -21,8 +22,8 @@ namespace George.Data
         {
             DataListResult<BusinessType> res = new DataListResult<BusinessType>();
 
-            // Build the query.
-            var query = _dbContext.BusinessTypes.AsNoTracking();
+            // Build the query (exclude soft-deleted).
+            var query = _dbContext.BusinessTypes.AsNoTracking().Where(a => !a.IsDeleted);
 
             // Filter.
             if (filter.Name.HasValue())
@@ -69,7 +70,7 @@ namespace George.Data
         {
             return await _dbContext.BusinessTypes
                 .AsNoTracking()
-                .FirstOrDefaultAsync(a => a.Id == businessTypeId, cancelToken);
+                .FirstOrDefaultAsync(a => a.Id == businessTypeId && !a.IsDeleted, cancelToken);
         }
 
         public async Task<BusinessType> CreateBusinessTypeAsync(BusinessType businessType, CancellationToken cancelToken)
@@ -97,17 +98,13 @@ namespace George.Data
 
         public async Task<BusinessType?> DeleteBusinessTypeAsync(int id, CancellationToken cancelToken = default)
         {
-            // Get the data from the DB.
             var dbModel = await _dbContext.BusinessTypes
-                                .Where(a => a.Id == id)
-                                .FirstOrDefaultAsync(cancelToken)
-                                .ConfigureAwait(false);
+                .FirstOrDefaultAsync(a => a.Id == id, cancelToken)
+                .ConfigureAwait(false);
             if (dbModel != null)
             {
-                // Delete the entity.
-                _dbContext.BusinessTypes.Remove(dbModel);
-
-                // Save to the DB.
+                dbModel.IsDeleted = true;
+                dbModel.UpdatedDate = DateTime.UtcNow;
                 await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
             }
 

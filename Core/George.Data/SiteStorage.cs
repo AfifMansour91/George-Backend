@@ -18,10 +18,10 @@ namespace George.Data
         {
             var res = new DataListResult<Site>();
 
-            // Base sites query
+            // Base sites query (only non-deleted business types)
             var query = _dbContext.Sites
                 .Include(a => a.Account)
-                .Include(s => s.BusinessTypes)
+                .Include(s => s.BusinessTypes.Where(bt => !bt.IsDeleted))
                 .AsNoTracking();
 
             if (filter?.Search?.SearchTerm.HasValue() == true)
@@ -61,7 +61,7 @@ namespace George.Data
         public async Task<List<Site>> GetSitesByAccountAsync(int accountId, CancellationToken cancelToken)
         {
             return await _dbContext.Sites
-                .Include(s => s.BusinessTypes)
+                .Include(s => s.BusinessTypes.Where(bt => !bt.IsDeleted))
                 .Where(s => s.AccountId == accountId && !s.IsDeleted)
                 .AsNoTracking()
                 .OrderBy(s => s.SiteName)
@@ -72,11 +72,11 @@ namespace George.Data
         {
             _dbContext.Sites.Add(site);
             
-            // Add business types if provided
+            // Add business types if provided (only non-deleted)
             if (businessTypeIds != null && businessTypeIds.Any())
             {
                 var businessTypes = await _dbContext.BusinessTypes
-                    .Where(bt => businessTypeIds.Contains(bt.Id))
+                    .Where(bt => businessTypeIds.Contains(bt.Id) && !bt.IsDeleted)
                     .ToListAsync(cancelToken);
                 
                 foreach (var bt in businessTypes)
@@ -92,7 +92,7 @@ namespace George.Data
         public async Task<Site?> UpdateSiteAsync(Site updated, List<int>? businessTypeIds, CancellationToken cancelToken)
         {
             var dbSite = await _dbContext.Sites
-                .Include(s => s.BusinessTypes)
+                .Include(s => s.BusinessTypes.Where(bt => !bt.IsDeleted))
                 .FirstOrDefaultAsync(a => a.Id == updated.Id, cancelToken);
 
             if (dbSite == null) return null;
@@ -124,7 +124,7 @@ namespace George.Data
                 if (businessTypeIds.Any())
                 {
                     var businessTypes = await _dbContext.BusinessTypes
-                        .Where(bt => businessTypeIds.Contains(bt.Id))
+                        .Where(bt => businessTypeIds.Contains(bt.Id) && !bt.IsDeleted)
                         .ToListAsync(cancelToken);
                     
                     foreach (var bt in businessTypes)

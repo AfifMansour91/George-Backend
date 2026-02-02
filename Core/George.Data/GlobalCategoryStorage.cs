@@ -22,7 +22,7 @@ namespace George.Data
 
             var query = _dbContext.GlobalCategories
                 .Include(gc => gc.ParentGlobalCategory)
-                .Include(gc => gc.BusinessTypes)
+                .Include(gc => gc.BusinessTypes.Where(bt => !bt.IsDeleted))
                 .AsNoTracking();
 
             // Apply filters
@@ -40,7 +40,7 @@ namespace George.Data
 
                 if (filter.BusinessTypeId.HasValue)
                 {
-                    query = query.Where(gc => gc.BusinessTypes.Any(bt => bt.Id == filter.BusinessTypeId.Value));
+                    query = query.Where(gc => gc.BusinessTypes.Any(bt => bt.Id == filter.BusinessTypeId.Value && !bt.IsDeleted));
                 }
 
                 if (filter.Search?.SearchTerm.HasValue() == true)
@@ -72,7 +72,7 @@ namespace George.Data
         {
             return await _dbContext.GlobalCategories
                 .Include(gc => gc.ParentGlobalCategory)
-                .Include(gc => gc.BusinessTypes)
+                .Include(gc => gc.BusinessTypes.Where(bt => !bt.IsDeleted))
                 .Include(gc => gc.InverseParentGlobalCategory)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(gc => gc.Id == globalCategoryId && !gc.IsDeleted, cancelToken);
@@ -85,11 +85,11 @@ namespace George.Data
         {
             _dbContext.GlobalCategories.Add(globalCategory);
 
-            // Add business types if provided
+            // Add business types if provided (only non-deleted)
             if (businessTypeIds != null && businessTypeIds.Any())
             {
                 var businessTypes = await _dbContext.BusinessTypes
-                    .Where(bt => businessTypeIds.Contains(bt.Id))
+                    .Where(bt => businessTypeIds.Contains(bt.Id) && !bt.IsDeleted)
                     .ToListAsync(cancelToken);
                 
                 foreach (var businessType in businessTypes)
@@ -108,7 +108,7 @@ namespace George.Data
             CancellationToken cancelToken)
         {
             var dbGlobalCategory = await _dbContext.GlobalCategories
-                .Include(gc => gc.BusinessTypes)
+                .Include(gc => gc.BusinessTypes.Where(bt => !bt.IsDeleted))
                 .FirstOrDefaultAsync(gc => gc.Id == updated.Id && !gc.IsDeleted, cancelToken);
 
             if (dbGlobalCategory == null) return null;
@@ -129,7 +129,7 @@ namespace George.Data
                 if (businessTypeIds.Any())
                 {
                     var businessTypes = await _dbContext.BusinessTypes
-                        .Where(bt => businessTypeIds.Contains(bt.Id))
+                        .Where(bt => businessTypeIds.Contains(bt.Id) && !bt.IsDeleted)
                         .ToListAsync(cancelToken);
                     
                     foreach (var businessType in businessTypes)
