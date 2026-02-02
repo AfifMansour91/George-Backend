@@ -218,6 +218,15 @@ namespace George.DB
 		{
 			// Add query filters for soft-deleted entities.
 			modelBuilder.Entity<User>().HasQueryFilter(a => a.IsDeleted == false);
+			modelBuilder.Entity<Account>().HasQueryFilter(a => a.IsDeleted == false);
+			modelBuilder.Entity<TemplateAttribute>().HasQueryFilter(a => a.IsDeleted == false);
+			modelBuilder.Entity<Attribute>().HasQueryFilter(a => a.IsDeleted == false);
+			modelBuilder.Entity<TemplateProductVariant>().HasQueryFilter(a => a.IsDeleted == false);
+			modelBuilder.Entity<ProductVariant>().HasQueryFilter(a => a.IsDeleted == false);
+			modelBuilder.Entity<Site>().HasQueryFilter(a => a.IsDeleted == false);
+			modelBuilder.Entity<Category>().HasQueryFilter(a => a.IsDeleted == false);
+			modelBuilder.Entity<BusinessType>().HasQueryFilter(a => a.IsDeleted == false);
+			modelBuilder.Entity<BusinessTypeCategory>().HasQueryFilter(a => a.IsDeleted == false);
 			//modelBuilder.Entity<Account>().HasQueryFilter(ent => EF.Property<bool>(ent, PROP_IS_DELETED) == false);
 
 		}
