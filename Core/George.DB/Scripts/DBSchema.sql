@@ -173,6 +173,8 @@ CREATE TABLE [dbo].[Category](
 	[AccountId] [int] NULL,
 	[SourceGlobalCategoryId] [int] NULL,
 	[WooCommerceId] [int] NULL,
+	[ImageUrl] [nvarchar](1000) NULL,
+	[IconUrl] [nvarchar](1000) NULL,
  CONSTRAINT [PK_Category] PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC

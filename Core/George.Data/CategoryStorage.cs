@@ -123,6 +123,8 @@ namespace George.Data
             dbCategory.SortOrder = updated.SortOrder;
             dbCategory.DisplayAsMain = updated.DisplayAsMain;
             dbCategory.AccountId = updated.AccountId;
+            dbCategory.ImageUrl = updated.ImageUrl;
+            dbCategory.IconUrl = updated.IconUrl;
             dbCategory.UpdatedDate = DateTime.UtcNow;
             dbCategory.UpdateUserId = updated.UpdateUserId;
 

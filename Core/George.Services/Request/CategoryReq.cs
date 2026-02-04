@@ -23,6 +23,12 @@ namespace George.Services.Request
         public int? AccountId { get; set; }
         
         public List<int>? SiteIds { get; set; }
+
+        /// <summary>Kiosk/sidebar: full image URL for category circle.</summary>
+        public string? ImageUrl { get; set; }
+
+        /// <summary>Kiosk/sidebar: icon URL for category circle.</summary>
+        public string? IconUrl { get; set; }
     }
 
     public class CreateCategoryReq : CategoryReq

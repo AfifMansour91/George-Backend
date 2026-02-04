@@ -22,7 +22,7 @@ SET IDENTITY_INSERT [dbo].[Role] OFF
 GO
 SET IDENTITY_INSERT [dbo].[User] ON 
 GO
-INSERT [dbo].[User] ([Id], [IsDeleted], [GuidId], [CreationTime], [UpdatedDate], [CreationUserId], [UpdateUserId], [RoleId], [AccountId], [StatusId], [FirstName], [LastName], [Email], [IsEmailVerified], [Password], [Otp], [LastLoginDate], [LockoutFailCount], [LockoutExpiration], [RefreshToken], [RefreshTokenExpiration], [Phone], [AvatarUrl], [Notes], [OtpExpiration]) VALUES (1, 0, N'50271d94-dfa5-4a0a-ac29-06bac58f234d', CAST(N'2026-01-04T12:10:30.0000000' AS DateTime2), CAST(N'2026-01-05T20:30:39.0000000' AS DateTime2), NULL, NULL, 1, NULL, 1, N'Afif', N'Mansour', N'afif.mansour@gmail.com', 1, N'12qwaszx', N'111111', CAST(N'2026-01-10T07:12:31.0000000' AS DateTime2), 0, NULL, N'93b0a9f1a4cd417bb703b02ff523980b', CAST(N'2031-09-24T15:12:31.0000000' AS DateTime2), N'0545874251', N'http://qa-api.afif-dev.com/files/DEV/Temp/1cc46f2905364eb5ae9739d2fc8a88e9.jpg', NULL, NULL)
+INSERT [dbo].[User] ([Id], [IsDeleted], [GuidId], [CreationTime], [UpdatedDate], [CreationUserId], [UpdateUserId], [RoleId], [AccountId], [StatusId], [FirstName], [LastName], [Email], [IsEmailVerified], [Password], [Otp], [LastLoginDate], [LockoutFailCount], [LockoutExpiration], [RefreshToken], [RefreshTokenExpiration], [Phone], [AvatarUrl], [Notes], [OtpExpiration]) VALUES (1, 0, N'50271d94-dfa5-4a0a-ac29-06bac58f234d', CAST(N'2026-01-04T12:10:30.0000000' AS DateTime2), CAST(N'2026-01-05T20:30:39.0000000' AS DateTime2), NULL, NULL, 1, NULL, 1, N'M', N'Mansour', N'M.mansour@gmail.com', 1, N'12qwaszx', N'111111', CAST(N'2026-01-10T07:12:31.0000000' AS DateTime2), 0, NULL, N'93b0a9f1a4cd417bb703b02ff523980b', CAST(N'2031-09-24T15:12:31.0000000' AS DateTime2), N'0545874251', N'http://qa-api.M-dev.com/files/DEV/Temp/1cc46f2905364eb5ae9739d2fc8a88e9.jpg', NULL, NULL)
 GO
 SET IDENTITY_INSERT [dbo].[User] OFF
 GO
@@ -92,7 +92,7 @@ SET IDENTITY_INSERT [dbo].[MediaType] OFF
 GO
 SET IDENTITY_INSERT [dbo].[Media] ON 
 GO
-INSERT [dbo].[Media] ([Id], [IsDeleted], [CreationTime], [UpdatedDate], [CreationUserId], [UpdateUserId], [Url], [Name], [TypeId], [BusinessTypeId], [FileSize], [UsageCount]) VALUES (1, 1, CAST(N'2026-01-05T12:35:05.0000000' AS DateTime2), CAST(N'2026-01-05T20:31:00.0000000' AS DateTime2), 1, NULL, N'http://qa-api.afif-dev.com/files/DEV/Temp/65fd92c7e1cc416b940d3d2adca0f3a9.jpg', N'7a8fcf95f_--.jpg', 1, NULL, 46589, 0)
+INSERT [dbo].[Media] ([Id], [IsDeleted], [CreationTime], [UpdatedDate], [CreationUserId], [UpdateUserId], [Url], [Name], [TypeId], [BusinessTypeId], [FileSize], [UsageCount]) VALUES (1, 1, CAST(N'2026-01-05T12:35:05.0000000' AS DateTime2), CAST(N'2026-01-05T20:31:00.0000000' AS DateTime2), 1, NULL, N'http://qa-api.M-dev.com/files/DEV/Temp/65fd92c7e1cc416b940d3d2adca0f3a9.jpg', N'7a8fcf95f_--.jpg', 1, NULL, 46589, 0)
 GO
 SET IDENTITY_INSERT [dbo].[Media] OFF
 GO

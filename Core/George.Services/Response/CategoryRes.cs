@@ -15,5 +15,9 @@ namespace George.Services.Response
         public bool? DisplayAsMain { get; set; }
         public int? AccountId { get; set; }
         public List<int> SiteIds { get; set; } = new();
+        /// <summary>Kiosk/sidebar: full image URL (Figma Ellipse 4, 260×260 inside circle).</summary>
+        public string? ImageUrl { get; set; }
+        /// <summary>Kiosk/sidebar: icon URL (Figma fi_XXX, ~134×134 centered in circle).</summary>
+        public string? IconUrl { get; set; }
     }
 }

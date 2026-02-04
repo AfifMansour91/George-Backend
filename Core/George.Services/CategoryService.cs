@@ -145,7 +145,9 @@ namespace George.Services
                 IsEnabled = category.IsEnabled,
                 SortOrder = category.SortOrder,
                 DisplayAsMain = category.DisplayAsMain,
-                AccountId = category.AccountId
+                AccountId = category.AccountId,
+                ImageUrl = category.ImageUrl,
+                IconUrl = category.IconUrl
             };
 
             // Map sites
