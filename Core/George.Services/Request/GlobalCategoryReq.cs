@@ -17,6 +17,12 @@ namespace George.Services.Request
         public int? SortOrder { get; set; }
 
         public int? ProductCount { get; set; }
+
+        /// <summary>Full image URL for category display.</summary>
+        public string? ImageUrl { get; set; }
+
+        /// <summary>Icon URL for category display.</summary>
+        public string? IconUrl { get; set; }
     }
 
     public class CreateGlobalCategoryReq : GlobalCategoryReq

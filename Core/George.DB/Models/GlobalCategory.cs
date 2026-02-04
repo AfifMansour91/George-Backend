@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -37,6 +37,12 @@ public partial class GlobalCategory
     public int? SortOrder { get; set; }
 
     public int? ProductCount { get; set; }
+
+    [StringLength(1000)]
+    public string? ImageUrl { get; set; }
+
+    [StringLength(1000)]
+    public string? IconUrl { get; set; }
 
     [InverseProperty("SourceGlobalCategory")]
     public virtual ICollection<Category> Categories { get; set; } = new List<Category>();

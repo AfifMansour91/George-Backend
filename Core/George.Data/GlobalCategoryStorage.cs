@@ -119,6 +119,8 @@ namespace George.Data
             dbGlobalCategory.ParentGlobalCategoryId = updated.ParentGlobalCategoryId;
             dbGlobalCategory.SortOrder = updated.SortOrder;
             dbGlobalCategory.ProductCount = updated.ProductCount;
+            dbGlobalCategory.ImageUrl = updated.ImageUrl;
+            dbGlobalCategory.IconUrl = updated.IconUrl;
             dbGlobalCategory.UpdatedDate = DateTime.UtcNow;
             dbGlobalCategory.UpdateUserId = updated.UpdateUserId;
 

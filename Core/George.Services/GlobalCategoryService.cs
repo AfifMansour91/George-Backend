@@ -124,7 +124,9 @@ namespace George.Services
                 Description = req.Description,
                 ParentGlobalCategoryId = req.ParentGlobalCategoryId,
                 SortOrder = req.SortOrder,
-                ProductCount = req.ProductCount
+                ProductCount = req.ProductCount,
+                ImageUrl = req.ImageUrl,
+                IconUrl = req.IconUrl
             };
         }
 
@@ -140,7 +142,9 @@ namespace George.Services
                 Description = globalCategory.Description,
                 ParentGlobalCategoryId = globalCategory.ParentGlobalCategoryId,
                 SortOrder = globalCategory.SortOrder,
-                ProductCount = globalCategory.ProductCount
+                ProductCount = globalCategory.ProductCount,
+                ImageUrl = globalCategory.ImageUrl,
+                IconUrl = globalCategory.IconUrl
             };
 
             // Map business types

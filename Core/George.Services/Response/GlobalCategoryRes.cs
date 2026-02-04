@@ -12,6 +12,8 @@ namespace George.Services.Response
         public List<int> BusinessTypeIds { get; set; } = new();
         public int? SortOrder { get; set; }
         public int? ProductCount { get; set; }
+        public string? ImageUrl { get; set; }
+        public string? IconUrl { get; set; }
     }
 }
 
