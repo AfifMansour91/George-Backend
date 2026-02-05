@@ -1,4 +1,4 @@
-﻿using George.Common;
+using George.Common;
 using George.Data;
 using George.DB;
 using George.Providers;
@@ -381,6 +381,7 @@ namespace George.Api.Core
 			services.AddScoped<TemplateAttributeService>();
 			services.AddScoped<TemplateProductService>();
 			services.AddScoped<WooCommerceService>();
+			services.AddScoped<KioskCustomerService>();
 
 			// Let the derived add its own dependencies.
 			AddCustomDependencies(services);

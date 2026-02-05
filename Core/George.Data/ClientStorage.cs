@@ -186,6 +186,13 @@ namespace George.Data
             var roleName = MapClientRoleToRoleName(clientRole);
             if (roleName == null) return null;
 
+            return await GetRoleIdByRoleNameAsync(roleName, cancelToken);
+        }
+
+        public async Task<int?> GetRoleIdByRoleNameAsync(string roleName, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(roleName)) return null;
+
             var role = await _dbContext.Roles
                 .FirstOrDefaultAsync(r => r.Name == roleName && !r.IsDeleted, cancelToken);
 

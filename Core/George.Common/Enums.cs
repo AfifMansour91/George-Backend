@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 
 namespace George.Common
 {
@@ -66,7 +66,7 @@ namespace George.Common
     }
 
 
-    // Values MUST match the DB's 'UserRole' table 'Id' column.
+    // Values MUST match the DB's 'Role' table 'Id' column.
     public enum UserRole
     {
         None = 0,
@@ -74,6 +74,7 @@ namespace George.Common
         Admin = 1,
         AccountAdmin = 2,
         SiteAdmin = 3,
+        KioskCustomer = 4,
     }
 
     public enum RolePermission
