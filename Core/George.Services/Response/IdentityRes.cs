@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 using George.Common;
@@ -29,6 +29,9 @@ namespace George.Services
 		public string? RefreshToken { get; set; }
 		[JsonIgnore]
 		public DateTime RefreshTokenExpiration { get; set; }
+
+		/// <summary>Optional display name (e.g. for kiosk customer after OTP verify).</summary>
+		public string? DisplayName { get; set; }
 
 		//public UserPermissions? Permissions { get; set; }
 	}

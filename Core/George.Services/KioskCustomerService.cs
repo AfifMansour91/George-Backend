@@ -120,6 +120,7 @@ namespace George.Services
 
             response.Data = _authHelper.CreateAuthenticationToken(user.Id, (UserRole)user.RoleId);
             response.Data.StatusId = (UserStatus)user.StatusId;
+            response.Data.DisplayName = string.IsNullOrWhiteSpace(user.FullName) ? null : user.FullName.Trim();
 
             await _userStorage.UpdateUserLoginAsync(user.Id, response.Data.RefreshToken!, response.Data.RefreshTokenExpiration,
                 false, (UserStatus)user.StatusId, cancelToken).ConfigureAwait(false);
