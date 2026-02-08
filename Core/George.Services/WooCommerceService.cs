@@ -932,8 +932,13 @@ namespace George.Services
                         metaData.Add(new { key = "ocwsu_unit_weight_type_", value = unitWeightTypeForWoo });
                         metaData.Add(new { key = "_ocwsu_unit_weight", value = weightConfig.UnitWeight ?? "" });
                         metaData.Add(new { key = "ocwsu_unit_weight_", value = weightConfig.UnitWeight ?? "" });
-                        metaData.Add(new { key = "_ocwsu_unit_weight_options", value = weightConfig.WeightOptions ?? "" });
-                        metaData.Add(new { key = "ocwsu_unit_weight_options_", value = weightConfig.WeightOptions ?? "" });
+                        // WooCommerce expects one weight option per line; we store comma-separated
+                        var weightOptionsRaw = weightConfig.WeightOptions ?? "";
+                        var unitWeightOptionsForWoo = string.IsNullOrWhiteSpace(weightOptionsRaw)
+                            ? ""
+                            : string.Join("\n", weightOptionsRaw.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).Where(s => s.Length > 0));
+                        metaData.Add(new { key = "_ocwsu_unit_weight_options", value = unitWeightOptionsForWoo });
+                        metaData.Add(new { key = "ocwsu_unit_weight_options_", value = unitWeightOptionsForWoo });
                         var getWeightFromVariation = weightConfig.WeightByVariant == true ? "yes" : "no";
                         metaData.Add(new { key = "_ocwsu_get_weight_from_variation", value = getWeightFromVariation });
                         metaData.Add(new { key = "ocwsu_get_weight_from_variation_", value = getWeightFromVariation });
