@@ -926,8 +926,10 @@ namespace George.Services
                         metaData.Add(new { key = "ocwsu_min_weight_", value = weightConfig.StartWeight ?? "" });
                         metaData.Add(new { key = "_ocwsu_weight_step", value = weightConfig.Step ?? "" });
                         metaData.Add(new { key = "ocwsu_weight_step_", value = weightConfig.Step ?? "" });
-                        metaData.Add(new { key = "_ocwsu_unit_weight_type", value = weightConfig.UnitWeightMode?.Name ?? "" });
-                        metaData.Add(new { key = "ocwsu_unit_weight_type_", value = weightConfig.UnitWeightMode?.Name ?? "" });
+                        // WooCommerce plugin expects "fixed" for משקל קבוע; we store "average" for that mode
+                        var unitWeightTypeForWoo = string.Equals(weightConfig.UnitWeightMode?.Name, "average", StringComparison.OrdinalIgnoreCase) ? "fixed" : (weightConfig.UnitWeightMode?.Name ?? "");
+                        metaData.Add(new { key = "_ocwsu_unit_weight_type", value = unitWeightTypeForWoo });
+                        metaData.Add(new { key = "ocwsu_unit_weight_type_", value = unitWeightTypeForWoo });
                         metaData.Add(new { key = "_ocwsu_unit_weight", value = weightConfig.UnitWeight ?? "" });
                         metaData.Add(new { key = "ocwsu_unit_weight_", value = weightConfig.UnitWeight ?? "" });
                         metaData.Add(new { key = "_ocwsu_unit_weight_options", value = weightConfig.WeightOptions ?? "" });
