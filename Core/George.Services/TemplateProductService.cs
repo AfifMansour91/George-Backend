@@ -131,12 +131,12 @@ namespace George.Services
             if (existingTemplateProduct == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
 
-            // Map request to DB model
-            var templateProduct = MapReqToTemplateProduct(req);
+            // Merge request with existing: if a property is null in req, keep the value from DB (partial update support for table quick-edit)
+            var templateProduct = MergeReqWithExistingTemplateProduct(req, existingTemplateProduct);
             templateProduct.Id = templateProductId;
             templateProduct.UpdateUserId = AuthUser.Id;
 
-            // Handle lookups
+            // Handle lookups (only overwrites IDs when req has a value; existing IDs are already on product from merge)
             var lookupDto = MapToLookupDto(req);
             await _templateProductStorage.MapLookupsAsync(templateProduct, lookupDto, cancelToken);
 
@@ -513,6 +513,45 @@ namespace George.Services
                 SeoTitle = req.SeoTitle,
                 SeoDescription = req.SeoDescription,
                 SourceProductId = req.SourceProductId
+            };
+        }
+
+        /// <summary>
+        /// Merges update request with existing template product for partial updates (e.g. quick-edit from table).
+        /// If a property is null in the request, the existing value from the DB is kept.
+        /// </summary>
+        private static TemplateProduct MergeReqWithExistingTemplateProduct(UpdateTemplateProductReq req, TemplateProduct existing)
+        {
+            return new TemplateProduct
+            {
+                Id = existing.Id,
+                TemplateId = req.TemplateId ?? existing.TemplateId,
+                Name = !string.IsNullOrWhiteSpace(req.Name) ? req.Name : existing.Name,
+                ShortDescription = req.ShortDescription ?? existing.ShortDescription,
+                LongDescription = req.LongDescription ?? existing.LongDescription,
+                Price = req.Price ?? existing.Price,
+                SalePrice = req.SalePrice ?? existing.SalePrice,
+                SalePriceStartDate = req.SalePriceStartDate ?? existing.SalePriceStartDate,
+                SalePriceEndDate = req.SalePriceEndDate ?? existing.SalePriceEndDate,
+                CostPrice = req.CostPrice ?? existing.CostPrice,
+                Sku = req.Sku != null ? req.Sku : existing.Sku,
+                StockQuantity = req.StockQuantity ?? existing.StockQuantity,
+                Weight = req.Weight ?? existing.Weight,
+                IsKosher = req.IsKosher ?? existing.IsKosher,
+                IsWeighted = req.IsWeighted ?? existing.IsWeighted,
+                SeoTitle = req.SeoTitle ?? existing.SeoTitle,
+                SeoDescription = req.SeoDescription ?? existing.SeoDescription,
+                SourceProductId = req.SourceProductId ?? existing.SourceProductId,
+                // Preserve lookup IDs from existing; MapLookupsAsync will overwrite only when req has values
+                BrandId = existing.BrandId,
+                SupplierId = existing.SupplierId,
+                StatusId = existing.StatusId,
+                VisibilityId = existing.VisibilityId,
+                StockManagementTypeId = existing.StockManagementTypeId,
+                StockStatusId = existing.StockStatusId,
+                ShippingClassId = existing.ShippingClassId,
+                SetupTypeId = existing.SetupTypeId,
+                WeightConfigId = existing.WeightConfigId
             };
         }
 
