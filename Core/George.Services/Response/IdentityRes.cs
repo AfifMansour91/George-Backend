@@ -71,4 +71,10 @@ namespace George.Services
 
 	//	public List<PermissionRes> Permissions { get; set; } = new();
  //   }
+
+	/// <summary>Response for password reset request. ResetToken is only populated in dev mode when email is not configured.</summary>
+	public class RequestPasswordResetRes
+	{
+		public string? ResetToken { get; set; }
+	}
 }

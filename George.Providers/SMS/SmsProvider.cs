@@ -127,7 +127,7 @@ namespace George.Providers
             _logger.LogTrace($"Sending OTP SMS to {phone}");
 
             // Build the otp text
-            string otpText = $"Your OTP code is: {otp}";
+            string otpText = $"קוד הכניסה שלך הוא: {otp}";
 
             var phones = new List<string>() { phone };
             return await SendAsync(phones, otpText, cancelToken);

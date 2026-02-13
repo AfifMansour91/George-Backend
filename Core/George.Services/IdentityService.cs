@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using George.Common;
@@ -366,6 +366,76 @@ namespace George.Services
 			// Update password
 			user.Password = request.NewPassword; // newPasswordHash;
 			await _userStorage.UpdateUserPasswordAsync(user.Id, newPasswordHash, cancelToken).ConfigureAwait(false);
+
+			response.Data = true;
+			return response;
+		}
+
+		/// <summary>Request password reset. Generates a token and stores it in cache. Always returns success to avoid revealing if email exists.</summary>
+		public async Task<IApiResponse<RequestPasswordResetRes>> RequestPasswordResetAsync(RequestPasswordResetReq request, CancellationToken cancelToken = default)
+		{
+			IApiResponse<RequestPasswordResetRes> response = new ApiResponse<RequestPasswordResetRes>();
+			response.Data = new RequestPasswordResetRes();
+
+			User? user = await _userStorage.GetUserByEmailAsync(request.Email, cancelToken).ConfigureAwait(false);
+			if (user == null)
+			{
+				// Always return success - don't reveal if email exists
+				return response;
+			}
+
+			if (user.StatusId == (int)UserStatus.Blocked)
+			{
+				// Don't reveal blocked status either
+				return response;
+			}
+
+			string token = Guid.NewGuid().ToString("N");
+			const int expirationMinutes = 60;
+			string cacheKey = "PasswordReset_" + token;
+			_cache.SetCacheItem(cacheKey, user.Id, expirationMinutes * 60);
+
+			// TODO: Send email with reset link when email provider is configured
+			// For now, in dev mode we can return the token so the frontend can redirect to /reset-password?token=xxx
+			bool returnTokenInDev = string.Equals(_configuration["Identity:ReturnResetTokenInDev"], "true", StringComparison.OrdinalIgnoreCase);
+			if (returnTokenInDev)
+			{
+				response.Data.ResetToken = token;
+				_logger.LogInformation("Password reset token generated for user {UserId} (dev mode - token returned in response)", user.Id);
+			}
+			else
+			{
+				_logger.LogInformation("Password reset token generated for user {UserId} - email sending not configured", user.Id);
+			}
+
+			return response;
+		}
+
+		/// <summary>Set new password using a valid reset token.</summary>
+		public async Task<IApiResponse<bool>> ResetPasswordAsync(ResetPasswordReq request, CancellationToken cancelToken = default)
+		{
+			IApiResponse<bool> response = new ApiResponse<bool>();
+
+			string cacheKey = "PasswordReset_" + request.Token;
+			int userId = _cache.GetFromCache<int>(cacheKey);
+			if (userId <= 0)
+			{
+				return CreateResponse(response, StatusCode.InvalidToken, "Invalid or expired reset token.");
+			}
+
+			User? user = await _userStorage.GetUserAsync(userId, cancelToken).ConfigureAwait(false);
+			if (user == null)
+			{
+				_cache.ClearCache(cacheKey);
+				return CreateResponse(response, StatusCode.UserNotFound, "User not found.");
+			}
+
+			string newPasswordHash = Cryptography.GeneratePasswordHash(request.NewPassword);
+			user.Password = request.NewPassword;
+			await _userStorage.UpdateUserPasswordAsync(user.Id, newPasswordHash, cancelToken).ConfigureAwait(false);
+
+			// Invalidate the token
+			_cache.ClearCache(cacheKey);
 
 			response.Data = true;
 			return response;

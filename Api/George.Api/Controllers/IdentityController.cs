@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json.Bson;
@@ -103,6 +103,22 @@ namespace George.Api.Controllers
 		public async Task<IActionResult> ChangePasswordAsync([FromBody] ChangePasswordReq request, CancellationToken cancelToken = default)
 		{
 			return await SafeCallWithErrorCatchingAsync(() => _identitySvc.ChangePasswordAsync(request, cancelToken));
+		}
+
+		[AllowAnonymous]
+		[HttpPost("Password/ResetRequest")]
+		[ProducesResponseType(typeof(IApiResponse<RequestPasswordResetRes>), 200)]
+		public async Task<IActionResult> RequestPasswordResetAsync([FromBody] RequestPasswordResetReq request, CancellationToken cancelToken = default)
+		{
+			return await SafeCallWithErrorCatchingAsync(() => _identitySvc.RequestPasswordResetAsync(request, cancelToken));
+		}
+
+		[AllowAnonymous]
+		[HttpPost("Password/Reset")]
+		[ProducesResponseType(typeof(IApiResponse<bool>), 200)]
+		public async Task<IActionResult> ResetPasswordAsync([FromBody] ResetPasswordReq request, CancellationToken cancelToken = default)
+		{
+			return await SafeCallWithErrorCatchingAsync(() => _identitySvc.ResetPasswordAsync(request, cancelToken));
 		}
 
 

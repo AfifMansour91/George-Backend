@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using George.Common;
 
 namespace George.Services
@@ -88,5 +88,24 @@ namespace George.Services
 		[RequiredNotEmpty]
 		[StringLength(250, MinimumLength = 6)]
 		public string Password { get; set; } = null!;
+	}
+
+	/// <summary>Request to send a password reset link/code to the user's email.</summary>
+	public class RequestPasswordResetReq
+	{
+		[RequiredNotEmpty]
+		[EmailAddress]
+		public string Email { get; set; } = null!;
+	}
+
+	/// <summary>Request to set a new password using a reset token.</summary>
+	public class ResetPasswordReq
+	{
+		[RequiredNotEmpty]
+		public string Token { get; set; } = null!;
+
+		[RequiredNotEmpty]
+		[StringLength(250, MinimumLength = 6)]
+		public string NewPassword { get; set; } = null!;
 	}
 }
