@@ -90,6 +90,8 @@ namespace George.Services
                 req.SiteIds, 
                 CombineCategoryIds(req.CategoryIds, req.SubcategoryIds),
                 req.Tags,
+                req.RelatedProductIds,
+                req.ComplementaryProductIds,
                 cancelToken);
 
             if (product != null)
@@ -170,6 +172,8 @@ namespace George.Services
                 req.SiteIds,
                 CombineCategoryIds(req.CategoryIds, req.SubcategoryIds),
                 req.Tags,
+                req.RelatedProductIds,
+                req.ComplementaryProductIds,
                 cancelToken);
 
             if (product != null)
@@ -411,6 +415,8 @@ namespace George.Services
                             productReq.SiteIds,
                             CombineCategoryIds(resolvedCategoryIds, resolvedSubcategoryIds),
                             productReq.Tags,
+                            productReq.RelatedProductIds,
+                            productReq.ComplementaryProductIds,
                             cancelToken);
 
                         if (product != null)
@@ -471,6 +477,8 @@ namespace George.Services
                             productReq.SiteIds,
                             CombineCategoryIds(resolvedCategoryIds, resolvedSubcategoryIds),
                             productReq.Tags,
+                            productReq.RelatedProductIds,
+                            productReq.ComplementaryProductIds,
                             cancelToken);
 
                         if (product != null)
@@ -682,6 +690,18 @@ namespace George.Services
             if (product.Sites != null && product.Sites.Any())
             {
                 res.SiteIds = product.Sites.Select(s => s.Id).ToList();
+            }
+
+            // Map related products (נלווים)
+            if (product.RelatedProducts != null && product.RelatedProducts.Any())
+            {
+                res.RelatedProductIds = product.RelatedProducts.Select(p => p.Id).ToList();
+            }
+
+            // Map complementary products (מוצרים משלימים)
+            if (product.ComplementaryProducts != null && product.ComplementaryProducts.Any())
+            {
+                res.ComplementaryProductIds = product.ComplementaryProducts.Select(p => p.Id).ToList();
             }
 
             // Map lookups

@@ -58,6 +58,12 @@ namespace George.Services.Response
         public string? SeoTitle { get; set; }
         public string? SeoDescription { get; set; }
         public string? SourceProductId { get; set; }
+
+        /// <summary>Related/accessory template product IDs (נלווים).</summary>
+        public List<int> RelatedProductIds { get; set; } = new();
+
+        /// <summary>Complementary template product IDs (מוצרים משלימים).</summary>
+        public List<int> ComplementaryProductIds { get; set; } = new();
     }
 }
 

@@ -70,6 +70,12 @@ namespace George.Services.Request
         public int? AccountId { get; set; }
         public string? SeoTitle { get; set; }
         public string? SeoDescription { get; set; }
+
+        /// <summary>Related/accessory product IDs (נלווים).</summary>
+        public List<int>? RelatedProductIds { get; set; }
+
+        /// <summary>Complementary product IDs (מוצרים משלימים).</summary>
+        public List<int>? ComplementaryProductIds { get; set; }
     }
 
     public class CreateProductReq : ProductReq

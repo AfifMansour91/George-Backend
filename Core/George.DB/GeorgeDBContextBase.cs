@@ -368,6 +368,40 @@ public partial class GeorgeDBContextBase : DbContext
                         j.HasIndex(new[] { "SiteId" }, "IX_ProductSite_SiteId");
                     });
 
+            entity.HasMany(d => d.RelatedProducts).WithMany()
+                .UsingEntity<Dictionary<string, object>>(
+                    "ProductRelated",
+                    r => r.HasOne<Product>().WithMany()
+                        .HasForeignKey("RelatedProductId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_ProductRelated_RelatedProduct"),
+                    l => l.HasOne<Product>().WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_ProductRelated_Product"),
+                    j =>
+                    {
+                        j.HasKey("ProductId", "RelatedProductId");
+                        j.ToTable("ProductRelated");
+                    });
+
+            entity.HasMany(d => d.ComplementaryProducts).WithMany()
+                .UsingEntity<Dictionary<string, object>>(
+                    "ProductComplementary",
+                    r => r.HasOne<Product>().WithMany()
+                        .HasForeignKey("ComplementaryProductId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_ProductComplementary_ComplementaryProduct"),
+                    l => l.HasOne<Product>().WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_ProductComplementary_Product"),
+                    j =>
+                    {
+                        j.HasKey("ProductId", "ComplementaryProductId");
+                        j.ToTable("ProductComplementary");
+                    });
+
             entity.HasMany(d => d.Tags).WithMany(p => p.Products)
                 .UsingEntity<Dictionary<string, object>>(
                     "ProductTag",
@@ -606,6 +640,40 @@ public partial class GeorgeDBContextBase : DbContext
                     {
                         j.HasKey("TemplateProductId", "TagId");
                         j.ToTable("TemplateProductTag");
+                    });
+
+            entity.HasMany(d => d.RelatedProducts).WithMany()
+                .UsingEntity<Dictionary<string, object>>(
+                    "TemplateProductRelated",
+                    r => r.HasOne<TemplateProduct>().WithMany()
+                        .HasForeignKey("RelatedTemplateProductId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_TPR_RelatedTemplateProduct"),
+                    l => l.HasOne<TemplateProduct>().WithMany()
+                        .HasForeignKey("TemplateProductId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_TPR_TemplateProduct"),
+                    j =>
+                    {
+                        j.HasKey("TemplateProductId", "RelatedTemplateProductId");
+                        j.ToTable("TemplateProductRelated");
+                    });
+
+            entity.HasMany(d => d.ComplementaryProducts).WithMany()
+                .UsingEntity<Dictionary<string, object>>(
+                    "TemplateProductComplementary",
+                    r => r.HasOne<TemplateProduct>().WithMany()
+                        .HasForeignKey("ComplementaryTemplateProductId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_TPComplementary_ComplementaryTemplateProduct"),
+                    l => l.HasOne<TemplateProduct>().WithMany()
+                        .HasForeignKey("TemplateProductId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_TPComplementary_TemplateProduct"),
+                    j =>
+                    {
+                        j.HasKey("TemplateProductId", "ComplementaryTemplateProductId");
+                        j.ToTable("TemplateProductComplementary");
                     });
         });
 

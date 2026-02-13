@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -161,4 +161,10 @@ public partial class Product
     [ForeignKey("ProductId")]
     [InverseProperty("Products")]
     public virtual ICollection<Tag> Tags { get; set; } = new List<Tag>();
+
+    /// <summary>Related/accessory product IDs (נלווים).</summary>
+    public virtual ICollection<Product> RelatedProducts { get; set; } = new List<Product>();
+
+    /// <summary>Complementary product IDs (מוצרים משלימים).</summary>
+    public virtual ICollection<Product> ComplementaryProducts { get; set; } = new List<Product>();
 }

@@ -43,6 +43,8 @@ namespace George.Data
                     .ThenInclude(po => po.ProductOptionValues)
                 .Include(p => p.ProductVariants)
                     .ThenInclude(pv => pv.ProductVariantOptionValues)
+                .Include(p => p.RelatedProducts)
+                .Include(p => p.ComplementaryProducts)
                 .AsNoTracking()
                 .Where(p => !p.IsDeleted);
 
@@ -114,11 +116,13 @@ namespace George.Data
                     .ThenInclude(po => po.ProductOptionValues)
                 .Include(p => p.ProductVariants)
                     .ThenInclude(pv => pv.ProductVariantOptionValues)
+                .Include(p => p.RelatedProducts)
+                .Include(p => p.ComplementaryProducts)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
         }
 
-        public async Task<Product> CreateProductAsync(Product product, List<int>? siteIds, List<int>? categoryIds, List<string>? tags, CancellationToken cancelToken)
+        public async Task<Product> CreateProductAsync(Product product, List<int>? siteIds, List<int>? categoryIds, List<string>? tags, List<int>? relatedProductIds, List<int>? complementaryProductIds, CancellationToken cancelToken)
         {
             // Normalize empty SKU to NULL to avoid unique constraint violations
             if (string.IsNullOrWhiteSpace(product.Sku))
@@ -179,15 +183,47 @@ namespace George.Data
             }
 
             await _dbContext.SaveChangesAsync(cancelToken);
+
+            // Add related (נלווים) and complementary (מוצרים משלימים) products after we have product.Id
+            if ((relatedProductIds != null && relatedProductIds.Any()) || (complementaryProductIds != null && complementaryProductIds.Any()))
+            {
+                var dbProduct = await _dbContext.Products
+                    .Include(p => p.RelatedProducts)
+                    .Include(p => p.ComplementaryProducts)
+                    .FirstAsync(p => p.Id == product.Id, cancelToken);
+                if (relatedProductIds != null)
+                {
+                    foreach (var id in relatedProductIds.Where(id => id != product.Id))
+                    {
+                        var related = await _dbContext.Products.FindAsync(new object[] { id }, cancelToken);
+                        if (related != null && !related.IsDeleted && related.AccountId == product.AccountId)
+                            dbProduct.RelatedProducts.Add(related);
+                    }
+                }
+                if (complementaryProductIds != null)
+                {
+                    foreach (var id in complementaryProductIds.Where(id => id != product.Id))
+                    {
+                        var comp = await _dbContext.Products.FindAsync(new object[] { id }, cancelToken);
+                        if (comp != null && !comp.IsDeleted && comp.AccountId == product.AccountId)
+                            dbProduct.ComplementaryProducts.Add(comp);
+                    }
+                }
+                await _dbContext.SaveChangesAsync(cancelToken);
+                product = await GetProductAsync(product.Id, cancelToken) ?? product;
+            }
+
             return product;
         }
 
-        public async Task<Product?> UpdateProductAsync(Product updated, List<int>? siteIds, List<int>? categoryIds, List<string>? tags, CancellationToken cancelToken)
+        public async Task<Product?> UpdateProductAsync(Product updated, List<int>? siteIds, List<int>? categoryIds, List<string>? tags, List<int>? relatedProductIds, List<int>? complementaryProductIds, CancellationToken cancelToken)
         {
             var dbProduct = await _dbContext.Products
                 .Include(p => p.Sites)
                 .Include(p => p.Tags)
                 .Include(p => p.ProductCategories)
+                .Include(p => p.RelatedProducts)
+                .Include(p => p.ComplementaryProducts)
                 .FirstOrDefaultAsync(p => p.Id == updated.Id, cancelToken);
 
             if (dbProduct == null) return null;
@@ -280,6 +316,30 @@ namespace George.Data
                         }
                         dbProduct.Tags.Add(tag);
                     }
+                }
+            }
+
+            // Update related products (נלווים)
+            if (relatedProductIds != null)
+            {
+                dbProduct.RelatedProducts.Clear();
+                foreach (var id in relatedProductIds.Where(id => id != dbProduct.Id))
+                {
+                    var related = await _dbContext.Products.FindAsync(new object[] { id }, cancelToken);
+                    if (related != null && !related.IsDeleted && related.AccountId == dbProduct.AccountId)
+                        dbProduct.RelatedProducts.Add(related);
+                }
+            }
+
+            // Update complementary products (מוצרים משלימים)
+            if (complementaryProductIds != null)
+            {
+                dbProduct.ComplementaryProducts.Clear();
+                foreach (var id in complementaryProductIds.Where(id => id != dbProduct.Id))
+                {
+                    var comp = await _dbContext.Products.FindAsync(new object[] { id }, cancelToken);
+                    if (comp != null && !comp.IsDeleted && comp.AccountId == dbProduct.AccountId)
+                        dbProduct.ComplementaryProducts.Add(comp);
                 }
             }
 
