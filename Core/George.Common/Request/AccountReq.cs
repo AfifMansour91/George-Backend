@@ -229,6 +229,7 @@ namespace George.Common.Request
         public bool IsActive { get; set; }
         public bool IsKosherShop { get; set; }
         public bool AllowWeighted { get; set; }
+        public bool KioskEnabled { get; set; }
         public int? WizardStep { get; set; }
         public string? WizardStatus { get; set; }
         
@@ -354,6 +355,7 @@ namespace George.Common.Request
         public bool SendInviteToClient { get; set; } = false;
         public bool IsKosherShop { get; set; } = false;
         public bool AllowWeighted { get; set; } = false;
+        public bool KioskEnabled { get; set; } = false;
         
         public string? LogoUrl { get; set; }
         public string? Website { get; set; }

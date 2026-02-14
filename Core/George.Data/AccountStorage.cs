@@ -123,9 +123,10 @@ namespace George.Data
             // Update LogoUrl
             dbAcc.LogoUrl = updated.LogoUrl;
             
-            // Update IsKosherShop and AllowWeighted
+            // Update IsKosherShop, AllowWeighted, KioskEnabled
             dbAcc.IsKosherShop = updated.IsKosherShop;
             dbAcc.AllowWeighted = updated.AllowWeighted;
+            dbAcc.KioskEnabled = updated.KioskEnabled;
 
             // Update address and website fields
             dbAcc.Address = updated.Address;

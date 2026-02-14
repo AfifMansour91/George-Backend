@@ -40,6 +40,8 @@ namespace George.Services.Response
         public bool IsKosherShop { get; set; }
         
         public bool AllowWeighted { get; set; }
+
+        public bool KioskEnabled { get; set; }
     }
 
     //public class AccountRes

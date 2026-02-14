@@ -80,6 +80,8 @@ public partial class Account
 
     public bool AllowWeighted { get; set; }
 
+    public bool KioskEnabled { get; set; }
+
     [InverseProperty("Account")]
     public virtual ICollection<Brand> Brands { get; set; } = new List<Brand>();
 

@@ -90,7 +90,8 @@ namespace George.Services
                         LogoUrl = account.LogoUrl,
                         Website = account.Website,
                         IsKosherShop = account.IsKosherShop,
-                        AllowWeighted = account.AllowWeighted
+                        AllowWeighted = account.AllowWeighted,
+                        KioskEnabled = account.KioskEnabled
                     };
                 })
                 .ToList();
@@ -152,6 +153,7 @@ namespace George.Services
                 Website = req.Website,
                 IsKosherShop = req.IsKosherShop,
                 AllowWeighted = req.AllowWeighted,
+                KioskEnabled = req.KioskEnabled,
                 IsActive = true,
                 CreationTime = DateTime.UtcNow,
             };
@@ -268,6 +270,7 @@ namespace George.Services
                 // Update IsKosherShop and AllowWeighted
                 IsKosherShop = req.IsKosherShop,
                 AllowWeighted = req.AllowWeighted,
+                KioskEnabled = req.KioskEnabled,
                 // Address fields: use request value if provided, otherwise preserve existing
                 Address = req.Address ?? existingAccount.Address,
                 City = req.City ?? existingAccount.City,
