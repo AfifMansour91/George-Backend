@@ -289,13 +289,25 @@ namespace George.Services
                     // Use AccountId from request if provided, otherwise use user's AccountId
                     var accountIdForLookup = productReq.AccountId ?? userAccountId;
 
-                    // Check if product exists by SKU
-                    if (req.UpdateIfExists && !string.IsNullOrWhiteSpace(productReq.Sku))
+                    // Check if product exists: first by SKU, then by name+account when SKU is empty (e.g. products with variations)
+                    if (req.UpdateIfExists)
                     {
-                        existingProduct = await _productStorage.GetProductBySkuAsync(
-                            productReq.Sku, 
-                            accountIdForLookup, 
-                            cancelToken);
+                        if (!string.IsNullOrWhiteSpace(productReq.Sku))
+                        {
+                            existingProduct = await _productStorage.GetProductBySkuAsync(
+                                productReq.Sku!,
+                                accountIdForLookup,
+                                cancelToken);
+                        }
+                        if (existingProduct == null && !string.IsNullOrWhiteSpace(productReq.Name))
+                        {
+                            var siteIdsForLookup = req.SiteIds ?? productReq.SiteIds;
+                            existingProduct = await _productStorage.GetProductByNameAndAccountAsync(
+                                productReq.Name!,
+                                accountIdForLookup,
+                                siteIdsForLookup,
+                                cancelToken);
+                        }
                     }
 
                     // Resolve categories - find or create them by path or ID

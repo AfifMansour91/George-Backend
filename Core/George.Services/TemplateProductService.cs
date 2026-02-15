@@ -241,12 +241,21 @@ namespace George.Services
                 {
                     TemplateProduct? existingProduct = null;
 
-                    // Check if product exists by SKU
-                    if (req.UpdateIfExists && !string.IsNullOrWhiteSpace(productReq.Sku))
+                    // Check if product exists: first by SKU, then by name when SKU is empty (e.g. products with variations)
+                    if (req.UpdateIfExists)
                     {
-                        existingProduct = await _templateProductStorage.GetTemplateProductBySkuAsync(
-                            productReq.Sku,
-                            cancelToken);
+                        if (!string.IsNullOrWhiteSpace(productReq.Sku))
+                        {
+                            existingProduct = await _templateProductStorage.GetTemplateProductBySkuAsync(
+                                productReq.Sku!,
+                                cancelToken);
+                        }
+                        if (existingProduct == null && !string.IsNullOrWhiteSpace(productReq.Name))
+                        {
+                            existingProduct = await _templateProductStorage.GetTemplateProductByNameAsync(
+                                productReq.Name!,
+                                cancelToken);
+                        }
                     }
 
                     // Resolve global categories - find or create them by path or ID

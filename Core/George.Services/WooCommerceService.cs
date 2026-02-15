@@ -759,7 +759,7 @@ namespace George.Services
                 var loadTasks = distinctIds.Select(id => _productStorage.GetProductAsync(id, cancelToken));
                 var loaded = await Task.WhenAll(loadTasks);
                 productsToSync = loaded
-                    .Where(p => p != null && (p!.Sites.Any(s => s.Id == siteId) || p.Sites.Count == 0))
+                    .Where(p => p != null && p!.Sites.Any(s => s.Id == siteId))
                     .Cast<Product>()
                     .ToList();
             }
@@ -771,7 +771,7 @@ namespace George.Services
                     filter,
                     new PagingExDto { Skip = 0, Take = 10000, IncludeTotal = false },
                     cancelToken);
-                productsToSync = products.Items.Where(p => p.Sites.Any(s => s.Id == siteId) || p.Sites.Count == 0).ToList();
+                productsToSync = products.Items.Where(p => p.Sites.Any(s => s.Id == siteId)).ToList();
             }
 
             // Deduplicate by product Id so we don't count the same product twice

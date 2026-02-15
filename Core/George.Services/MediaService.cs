@@ -1,3 +1,4 @@
+using System.Linq;
 using AutoMapper;
 using George.Common;
 using George.Common.Request;
@@ -59,8 +60,18 @@ namespace George.Services
         {
             var response = new ApiResponse<MediaRes>();
 
+            // When URL is external (e.g. from bulk import), use filename from URL as media name if current name is missing or looks like a storage Guid
+            var nameToUse = req.Name;
+            if (req.Url != null && (req.Url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || req.Url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+            {
+                var fileNameFromUrl = GetFileNameFromUrl(req.Url);
+                if (!string.IsNullOrWhiteSpace(fileNameFromUrl) && (string.IsNullOrWhiteSpace(nameToUse) || LooksLikeStorageFileName(nameToUse)))
+                    nameToUse = fileNameFromUrl;
+            }
+
             // Convert to EF model
             var media = MapReqToMedia(req);
+            media.Name = nameToUse ?? media.Name;
             media.CreationUserId = AuthUser.Id;
             media.CreationTime = DateTime.UtcNow;
             media.IsDeleted = false;
@@ -217,6 +228,32 @@ namespace George.Services
             if (categoryIds != null) combined.AddRange(categoryIds);
             if (subcategoryIds != null) combined.AddRange(subcategoryIds);
             return combined;
+        }
+
+        /// <summary>Gets the file name from a URL (last path segment, without query or hash).</summary>
+        private static string? GetFileNameFromUrl(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return null;
+            try
+            {
+                var withoutQuery = url.Split('?')[0].Split('#')[0];
+                var segments = withoutQuery.Split('/', '\\');
+                var last = segments.Length > 0 ? segments[^1].Trim() : null;
+                return !string.IsNullOrEmpty(last) ? last : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>True if the name looks like a storage-generated filename (e.g. Guid + extension).</summary>
+        private static bool LooksLikeStorageFileName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return true;
+            var withoutExt = System.IO.Path.GetFileNameWithoutExtension(name);
+            // 32 hex chars (Guid without dashes) or very short random-looking name
+            return withoutExt.Length == 32 && withoutExt.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
         }
     }
 }

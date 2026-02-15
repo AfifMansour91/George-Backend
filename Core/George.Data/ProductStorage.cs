@@ -58,7 +58,7 @@ namespace George.Data
 
                 if (filter.SiteId.HasValue)
                 {
-                    query = query.Where(p => p.Sites.Any(s => s.Id == filter.SiteId.Value) || !p.Sites.Any());
+                    query = query.Where(p => p.Sites.Any(s => s.Id == filter.SiteId.Value));
                 }
 
                 if (filter.CategoryId.HasValue)
@@ -573,6 +573,34 @@ namespace George.Data
             }
 
             return await query
+                .AsNoTracking()
+                .FirstOrDefaultAsync(cancelToken);
+        }
+
+        /// <summary>
+        /// Finds a product by name, account and optionally site(s) (case-insensitive name). Used as fallback when re-importing and SKU is empty.
+        /// When siteIds is provided and has items, the product must be assigned to at least one of those sites.
+        /// Returns the first match (by Id) when multiple products share the same name in the account.
+        /// </summary>
+        public async Task<Product?> GetProductByNameAndAccountAsync(string name, int? accountId, List<int>? siteIds, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return null;
+
+            var query = _dbContext.Products
+                .Where(p => !p.IsDeleted && p.Name != null && p.Name.Trim().ToLower() == name.Trim().ToLower());
+
+            if (accountId.HasValue)
+            {
+                query = query.Where(p => p.AccountId == accountId.Value);
+            }
+
+            if (siteIds != null && siteIds.Any())
+            {
+                query = query.Where(p => p.Sites.Any(s => siteIds.Contains(s.Id)));
+            }
+
+            return await query
+                .OrderBy(p => p.Id)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(cancelToken);
         }

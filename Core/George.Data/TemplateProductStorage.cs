@@ -105,6 +105,18 @@ namespace George.Data
                 .FirstOrDefaultAsync(cancelToken);
         }
 
+        /// <summary>Finds a template product by name (case-insensitive). Used as fallback when re-importing and SKU is empty.</summary>
+        public async Task<TemplateProduct?> GetTemplateProductByNameAsync(string name, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return null;
+
+            return await _dbContext.TemplateProducts
+                .Where(tp => !tp.IsDeleted && tp.Name != null && tp.Name.Trim().ToLower() == name.Trim().ToLower())
+                .OrderBy(tp => tp.Id)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(cancelToken);
+        }
+
         public async Task<TemplateProduct?> GetTemplateProductAsync(int templateProductId, CancellationToken cancelToken)
         {
             return await _dbContext.TemplateProducts
