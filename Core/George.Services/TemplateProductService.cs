@@ -94,7 +94,7 @@ namespace George.Services
                 // Create images
                 if (req.ImageUrls != null && req.ImageUrls.Any())
                 {
-                    var imageList = await ResolveImageUrlsToMediaAsync(AuthUser?.AccountId, req.ImageUrls, createMediaIfMissing: true, cancelToken);
+                    var imageList = await ResolveTemplateImageUrlsToMediaAsync(req.ImageUrls, cancelToken);
                     await _templateProductStorage.CreateTemplateProductImagesAsync(templateProduct.Id, imageList, cancelToken);
                 }
 
@@ -164,7 +164,7 @@ namespace George.Services
                 // Update images
                 if (req.ImageUrls != null)
                 {
-                    var imageList = await ResolveImageUrlsToMediaAsync(AuthUser?.AccountId, req.ImageUrls, createMediaIfMissing: true, cancelToken);
+                    var imageList = await ResolveTemplateImageUrlsToMediaAsync(req.ImageUrls, cancelToken);
                     await _templateProductStorage.CreateTemplateProductImagesAsync(templateProductId, imageList, cancelToken);
                 }
 
@@ -380,7 +380,7 @@ namespace George.Services
                             // Update images, options, variants
                             if (productReq.ImageUrls != null)
                             {
-                                var imageList = await ResolveImageUrlsToMediaAsync(AuthUser?.AccountId, productReq.ImageUrls, createMediaIfMissing: true, cancelToken);
+                                var imageList = await ResolveTemplateImageUrlsToMediaAsync(productReq.ImageUrls, cancelToken);
                                 await _templateProductStorage.CreateTemplateProductImagesAsync(templateProduct.Id, imageList, cancelToken);
                             }
 
@@ -437,7 +437,7 @@ namespace George.Services
                             // Create images, options, variants
                             if (productReq.ImageUrls != null && productReq.ImageUrls.Any())
                             {
-                                var imageList = await ResolveImageUrlsToMediaAsync(AuthUser?.AccountId, productReq.ImageUrls, createMediaIfMissing: true, cancelToken);
+                                var imageList = await ResolveTemplateImageUrlsToMediaAsync(productReq.ImageUrls, cancelToken);
                                 await _templateProductStorage.CreateTemplateProductImagesAsync(templateProduct.Id, imageList, cancelToken);
                             }
 
@@ -489,33 +489,6 @@ namespace George.Services
             response.Data.Results = results;
 
             return response;
-        }
-
-        /// <summary>Resolve image URLs to (Url, MediaId). Uses importer's account media when URL matches; when createMediaIfMissing is true, creates Media for external URLs.</summary>
-        private async Task<List<(string Url, int? MediaId)>> ResolveImageUrlsToMediaAsync(int? accountId, List<string>? imageUrls, bool createMediaIfMissing, CancellationToken cancelToken)
-        {
-            if (imageUrls == null || !imageUrls.Any()) return new List<(string, int?)>();
-            if (!accountId.HasValue) return imageUrls.Select(u => (u, (int?)null)).ToList();
-            var urlToMediaId = await _mediaStorage.GetMediaIdsByUrlsForAccountAsync(accountId.Value, imageUrls, cancelToken);
-            var result = new List<(string Url, int? MediaId)>();
-            foreach (var u in imageUrls)
-            {
-                var trimmed = u?.Trim();
-                if (string.IsNullOrWhiteSpace(trimmed)) continue;
-                if (urlToMediaId.TryGetValue(trimmed, out var id))
-                {
-                    result.Add((u!, id));
-                    continue;
-                }
-                if (createMediaIfMissing)
-                {
-                    var newId = await _mediaStorage.GetOrCreateMediaByUrlForAccountAsync(accountId.Value, trimmed, AuthUser?.Id, cancelToken);
-                    result.Add((u!, newId));
-                }
-                else
-                    result.Add((u!, (int?)null));
-            }
-            return result;
         }
 
         /// <summary>
@@ -604,6 +577,21 @@ namespace George.Services
                 SetupTypeId = existing.SetupTypeId,
                 WeightConfigId = existing.WeightConfigId
             };
+        }
+
+        /// <summary>Resolve image URLs to (Url, MediaId) using global media pool. Creates Media (no account link) for external URLs when importing global/template products.</summary>
+        private async Task<List<(string Url, int? MediaId)>> ResolveTemplateImageUrlsToMediaAsync(List<string>? imageUrls, CancellationToken cancelToken)
+        {
+            if (imageUrls == null || !imageUrls.Any()) return new List<(string, int?)>();
+            var result = new List<(string Url, int? MediaId)>();
+            foreach (var u in imageUrls)
+            {
+                if (string.IsNullOrWhiteSpace(u)) continue;
+                var trimmed = u.Trim();
+                var mediaId = await _mediaStorage.GetOrCreateMediaByUrlAsync(trimmed, AuthUser?.Id, cancelToken);
+                result.Add((u!, mediaId));
+            }
+            return result;
         }
 
         private TemplateProductRes MapTemplateProductToRes(TemplateProduct templateProduct)

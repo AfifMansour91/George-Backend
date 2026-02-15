@@ -276,6 +276,34 @@ namespace George.Data
             return list.ToDictionary(x => x.Url, x => x.Id);
         }
 
+        /// <summary>Returns MediaId for the given URL in the global media pool: existing Media with that URL, or a new Media record (no AccountMedia). Used when importing global/template products with external image URLs.</summary>
+        public async Task<int?> GetOrCreateMediaByUrlAsync(string url, int? creationUserId, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return null;
+            var trimmed = url.Trim();
+
+            var existing = await _dbContext.Media
+                .Where(m => !m.IsDeleted && m.Url == trimmed)
+                .Select(m => m.Id)
+                .FirstOrDefaultAsync(cancelToken);
+            if (existing != 0) return existing;
+
+            var typeId = await GetOrCreateMediaTypeAsync("image", cancelToken);
+            var name = GetFileNameFromUrl(trimmed) ?? "image";
+            var media = new Medium
+            {
+                Url = trimmed,
+                Name = name,
+                TypeId = typeId,
+                CreationUserId = creationUserId,
+                CreationTime = DateTime.UtcNow,
+                IsDeleted = false
+            };
+            _dbContext.Media.Add(media);
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return media.Id;
+        }
+
         /// <summary>Returns MediaId for the given URL in this account: existing account media with that URL, or a new Media record (and AccountMedia) for external URLs. Used when importing products with external image URLs.</summary>
         public async Task<int?> GetOrCreateMediaByUrlForAccountAsync(int accountId, string url, int? creationUserId, CancellationToken cancelToken)
         {
