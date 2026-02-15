@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -19,7 +19,13 @@ public partial class ProductImage
     [StringLength(1000)]
     public string Url { get; set; } = null!;
 
+    public int? MediaId { get; set; }
+
     [ForeignKey("ProductId")]
     [InverseProperty("ProductImages")]
     public virtual Product Product { get; set; } = null!;
+
+    [ForeignKey("MediaId")]
+    [InverseProperty("ProductImages")]
+    public virtual Medium? Media { get; set; }
 }

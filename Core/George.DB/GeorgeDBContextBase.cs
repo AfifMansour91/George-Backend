@@ -437,6 +437,10 @@ public partial class GeorgeDBContextBase : DbContext
             entity.HasOne(d => d.Product).WithMany(p => p.ProductImages)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_ProductImage_Product");
+            entity.HasOne(d => d.Media).WithMany(m => m.ProductImages)
+                .HasForeignKey(d => d.MediaId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("FK_ProductImage_Media");
         });
 
         modelBuilder.Entity<ProductOption>(entity =>
@@ -693,6 +697,10 @@ public partial class GeorgeDBContextBase : DbContext
             entity.HasOne(d => d.TemplateProduct).WithMany(p => p.TemplateProductImages)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_TemplateProductImage_TemplateProduct");
+            entity.HasOne(d => d.Media).WithMany(m => m.TemplateProductImages)
+                .HasForeignKey(d => d.MediaId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("FK_TemplateProductImage_Media");
         });
 
         modelBuilder.Entity<TemplateProductOption>(entity =>

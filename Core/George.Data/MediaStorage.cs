@@ -223,6 +223,19 @@ namespace George.Data
 
             if (media == null) return false;
 
+            // Clear product image references so products no longer point to this media
+            var productImages = await _dbContext.ProductImages
+                .Where(pi => pi.MediaId == mediaId)
+                .ToListAsync(cancelToken);
+            foreach (var pi in productImages)
+                pi.MediaId = null;
+
+            var templateProductImages = await _dbContext.TemplateProductImages
+                .Where(tpi => tpi.MediaId == mediaId)
+                .ToListAsync(cancelToken);
+            foreach (var tpi in templateProductImages)
+                tpi.MediaId = null;
+
             media.IsDeleted = true;
             media.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken);
@@ -244,6 +257,65 @@ namespace George.Data
                 CreationTime = DateTime.UtcNow
             });
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+        }
+
+        /// <summary>Returns URL -> MediaId for media that belong to the account (via AccountMedia) and have one of the given URLs. Used when linking product images to existing account media.</summary>
+        public async Task<Dictionary<string, int>> GetMediaIdsByUrlsForAccountAsync(int accountId, List<string> urls, CancellationToken cancelToken)
+        {
+            if (urls == null || !urls.Any()) return new Dictionary<string, int>();
+
+            var normalized = urls.Where(u => !string.IsNullOrWhiteSpace(u)).Select(u => u!.Trim()).Distinct().ToList();
+            if (normalized.Count == 0) return new Dictionary<string, int>();
+
+            var list = await _dbContext.Media
+                .Where(m => !m.IsDeleted && normalized.Contains(m.Url)
+                    && _dbContext.AccountMedia.Any(am => am.AccountId == accountId && am.MediaId == m.Id))
+                .Select(m => new { m.Url, m.Id })
+                .ToListAsync(cancelToken);
+
+            return list.ToDictionary(x => x.Url, x => x.Id);
+        }
+
+        /// <summary>Returns MediaId for the given URL in this account: existing account media with that URL, or a new Media record (and AccountMedia) for external URLs. Used when importing products with external image URLs.</summary>
+        public async Task<int?> GetOrCreateMediaByUrlForAccountAsync(int accountId, string url, int? creationUserId, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return null;
+            var trimmed = url.Trim();
+
+            var existing = await GetMediaIdsByUrlsForAccountAsync(accountId, new List<string> { trimmed }, cancelToken);
+            if (existing.TryGetValue(trimmed, out var existingId)) return existingId;
+
+            var typeId = await GetOrCreateMediaTypeAsync("image", cancelToken);
+            var name = GetFileNameFromUrl(trimmed) ?? "image";
+            var media = new Medium
+            {
+                Url = trimmed,
+                Name = name,
+                TypeId = typeId,
+                CreationUserId = creationUserId,
+                CreationTime = DateTime.UtcNow,
+                IsDeleted = false
+            };
+            _dbContext.Media.Add(media);
+            await _dbContext.SaveChangesAsync(cancelToken);
+            await AddAccountMediaUsageAsync(accountId, media.Id, cancelToken);
+            return media.Id;
+        }
+
+        private static string? GetFileNameFromUrl(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return null;
+            try
+            {
+                var withoutQuery = url.Split('?')[0].Split('#')[0];
+                var segments = withoutQuery.Split('/', '\\');
+                var last = segments.Length > 0 ? segments[^1].Trim() : null;
+                return !string.IsNullOrEmpty(last) ? last : null;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         // Helper method to get or create MediaType

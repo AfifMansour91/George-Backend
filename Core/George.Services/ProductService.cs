@@ -16,6 +16,7 @@ namespace George.Services
         private readonly ProductStorage _productStorage;
         private readonly CategoryStorage _categoryStorage;
         private readonly UserStorage _userStorage;
+        private readonly MediaStorage _mediaStorage;
         private readonly WooCommerceService _wooCommerceService;
         private readonly IServiceScopeFactory _serviceScopeFactory;
 
@@ -26,6 +27,7 @@ namespace George.Services
             ProductStorage productStorage,
             CategoryStorage categoryStorage,
             UserStorage userStorage,
+            MediaStorage mediaStorage,
             WooCommerceService wooCommerceService,
             IServiceScopeFactory serviceScopeFactory
         ) : base(logger, mapper, cache)
@@ -33,6 +35,7 @@ namespace George.Services
             _productStorage = productStorage;
             _categoryStorage = categoryStorage;
             _userStorage = userStorage;
+            _mediaStorage = mediaStorage;
             _wooCommerceService = wooCommerceService;
             _serviceScopeFactory = serviceScopeFactory;
         }
@@ -96,10 +99,11 @@ namespace George.Services
 
             if (product != null)
             {
-                // Create images
+                // Create images (link to existing account media when URL matches; do not create new media)
                 if (req.ImageUrls != null && req.ImageUrls.Any())
                 {
-                    await _productStorage.CreateProductImagesAsync(product.Id, req.ImageUrls, cancelToken);
+                    var imageList = await ResolveImageUrlsToMediaAsync(product.AccountId, req.ImageUrls, createMediaIfMissing: true, cancelToken);
+                    await _productStorage.CreateProductImagesAsync(product.Id, imageList, cancelToken);
                 }
 
                 // Create options and variants
@@ -178,10 +182,11 @@ namespace George.Services
 
             if (product != null)
             {
-                // Update images
+                // Update images (link to existing account media when URL matches; do not create new media)
                 if (req.ImageUrls != null)
                 {
-                    await _productStorage.CreateProductImagesAsync(productId, req.ImageUrls, cancelToken);
+                    var imageList = await ResolveImageUrlsToMediaAsync(existingProduct.AccountId, req.ImageUrls, createMediaIfMissing: true, cancelToken);
+                    await _productStorage.CreateProductImagesAsync(productId, imageList, cancelToken);
                 }
 
                 // Update options and variants
@@ -433,10 +438,12 @@ namespace George.Services
 
                         if (product != null)
                         {
-                            // Update images, options, variants
+                            // Update images (link to existing account media; do not create new media)
                             if (productReq.ImageUrls != null)
                             {
-                                await _productStorage.CreateProductImagesAsync(product.Id, productReq.ImageUrls, cancelToken);
+                                var accountIdForImages = product.AccountId ?? userAccountId;
+                                var imageList = await ResolveImageUrlsToMediaAsync(accountIdForImages, productReq.ImageUrls, createMediaIfMissing: true, cancelToken);
+                                await _productStorage.CreateProductImagesAsync(product.Id, imageList, cancelToken);
                             }
 
                             if (productReq.ProductOptions != null)
@@ -495,10 +502,12 @@ namespace George.Services
 
                         if (product != null)
                         {
-                            // Create images, options, variants
+                            // Create images (link to existing account media; do not create new media)
                             if (productReq.ImageUrls != null && productReq.ImageUrls.Any())
                             {
-                                await _productStorage.CreateProductImagesAsync(product.Id, productReq.ImageUrls, cancelToken);
+                                var accountIdForImages = product.AccountId ?? userAccountId;
+                                var imageList = await ResolveImageUrlsToMediaAsync(accountIdForImages, productReq.ImageUrls, createMediaIfMissing: true, cancelToken);
+                                await _productStorage.CreateProductImagesAsync(product.Id, imageList, cancelToken);
                             }
 
                             if (productReq.ProductOptions != null && productReq.ProductOptions.Any())
@@ -549,6 +558,33 @@ namespace George.Services
             response.Data.Results = results;
 
             return response;
+        }
+
+        /// <summary>Resolve image URLs to (Url, MediaId). Uses existing account media when URL matches; when createMediaIfMissing is true (e.g. import), creates Media + AccountMedia for external URLs.</summary>
+        private async Task<List<(string Url, int? MediaId)>> ResolveImageUrlsToMediaAsync(int? accountId, List<string>? imageUrls, bool createMediaIfMissing, CancellationToken cancelToken)
+        {
+            if (imageUrls == null || !imageUrls.Any()) return new List<(string, int?)>();
+            if (!accountId.HasValue) return imageUrls.Select(u => (u, (int?)null)).ToList();
+            var urlToMediaId = await _mediaStorage.GetMediaIdsByUrlsForAccountAsync(accountId.Value, imageUrls, cancelToken);
+            var result = new List<(string Url, int? MediaId)>();
+            foreach (var u in imageUrls)
+            {
+                var trimmed = u?.Trim();
+                if (string.IsNullOrWhiteSpace(trimmed)) continue;
+                if (urlToMediaId.TryGetValue(trimmed, out var id))
+                {
+                    result.Add((u!, id));
+                    continue;
+                }
+                if (createMediaIfMissing)
+                {
+                    var newId = await _mediaStorage.GetOrCreateMediaByUrlForAccountAsync(accountId.Value, trimmed, AuthUser?.Id, cancelToken);
+                    result.Add((u!, newId));
+                }
+                else
+                    result.Add((u!, (int?)null));
+            }
+            return result;
         }
 
         /// <summary>

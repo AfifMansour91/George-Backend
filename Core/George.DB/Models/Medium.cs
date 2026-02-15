@@ -63,4 +63,10 @@ public partial class Medium
     [ForeignKey("MediaId")]
     [InverseProperty("Media")]
     public virtual ICollection<Tag> Tags { get; set; } = new List<Tag>();
+
+    [InverseProperty("Media")]
+    public virtual ICollection<ProductImage> ProductImages { get; set; } = new List<ProductImage>();
+
+    [InverseProperty("Media")]
+    public virtual ICollection<TemplateProductImage> TemplateProductImages { get; set; } = new List<TemplateProductImage>();
 }

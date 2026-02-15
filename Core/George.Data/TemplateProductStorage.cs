@@ -408,8 +408,8 @@ namespace George.Data
             return true;
         }
 
-        // Helper methods for service layer
-        public async Task CreateTemplateProductImagesAsync(int templateProductId, List<string> imageUrls, CancellationToken cancelToken)
+        // Helper methods for service layer. Each item has Url and optional MediaId (template products typically use Url only).
+        public async Task CreateTemplateProductImagesAsync(int templateProductId, List<(string Url, int? MediaId)> images, CancellationToken cancelToken)
         {
             var existingImages = await _dbContext.TemplateProductImages
                 .Where(tpi => tpi.TemplateProductId == templateProductId)
@@ -417,12 +417,14 @@ namespace George.Data
 
             _dbContext.TemplateProductImages.RemoveRange(existingImages);
 
-            for (int i = 0; i < imageUrls.Count; i++)
+            for (int i = 0; i < images.Count; i++)
             {
+                var (url, mediaId) = images[i];
                 _dbContext.TemplateProductImages.Add(new TemplateProductImage
                 {
                     TemplateProductId = templateProductId,
-                    Url = imageUrls[i],
+                    Url = url,
+                    MediaId = mediaId,
                     SortOrder = i
                 });
             }
