@@ -20,6 +20,9 @@ namespace George.Services
 {
     public class WooCommerceService : ServiceBase
     {
+        /// <summary>HTTP client timeout for WooCommerce API calls (bulk sync can take many minutes).</summary>
+        private static readonly TimeSpan WooCommerceHttpTimeout = TimeSpan.FromMinutes(30);
+
         private readonly SiteStorage _siteStorage;
         private readonly CategoryStorage _categoryStorage;
         private readonly ProductStorage _productStorage;
@@ -73,11 +76,12 @@ namespace George.Services
                         "WooCommerce integration not configured. Please set up your credentials in Store Settings.");
                 }
 
-                // Setup WooCommerce API client
+                // Setup WooCommerce API client (long timeout for bulk sync: many products can take several minutes)
                 var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
                 var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
                 
                 using var httpClient = _httpClientFactory.CreateClient();
+                httpClient.Timeout = WooCommerceHttpTimeout;
                 httpClient.DefaultRequestHeaders.Clear();
                 httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
                 // Note: Content-Type is set on HttpContent objects (StringContent), not on DefaultRequestHeaders
@@ -127,6 +131,7 @@ namespace George.Services
             var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
 
             using var httpClient = _httpClientFactory.CreateClient();
+            httpClient.Timeout = WooCommerceHttpTimeout;
             httpClient.DefaultRequestHeaders.Clear();
             httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
 
@@ -264,11 +269,12 @@ namespace George.Services
                         "WooCommerce is not enabled or configured for this site");
                 }
 
-                // Setup WooCommerce API client
+                // Setup WooCommerce API client (long timeout for sync operations)
                 var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
                 var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
 
                 using var httpClient = _httpClientFactory.CreateClient();
+                httpClient.Timeout = WooCommerceHttpTimeout;
                 httpClient.DefaultRequestHeaders.Clear();
                 httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
 
@@ -356,6 +362,7 @@ namespace George.Services
                 var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
 
                 using var httpClient = _httpClientFactory.CreateClient();
+                httpClient.Timeout = WooCommerceHttpTimeout;
                 httpClient.DefaultRequestHeaders.Clear();
                 httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
 
