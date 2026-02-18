@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Net.Http.Headers;
 using AutoMapper;
 using George.Common;
 using George.Common.Request;
@@ -6,6 +7,7 @@ using George.Data;
 using George.DB;
 using George.Services.Request;
 using George.Services.Response;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
 namespace George.Services
@@ -13,15 +15,21 @@ namespace George.Services
     public class MediaService : ServiceBase
     {
         private readonly MediaStorage _mediaStorage;
+        private readonly IHttpClientFactory _httpClientFactory;
+        private readonly IFileStorage _fileStorage;
 
         public MediaService(
             ILogger<MediaService> logger,
             IMapper mapper,
             CacheManager cache,
-            MediaStorage mediaStorage
+            MediaStorage mediaStorage,
+            IHttpClientFactory httpClientFactory,
+            IFileStorage fileStorage
         ) : base(logger, mapper, cache)
         {
             _mediaStorage = mediaStorage;
+            _httpClientFactory = httpClientFactory;
+            _fileStorage = fileStorage;
         }
 
         public async Task<IApiResponse<ApiListResponse<MediaRes>>> GetMediaAsync(
@@ -254,6 +262,123 @@ namespace George.Services
             var withoutExt = System.IO.Path.GetFileNameWithoutExtension(name);
             // 32 hex chars (Guid without dashes) or very short random-looking name
             return withoutExt.Length == 32 && withoutExt.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
+        }
+
+        /// <summary>Download external media URLs and save files to our storage, then update media records.</summary>
+        public async Task<IApiResponse<DownloadAndSaveMediaRes>> DownloadAndSaveToStorageAsync(DownloadAndSaveMediaReq req, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<DownloadAndSaveMediaRes>
+            {
+                Data = new DownloadAndSaveMediaRes()
+            };
+            var res = response.Data!;
+            var userId = AuthUser?.Id;
+
+            using var httpClient = _httpClientFactory.CreateClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(60);
+            httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("George-ShopManager/1.0");
+
+            foreach (var mediaId in req.MediaIds.Distinct())
+            {
+                res.Processed++;
+                try
+                {
+                    var media = await _mediaStorage.GetMediaAsync(mediaId, cancelToken);
+                    if (media == null)
+                    {
+                        res.Failed++;
+                        res.Errors.Add(new DownloadAndSaveError { MediaId = mediaId, Message = "Media not found." });
+                        continue;
+                    }
+
+                    var url = media.Url?.Trim();
+                    if (string.IsNullOrEmpty(url) || (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        res.Skipped++;
+                        continue;
+                    }
+
+                    using var httpResponse = await httpClient.GetAsync(url, cancelToken);
+                    httpResponse.EnsureSuccessStatusCode();
+                    var bytes = await httpResponse.Content.ReadAsByteArrayAsync(cancelToken);
+                    if (bytes.Length == 0)
+                    {
+                        res.Failed++;
+                        res.Errors.Add(new DownloadAndSaveError { MediaId = mediaId, Message = "Downloaded file is empty." });
+                        continue;
+                    }
+
+                    var contentType = httpResponse.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+                    var extension = GetExtensionFromContentType(contentType) ?? GetExtensionFromUrl(url) ?? ".jpg";
+                    var fileName = "image" + extension;
+
+                    var formFile = CreateFormFileFromBytes(bytes, fileName, contentType);
+                    var path = FileHelper.GetTempFolderPath();
+                    var uploadResult = await _fileStorage.UploadFileAsync(formFile, path, cancelToken);
+
+                    if (!uploadResult.IsSuccessful || string.IsNullOrEmpty(uploadResult.FilePath))
+                    {
+                        res.Failed++;
+                        res.Errors.Add(new DownloadAndSaveError { MediaId = mediaId, Message = uploadResult.Exception?.Message ?? "Upload failed." });
+                        continue;
+                    }
+
+                    var newUrl = FileHelper.GetFileExternalPath(uploadResult.FilePath);
+                    var updated = await _mediaStorage.UpdateMediaUrlAndSizeAsync(mediaId, newUrl, bytes.LongLength, userId, cancelToken);
+                    if (updated)
+                        res.Saved++;
+                    else
+                    {
+                        res.Failed++;
+                        res.Errors.Add(new DownloadAndSaveError { MediaId = mediaId, Message = "Failed to update media record." });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "DownloadAndSaveToStorage failed for media {MediaId}", mediaId);
+                    res.Failed++;
+                    res.Errors.Add(new DownloadAndSaveError { MediaId = mediaId, Message = ex.Message });
+                }
+            }
+
+            return response;
+        }
+
+        private static string? GetExtensionFromContentType(string contentType)
+        {
+            if (string.IsNullOrWhiteSpace(contentType)) return null;
+            return contentType.ToLowerInvariant() switch
+            {
+                "image/jpeg" or "image/jpg" => ".jpg",
+                "image/png" => ".png",
+                "image/gif" => ".gif",
+                "image/webp" => ".webp",
+                "image/svg+xml" => ".svg",
+                _ => null
+            };
+        }
+
+        private static string? GetExtensionFromUrl(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return null;
+            try
+            {
+                var path = url.Split('?')[0].Split('#')[0];
+                var ext = System.IO.Path.GetExtension(path);
+                return !string.IsNullOrEmpty(ext) ? ext : null;
+            }
+            catch { return null; }
+        }
+
+        private static IFormFile CreateFormFileFromBytes(byte[] bytes, string fileName, string contentType)
+        {
+            var stream = new MemoryStream(bytes);
+            var formFile = new FormFile(stream, 0, bytes.Length, "file", fileName)
+            {
+                Headers = new HeaderDictionary(),
+                ContentType = contentType
+            };
+            return formFile;
         }
     }
 }

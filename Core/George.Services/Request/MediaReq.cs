@@ -45,5 +45,12 @@ namespace George.Services.Request
         [Required]
         public int AccountId { get; set; }
     }
+
+    /// <summary>Request to download external media URLs and save files to our storage.</summary>
+    public class DownloadAndSaveMediaReq
+    {
+        [Required]
+        public List<int> MediaIds { get; set; } = new();
+    }
 }
 

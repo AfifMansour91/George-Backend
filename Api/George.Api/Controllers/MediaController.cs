@@ -71,6 +71,14 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _mediaSvc.UseMediaAsync(mediaId, req, cancelToken));
         }
 
+        /// <summary>Download external media URLs and save files to our storage, then update media records.</summary>
+        [HttpPost("DownloadToStorage")]
+        [ProducesResponseType(typeof(IApiResponse<DownloadAndSaveMediaRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> DownloadAndSaveToStorageAsync([FromBody] DownloadAndSaveMediaReq req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _mediaSvc.DownloadAndSaveToStorageAsync(req, cancelToken));
+        }
+
         [HttpGet("Account/{accountId:int}")]
         [ProducesResponseType(typeof(IApiResponse<ApiListResponse<MediaRes>>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetMediaByAccountAsync(

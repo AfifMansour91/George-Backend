@@ -16,5 +16,21 @@ namespace George.Services.Response
         public long? FileSize { get; set; }
         public int? UsageCount { get; set; }
     }
+
+    /// <summary>Result of downloading external media and saving to our storage.</summary>
+    public class DownloadAndSaveMediaRes
+    {
+        public int Processed { get; set; }
+        public int Saved { get; set; }
+        public int Skipped { get; set; }
+        public int Failed { get; set; }
+        public List<DownloadAndSaveError> Errors { get; set; } = new();
+    }
+
+    public class DownloadAndSaveError
+    {
+        public int MediaId { get; set; }
+        public string Message { get; set; } = null!;
+    }
 }
 

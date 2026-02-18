@@ -434,6 +434,7 @@ public partial class GeorgeDBContextBase : DbContext
 
         modelBuilder.Entity<ProductImage>(entity =>
         {
+            entity.HasIndex(e => new { e.ProductId, e.Url }).IsUnique().HasDatabaseName("IX_ProductImage_ProductId_Url");
             entity.HasOne(d => d.Product).WithMany(p => p.ProductImages)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_ProductImage_Product");
@@ -694,6 +695,7 @@ public partial class GeorgeDBContextBase : DbContext
 
         modelBuilder.Entity<TemplateProductImage>(entity =>
         {
+            entity.HasIndex(e => new { e.TemplateProductId, e.Url }).IsUnique().HasDatabaseName("IX_TemplateProductImage_TemplateProductId_Url");
             entity.HasOne(d => d.TemplateProduct).WithMany(p => p.TemplateProductImages)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_TemplateProductImage_TemplateProduct");

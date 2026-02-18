@@ -216,6 +216,34 @@ namespace George.Data
             return dbMedia;
         }
 
+        /// <summary>Updates only Url and FileSize for a media item (e.g. after downloading external URL to our storage). Also updates ProductImage and TemplateProductImage rows that reference this media so products keep showing the correct URL.</summary>
+        public async Task<bool> UpdateMediaUrlAndSizeAsync(int mediaId, string url, long? fileSize, int? updateUserId, CancellationToken cancelToken)
+        {
+            var media = await _dbContext.Media
+                .FirstOrDefaultAsync(m => m.Id == mediaId && !m.IsDeleted, cancelToken);
+            if (media == null) return false;
+            media.Url = url;
+            media.FileSize = fileSize;
+            media.UpdatedDate = DateTime.UtcNow;
+            media.UpdateUserId = updateUserId;
+
+            // Update ProductImage and TemplateProductImage URLs in place (Id is PK so Url can be updated)
+            var productImages = await _dbContext.ProductImages
+                .Where(pi => pi.MediaId == mediaId)
+                .ToListAsync(cancelToken);
+            foreach (var pi in productImages)
+                pi.Url = url;
+
+            var templateProductImages = await _dbContext.TemplateProductImages
+                .Where(tpi => tpi.MediaId == mediaId)
+                .ToListAsync(cancelToken);
+            foreach (var tpi in templateProductImages)
+                tpi.Url = url;
+
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return true;
+        }
+
         public async Task<bool> DeleteMediaAsync(int mediaId, CancellationToken cancelToken)
         {
             var media = await _dbContext.Media

@@ -1,5 +1,6 @@
 using AutoMapper;
 using System;
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -22,6 +23,9 @@ namespace George.Services
     {
         /// <summary>HTTP client timeout for WooCommerce API calls (bulk sync can take many minutes).</summary>
         private static readonly TimeSpan WooCommerceHttpTimeout = TimeSpan.FromMinutes(30);
+
+        /// <summary>Semaphore per (siteId, attributeName) so parallel product syncs don't create the same global attribute multiple times.</summary>
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> AttributeEnsureLocks = new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.Ordinal);
 
         private readonly SiteStorage _siteStorage;
         private readonly CategoryStorage _categoryStorage;
@@ -518,6 +522,14 @@ namespace George.Services
                 }
             }
 
+            // Create failed (e.g. duplicate from parallel sync); try to find existing again and use it
+            var (retryId, retrySlug) = await FindExistingAttributeAsync(baseUrl, attribute.Name, httpClient, cancelToken);
+            if (retryId.HasValue)
+            {
+                await SyncAttributeTermsAsync(baseUrl, retryId.Value, attribute, httpClient, cancelToken);
+                return (retryId.Value, retrySlug ?? slug);
+            }
+
             throw new Exception(GetUserFriendlyWooCommerceError((int)createResponse.StatusCode, responseBody));
         }
 
@@ -559,6 +571,7 @@ namespace George.Services
         /// <summary>
         /// Ensures a global attribute exists in the database and is synced to WooCommerce.
         /// Returns (WooCommerce attribute ID, taxonomy slug). Slug is the actual slug from WooCommerce (e.g. pa_xxx for Hebrew names).
+        /// Uses a per-(siteId, attributeName) lock so parallel product syncs don't create the same attribute multiple times.
         /// </summary>
         private async Task<(int? id, string? slug)> EnsureGlobalAttributeAsync(
             string baseUrl,
@@ -568,44 +581,69 @@ namespace George.Services
             HttpClient httpClient,
             CancellationToken cancelToken)
         {
-            // First, try to find existing Attribute in DB by name and siteId
-            var filter = new AttributeFilter { Name = attributeName };
-            var paging = new PagingExDto { Skip = 0, Take = 10, IncludeTotal = false };
-            var existingAttributes = await _attributeStorage.GetAttributesAsync(filter, paging, cancelToken);
-            var existingAttribute = existingAttributes.Items.FirstOrDefault(a => 
-                a.SiteId == siteId && 
-                string.Equals(a.Name, attributeName, StringComparison.OrdinalIgnoreCase) &&
-                !a.IsDeleted);
-
-            Attribute attribute;
-            if (existingAttribute != null)
+            var lockKey = $"{siteId}:{NormalizeOptionKey(attributeName)}";
+            var sem = AttributeEnsureLocks.GetOrAdd(lockKey, _ => new SemaphoreSlim(1, 1));
+            var acquired = false;
+            // Timeout so one slow attribute doesn't block the whole sync; 90s is enough for one attribute sync
+            using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancelToken))
             {
-                attribute = existingAttribute;
+                cts.CancelAfter(TimeSpan.FromSeconds(90));
+                try
+                {
+                    await sem.WaitAsync(cts.Token);
+                    acquired = true;
+                }
+                catch (OperationCanceledException) when (cts.IsCancellationRequested && !cancelToken.IsCancellationRequested)
+                {
+                    _logger.LogWarning("Timeout waiting for attribute lock {LockKey}; proceeding without lock (possible duplicate attribute).", lockKey);
+                }
             }
-            else
+            try
             {
-                // Create new Attribute in DB
-                attribute = await _attributeStorage.CreateAttributeAsync(
-                    new Attribute
-                    {
-                        Name = attributeName,
-                        SiteId = siteId,
-                        CreationTime = DateTime.UtcNow,
-                        GuidId = Guid.NewGuid()
-                    },
-                    attributeValues,
-                    cancelToken);
-            }
+                // First, try to find existing Attribute in DB by name and siteId
+                var filter = new AttributeFilter { Name = attributeName };
+                var paging = new PagingExDto { Skip = 0, Take = 10, IncludeTotal = false };
+                var existingAttributes = await _attributeStorage.GetAttributesAsync(filter, paging, cancelToken);
+                var existingAttribute = existingAttributes.Items.FirstOrDefault(a =>
+                    a.SiteId == siteId &&
+                    string.Equals(a.Name, attributeName, StringComparison.OrdinalIgnoreCase) &&
+                    !a.IsDeleted);
 
-            // Sync to WooCommerce; get actual (id, slug) from API
-            var (wooCommerceId, wooSlug) = await SyncAttributeAsync(baseUrl, attribute, httpClient, cancelToken);
-            
-            if (wooCommerceId.HasValue && attribute.WooCommerceId != wooCommerceId.Value)
+                Attribute attribute;
+                if (existingAttribute != null)
+                {
+                    attribute = existingAttribute;
+                }
+                else
+                {
+                    // Create new Attribute in DB
+                    attribute = await _attributeStorage.CreateAttributeAsync(
+                        new Attribute
+                        {
+                            Name = attributeName,
+                            SiteId = siteId,
+                            CreationTime = DateTime.UtcNow,
+                            GuidId = Guid.NewGuid()
+                        },
+                        attributeValues,
+                        cancelToken);
+                }
+
+                // Sync to WooCommerce; get actual (id, slug) from API
+                var (wooCommerceId, wooSlug) = await SyncAttributeAsync(baseUrl, attribute, httpClient, cancelToken);
+
+                if (wooCommerceId.HasValue && attribute.WooCommerceId != wooCommerceId.Value)
+                {
+                    await _attributeStorage.UpdateAttributeWooCommerceIdAsync(attribute.Id, wooCommerceId.Value, cancelToken);
+                }
+
+                return (wooCommerceId, wooSlug);
+            }
+            finally
             {
-                await _attributeStorage.UpdateAttributeWooCommerceIdAsync(attribute.Id, wooCommerceId.Value, cancelToken);
+                if (acquired)
+                    sem.Release();
             }
-
-            return (wooCommerceId, wooSlug);
         }
 
         private async Task<int?> SyncCategoryAsync(
@@ -976,9 +1014,10 @@ namespace George.Services
                 var attributeMap = new Dictionary<string, int?>();   // attribute name -> WooCommerce ID
                 var attributeSlugMap = new Dictionary<string, string>(); // attribute name -> WooCommerce taxonomy slug (e.g. pa_xxx)
 
-                // For simple products, add pricing and stock
+                // For simple products, add pricing and stock and clear attributes (so WooCommerce removes variation attributes when product was variable before)
                 if (product.ProductVariants == null || !product.ProductVariants.Any(v => !v.IsDeleted))
                 {
+                    wooProduct["attributes"] = new List<object>();
                     wooProduct["regular_price"] = product.Price?.ToString() ?? "0";
                     wooProduct["sale_price"] = product.SalePrice?.ToString() ?? "";
                     wooProduct["date_on_sale_from"] = product.SalePriceStartDate?.ToString("yyyy-MM-ddTHH:mm:ss") ?? "";
@@ -1023,27 +1062,34 @@ namespace George.Services
                         }
                     }
 
-                    // Build attributes array using global attribute IDs. Use actual WooCommerce taxonomy slug as name
-                    // (from API) so WooCommerce links variations correctly; options remain display names for the dropdown.
+                    // Build attributes array using global attribute IDs. Include "name" (taxonomy slug) so WooCommerce
+                    // reliably relates attributes to the product; options remain display names for the dropdown.
                     var attributes = product.ProductOptions?
                         .Where(po => !po.IsDeleted && attributeMap.ContainsKey(NormalizeOptionKey(po.Name)))
-                        .Select((option, index) => new
+                        .Select((option, index) =>
                         {
-                            id = attributeMap[NormalizeOptionKey(option.Name)]!.Value,
-                            // you can omit "name" entirely when using "id"
-                            position = index,
-                            visible = true,
-                            variation = true,
-                            options = option.ProductOptionValues?
-                                .Select(pov => pov.Value)
-                                .Where(v => !string.IsNullOrWhiteSpace(v))
-                                .Select(v => v.Trim())
-                                .Distinct()
-                                .ToList() ?? new List<string>()
+                            var key = NormalizeOptionKey(option.Name);
+                            var attrId = attributeMap[key]!.Value;
+                            var slug = attributeSlugMap.TryGetValue(key, out var s) ? s : null;
+                            var dict = new Dictionary<string, object>
+                            {
+                                ["id"] = attrId,
+                                ["position"] = index,
+                                ["visible"] = true,
+                                ["variation"] = true,
+                                ["options"] = option.ProductOptionValues?
+                                    .Select(pov => pov.Value)
+                                    .Where(v => !string.IsNullOrWhiteSpace(v))
+                                    .Select(v => v.Trim())
+                                    .Distinct()
+                                    .ToList() ?? new List<string>()
+                            };
+                            if (!string.IsNullOrEmpty(slug))
+                                dict["name"] = slug;
+                            return dict;
                         })
                         .Cast<object>()
                         .ToList() ?? new List<object>();
-
 
                     wooProduct["attributes"] = attributes;
 
@@ -1167,6 +1213,16 @@ namespace George.Services
         {
             var variants = product.ProductVariants?.Where(v => !v.IsDeleted).ToList() ?? new List<ProductVariant>();
 
+            // Fetch existing WooCommerce variations so we can match by attributes (avoid duplicates) and delete removed ones
+            var existingWoo = await GetExistingWooCommerceVariationsAsync(baseUrl, wooProductId, httpClient, cancelToken);
+            var existingIdsSet = existingWoo.Select(x => x.id).ToHashSet();
+            // signature -> list of Woo variation ids (so we can match one per our variant and delete the rest as duplicates)
+            var signatureToIds = existingWoo
+                .GroupBy(x => x.signature ?? "")
+                .ToDictionary(g => g.Key, g => g.Select(x => x.id).ToList());
+
+            var usedWooVariationIds = new HashSet<int>();
+
             // When stock is not managed per variation ("במלאי" / "מלאי לפי כמות"), variations must not have their own stock column so they inherit from product.
             var stockManagedPerVariation = string.Equals(product.StockManagementType?.Name, "variation", StringComparison.OrdinalIgnoreCase);
             var productStockStatus = "instock";
@@ -1184,24 +1240,18 @@ namespace George.Services
                         : productStockStatus;
 
                     var variantOptionValues = variant.ProductVariantOptionValues?
-    .Where(x => !string.IsNullOrWhiteSpace(x.OptionName))
-    .ToDictionary(
-        x => NormalizeOptionKey(x.OptionName),
-        x => (x.OptionValue ?? "").Trim()
-    ) ?? new Dictionary<string, string>();
+                        .Where(x => !string.IsNullOrWhiteSpace(x.OptionName))
+                        .ToDictionary(
+                            x => NormalizeOptionKey(x.OptionName),
+                            x => (x.OptionValue ?? "").Trim()
+                        ) ?? new Dictionary<string, string>();
 
-
-                    // Build variation attributes per WooCommerce API: id, name (taxonomy slug), slug, option (term value).
-                    // Use actual WooCommerce slug from attributeSlugMap (kvp.Key = attribute name e.g. "צורת חיתוך").
-                    // SlugifyAttributeName strips Hebrew and gives "pa_attr"; WooCommerce returns the real slug (e.g. pa_xxxx).
                     var variationAttributesList = new List<object>();
                     foreach (var kvp in variantOptionValues)
                     {
                         if (!attributeMap.TryGetValue(kvp.Key, out var attrIdNullable) || !attrIdNullable.HasValue)
                             continue;
-
                         var attrId = attrIdNullable.Value;
-
                         variationAttributesList.Add(new Dictionary<string, object>
                         {
                             ["id"] = attrId,
@@ -1209,11 +1259,28 @@ namespace George.Services
                         });
                     }
 
-
                     if (variationAttributesList.Count == 0)
                     {
                         _logger.LogWarning("Variation {VariantId} for product {ProductId} has no matching attributes (attributeMap or ProductVariantOptionValues). Skipping this variation.", variant.Id, product.Id);
                         continue;
+                    }
+
+                    var ourSignature = BuildOurVariationSignature(variantOptionValues, attributeMap);
+                    int? wooVariationIdToUse = null;
+
+                    // 1) Prefer our stored WooCommerce variation id if it still exists in WooCommerce
+                    if (variant.WooCommerceVariationId.HasValue && existingIdsSet.Contains(variant.WooCommerceVariationId.Value))
+                    {
+                        wooVariationIdToUse = variant.WooCommerceVariationId.Value;
+                        usedWooVariationIds.Add(wooVariationIdToUse.Value);
+                    }
+                    // 2) Else match by attribute signature (same combination = same variation; avoids creating duplicates)
+                    else if (!string.IsNullOrEmpty(ourSignature) && signatureToIds.TryGetValue(ourSignature, out var idList) && idList.Count > 0)
+                    {
+                        var taken = idList[0];
+                        idList.RemoveAt(0);
+                        wooVariationIdToUse = taken;
+                        usedWooVariationIds.Add(taken);
                     }
 
                     var wooVariation = new Dictionary<string, object>
@@ -1227,24 +1294,17 @@ namespace George.Services
                         ["attributes"] = variationAttributesList
                     };
                     if (stockManagedPerVariation)
-                    {
                         wooVariation["stock_quantity"] = variant.StockQuantity ?? 0;
-                    }
-
                     if (!string.IsNullOrEmpty(variant.ImageUrl))
-                    {
                         wooVariation["image"] = new { src = variant.ImageUrl };
-                    }
 
                     int? wooVariationId = null;
 
-                    if (variant.WooCommerceVariationId.HasValue)
+                    if (wooVariationIdToUse.HasValue)
                     {
-                        // Try to update
-                        var updateUrl = $"{baseUrl}/products/{wooProductId}/variations/{variant.WooCommerceVariationId.Value}";
+                        var updateUrl = $"{baseUrl}/products/{wooProductId}/variations/{wooVariationIdToUse.Value}";
                         var updateJson = JsonSerializer.Serialize(wooVariation);
-                        var updateContent = new StringContent(updateJson, Encoding.UTF8, "application/json");
-
+                        using var updateContent = new StringContent(updateJson, Encoding.UTF8, "application/json");
                         var updateResponse = await httpClient.PutAsync(updateUrl, updateContent, cancelToken);
                         if (updateResponse.IsSuccessStatusCode)
                         {
@@ -1257,11 +1317,9 @@ namespace George.Services
 
                     if (!wooVariationId.HasValue)
                     {
-                        // Create new variation
                         var createUrl = $"{baseUrl}/products/{wooProductId}/variations";
                         var createJson = JsonSerializer.Serialize(wooVariation);
-                        var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
-
+                        using var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
                         var createResponse = await httpClient.PostAsync(createUrl, createContent, cancelToken);
                         if (createResponse.IsSuccessStatusCode)
                         {
@@ -1278,15 +1336,99 @@ namespace George.Services
                     }
 
                     if (wooVariationId.HasValue && variant.WooCommerceVariationId != wooVariationId.Value)
-                    {
                         await _productStorage.UpdateProductVariantWooCommerceIdAsync(variant.Id, wooVariationId.Value, cancelToken);
-                    }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to sync variation {VariantId} for product {ProductId}", variant.Id, product.Id);
                 }
             }
+
+            // Delete WooCommerce variations that we no longer have (removed in our product) or duplicates (same signature).
+            // Run deletes in parallel with limited concurrency to avoid blocking and to speed up.
+            var toDelete = existingIdsSet.Where(id => !usedWooVariationIds.Contains(id)).ToList();
+            const int deleteConcurrency = 5;
+            for (var i = 0; i < toDelete.Count; i += deleteConcurrency)
+            {
+                var batch = toDelete.Skip(i).Take(deleteConcurrency).ToList();
+                var tasks = batch.Select(async wooId =>
+                {
+                    try
+                    {
+                        var deleteUrl = $"{baseUrl}/products/{wooProductId}/variations/{wooId}?force=true";
+                        var deleteResponse = await httpClient.DeleteAsync(deleteUrl, cancelToken);
+                        if (!deleteResponse.IsSuccessStatusCode)
+                            _logger.LogWarning("Failed to delete WooCommerce variation {WooId} for product {ProductId}: {Status}", wooId, product.Id, deleteResponse.StatusCode);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Error deleting WooCommerce variation {WooId} for product {ProductId}", wooId, product.Id);
+                    }
+                });
+                await Task.WhenAll(tasks);
+            }
+        }
+
+        /// <summary>
+        /// Fetches existing variations for a WooCommerce variable product. Returns (id, signature) for each;
+        /// signature is a stable key from attributes (attrId:option) for matching our variants to existing ones.
+        /// Limited to MaxVariationFetchPages to avoid long stalls on products with many variations.
+        /// </summary>
+        private const int MaxVariationFetchPages = 5;
+        private const int VariationsPerPage = 100;
+
+        private static async Task<List<(int id, string signature)>> GetExistingWooCommerceVariationsAsync(
+            string baseUrl,
+            int wooProductId,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            var result = new List<(int id, string signature)>();
+            for (var page = 1; page <= MaxVariationFetchPages; page++)
+            {
+                var url = $"{baseUrl}/products/{wooProductId}/variations?per_page={VariationsPerPage}&page={page}";
+                var response = await httpClient.GetAsync(url, cancelToken);
+                if (!response.IsSuccessStatusCode) break;
+                var body = await response.Content.ReadAsStringAsync(cancelToken);
+                var list = TryDeserialize<List<WooCommerceVariationListItem>>(body);
+                if (list == null || list.Count == 0) break;
+                foreach (var v in list)
+                {
+                    var sig = BuildWooVariationSignature(v.attributes);
+                    result.Add((v.id, sig));
+                }
+                if (list.Count < VariationsPerPage) break;
+            }
+            return result;
+        }
+
+        /// <summary>Builds a stable signature from WooCommerce variation attributes (id:option sorted by id).</summary>
+        private static string BuildWooVariationSignature(List<WooCommerceVariationAttributeItem>? attributes)
+        {
+            if (attributes == null || attributes.Count == 0) return "";
+            var parts = attributes
+                .Where(a => a.id != 0)
+                .Select(a => $"{a.id}:{(a.option ?? "").Trim()}")
+                .OrderBy(s => s, StringComparer.Ordinal)
+                .ToList();
+            return string.Join("|", parts);
+        }
+
+        /// <summary>Builds the same signature format from our variant option values and attributeMap.</summary>
+        private static string BuildOurVariationSignature(
+            Dictionary<string, string> variantOptionValues,
+            Dictionary<string, int?> attributeMap)
+        {
+            if (variantOptionValues == null || attributeMap == null) return "";
+            var parts = new List<string>();
+            foreach (var kvp in variantOptionValues)
+            {
+                if (!attributeMap.TryGetValue(kvp.Key, out var idVal) || !idVal.HasValue) continue;
+                var val = (kvp.Value ?? "").Trim();
+                parts.Add($"{idVal.Value}:{val}");
+            }
+            parts.Sort(StringComparer.Ordinal);
+            return string.Join("|", parts);
         }
 
         /// <summary>
@@ -1347,6 +1489,20 @@ namespace George.Services
         {
             public int id { get; set; }
         }
+
+        /// <summary>For GET variations list: each variation has id and attributes (id, option).</summary>
+        private class WooCommerceVariationListItem
+        {
+            public int id { get; set; }
+            public List<WooCommerceVariationAttributeItem>? attributes { get; set; }
+        }
+
+        private class WooCommerceVariationAttributeItem
+        {
+            public int id { get; set; }
+            public string? option { get; set; }
+        }
+
         private static string NormalizeOptionKey(string? s)
         {
             if (string.IsNullOrWhiteSpace(s)) return "";

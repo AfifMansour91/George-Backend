@@ -341,6 +341,7 @@ namespace George.Api.Core
 			//services.AddScoped<AuthorizationManager>();
 			services.AddSingleton<CacheManager>();
 			services.AddSingleton<FileStorageManager>();
+			services.AddSingleton<IFileStorage>(sp => sp.GetRequiredService<FileStorageManager>());
 			services.AddSingleton<DataUpdater>();
 			
 			// Providers.

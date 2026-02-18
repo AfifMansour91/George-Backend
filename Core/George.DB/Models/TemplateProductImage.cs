@@ -6,16 +6,17 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[PrimaryKey("TemplateProductId", "Url")]
 [Table("TemplateProductImage")]
 public partial class TemplateProductImage
 {
     [Key]
+    [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+    public long Id { get; set; }
+
     public int TemplateProductId { get; set; }
 
     public int SortOrder { get; set; }
 
-    [Key]
     [StringLength(1000)]
     public string Url { get; set; } = null!;
 
