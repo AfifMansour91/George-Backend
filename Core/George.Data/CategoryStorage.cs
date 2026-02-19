@@ -38,14 +38,14 @@ namespace George.Data
                     query = query.Where(c => c.Sites.Any(s => s.Id == filter.SiteId.Value));
                 }
 
-                if (filter.ParentCategoryId.HasValue)
+                // 0 means root categories (no parent); otherwise filter by that parent id
+                if (filter.ParentCategoryId == 0)
+                {
+                    query = query.Where(c => c.ParentCategoryId == null);
+                }
+                else if (filter.ParentCategoryId.HasValue)
                 {
                     query = query.Where(c => c.ParentCategoryId == filter.ParentCategoryId.Value);
-                }
-                else if (filter.ParentCategoryId == 0)
-                {
-                    // Explicitly request root categories (no parent)
-                    query = query.Where(c => c.ParentCategoryId == null);
                 }
 
                 if (filter.IsEnabled.HasValue)
