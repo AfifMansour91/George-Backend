@@ -4,6 +4,7 @@ using George.Common;
 using George.Data;
 using George.DB;
 using George.Providers;
+using George.Providers.Twilio;
 using UserStatus = George.Common.UserStatus;
 using UserRole = George.Common.UserRole;
 
@@ -16,6 +17,7 @@ namespace George.Services
         private readonly SiteStorage _siteStorage;
         private readonly AuthHelper _authHelper;
         private readonly SmsProvider _smsProvider;
+        private readonly TwilioVoiceOtpProvider _twilioVoiceOtpProvider;
 
         public KioskCustomerService(
             ILogger<KioskCustomerService> logger,
@@ -25,13 +27,15 @@ namespace George.Services
             ClientStorage clientStorage,
             SiteStorage siteStorage,
             AuthHelper authHelper,
-            SmsProvider smsProvider) : base(logger, mapper, cache)
+            SmsProvider smsProvider,
+            TwilioVoiceOtpProvider twilioVoiceOtpProvider) : base(logger, mapper, cache)
         {
             _userStorage = userStorage;
             _clientStorage = clientStorage;
             _siteStorage = siteStorage;
             _authHelper = authHelper;
             _smsProvider = smsProvider;
+            _twilioVoiceOtpProvider = twilioVoiceOtpProvider;
         }
 
         public async Task<IApiResponse<bool>> SendOtpAsync(SendKioskCustomerOtpReq request, CancellationToken cancelToken = default)
@@ -89,6 +93,19 @@ namespace George.Services
             }
 
             int languageId = 1;
+            if (request.Channel == KioskOtpChannel.Voice)
+            {
+                bool voiceSent = await _twilioVoiceOtpProvider.SendOtpByVoiceAsync(user.Phone, otp!, languageId, cancelToken).ConfigureAwait(false);
+                if (!voiceSent)
+                {
+                    _logger.LogError("Failed to send OTP by voice to phone: {Phone}", user.Phone);
+                    return CreateResponse(response, StatusCode.GeneralError,
+                        _twilioVoiceOtpProvider.IsConfigured ? "Failed to place voice call. Try SMS." : "Voice OTP is not available. Use SMS.");
+                }
+                response.Data = true;
+                return response;
+            }
+
             bool smsSent = await _smsProvider.SendOtpMessageAsync(user.Phone, languageId, otp!, cancelToken).ConfigureAwait(false);
             if (!smsSent)
             {

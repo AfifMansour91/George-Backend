@@ -3,6 +3,13 @@ using George.Common;
 
 namespace George.Services
 {
+    /// <summary>How to deliver the OTP to the customer.</summary>
+    public enum KioskOtpChannel
+    {
+        Sms = 0,
+        Voice = 1
+    }
+
     public class SendKioskCustomerOtpReq
     {
         [RequiredNotEmpty]
@@ -10,6 +17,9 @@ namespace George.Services
         public string Phone { get; set; } = null!;
 
         public int SiteId { get; set; }
+
+        /// <summary>Delivery channel: Sms (default) or Voice (phone call).</summary>
+        public KioskOtpChannel Channel { get; set; } = KioskOtpChannel.Sms;
     }
 
     public class VerifyKioskCustomerOtpReq

@@ -346,6 +346,7 @@ namespace George.Api.Core
 			
 			// Providers.
 			services.AddScoped<George.Providers.SmsProvider>();
+			services.AddScoped<George.Providers.Twilio.TwilioVoiceOtpProvider>();
 
 			// SQL Storage/Repositories.
 			services.AddScoped<AuthStorage>();
