@@ -1,4 +1,5 @@
-﻿using System.Net;
+using System.Collections.Generic;
+using System.Net;
 using System.Reflection.Metadata;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -97,6 +98,33 @@ namespace George.Api.Controllers
 			return await SafeCallWithErrorCatchingAsync(() => _userSvc.GetProfileAsync(userId, cancelToken));
 		}
 
+		/// <summary>
+		/// Get current user's UI preferences (product list view/filters, etc.). Keys: myProducts_viewPrefs, globalCatalog_viewPrefs.
+		/// </summary>
+		[HttpGet("Preferences")]
+		[ProducesResponseType(typeof(IApiResponse<Dictionary<string, object?>>), 200)]
+		public async Task<IActionResult> GetPreferencesAsync(CancellationToken cancelToken = default)
+		{
+			int userId = TokenUserId;
+			if (userId <= 0)
+				return CreateHttpResponse(Common.StatusCode.UnauthorizedData, "User not authenticated.");
+			return await SafeCallWithErrorCatchingAsync(() => _userSvc.GetPreferencesAsync(userId, cancelToken));
+		}
+
+		/// <summary>
+		/// Save current user's UI preferences. Body: { "myProducts_viewPrefs": {...}, "globalCatalog_viewPrefs": {...} }. Merges with existing.
+		/// </summary>
+		[HttpPut("Preferences")]
+		[ProducesResponseType(typeof(IApiResponse<bool>), 200)]
+		public async Task<IActionResult> SavePreferencesAsync([FromBody] Dictionary<string, object?> preferences, CancellationToken cancelToken = default)
+		{
+			int userId = TokenUserId;
+			if (userId <= 0)
+				return CreateHttpResponse(Common.StatusCode.UnauthorizedData, "User not authenticated.");
+			if (preferences == null)
+				preferences = new Dictionary<string, object?>();
+			return await SafeCallWithErrorCatchingAsync(() => _userSvc.SavePreferencesAsync(userId, preferences, cancelToken));
+		}
 
 		//*************************    Private Methods    ************************//
 

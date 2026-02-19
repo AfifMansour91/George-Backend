@@ -351,6 +351,7 @@ namespace George.Api.Core
 			services.AddScoped<AuthStorage>();
 			services.AddScoped<GeneralStorage>();
 			services.AddScoped<UserStorage>();
+			services.AddScoped<UserPreferenceStorage>();
 			services.AddScoped<AccountStorage>();
 
 			services.AddScoped<BusinessTypeStorage>();

@@ -95,6 +95,8 @@ public partial class GeorgeDBContextBase : DbContext
 
     public virtual DbSet<User> Users { get; set; }
 
+    public virtual DbSet<UserPreference> UserPreferences { get; set; }
+
     public virtual DbSet<UserStatus> UserStatuses { get; set; }
 
     public virtual DbSet<Visibility> Visibilities { get; set; }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
@@ -212,6 +212,16 @@ namespace George.DB
 
 		private void MapNonScaffoldEntities(ModelBuilder modelBuilder)
 		{
+			modelBuilder.Entity<UserPreference>(entity =>
+			{
+				entity.HasKey(e => e.UserId);
+				entity.Property(e => e.PreferencesJson).HasMaxLength(-1); // nvarchar(max)
+				entity.HasOne<User>()
+					.WithMany()
+					.HasForeignKey(e => e.UserId)
+					.OnDelete(DeleteBehavior.Cascade)
+					.HasConstraintName("FK_UserPreference_User");
+			});
 		}
 
 		private void SetQueryFilters(ModelBuilder modelBuilder)

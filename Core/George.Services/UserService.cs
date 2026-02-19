@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AutoMapper;
 using Microsoft.Extensions.Logging;
 using George.Common;
@@ -13,15 +14,17 @@ namespace George.Services
 		//*********************  Data members/Constants  *********************//
 		private readonly AuthHelper _authHelper;
 		private readonly UserStorage _userStorage;
+		private readonly UserPreferenceStorage _userPreferenceStorage;
 		private readonly FileStorageManager _fileStorage;
 
 
 		//**************************    Construction    **************************//
 		public UserService(ILogger<UserService> logger, IMapper mapper, CacheManager cache, AuthHelper authHelper, 
-			/*AuthorizationManager authManager,*/ GeneralStorage generalStorage, UserStorage userStorage, FileStorageManager fileStorage) : base(logger, mapper, cache)
+			/*AuthorizationManager authManager,*/ GeneralStorage generalStorage, UserStorage userStorage, UserPreferenceStorage userPreferenceStorage, FileStorageManager fileStorage) : base(logger, mapper, cache)
 		{
 			_authHelper = authHelper;
 			_userStorage = userStorage;
+			_userPreferenceStorage = userPreferenceStorage;
 			_fileStorage = fileStorage;
 		}
 
@@ -313,6 +316,62 @@ namespace George.Services
 				return false;
 
 			return true;
+		}
+
+		/// <summary>
+		/// Get current user's UI preferences (e.g. product list view/filters). Returns key-value map; keys like "myProducts_viewPrefs", "globalCatalog_viewPrefs".
+		/// </summary>
+		public async Task<IApiResponse<Dictionary<string, object?>>> GetPreferencesAsync(int userId, CancellationToken cancelToken = default)
+		{
+			IApiResponse<Dictionary<string, object?>> response = new ApiResponse<Dictionary<string, object?>> { Data = new Dictionary<string, object?>() };
+			try
+			{
+				var json = await _userPreferenceStorage.GetPreferencesJsonAsync(userId, cancelToken);
+				if (!string.IsNullOrWhiteSpace(json))
+				{
+					var dict = JsonSerializer.Deserialize<Dictionary<string, object?>>(json);
+					if (dict != null)
+						response.Data = dict;
+				}
+			}
+			catch (JsonException ex)
+			{
+				_logger.LogWarning(ex, "User preferences JSON invalid for user {UserId}", userId);
+			}
+			return response;
+		}
+
+		/// <summary>
+		/// Save current user's UI preferences. Merges with existing; pass the full key-value map (e.g. myProducts_viewPrefs, globalCatalog_viewPrefs).
+		/// </summary>
+		public async Task<IApiResponse<bool>> SavePreferencesAsync(int userId, Dictionary<string, object?> preferences, CancellationToken cancelToken = default)
+		{
+			IApiResponse<bool> response = new ApiResponse<bool> { Data = true };
+			try
+			{
+				var existingJson = await _userPreferenceStorage.GetPreferencesJsonAsync(userId, cancelToken);
+				var existing = new Dictionary<string, object?>();
+				if (!string.IsNullOrWhiteSpace(existingJson))
+				{
+					try
+					{
+						var parsed = JsonSerializer.Deserialize<Dictionary<string, object?>>(existingJson);
+						if (parsed != null)
+							existing = parsed;
+					}
+					catch { /* ignore */ }
+				}
+				foreach (var kv in preferences)
+					existing[kv.Key] = kv.Value;
+				var json = JsonSerializer.Serialize(existing);
+				await _userPreferenceStorage.SavePreferencesJsonAsync(userId, json, cancelToken);
+			}
+			catch (Exception ex)
+			{
+				_logger.LogError(ex, "Failed to save preferences for user {UserId}", userId);
+				return CreateResponse(response, StatusCode.InvalidRequest, ex.Message);
+			}
+			return response;
 		}
 
 	}
