@@ -142,6 +142,26 @@ namespace George.Data
             return otp;
         }
 
+        /// <summary>
+        /// Sets the user's OTP to a given value (e.g. from Auth:OverrideOtp). Used when SMS/voice is skipped in dev.
+        /// </summary>
+        public async Task<bool> SetUserOtpOverrideAsync(int id, string otp, CancellationToken cancelToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(otp))
+                return false;
+
+            User? dbModel = await _dbContext.Users
+                .Where(a => a.Id == id)
+                .FirstOrDefaultAsync(cancelToken);
+            if (dbModel == null)
+                return false;
+
+            dbModel.Otp = otp.Trim();
+            dbModel.OtpExpiration = DateTime.UtcNow.AddMinutes(5);
+
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            return true;
+        }
 
         public async Task<bool> IsEmailExistAsync(string email, CancellationToken cancelToken = default)
 		{

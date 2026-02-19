@@ -1,4 +1,5 @@
 using AutoMapper;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using George.Common;
 using George.Data;
@@ -18,6 +19,7 @@ namespace George.Services
         private readonly AuthHelper _authHelper;
         private readonly SmsProvider _smsProvider;
         private readonly TwilioVoiceOtpProvider _twilioVoiceOtpProvider;
+        private readonly IConfiguration _configuration;
 
         public KioskCustomerService(
             ILogger<KioskCustomerService> logger,
@@ -28,7 +30,8 @@ namespace George.Services
             SiteStorage siteStorage,
             AuthHelper authHelper,
             SmsProvider smsProvider,
-            TwilioVoiceOtpProvider twilioVoiceOtpProvider) : base(logger, mapper, cache)
+            TwilioVoiceOtpProvider twilioVoiceOtpProvider,
+            IConfiguration configuration) : base(logger, mapper, cache)
         {
             _userStorage = userStorage;
             _clientStorage = clientStorage;
@@ -36,6 +39,7 @@ namespace George.Services
             _authHelper = authHelper;
             _smsProvider = smsProvider;
             _twilioVoiceOtpProvider = twilioVoiceOtpProvider;
+            _configuration = configuration;
         }
 
         public async Task<IApiResponse<bool>> SendOtpAsync(SendKioskCustomerOtpReq request, CancellationToken cancelToken = default)
@@ -83,6 +87,18 @@ namespace George.Services
 
                 if (user.LockoutExpiration.HasValue && DateTime.UtcNow <= user.LockoutExpiration)
                     return CreateResponse(response, StatusCode.UserLockedOut);
+            }
+
+            // When Auth:OverrideOtp is set (e.g. in appsettings.User.json), skip sending SMS/voice and set OTP to that value.
+            string? overrideOtp = _configuration["Auth:OverrideOtp"];
+            if (overrideOtp.HasValue())
+            {
+                bool set = await _userStorage.SetUserOtpOverrideAsync(user.Id, overrideOtp!, cancelToken).ConfigureAwait(false);
+                if (set)
+                {
+                    response.Data = true;
+                    return response;
+                }
             }
 
             string? otp = await _userStorage.SetLoginUserOtpAsync(user.Id, cancelToken).ConfigureAwait(false);
