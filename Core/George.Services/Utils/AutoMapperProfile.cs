@@ -82,8 +82,24 @@ namespace George.Services
                     dest.IsKosherShop = src.IsKosherShop;
                     dest.AllowWeighted = src.AllowWeighted;
                     dest.KioskEnabled = src.KioskEnabled;
-
+                    if (src.KioskSettings != null)
+                    {
+                        dest.KioskSettings = context.Mapper.Map<KioskSettingsRes>(src.KioskSettings);
+                        dest.KioskSettings.HomeVideoMediaId = src.KioskSettings.HomeVideoMediaId;
+                        dest.KioskSettings.HomeVideoUrl = src.KioskSettings.HomeVideoMedia?.Url;
+                        var orderedImages = src.KioskSettingsHomeImages?.OrderBy(i => i.SortOrder).ToList() ?? new List<George.DB.KioskSettingsHomeImage>();
+                        dest.KioskSettings.HomeImageMediaIds = orderedImages.Select(x => x.MediaId).ToList();
+                        dest.KioskSettings.HomeImageUrls = orderedImages.Select(x => x.Media?.Url).Where(u => !string.IsNullOrEmpty(u)).Cast<string>().ToList();
+                    }
+                    else
+                    {
+                        dest.KioskSettings = null;
+                    }
                 });
+            CreateMap<KioskSettings, KioskSettingsRes>()
+                .ForMember(dest => dest.HomeVideoUrl, opt => opt.Ignore())
+                .ForMember(dest => dest.HomeImageMediaIds, opt => opt.Ignore())
+                .ForMember(dest => dest.HomeImageUrls, opt => opt.Ignore());
             CreateMap<CreateAccountReq, Account>()
                 .AfterMap((src, dest, context) =>
                 {

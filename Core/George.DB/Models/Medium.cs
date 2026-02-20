@@ -69,4 +69,10 @@ public partial class Medium
 
     [InverseProperty("Media")]
     public virtual ICollection<TemplateProductImage> TemplateProductImages { get; set; } = new List<TemplateProductImage>();
+
+    [InverseProperty("HomeVideoMedia")]
+    public virtual ICollection<KioskSettings> KioskSettingsHomeVideos { get; set; } = new List<KioskSettings>();
+
+    [InverseProperty("Media")]
+    public virtual ICollection<KioskSettingsHomeImage> KioskSettingsHomeImages { get; set; } = new List<KioskSettingsHomeImage>();
 }

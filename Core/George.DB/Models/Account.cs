@@ -83,6 +83,12 @@ public partial class Account
     public bool KioskEnabled { get; set; }
 
     [InverseProperty("Account")]
+    public virtual KioskSettings? KioskSettings { get; set; }
+
+    [InverseProperty("Account")]
+    public virtual ICollection<KioskSettingsHomeImage> KioskSettingsHomeImages { get; set; } = new List<KioskSettingsHomeImage>();
+
+    [InverseProperty("Account")]
     public virtual ICollection<Brand> Brands { get; set; } = new List<Brand>();
 
     [InverseProperty("Account")]

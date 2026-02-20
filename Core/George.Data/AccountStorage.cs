@@ -23,6 +23,8 @@ namespace George.Data
                 .Where(a => !a.IsDeleted)
                 .Include(a => a.Users)
                 .Include(a => a.Manager)
+                .Include(a => a.KioskSettings!).ThenInclude(s => s.HomeVideoMedia)
+                .Include(a => a.KioskSettingsHomeImages).ThenInclude(i => i.Media)
                 //.Include(a => a.Status)
                 .Include(a => a.WizardStatus)
                 .Include(a => a.WizardType)
@@ -82,6 +84,8 @@ namespace George.Data
                 .Where(a => a.Id == accountId && !a.IsDeleted)
                 .Include(a => a.Users)
                 .Include(a => a.Manager)
+                .Include(a => a.KioskSettings!).ThenInclude(s => s.HomeVideoMedia)
+                .Include(a => a.KioskSettingsHomeImages).ThenInclude(i => i.Media)
                 //.Include(a => a.Status)
                 .Include(a => a.WizardStatus)
                 .Include(a => a.WizardType)
@@ -138,6 +142,48 @@ namespace George.Data
 
             await _dbContext.SaveChangesAsync(cancelToken);
             return dbAcc;
+        }
+
+        public async Task UpsertKioskSettingsAsync(int accountId, George.DB.KioskSettings settings, List<int>? homeImageMediaIds, CancellationToken cancelToken)
+        {
+            var existing = await _dbContext.KioskSettings
+                .FirstOrDefaultAsync(s => s.AccountId == accountId, cancelToken);
+            if (existing != null)
+            {
+                existing.KioskLogoUrl = settings.KioskLogoUrl;
+                existing.HeaderBgColor = settings.HeaderBgColor;
+                existing.HomeBgType = settings.HomeBgType;
+                existing.HomeVideoMediaId = settings.HomeVideoMediaId;
+                existing.HomeImageIntervalSeconds = settings.HomeImageIntervalSeconds;
+                existing.PrimaryColor = settings.PrimaryColor;
+                existing.SecondaryColor = settings.SecondaryColor;
+                existing.PosProductsTitle = settings.PosProductsTitle;
+                existing.CreditEnabled = settings.CreditEnabled;
+                existing.CashAtRegisterEnabled = settings.CashAtRegisterEnabled;
+            }
+            else
+            {
+                _dbContext.KioskSettings.Add(settings);
+            }
+            await _dbContext.SaveChangesAsync(cancelToken);
+
+            if (homeImageMediaIds != null)
+            {
+                var existingImages = await _dbContext.KioskSettingsHomeImages
+                    .Where(i => i.AccountId == accountId)
+                    .ToListAsync(cancelToken);
+                _dbContext.KioskSettingsHomeImages.RemoveRange(existingImages);
+                for (var i = 0; i < homeImageMediaIds.Count; i++)
+                {
+                    _dbContext.KioskSettingsHomeImages.Add(new George.DB.KioskSettingsHomeImage
+                    {
+                        AccountId = accountId,
+                        MediaId = homeImageMediaIds[i],
+                        SortOrder = i
+                    });
+                }
+                await _dbContext.SaveChangesAsync(cancelToken);
+            }
         }
 
         public async Task<Account?> DeleteAccountAsync(int id, CancellationToken cancelToken = default)

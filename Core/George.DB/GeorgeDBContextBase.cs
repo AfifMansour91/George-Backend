@@ -13,6 +13,10 @@ public partial class GeorgeDBContextBase : DbContext
 
     public virtual DbSet<Account> Accounts { get; set; }
 
+    public virtual DbSet<KioskSettings> KioskSettings { get; set; }
+
+    public virtual DbSet<KioskSettingsHomeImage> KioskSettingsHomeImages { get; set; }
+
     public virtual DbSet<AccountMedia> AccountMedia { get; set; }
 
     public virtual DbSet<AccountStatus> AccountStatuses { get; set; }
@@ -130,6 +134,26 @@ public partial class GeorgeDBContextBase : DbContext
             entity.HasOne(d => d.WizardStatus).WithMany(p => p.Accounts).HasConstraintName("FK_Account_WizardStatus");
 
             entity.HasOne(d => d.WizardType).WithMany(p => p.Accounts).HasConstraintName("FK_Account_WizardType");
+        });
+
+        modelBuilder.Entity<KioskSettings>(entity =>
+        {
+            entity.HasOne(d => d.Account).WithOne(p => p.KioskSettings)
+                .HasForeignKey<KioskSettings>(d => d.AccountId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(d => d.HomeVideoMedia).WithMany(p => p.KioskSettingsHomeVideos)
+                .HasForeignKey(d => d.HomeVideoMediaId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<KioskSettingsHomeImage>(entity =>
+        {
+            entity.HasOne(d => d.Account).WithMany(p => p.KioskSettingsHomeImages)
+                .HasForeignKey(d => d.AccountId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(d => d.Media).WithMany(p => p.KioskSettingsHomeImages)
+                .HasForeignKey(d => d.MediaId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<AccountMedia>(entity =>

@@ -42,6 +42,9 @@ namespace George.Services.Response
         public bool AllowWeighted { get; set; }
 
         public bool KioskEnabled { get; set; }
+
+        /// <summary>Kiosk design and behavior settings (logo override, colors, home bg, payment toggles).</summary>
+        public KioskSettingsRes? KioskSettings { get; set; }
     }
 
     //public class AccountRes

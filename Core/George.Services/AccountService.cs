@@ -38,62 +38,7 @@ namespace George.Services
             var res = await _accountStorage.GetAccountsAsync(request.Filter, request, cancelToken);
 
             response.Data.Items = (res.Items ?? new List<Account>())
-                .Select(account =>
-                {
-                    return new AccountRes
-                    {
-                        Id = account.Id,
-                        AccountName = account.Name,
-
-                        // If you don’t have these columns yet, keep null/empty
-                        AccountDescription = account.Description,
-                        AccountAddress = account.Address,
-                        AccountCity = account.City,
-                        AccountState = account.State,
-                        AccountZip = account.Zip,
-                        AccountPhone = account.Phone,
-
-                        ManagerName = account.ManagerName,
-                        ManagerEmail = account?.ManagerEmail,
-
-                        Status = account.IsActive ? "Active" : "Inactive",
-
-                        WizardStatusNamePair = account.WizardStatus != null
-                            ? new IdNamePair
-                            {
-                                Id = account.WizardStatus.Id,
-                                Name = account.WizardStatus.Name
-                            }
-                            : null,
-                        WizardStatus = account.Status == null
-                            ? "Not Started"
-                            : (account.Status == "Completed" ? "Completed" : "In Progress"),
-
-                        WizardTypeIdNamePair = account.WizardType != null
-                            ? new IdNamePair
-                            {
-                                Id = account.WizardType.Id,
-                                Name = account.WizardType.Name
-                            }
-                            : null,
-                        WizardType = "all_sites", // until you store it
-                        WizardStep = account?.WizardStep ?? 0,
-
-                        ContentOwner = account?.ContentOwner?.Name ?? "Company",
-
-                        CreatedDate = account.CreationTime,
-                        UpdatedDate = account.UpdatedDate,
-
-                        CreatedById = null,
-                        CreatedBy = null,
-                        
-                        LogoUrl = account.LogoUrl,
-                        Website = account.Website,
-                        IsKosherShop = account.IsKosherShop,
-                        AllowWeighted = account.AllowWeighted,
-                        KioskEnabled = account.KioskEnabled
-                    };
-                })
+                .Select(account => _mapper.Map<AccountRes>(account))
                 .ToList();
 
             response.Data.Skip = request.Skip;
@@ -284,6 +229,25 @@ namespace George.Services
             var updated = await _accountStorage.UpdateAccountAsync(model, cancelToken);
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
+
+            if (req.KioskSettings != null)
+            {
+                var kioskEntity = new George.DB.KioskSettings
+                {
+                    AccountId = accountId,
+                    KioskLogoUrl = string.IsNullOrWhiteSpace(req.KioskSettings.KioskLogoUrl) ? null : req.KioskSettings.KioskLogoUrl,
+                    HeaderBgColor = string.IsNullOrWhiteSpace(req.KioskSettings.HeaderBgColor) ? null : req.KioskSettings.HeaderBgColor,
+                    HomeBgType = string.IsNullOrWhiteSpace(req.KioskSettings.HomeBgType) ? null : req.KioskSettings.HomeBgType,
+                    HomeVideoMediaId = req.KioskSettings.HomeVideoMediaId,
+                    HomeImageIntervalSeconds = req.KioskSettings.HomeImageIntervalSeconds,
+                    PrimaryColor = string.IsNullOrWhiteSpace(req.KioskSettings.PrimaryColor) ? null : req.KioskSettings.PrimaryColor,
+                    SecondaryColor = string.IsNullOrWhiteSpace(req.KioskSettings.SecondaryColor) ? null : req.KioskSettings.SecondaryColor,
+                    PosProductsTitle = string.IsNullOrWhiteSpace(req.KioskSettings.PosProductsTitle) ? null : req.KioskSettings.PosProductsTitle,
+                    CreditEnabled = req.KioskSettings.CreditEnabled,
+                    CashAtRegisterEnabled = req.KioskSettings.CashAtRegisterEnabled,
+                };
+                await _accountStorage.UpsertKioskSettingsAsync(accountId, kioskEntity, req.KioskSettings.HomeImageMediaIds, cancelToken);
+            }
 
             // Reload account with includes to get full details
             var fullAccount = await _accountStorage.GetAccountAsync(accountId, cancelToken);

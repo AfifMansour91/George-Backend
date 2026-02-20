@@ -241,6 +241,25 @@ namespace George.Common.Request
         public string? Zip { get; set; }
         public string? Phone { get; set; }
         public string? Website { get; set; }
+
+        public KioskSettingsReq? KioskSettings { get; set; }
+    }
+
+    public class KioskSettingsReq
+    {
+        public string? KioskLogoUrl { get; set; }
+        public string? HeaderBgColor { get; set; }
+        public string? HomeBgType { get; set; }
+        /// <summary>Media ID for home background video (FK to Media).</summary>
+        public int? HomeVideoMediaId { get; set; }
+        /// <summary>Media IDs for rotating home images (FKs to Media), in display order.</summary>
+        public List<int>? HomeImageMediaIds { get; set; }
+        public int? HomeImageIntervalSeconds { get; set; }
+        public string? PrimaryColor { get; set; }
+        public string? SecondaryColor { get; set; }
+        public string? PosProductsTitle { get; set; }
+        public bool CreditEnabled { get; set; }
+        public bool CashAtRegisterEnabled { get; set; }
     }
 
     public class UpdateWizardSessionReq
