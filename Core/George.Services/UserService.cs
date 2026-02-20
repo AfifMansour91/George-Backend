@@ -270,7 +270,8 @@ namespace George.Services
 			AccountId = request.AccountId ?? existingUser.AccountId,
 			RoleId = request.RoleId ?? existingUser.RoleId,
 			StatusId = request.StatusId ?? existingUser.StatusId,
-			AvatarUrl = request.AvatarUrl ?? existingUser.AvatarUrl,
+			// Empty string from client means "clear avatar"; null/omit means keep existing
+			AvatarUrl = request.AvatarUrl == null ? existingUser.AvatarUrl : (request.AvatarUrl.Length == 0 ? null : request.AvatarUrl),
 			UpdateUserId = _authUser?.Id,
 		};
 

@@ -488,10 +488,8 @@ namespace George.Data
 				dbModel.StatusId = user.StatusId;
 			}
 
-			if (user.AvatarUrl != null)
-			{
-				dbModel.AvatarUrl = user.AvatarUrl;
-			}
+			// Always apply AvatarUrl so that null clears the stored value
+			dbModel.AvatarUrl = user.AvatarUrl;
 
 			// Update site associations for site_admin role
 			if (siteIds != null)
