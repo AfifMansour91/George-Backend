@@ -38,6 +38,13 @@ public partial class KioskSettings
     [StringLength(500)]
     public string? PosProductsTitle { get; set; }
 
+    /// <summary>POS products step: "upsells" (related/complementary only), "category", or "combined".</summary>
+    [StringLength(20)]
+    public string? PosProductsType { get; set; }
+
+    /// <summary>When PosProductsType is "category" or "combined", the category to show products from.</summary>
+    public int? PosProductsCategoryId { get; set; }
+
     public bool CreditEnabled { get; set; }
 
     public bool CashAtRegisterEnabled { get; set; }

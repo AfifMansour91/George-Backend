@@ -87,6 +87,8 @@ namespace George.Services
                         dest.KioskSettings = context.Mapper.Map<KioskSettingsRes>(src.KioskSettings);
                         dest.KioskSettings.HomeVideoMediaId = src.KioskSettings.HomeVideoMediaId;
                         dest.KioskSettings.HomeVideoUrl = src.KioskSettings.HomeVideoMedia?.Url;
+                        dest.KioskSettings.PosProductsType = src.KioskSettings.PosProductsType;
+                        dest.KioskSettings.PosProductsCategoryId = src.KioskSettings.PosProductsCategoryId;
                         var orderedImages = src.KioskSettingsHomeImages?.OrderBy(i => i.SortOrder).ToList() ?? new List<George.DB.KioskSettingsHomeImage>();
                         dest.KioskSettings.HomeImageMediaIds = orderedImages.Select(x => x.MediaId).ToList();
                         dest.KioskSettings.HomeImageUrls = orderedImages.Select(x => x.Media?.Url).Where(u => !string.IsNullOrEmpty(u)).Cast<string>().ToList();

@@ -18,6 +18,9 @@ public class KioskSettingsRes
     public string? PrimaryColor { get; set; }
     public string? SecondaryColor { get; set; }
     public string? PosProductsTitle { get; set; }
+    /// <summary>"upsells" | "category" | "combined"</summary>
+    public string? PosProductsType { get; set; }
+    public int? PosProductsCategoryId { get; set; }
     public bool CreditEnabled { get; set; }
     public bool CashAtRegisterEnabled { get; set; }
 }

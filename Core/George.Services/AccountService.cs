@@ -243,6 +243,8 @@ namespace George.Services
                     PrimaryColor = string.IsNullOrWhiteSpace(req.KioskSettings.PrimaryColor) ? null : req.KioskSettings.PrimaryColor,
                     SecondaryColor = string.IsNullOrWhiteSpace(req.KioskSettings.SecondaryColor) ? null : req.KioskSettings.SecondaryColor,
                     PosProductsTitle = string.IsNullOrWhiteSpace(req.KioskSettings.PosProductsTitle) ? null : req.KioskSettings.PosProductsTitle,
+                    PosProductsType = string.IsNullOrWhiteSpace(req.KioskSettings.PosProductsType) ? null : req.KioskSettings.PosProductsType,
+                    PosProductsCategoryId = req.KioskSettings.PosProductsCategoryId,
                     CreditEnabled = req.KioskSettings.CreditEnabled,
                     CashAtRegisterEnabled = req.KioskSettings.CashAtRegisterEnabled,
                 };

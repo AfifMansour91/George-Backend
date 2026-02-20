@@ -158,6 +158,8 @@ namespace George.Data
                 existing.PrimaryColor = settings.PrimaryColor;
                 existing.SecondaryColor = settings.SecondaryColor;
                 existing.PosProductsTitle = settings.PosProductsTitle;
+                existing.PosProductsType = settings.PosProductsType;
+                existing.PosProductsCategoryId = settings.PosProductsCategoryId;
                 existing.CreditEnabled = settings.CreditEnabled;
                 existing.CashAtRegisterEnabled = settings.CashAtRegisterEnabled;
             }
