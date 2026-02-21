@@ -718,6 +718,35 @@ namespace George.Services
         }
 
         /// <summary>
+        /// Deletes a product category from WooCommerce for the given site.
+        /// </summary>
+        public async Task<bool> DeleteCategoryFromWooCommerceAsync(int siteId, int wooCategoryId, CancellationToken cancelToken)
+        {
+            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+            if (site == null || site.WooCommerceEnabled != true ||
+                string.IsNullOrEmpty(site.WooCommerceUrl) ||
+                string.IsNullOrEmpty(site.WooCommerceKey) ||
+                string.IsNullOrEmpty(site.WooCommerceSecret))
+                return false;
+
+            var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
+            var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
+
+            using var httpClient = _httpClientFactory.CreateClient();
+            httpClient.Timeout = WooCommerceHttpTimeout;
+            httpClient.DefaultRequestHeaders.Clear();
+            httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+
+            var deleteUrl = $"{baseUrl}/products/categories/{wooCategoryId}?force=true";
+            var deleteResponse = await httpClient.DeleteAsync(deleteUrl, cancelToken);
+            if (deleteResponse.IsSuccessStatusCode)
+                return true;
+            var errorContent = await deleteResponse.Content.ReadAsStringAsync(cancelToken);
+            _logger.LogWarning("Failed to delete category {WooCategoryId} from WooCommerce for site {SiteId}: {Error}", wooCategoryId, siteId, errorContent);
+            return false;
+        }
+
+        /// <summary>
         /// Deserializes JSON from WooCommerce API response. If the response is HTML (e.g. error page, redirect)
         /// instead of JSON, throws a clear exception to avoid JsonException on '&lt;' invalid start.
         /// </summary>

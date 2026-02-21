@@ -124,6 +124,26 @@ namespace George.Services
         {
             var response = new ApiResponse<bool>();
 
+            // Load category with Sites before delete so we can remove it from WooCommerce for each enabled site
+            var category = await _categoryStorage.GetCategoryAsync(categoryId, cancelToken);
+            if (category != null && category.WooCommerceId.HasValue && category.Sites != null && category.Sites.Any())
+            {
+                foreach (var site in category.Sites.Where(s => s.WooCommerceEnabled == true))
+                {
+                    try
+                    {
+                        var deleted = await _wooCommerceService.DeleteCategoryFromWooCommerceAsync(site.Id, category.WooCommerceId.Value, cancelToken);
+                        if (deleted)
+                            _logger.LogInformation("Deleted category {CategoryId} (WooCommerce id {WooId}) from WooCommerce for site {SiteId}", categoryId, category.WooCommerceId, site.Id);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error deleting category {CategoryId} from WooCommerce for site {SiteId}", categoryId, site.Id);
+                        // Continue with other sites and with DB delete
+                    }
+                }
+            }
+
             var result = await _categoryStorage.DeleteCategoryAsync(categoryId, cancelToken);
             response.Data = result;
 
