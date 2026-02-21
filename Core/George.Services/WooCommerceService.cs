@@ -1019,9 +1019,10 @@ namespace George.Services
                 {
                     wooProduct["attributes"] = new List<object>();
                     wooProduct["regular_price"] = product.Price?.ToString() ?? "0";
-                    wooProduct["sale_price"] = product.SalePrice?.ToString() ?? "";
-                    wooProduct["date_on_sale_from"] = product.SalePriceStartDate?.ToString("yyyy-MM-ddTHH:mm:ss") ?? "";
-                    wooProduct["date_on_sale_to"] = product.SalePriceEndDate?.ToString("yyyy-MM-ddTHH:mm:ss") ?? "";
+                    // WooCommerce rejects empty string for sale_price and date fields; use null when no value (avoids 400 Bad Request on update)
+                    wooProduct["sale_price"] = product.SalePrice.HasValue ? product.SalePrice.Value.ToString() : (object?)null;
+                    wooProduct["date_on_sale_from"] = product.SalePriceStartDate.HasValue ? product.SalePriceStartDate.Value.ToString("yyyy-MM-ddTHH:mm:ss") : (object?)null;
+                    wooProduct["date_on_sale_to"] = product.SalePriceEndDate.HasValue ? product.SalePriceEndDate.Value.ToString("yyyy-MM-ddTHH:mm:ss") : (object?)null;
                     wooProduct["manage_stock"] = product.StockManagementType?.Name == "quantity";
                     wooProduct["stock_quantity"] = product.StockQuantity ?? 0;
                     wooProduct["stock_status"] = stockStatus;

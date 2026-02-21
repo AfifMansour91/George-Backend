@@ -170,11 +170,16 @@ namespace George.Services
             var lookupDto = MapToLookupDto(req);
             await _productStorage.MapLookupsAsync(product, lookupDto, cancelToken);
 
-            // Update product
+            // For partial updates (e.g. table quick-edit), only pass category/tag/related/complementary when provided.
+            // When null, storage keeps existing values; when empty list is passed, we would clear them.
+            var categoryIdsToApply = (req.CategoryIds != null || req.SubcategoryIds != null)
+                ? CombineCategoryIds(req.CategoryIds, req.SubcategoryIds)
+                : null;
+
             product = await _productStorage.UpdateProductAsync(
                 product,
                 req.SiteIds,
-                CombineCategoryIds(req.CategoryIds, req.SubcategoryIds),
+                categoryIdsToApply,
                 req.Tags,
                 req.RelatedProductIds,
                 req.ComplementaryProductIds,
