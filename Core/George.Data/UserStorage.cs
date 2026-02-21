@@ -463,7 +463,13 @@ namespace George.Data
 				dbModel.Email = user.Email;
 			}
 
-		if (user.Phone != null)
+
+            if (user.Otp != null)
+            {
+                dbModel.Otp = user.Otp;
+            }
+
+            if (user.Phone != null)
 		{
 			dbModel.Phone = user.Phone;
 		}

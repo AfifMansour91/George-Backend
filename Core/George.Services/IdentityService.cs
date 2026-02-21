@@ -178,7 +178,8 @@ namespace George.Services
             string? overrideOtp = null;
             if (model.Id == SysConfig.Data.StaticUserId)
                 overrideOtp = SysConfig.Data.StaticUserOtp;
-            
+
+            overrideOtp = _configuration["Auth:OverrideOtp"];
             if (overrideOtp.HasValue())
             {
                 // Set the override otp directly in the user model
