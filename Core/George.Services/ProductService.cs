@@ -249,6 +249,40 @@ namespace George.Services
             }
             await _productStorage.UpdateProductOrderAsync(req.ProductIds, cancelToken);
             response.Data = true;
+
+            // Sync updated order to WooCommerce (fire-and-forget per site so response stays fast)
+            var siteToProductIds = await _productStorage.GetProductIdsBySiteForProductIdsAsync(req.ProductIds, cancelToken);
+            if (siteToProductIds.Count > 0)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var scope = _serviceScopeFactory.CreateScope();
+                        var siteStorage = scope.ServiceProvider.GetRequiredService<George.Data.SiteStorage>();
+                        var wooService = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
+                        foreach (var (siteId, productIdsForSite) in siteToProductIds)
+                        {
+                            try
+                            {
+                                var site = await siteStorage.GetSiteAsync(siteId, CancellationToken.None);
+                                if (site == null || !site.WooCommerceEnabled.HasValue || !site.WooCommerceEnabled.Value)
+                                    continue;
+                                await wooService.SyncToWooCommerceAsync(new WooCommerceSyncReq { SiteId = siteId, ProductIds = productIdsForSite }, CancellationToken.None);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "WooCommerce sync after order update failed for site {SiteId}", siteId);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "WooCommerce sync after order update failed");
+                    }
+                });
+            }
+
             return response;
         }
 

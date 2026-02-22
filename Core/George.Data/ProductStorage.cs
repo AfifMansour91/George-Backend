@@ -410,6 +410,18 @@ namespace George.Data
             await _dbContext.SaveChangesAsync(cancelToken);
         }
 
+        /// <summary>Returns siteId -> list of product IDs for products that belong to that site. Used to sync order to WooCommerce per site.</summary>
+        public async Task<Dictionary<int, List<int>>> GetProductIdsBySiteForProductIdsAsync(List<int> productIds, CancellationToken cancelToken)
+        {
+            if (productIds == null || !productIds.Any()) return new Dictionary<int, List<int>>();
+            var pairs = await _dbContext.Products
+                .AsNoTracking()
+                .Where(p => productIds.Contains(p.Id))
+                .SelectMany(p => p.Sites.Select(s => new { ProductId = p.Id, SiteId = s.Id }))
+                .ToListAsync(cancelToken);
+            return pairs.GroupBy(x => x.SiteId).ToDictionary(g => g.Key, g => g.Select(x => x.ProductId).ToList());
+        }
+
         public async Task<bool> UpdateProductWooCommerceIdAsync(int productId, int? wooCommerceId, CancellationToken cancelToken)
         {
             var product = await _dbContext.Products
