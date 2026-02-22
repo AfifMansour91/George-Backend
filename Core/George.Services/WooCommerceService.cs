@@ -1029,6 +1029,7 @@ namespace George.Services
                     ["catalog_visibility"] = catalogVisibility,
                     ["weight"] = product.Weight?.ToString() ?? "",
                     ["shipping_class"] = shippingClass,
+                    ["menu_order"] = product.DisplayOrder ?? 0,
                     //["images"] = images,
                     ["categories"] = allCategoryIds,
                     ["tags"] = tags,
