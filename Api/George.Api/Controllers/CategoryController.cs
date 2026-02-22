@@ -53,9 +53,9 @@ namespace George.Api.Controllers
 
         [HttpDelete("{categoryId:int}")]
         [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
-        public async Task<IActionResult> DeleteCategoryAsync([FromRoute] int categoryId, CancellationToken cancelToken = default)
+        public async Task<IActionResult> DeleteCategoryAsync([FromRoute] int categoryId, [FromQuery] int? siteId, CancellationToken cancelToken = default)
         {
-            return await SafeCallWithErrorCatchingAsync(() => _categorySvc.DeleteCategoryAsync(categoryId, cancelToken));
+            return await SafeCallWithErrorCatchingAsync(() => _categorySvc.DeleteCategoryAsync(categoryId, siteId, cancelToken));
         }
 
         [HttpGet("Account/{accountId:int}")]

@@ -53,9 +53,9 @@ namespace George.Api.Controllers
 
         [HttpDelete("{productId:int}")]
         [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
-        public async Task<IActionResult> DeleteProductAsync([FromRoute] int productId, CancellationToken cancelToken = default)
+        public async Task<IActionResult> DeleteProductAsync([FromRoute] int productId, [FromQuery] int? siteId, CancellationToken cancelToken = default)
         {
-            return await SafeCallWithErrorCatchingAsync(() => _productSvc.DeleteProductAsync(productId, cancelToken));
+            return await SafeCallWithErrorCatchingAsync(() => _productSvc.DeleteProductAsync(productId, siteId, cancelToken));
         }
 
         [HttpGet("Site/{siteId:int}")]

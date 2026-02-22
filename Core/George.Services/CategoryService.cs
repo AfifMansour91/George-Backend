@@ -120,32 +120,58 @@ namespace George.Services
             return response;
         }
 
-        public async Task<IApiResponse<bool>> DeleteCategoryAsync(int categoryId, CancellationToken cancelToken)
+        /// <param name="siteId">When provided, only removes the category from this site (unlinks CategorySite). Other sites keep the category. When null, soft-deletes the category for all sites.</param>
+        public async Task<IApiResponse<bool>> DeleteCategoryAsync(int categoryId, int? siteId, CancellationToken cancelToken)
         {
             var response = new ApiResponse<bool>();
 
-            // Load category with Sites before delete so we can remove it from WooCommerce for each enabled site
-            var category = await _categoryStorage.GetCategoryAsync(categoryId, cancelToken);
-            if (category != null && category.WooCommerceId.HasValue && category.Sites != null && category.Sites.Any())
+            if (siteId.HasValue)
             {
-                foreach (var site in category.Sites.Where(s => s.WooCommerceEnabled == true))
+                // Remove category from this site only; do not remove from other sites
+                var category = await _categoryStorage.GetCategoryAsync(categoryId, cancelToken);
+                if (category != null && category.WooCommerceId.HasValue && category.Sites != null)
+                {
+                    var site = category.Sites.FirstOrDefault(s => s.Id == siteId.Value && s.WooCommerceEnabled == true);
+                    if (site != null)
+                    {
+                        try
+                        {
+                            var deleted = await _wooCommerceService.DeleteCategoryFromWooCommerceAsync(site.Id, category.WooCommerceId.Value, cancelToken);
+                            if (deleted)
+                                _logger.LogInformation("Removed category {CategoryId} (WooCommerce id {WooId}) from WooCommerce for site {SiteId}", categoryId, category.WooCommerceId, site.Id);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Error removing category {CategoryId} from WooCommerce for site {SiteId}", categoryId, site.Id);
+                        }
+                    }
+                }
+                var result = await _categoryStorage.RemoveCategoryFromSiteAsync(categoryId, siteId.Value, cancelToken);
+                response.Data = result;
+                return response;
+            }
+
+            // Full delete: soft-delete category and remove from WooCommerce for all linked sites
+            var categoryForDelete = await _categoryStorage.GetCategoryAsync(categoryId, cancelToken);
+            if (categoryForDelete != null && categoryForDelete.WooCommerceId.HasValue && categoryForDelete.Sites != null && categoryForDelete.Sites.Any())
+            {
+                foreach (var site in categoryForDelete.Sites.Where(s => s.WooCommerceEnabled == true))
                 {
                     try
                     {
-                        var deleted = await _wooCommerceService.DeleteCategoryFromWooCommerceAsync(site.Id, category.WooCommerceId.Value, cancelToken);
+                        var deleted = await _wooCommerceService.DeleteCategoryFromWooCommerceAsync(site.Id, categoryForDelete.WooCommerceId.Value, cancelToken);
                         if (deleted)
-                            _logger.LogInformation("Deleted category {CategoryId} (WooCommerce id {WooId}) from WooCommerce for site {SiteId}", categoryId, category.WooCommerceId, site.Id);
+                            _logger.LogInformation("Deleted category {CategoryId} (WooCommerce id {WooId}) from WooCommerce for site {SiteId}", categoryId, categoryForDelete.WooCommerceId, site.Id);
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Error deleting category {CategoryId} from WooCommerce for site {SiteId}", categoryId, site.Id);
-                        // Continue with other sites and with DB delete
                     }
                 }
             }
 
-            var result = await _categoryStorage.DeleteCategoryAsync(categoryId, cancelToken);
-            response.Data = result;
+            var deleteResult = await _categoryStorage.DeleteCategoryAsync(categoryId, cancelToken);
+            response.Data = deleteResult;
 
             return response;
         }

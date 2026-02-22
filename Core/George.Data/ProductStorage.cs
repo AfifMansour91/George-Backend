@@ -347,6 +347,34 @@ namespace George.Data
             return dbProduct;
         }
 
+        /// <summary>
+        /// Removes the product from the given site only (unlinks ProductSite). Other sites keep the product.
+        /// If this was the last site linked to the product, soft-deletes the product.
+        /// </summary>
+        public async Task<bool> RemoveProductFromSiteAsync(int productId, int siteId, CancellationToken cancelToken)
+        {
+            var product = await _dbContext.Products
+                .Include(p => p.Sites)
+                .FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
+
+            if (product == null) return false;
+
+            var siteToRemove = product.Sites.FirstOrDefault(s => s.Id == siteId);
+            if (siteToRemove == null) return true; // already not on this site
+
+            product.Sites.Remove(siteToRemove);
+            product.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken);
+
+            if (!product.Sites.Any())
+            {
+                product.IsDeleted = true;
+                await _dbContext.SaveChangesAsync(cancelToken);
+            }
+
+            return true;
+        }
+
         public async Task<bool> DeleteProductAsync(int productId, CancellationToken cancelToken)
         {
             var product = await _dbContext.Products
@@ -573,6 +601,30 @@ namespace George.Data
             {
                 query = query.Where(p => p.AccountId == accountId.Value);
             }
+
+            return await query
+                .AsNoTracking()
+                .FirstOrDefaultAsync(cancelToken);
+        }
+
+        /// <summary>
+        /// Finds a product by SKU, account and site(s). The product must be assigned to at least one of the given site IDs.
+        /// Used during bulk import so we only update a product that already exists on the target site; if it exists only on another site, the caller can merge sites.
+        /// </summary>
+        public async Task<Product?> GetProductBySkuAndSitesAsync(string sku, int? accountId, List<int>? siteIds, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(sku)) return null;
+            if (siteIds == null || !siteIds.Any()) return null;
+
+            var query = _dbContext.Products
+                .Where(p => !p.IsDeleted && p.Sku != null && p.Sku.ToLower().Trim() == sku.ToLower().Trim());
+
+            if (accountId.HasValue)
+            {
+                query = query.Where(p => p.AccountId == accountId.Value);
+            }
+
+            query = query.Where(p => p.Sites.Any(s => siteIds.Contains(s.Id)));
 
             return await query
                 .AsNoTracking()

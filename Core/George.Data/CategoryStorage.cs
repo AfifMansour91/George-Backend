@@ -95,7 +95,7 @@ namespace George.Data
                 var sites = await _dbContext.Sites
                     .Where(s => siteIds.Contains(s.Id))
                     .ToListAsync(cancelToken);
-                
+
                 foreach (var site in sites)
                 {
                     category.Sites.Add(site);
@@ -137,7 +137,7 @@ namespace George.Data
                     var sites = await _dbContext.Sites
                         .Where(s => siteIds.Contains(s.Id))
                         .ToListAsync(cancelToken);
-                    
+
                     foreach (var site in sites)
                     {
                         dbCategory.Sites.Add(site);
@@ -147,6 +147,35 @@ namespace George.Data
 
             await _dbContext.SaveChangesAsync(cancelToken);
             return dbCategory;
+        }
+
+        /// <summary>
+        /// Removes the category from the given site only (unlinks CategorySite). Other sites keep the category.
+        /// If this was the last site linked to the category, soft-deletes the category.
+        /// </summary>
+        public async Task<bool> RemoveCategoryFromSiteAsync(int categoryId, int siteId, CancellationToken cancelToken)
+        {
+            var category = await _dbContext.Categories
+                .Include(c => c.Sites)
+                .FirstOrDefaultAsync(c => c.Id == categoryId, cancelToken);
+
+            if (category == null) return false;
+
+            var siteToRemove = category.Sites.FirstOrDefault(s => s.Id == siteId);
+            if (siteToRemove == null) return true; // already not on this site
+
+            category.Sites.Remove(siteToRemove);
+            category.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken);
+
+            // If that was the last site, soft-delete the category
+            if (!category.Sites.Any())
+            {
+                category.IsDeleted = true;
+                await _dbContext.SaveChangesAsync(cancelToken);
+            }
+
+            return true;
         }
 
         public async Task<bool> DeleteCategoryAsync(int categoryId, CancellationToken cancelToken)
@@ -179,10 +208,10 @@ namespace George.Data
         /// Find category by name, optionally with parent and site filters
         /// </summary>
         public async Task<Category?> FindCategoryByNameAsync(
-            string name, 
-            int? parentCategoryId, 
-            int? accountId, 
-            List<int>? siteIds, 
+            string name,
+            int? parentCategoryId,
+            int? accountId,
+            List<int>? siteIds,
             CancellationToken cancelToken)
         {
             if (string.IsNullOrWhiteSpace(name)) return null;
@@ -215,12 +244,40 @@ namespace George.Data
         }
 
         /// <summary>
-        /// Find or create category by hierarchical path (e.g., "Parent > Child")
+        /// Ensures the category is linked to the given site(s). Adds any missing sites; does not remove existing ones.
+        /// </summary>
+        public async Task EnsureCategoryHasSitesAsync(int categoryId, List<int>? siteIds, CancellationToken cancelToken)
+        {
+            if (siteIds == null || !siteIds.Any()) return;
+
+            var dbCategory = await _dbContext.Categories
+                .Include(c => c.Sites)
+                .FirstOrDefaultAsync(c => c.Id == categoryId, cancelToken);
+
+            if (dbCategory == null) return;
+
+            var existingSiteIds = dbCategory.Sites.Select(s => s.Id).ToHashSet();
+            var toAdd = siteIds.Where(id => !existingSiteIds.Contains(id)).ToList();
+            if (toAdd.Count == 0) return;
+
+            var sites = await _dbContext.Sites
+                .Where(s => toAdd.Contains(s.Id))
+                .ToListAsync(cancelToken);
+            foreach (var site in sites)
+            {
+                dbCategory.Sites.Add(site);
+            }
+            await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
+        /// <summary>
+        /// Find or create category by hierarchical path (e.g., "Parent > Child").
+        /// Looks up by account and parent+name first (optionally scoped to site). If not found on target site, looks up in account without site filter to avoid duplicate (AccountId, ParentId, Name); if found, links category to target site(s) and returns it.
         /// </summary>
         public async Task<Category?> FindOrCreateCategoryByPathAsync(
-            string categoryPath, 
-            int? accountId, 
-            List<int>? siteIds, 
+            string categoryPath,
+            int? accountId,
+            List<int>? siteIds,
             int? creationUserId,
             CancellationToken cancelToken)
         {
@@ -246,22 +303,32 @@ namespace George.Data
                 }
                 else
                 {
-                    // Create new category
-                    var newCategory = new Category
+                    // Not found on target site(s); find by account + parent + name only to avoid duplicate key (same category may exist on another site)
+                    existing = await FindCategoryByNameAsync(part, parentId, accountId, null, cancelToken);
+                    if (existing != null)
                     {
-                        Name = part,
-                        ParentCategoryId = parentId,
-                        AccountId = accountId,
-                        Description = null,
-                        IsEnabled = true,
-                        IsDeleted = false,
-                        IsActive = true,
-                        CreationTime = DateTime.UtcNow,
-                        CreationUserId = creationUserId,
-                        GuidId = Guid.NewGuid()
-                    };
+                        await EnsureCategoryHasSitesAsync(existing.Id, siteIds, cancelToken);
+                        currentCategory = await GetCategoryAsync(existing.Id, cancelToken);
+                    }
+                    else
+                    {
+                        // Create new category
+                        var newCategory = new Category
+                        {
+                            Name = part,
+                            ParentCategoryId = parentId,
+                            AccountId = accountId,
+                            Description = null,
+                            IsEnabled = true,
+                            IsDeleted = false,
+                            IsActive = true,
+                            CreationTime = DateTime.UtcNow,
+                            CreationUserId = creationUserId,
+                            GuidId = Guid.NewGuid()
+                        };
 
-                    currentCategory = await CreateCategoryAsync(newCategory, siteIds, cancelToken);
+                        currentCategory = await CreateCategoryAsync(newCategory, siteIds, cancelToken);
+                    }
                 }
             }
 
