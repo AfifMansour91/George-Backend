@@ -91,6 +91,15 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _productSvc.BulkImportProductsAsync(req, cancelToken));
         }
 
+        [HttpPut("Order")]
+        [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> UpdateProductOrderAsync(
+            [FromBody] UpdateProductOrderReq req,
+            CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _productSvc.UpdateProductOrderAsync(req, cancelToken));
+        }
+
         [ApiExplorerSettings(IgnoreApi = true)]
         public void SetAuthUser()
         {

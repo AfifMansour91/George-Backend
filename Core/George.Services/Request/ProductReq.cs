@@ -88,6 +88,11 @@ namespace George.Services.Request
         [ValidId]
         public int Id { get; set; }
     }
+
+    public class UpdateProductOrderReq
+    {
+        public List<int> ProductIds { get; set; } = new();
+    }
 }
 
 

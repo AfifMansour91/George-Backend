@@ -83,7 +83,9 @@ namespace George.Data
             if (paging.IncludeTotal)
                 res.Total = await query.CountAsync(cancelToken).ConfigureAwait(false);
 
-            query = query.OrderByDescending(p => p.CreationTime);
+            query = query
+                .OrderBy(p => p.DisplayOrder ?? int.MaxValue)
+                .ThenByDescending(p => p.CreationTime);
 
             //query = query.Skip(paging.Skip).Take(paging.Take);
 
@@ -386,6 +388,26 @@ namespace George.Data
             product.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken);
             return true;
+        }
+
+        /// <summary>Sets DisplayOrder for the given product IDs (order in list = index). Single query + single save for performance.</summary>
+        public async Task UpdateProductOrderAsync(List<int> productIds, CancellationToken cancelToken)
+        {
+            if (productIds == null || !productIds.Any()) return;
+            var products = await _dbContext.Products
+                .Where(p => productIds.Contains(p.Id))
+                .ToListAsync(cancelToken);
+            var idToIndex = productIds.Select((id, i) => (id, i)).ToDictionary(x => x.id, x => x.i);
+            var now = DateTime.UtcNow;
+            foreach (var product in products)
+            {
+                if (idToIndex.TryGetValue(product.Id, out int order))
+                {
+                    product.DisplayOrder = order;
+                    product.UpdatedDate = now;
+                }
+            }
+            await _dbContext.SaveChangesAsync(cancelToken);
         }
 
         public async Task<bool> UpdateProductWooCommerceIdAsync(int productId, int? wooCommerceId, CancellationToken cancelToken)

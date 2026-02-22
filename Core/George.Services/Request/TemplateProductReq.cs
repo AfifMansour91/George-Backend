@@ -109,5 +109,10 @@ namespace George.Services.Request
         [ValidId]
         public int Id { get; set; }
     }
+
+    public class UpdateTemplateProductOrderReq
+    {
+        public List<int> TemplateProductIds { get; set; } = new();
+    }
 }
 

@@ -86,7 +86,9 @@ namespace George.Data
             if (paging.IncludeTotal)
                 res.Total = await query.CountAsync(cancelToken).ConfigureAwait(false);
 
-            query = query.OrderByDescending(tp => tp.CreationTime);
+            query = query
+                .OrderBy(tp => tp.DisplayOrder ?? int.MaxValue)
+                .ThenByDescending(tp => tp.CreationTime);
 
             query = query.Skip(paging.Skip).Take(paging.Take);
 
@@ -406,6 +408,26 @@ namespace George.Data
             templateProduct.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken);
             return true;
+        }
+
+        /// <summary>Sets DisplayOrder for the given template product IDs (order in list = index). Single query + single save for performance.</summary>
+        public async Task UpdateTemplateProductOrderAsync(List<int> templateProductIds, CancellationToken cancelToken)
+        {
+            if (templateProductIds == null || !templateProductIds.Any()) return;
+            var list = await _dbContext.TemplateProducts
+                .Where(p => templateProductIds.Contains(p.Id))
+                .ToListAsync(cancelToken);
+            var idToIndex = templateProductIds.Select((id, i) => (id, i)).ToDictionary(x => x.id, x => x.i);
+            var now = DateTime.UtcNow;
+            foreach (var tp in list)
+            {
+                if (idToIndex.TryGetValue(tp.Id, out int order))
+                {
+                    tp.DisplayOrder = order;
+                    tp.UpdatedDate = now;
+                }
+            }
+            await _dbContext.SaveChangesAsync(cancelToken);
         }
 
         // Helper methods for service layer. Each item has Url and optional MediaId (template products typically use Url only).

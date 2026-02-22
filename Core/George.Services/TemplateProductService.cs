@@ -200,6 +200,18 @@ namespace George.Services
             return response;
         }
 
+        public async Task<IApiResponse<bool>> UpdateTemplateProductOrderAsync(UpdateTemplateProductOrderReq req, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<bool>();
+            if (req?.TemplateProductIds == null || !req.TemplateProductIds.Any())
+            {
+                return CreateResponse(response, StatusCode.InvalidRequest, "TemplateProductIds required");
+            }
+            await _templateProductStorage.UpdateTemplateProductOrderAsync(req.TemplateProductIds, cancelToken);
+            response.Data = true;
+            return response;
+        }
+
         public async Task<IApiResponse<bool>> DeleteTemplateProductAsync(int templateProductId, CancellationToken cancelToken)
         {
             var response = new ApiResponse<bool>();
@@ -618,6 +630,7 @@ namespace George.Services
                 Weight = templateProduct.Weight,
                 IsKosher = templateProduct.IsKosher,
                 IsWeighted = templateProduct.IsWeighted,
+                DisplayOrder = templateProduct.DisplayOrder,
                 SeoTitle = templateProduct.SeoTitle,
                 SeoDescription = templateProduct.SeoDescription,
                 SourceProductId = templateProduct.SourceProductId

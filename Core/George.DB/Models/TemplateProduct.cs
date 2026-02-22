@@ -91,6 +91,9 @@ public partial class TemplateProduct
     [StringLength(100)]
     public string? SourceProductId { get; set; }
 
+    /// <summary>Display order for listing (lower = first). Null = use CreationTime.</summary>
+    public int? DisplayOrder { get; set; }
+
     [ForeignKey("BrandId")]
     [InverseProperty("TemplateProducts")]
     public virtual Brand? Brand { get; set; }

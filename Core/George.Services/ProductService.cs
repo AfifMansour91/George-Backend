@@ -240,6 +240,18 @@ namespace George.Services
             return response;
         }
 
+        public async Task<IApiResponse<bool>> UpdateProductOrderAsync(UpdateProductOrderReq req, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<bool>();
+            if (req?.ProductIds == null || !req.ProductIds.Any())
+            {
+                return CreateResponse(response, StatusCode.InvalidRequest, "ProductIds required");
+            }
+            await _productStorage.UpdateProductOrderAsync(req.ProductIds, cancelToken);
+            response.Data = true;
+            return response;
+        }
+
         /// <param name="siteId">When provided, only removes the product from this site (unlinks ProductSite). Other sites keep the product. When null, soft-deletes the product for all sites.</param>
         public async Task<IApiResponse<bool>> DeleteProductAsync(int productId, int? siteId, CancellationToken cancelToken)
         {
@@ -737,6 +749,7 @@ namespace George.Services
                 IsKosher = product.IsKosher,
                 IsWeighted = product.IsWeighted,
                 AccountId = product.AccountId,
+                DisplayOrder = product.DisplayOrder,
                 SeoTitle = product.SeoTitle,
                 SeoDescription = product.SeoDescription
             };

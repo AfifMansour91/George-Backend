@@ -96,6 +96,9 @@ public partial class Product
 
     public int? AccountId { get; set; }
 
+    /// <summary>Display order for listing (lower = first). Null = use CreationTime.</summary>
+    public int? DisplayOrder { get; set; }
+
     public int? WooCommerceId { get; set; }
 
     [ForeignKey("BrandId")]

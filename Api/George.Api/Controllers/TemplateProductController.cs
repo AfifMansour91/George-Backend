@@ -58,6 +58,15 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _templateProductSvc.DeleteTemplateProductAsync(templateProductId, cancelToken));
         }
 
+        [HttpPut("Order")]
+        [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> UpdateTemplateProductOrderAsync(
+            [FromBody] UpdateTemplateProductOrderReq req,
+            CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _templateProductSvc.UpdateTemplateProductOrderAsync(req, cancelToken));
+        }
+
         [HttpGet("Template/{templateId}")]
         [ProducesResponseType(typeof(IApiResponse<ApiListResponse<TemplateProductRes>>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetTemplateProductsByTemplateAsync(

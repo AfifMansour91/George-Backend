@@ -55,6 +55,7 @@ namespace George.Services.Response
         public string? SetupType { get; set; }
         public George.Services.Response.WeightConfigRes? WeightConfig { get; set; }
         public List<int> SiteIds { get; set; } = new(); // Empty = all sites
+        public int? DisplayOrder { get; set; }
         public string? SeoTitle { get; set; }
         public string? SeoDescription { get; set; }
         public string? SourceProductId { get; set; }
