@@ -1023,7 +1023,7 @@ namespace George.Services
                 {
                     ["name"] = product.Name,
                     ["type"] = (product.ProductVariants != null && product.ProductVariants.Any(v => !v.IsDeleted)) ? "variable" : "simple",
-                    ["description"] = product.LongDescription ?? product.ShortDescription ?? "",
+                    ["description"] = product.LongDescription ?? "",
                     ["short_description"] = product.ShortDescription ?? "",
                     ["sku"] = product.Sku ?? "",
                     ["catalog_visibility"] = catalogVisibility,
