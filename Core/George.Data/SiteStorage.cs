@@ -114,6 +114,19 @@ namespace George.Data
             {
                 dbSite.WooCommerceEnabled = updated.WooCommerceEnabled;
             }
+            // Shop settings (Sprint 2)
+            if (updated.WeightTolerancePercent.HasValue) dbSite.WeightTolerancePercent = updated.WeightTolerancePercent;
+            if (updated.DepreciationEnabled.HasValue) dbSite.DepreciationEnabled = updated.DepreciationEnabled;
+            if (updated.DepreciationPercentagesJson != null) dbSite.DepreciationPercentagesJson = updated.DepreciationPercentagesJson;
+            if (updated.PrepTimeMinutes.HasValue) dbSite.PrepTimeMinutes = updated.PrepTimeMinutes;
+            if (updated.ShippingCost.HasValue) dbSite.ShippingCost = updated.ShippingCost;
+            if (updated.FreeShippingAbove.HasValue) dbSite.FreeShippingAbove = updated.FreeShippingAbove;
+            if (updated.AutoPrintEnabled.HasValue) dbSite.AutoPrintEnabled = updated.AutoPrintEnabled;
+            if (updated.PrintNewOrderImmediate.HasValue) dbSite.PrintNewOrderImmediate = updated.PrintNewOrderImmediate;
+            if (updated.PrintMovedToTreatment.HasValue) dbSite.PrintMovedToTreatment = updated.PrintMovedToTreatment;
+            if (updated.PrintFutureImmediate.HasValue) dbSite.PrintFutureImmediate = updated.PrintFutureImmediate;
+            if (updated.PrintFutureAtTimeEnabled.HasValue) dbSite.PrintFutureAtTimeEnabled = updated.PrintFutureAtTimeEnabled;
+            if (updated.PrintFutureAtTime != null) dbSite.PrintFutureAtTime = updated.PrintFutureAtTime;
             dbSite.IsActive = updated.IsActive || dbSite.IsActive;
             dbSite.UpdatedDate = DateTime.UtcNow;
 

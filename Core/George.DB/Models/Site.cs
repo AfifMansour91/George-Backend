@@ -66,6 +66,24 @@ public partial class Site
 
     public bool? WooCommerceEnabled { get; set; }
 
+    // Shop settings (Sprint 2)
+    public int? WeightTolerancePercent { get; set; }
+    public bool? DepreciationEnabled { get; set; }
+    [StringLength(200)]
+    public string? DepreciationPercentagesJson { get; set; }
+    public int? PrepTimeMinutes { get; set; }
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? ShippingCost { get; set; }
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? FreeShippingAbove { get; set; }
+    public bool? AutoPrintEnabled { get; set; }
+    public bool? PrintNewOrderImmediate { get; set; }
+    public bool? PrintMovedToTreatment { get; set; }
+    public bool? PrintFutureImmediate { get; set; }
+    public bool? PrintFutureAtTimeEnabled { get; set; }
+    [StringLength(10)]
+    public string? PrintFutureAtTime { get; set; }
+
     [ForeignKey("AccountId")]
     [InverseProperty("Sites")]
     public virtual Account Account { get; set; } = null!;

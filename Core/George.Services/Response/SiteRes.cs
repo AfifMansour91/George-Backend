@@ -21,5 +21,19 @@ namespace George.Services.Response
         public string? WooCommerceKey { get; set; }
         public string? WooCommerceSecret { get; set; }
         public bool? WooCommerceEnabled { get; set; }
+
+        // Shop settings (Sprint 2)
+        public int? WeightTolerancePercent { get; set; }
+        public bool? DepreciationEnabled { get; set; }
+        public string? DepreciationPercentagesJson { get; set; }
+        public int? PrepTimeMinutes { get; set; }
+        public decimal? ShippingCost { get; set; }
+        public decimal? FreeShippingAbove { get; set; }
+        public bool? AutoPrintEnabled { get; set; }
+        public bool? PrintNewOrderImmediate { get; set; }
+        public bool? PrintMovedToTreatment { get; set; }
+        public bool? PrintFutureImmediate { get; set; }
+        public bool? PrintFutureAtTimeEnabled { get; set; }
+        public string? PrintFutureAtTime { get; set; }
     }
 }
