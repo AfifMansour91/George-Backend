@@ -119,6 +119,9 @@ public partial class Site
     [InverseProperty("Sites")]
     public virtual ICollection<TemplateProduct> TemplateProducts { get; set; } = new List<TemplateProduct>();
 
+    [InverseProperty("Site")]
+    public virtual ICollection<Order> Orders { get; set; } = new List<Order>();
+
     [ForeignKey("SiteId")]
     [InverseProperty("Sites")]
     public virtual ICollection<User> Users { get; set; } = new List<User>();

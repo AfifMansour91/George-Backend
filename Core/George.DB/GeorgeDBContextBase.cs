@@ -43,6 +43,10 @@ public partial class GeorgeDBContextBase : DbContext
 
     public virtual DbSet<Medium> Media { get; set; }
 
+    public virtual DbSet<Order> Orders { get; set; }
+
+    public virtual DbSet<OrderItem> OrderItems { get; set; }
+
     public virtual DbSet<Product> Products { get; set; }
 
     public virtual DbSet<ProductCategory> ProductCategories { get; set; }
@@ -555,6 +559,26 @@ public partial class GeorgeDBContextBase : DbContext
                         j.HasKey("SiteId", "UserId");
                         j.ToTable("SiteUser");
                     });
+        });
+
+        modelBuilder.Entity<Order>(entity =>
+        {
+            entity.HasIndex(e => new { e.SiteId, e.IsDeleted }).HasFilter("([IsDeleted]=(0))");
+            entity.HasIndex(e => e.OrderNumber).HasFilter("([IsDeleted]=(0))");
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.HasOne(d => d.Account).WithMany(p => p.Orders)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_Order_Account");
+            entity.HasOne(d => d.Site).WithMany(p => p.Orders)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_Order_Site");
+        });
+
+        modelBuilder.Entity<OrderItem>(entity =>
+        {
+            entity.HasOne(d => d.Order).WithMany(p => p.OrderItems)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_OrderItem_Order");
         });
 
         modelBuilder.Entity<Supplier>(entity =>

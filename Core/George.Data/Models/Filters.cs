@@ -141,4 +141,17 @@ namespace George.Common
         public SearchFilter? Search { get; set; }
     }
 
+    /// <summary>Sprint 2: Filter for orders list by site.</summary>
+    public class OrderFilter
+    {
+        public int? SiteId { get; set; }
+        public string? Status { get; set; }       // New | InTreatment | Ready | Completed | Cancelled
+        public string? Source { get; set; }       // Website | Kiosk | Phone
+        public string? DeliveryType { get; set; } // Shipping | Pickup
+        public string? PaymentStatus { get; set; } // Unpaid | Paid | Captured
+        public DateTime? DeliveryDateFrom { get; set; }
+        public DateTime? DeliveryDateTo { get; set; }
+        public SearchFilter? Search { get; set; }
+    }
+
 }

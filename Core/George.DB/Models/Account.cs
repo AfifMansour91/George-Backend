@@ -113,6 +113,9 @@ public partial class Account
     public virtual ICollection<AccountMedia> AccountMedia { get; set; } = new List<AccountMedia>();
 
     [InverseProperty("Account")]
+    public virtual ICollection<Order> Orders { get; set; } = new List<Order>();
+
+    [InverseProperty("Account")]
     public virtual ICollection<Site> Sites { get; set; } = new List<Site>();
 
     [ForeignKey("StatusId")]

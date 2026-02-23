@@ -153,7 +153,14 @@ namespace George.Services
                     // Business types will be handled separately in storage
                 });
 
-
+            ////////////////////////// Order (Sprint 2)
+            CreateMap<Order, OrderRes>()
+                .ForMember(dest => dest.Items, opt => opt.MapFrom(src => src.OrderItems ?? new List<OrderItem>()));
+            CreateMap<OrderItem, OrderItemRes>();
+            CreateMap<CreateOrderReq, Order>();
+            CreateMap<CreateOrderItemReq, OrderItem>();
+            CreateMap<UpdateOrderReq, Order>()
+                .ForAllMembers(opt => opt.Condition((src, dest, srcMember) => srcMember != null));
 
             ////////////////////////// BusinessType
             CreateMap<BusinessType, BusinessTypeRes>()
