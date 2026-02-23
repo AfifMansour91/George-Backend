@@ -17,6 +17,8 @@ public partial class GeorgeDBContextBase : DbContext
 
     public virtual DbSet<KioskSettingsHomeImage> KioskSettingsHomeImages { get; set; }
 
+    public virtual DbSet<AccountNotificationSettings> AccountNotificationSettings { get; set; }
+
     public virtual DbSet<AccountMedia> AccountMedia { get; set; }
 
     public virtual DbSet<AccountStatus> AccountStatuses { get; set; }
@@ -144,6 +146,13 @@ public partial class GeorgeDBContextBase : DbContext
             entity.HasOne(d => d.HomeVideoMedia).WithMany(p => p.KioskSettingsHomeVideos)
                 .HasForeignKey(d => d.HomeVideoMediaId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<AccountNotificationSettings>(entity =>
+        {
+            entity.HasOne(d => d.Account).WithOne(p => p.NotificationSettings)
+                .HasForeignKey<AccountNotificationSettings>(d => d.AccountId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<KioskSettingsHomeImage>(entity =>

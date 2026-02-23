@@ -45,6 +45,9 @@ namespace George.Services.Response
 
         /// <summary>Kiosk design and behavior settings (logo override, colors, home bg, payment toggles).</summary>
         public KioskSettingsRes? KioskSettings { get; set; }
+
+        /// <summary>Sprint 2: Notification settings (התראות), relational.</summary>
+        public NotificationSettingsRes? NotificationSettings { get; set; }
     }
 
     //public class AccountRes
