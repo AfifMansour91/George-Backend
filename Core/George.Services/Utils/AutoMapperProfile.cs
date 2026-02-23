@@ -31,6 +31,7 @@ namespace George.Services
 
             ////////////////////////// Account
             CreateMap<Account, AccountRes>()
+                .ForMember(dest => dest.NotificationSettings, opt => opt.Ignore())
                 .AfterMap((src, dest, context) =>
                 {
                     dest.AccountName = src.Name;
@@ -97,6 +98,9 @@ namespace George.Services
                     {
                         dest.KioskSettings = null;
                     }
+                    dest.NotificationSettings = src.NotificationSettings != null
+                        ? MapNotificationSettingsToRes(src.NotificationSettings)
+                        : null;
                 });
             CreateMap<KioskSettings, KioskSettingsRes>()
                 .ForMember(dest => dest.HomeVideoUrl, opt => opt.Ignore())
@@ -254,5 +258,58 @@ namespace George.Services
             }
         }
 
+        private static NotificationSettingsRes MapNotificationSettingsToRes(George.DB.AccountNotificationSettings e)
+        {
+            return new NotificationSettingsRes
+            {
+                NewOrder = new NewOrderSettingsRes
+                {
+                    ManagerSoundEnabled = e.NewOrder_ManagerSoundEnabled,
+                    ManagerSoundKey = e.NewOrder_ManagerSoundKey,
+                    ManagerSoundTriggerSources = new NewOrderSoundTriggerSourcesRes
+                    {
+                        Website = e.NewOrder_ManagerSoundTriggerWebsite,
+                        Kiosk = e.NewOrder_ManagerSoundTriggerKiosk,
+                        Whatsapp = e.NewOrder_ManagerSoundTriggerWhatsapp,
+                        Phone = e.NewOrder_ManagerSoundTriggerPhone
+                    },
+                    ManagerMessageChannel = e.NewOrder_ManagerMessageChannel,
+                    ManagerPhoneNumbers = e.NewOrder_ManagerPhoneNumbers,
+                    ManagerMessageTemplate = e.NewOrder_ManagerMessageTemplate,
+                    ManagerReminderBeforeDeliveryEnabled = e.NewOrder_ManagerReminderBeforeDeliveryEnabled,
+                    ManagerReminderBeforeDeliveryMinutes = e.NewOrder_ManagerReminderBeforeDeliveryMinutes,
+                    ManagerReminderNoTreatmentEnabled = e.NewOrder_ManagerReminderNoTreatmentEnabled,
+                    ManagerReminderNoTreatmentMinutes = e.NewOrder_ManagerReminderNoTreatmentMinutes,
+                    ManagerReminderNoTreatmentSoundKey = e.NewOrder_ManagerReminderNoTreatmentSoundKey,
+                    CustomerChannel = e.NewOrder_CustomerChannel,
+                    CustomerMessageShipping = e.NewOrder_CustomerMessageShipping,
+                    CustomerMessagePickup = e.NewOrder_CustomerMessagePickup,
+                    CustomerMessageKiosk = e.NewOrder_CustomerMessageKiosk
+                },
+                OrderReady = new OrderReadySettingsRes
+                {
+                    ManagerNotifyEnabled = e.OrderReady_ManagerNotifyEnabled,
+                    CustomerChannel = e.OrderReady_CustomerChannel,
+                    CustomerMessageShipping = e.OrderReady_CustomerMessageShipping,
+                    CustomerMessagePickup = e.OrderReady_CustomerMessagePickup,
+                    CustomerMessageKiosk = e.OrderReady_CustomerMessageKiosk
+                },
+                OrderNotPickedUp = new OrderNotPickedUpSettingsRes
+                {
+                    ManagerNotifyEnabled = e.OrderNotPickedUp_ManagerNotifyEnabled,
+                    AutoReminderEnabled = e.OrderNotPickedUp_AutoReminderEnabled,
+                    MinutesAfterScheduledPickup = e.OrderNotPickedUp_MinutesAfterScheduledPickup,
+                    CustomerMessageTemplate = e.OrderNotPickedUp_CustomerMessageTemplate
+                },
+                AfterDelivery = new AfterDeliverySettingsRes
+                {
+                    Enabled = e.AfterDelivery_Enabled,
+                    TriggerType = e.AfterDelivery_TriggerType,
+                    TriggerAfterValue = e.AfterDelivery_TriggerAfterValue,
+                    TriggerAfterUnit = e.AfterDelivery_TriggerAfterUnit,
+                    CustomerMessageTemplate = e.AfterDelivery_CustomerMessageTemplate
+                }
+            };
+        }
     }
 }

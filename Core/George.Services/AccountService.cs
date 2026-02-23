@@ -251,6 +251,12 @@ namespace George.Services
                 await _accountStorage.UpsertKioskSettingsAsync(accountId, kioskEntity, req.KioskSettings.HomeImageMediaIds, cancelToken);
             }
 
+            if (req.NotificationSettings != null)
+            {
+                var notifEntity = MapNotificationSettingsReqToEntity(accountId, req.NotificationSettings);
+                await _accountStorage.UpsertNotificationSettingsAsync(accountId, notifEntity, cancelToken);
+            }
+
             // Reload account with includes to get full details
             var fullAccount = await _accountStorage.GetAccountAsync(accountId, cancelToken);
             if (fullAccount == null)
@@ -339,6 +345,51 @@ namespace George.Services
 
         //    return response;
         //}
+
+        private static AccountNotificationSettings MapNotificationSettingsReqToEntity(int accountId, NotificationSettingsReq req)
+        {
+            var n = req.NewOrder;
+            var r = req.OrderReady;
+            var u = req.OrderNotPickedUp;
+            var a = req.AfterDelivery;
+            var trig = n?.ManagerSoundTriggerSources;
+            return new AccountNotificationSettings
+            {
+                AccountId = accountId,
+                NewOrder_ManagerSoundEnabled = n?.ManagerSoundEnabled ?? true,
+                NewOrder_ManagerSoundKey = string.IsNullOrWhiteSpace(n?.ManagerSoundKey) ? null : n.ManagerSoundKey,
+                NewOrder_ManagerSoundTriggerWebsite = trig?.Website ?? true,
+                NewOrder_ManagerSoundTriggerKiosk = trig?.Kiosk ?? true,
+                NewOrder_ManagerSoundTriggerWhatsapp = trig?.Whatsapp ?? false,
+                NewOrder_ManagerSoundTriggerPhone = trig?.Phone ?? false,
+                NewOrder_ManagerMessageChannel = string.IsNullOrWhiteSpace(n?.ManagerMessageChannel) ? null : n.ManagerMessageChannel,
+                NewOrder_ManagerPhoneNumbers = string.IsNullOrWhiteSpace(n?.ManagerPhoneNumbers) ? null : n.ManagerPhoneNumbers,
+                NewOrder_ManagerMessageTemplate = string.IsNullOrWhiteSpace(n?.ManagerMessageTemplate) ? null : n.ManagerMessageTemplate,
+                NewOrder_ManagerReminderBeforeDeliveryEnabled = n?.ManagerReminderBeforeDeliveryEnabled ?? false,
+                NewOrder_ManagerReminderBeforeDeliveryMinutes = n?.ManagerReminderBeforeDeliveryMinutes ?? 60,
+                NewOrder_ManagerReminderNoTreatmentEnabled = n?.ManagerReminderNoTreatmentEnabled ?? false,
+                NewOrder_ManagerReminderNoTreatmentMinutes = n?.ManagerReminderNoTreatmentMinutes ?? 15,
+                NewOrder_ManagerReminderNoTreatmentSoundKey = string.IsNullOrWhiteSpace(n?.ManagerReminderNoTreatmentSoundKey) ? null : n.ManagerReminderNoTreatmentSoundKey,
+                NewOrder_CustomerChannel = string.IsNullOrWhiteSpace(n?.CustomerChannel) ? null : n.CustomerChannel,
+                NewOrder_CustomerMessageShipping = string.IsNullOrWhiteSpace(n?.CustomerMessageShipping) ? null : n.CustomerMessageShipping,
+                NewOrder_CustomerMessagePickup = string.IsNullOrWhiteSpace(n?.CustomerMessagePickup) ? null : n.CustomerMessagePickup,
+                NewOrder_CustomerMessageKiosk = string.IsNullOrWhiteSpace(n?.CustomerMessageKiosk) ? null : n.CustomerMessageKiosk,
+                OrderReady_ManagerNotifyEnabled = r?.ManagerNotifyEnabled ?? false,
+                OrderReady_CustomerChannel = string.IsNullOrWhiteSpace(r?.CustomerChannel) ? null : r.CustomerChannel,
+                OrderReady_CustomerMessageShipping = string.IsNullOrWhiteSpace(r?.CustomerMessageShipping) ? null : r.CustomerMessageShipping,
+                OrderReady_CustomerMessagePickup = string.IsNullOrWhiteSpace(r?.CustomerMessagePickup) ? null : r.CustomerMessagePickup,
+                OrderReady_CustomerMessageKiosk = string.IsNullOrWhiteSpace(r?.CustomerMessageKiosk) ? null : r.CustomerMessageKiosk,
+                OrderNotPickedUp_ManagerNotifyEnabled = u?.ManagerNotifyEnabled ?? false,
+                OrderNotPickedUp_AutoReminderEnabled = u?.AutoReminderEnabled ?? false,
+                OrderNotPickedUp_MinutesAfterScheduledPickup = u?.MinutesAfterScheduledPickup ?? 30,
+                OrderNotPickedUp_CustomerMessageTemplate = string.IsNullOrWhiteSpace(u?.CustomerMessageTemplate) ? null : u.CustomerMessageTemplate,
+                AfterDelivery_Enabled = a?.Enabled ?? false,
+                AfterDelivery_TriggerType = string.IsNullOrWhiteSpace(a?.TriggerType) ? null : a.TriggerType,
+                AfterDelivery_TriggerAfterValue = a?.TriggerAfterValue ?? 1,
+                AfterDelivery_TriggerAfterUnit = string.IsNullOrWhiteSpace(a?.TriggerAfterUnit) ? null : a.TriggerAfterUnit,
+                AfterDelivery_CustomerMessageTemplate = string.IsNullOrWhiteSpace(a?.CustomerMessageTemplate) ? null : a.CustomerMessageTemplate
+            };
+        }
     }
 
 }

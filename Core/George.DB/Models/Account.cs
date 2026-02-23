@@ -86,6 +86,9 @@ public partial class Account
     public virtual KioskSettings? KioskSettings { get; set; }
 
     [InverseProperty("Account")]
+    public virtual AccountNotificationSettings? NotificationSettings { get; set; }
+
+    [InverseProperty("Account")]
     public virtual ICollection<KioskSettingsHomeImage> KioskSettingsHomeImages { get; set; } = new List<KioskSettingsHomeImage>();
 
     [InverseProperty("Account")]
