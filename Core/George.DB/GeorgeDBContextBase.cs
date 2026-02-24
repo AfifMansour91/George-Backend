@@ -47,6 +47,8 @@ public partial class GeorgeDBContextBase : DbContext
 
     public virtual DbSet<OrderItem> OrderItems { get; set; }
 
+    public virtual DbSet<SiteOrderReceptionClosed> SiteOrderReceptionClosed { get; set; }
+
     public virtual DbSet<Product> Products { get; set; }
 
     public virtual DbSet<ProductCategory> ProductCategories { get; set; }
@@ -579,6 +581,14 @@ public partial class GeorgeDBContextBase : DbContext
             entity.HasOne(d => d.Order).WithMany(p => p.OrderItems)
                 .OnDelete(DeleteBehavior.Cascade)
                 .HasConstraintName("FK_OrderItem_Order");
+        });
+
+        modelBuilder.Entity<SiteOrderReceptionClosed>(entity =>
+        {
+            entity.HasIndex(e => new { e.SiteId, e.ClosedDate, e.Type }).IsUnique();
+            entity.HasOne(d => d.Site).WithMany(p => p.SiteOrderReceptionClosed)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_SiteOrderReceptionClosed_Site");
         });
 
         modelBuilder.Entity<Supplier>(entity =>
