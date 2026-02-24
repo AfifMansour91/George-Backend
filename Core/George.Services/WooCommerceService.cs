@@ -825,7 +825,7 @@ namespace George.Services
 
             // Get products to sync - load individually to ensure all relationships are included
             List<Product> productsToSync;
-            
+
             if (productIds != null && productIds.Any())
             {
                 // Load specific products in parallel to avoid sequential DB round-trips
@@ -1202,6 +1202,19 @@ namespace George.Services
                     await _productStorage.UpdateProductWooCommerceIdAsync(product.Id, wooCommerceId.Value, cancelToken);
                 }
 
+                // Apply menu_order: send a dedicated PUT so WooCommerce reliably persists it (main payload may not include/apply it in all versions)
+                if (wooCommerceId.HasValue)
+                {
+                    try
+                    {
+                        await UpdateWooCommerceProductMenuOrderAsync(baseUrl, wooCommerceId.Value, product.DisplayOrder ?? 0, httpClient, cancelToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "WooCommerce menu_order update failed for product {ProductId} (WooCommerce id {WooId}); product sync succeeded.", product.Id, wooCommerceId.Value);
+                    }
+                }
+
                 // Sync variations for variable products
                 if (wooCommerceId.HasValue && product.ProductVariants != null && product.ProductVariants.Any(v => !v.IsDeleted))
                 {
@@ -1230,6 +1243,53 @@ namespace George.Services
                     ProductName = product.Name ?? "",
                     Error = ex.Message
                 };
+            }
+        }
+
+        /// <summary>
+        /// Syncs only menu_order to WooCommerce for the given ordered product IDs (e.g. after reorder). Much faster than full product sync.
+        /// </summary>
+        public async Task SyncMenuOrderOnlyAsync(int siteId, List<int> orderedProductIds, CancellationToken cancelToken)
+        {
+            if (orderedProductIds == null || !orderedProductIds.Any()) return;
+            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+            if (site == null || string.IsNullOrEmpty(site.WooCommerceUrl) || string.IsNullOrEmpty(site.WooCommerceKey) || string.IsNullOrEmpty(site.WooCommerceSecret))
+                return;
+            var orders = await _productStorage.GetWooCommerceIdAndDisplayOrderForSiteAsync(orderedProductIds, siteId, cancelToken);
+            if (orders.Count == 0) return;
+            var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
+            var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
+            using var httpClient = _httpClientFactory.CreateClient();
+            httpClient.Timeout = TimeSpan.FromMinutes(2);
+            httpClient.DefaultRequestHeaders.Clear();
+            httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+            const int concurrency = 10;
+            for (var i = 0; i < orders.Count; i += concurrency)
+            {
+                var batch = orders.Skip(i).Take(concurrency).ToList();
+                var tasks = batch.Select(o => UpdateWooCommerceProductMenuOrderAsync(baseUrl, o.WooCommerceId, o.DisplayOrder, httpClient, cancelToken));
+                await Task.WhenAll(tasks);
+            }
+        }
+
+        /// <summary>
+        /// Sends a PUT with only menu_order so WooCommerce persists sort order (main product payload may not include or apply menu_order in all setups).
+        /// </summary>
+        private static async Task UpdateWooCommerceProductMenuOrderAsync(
+            string baseUrl,
+            int wooProductId,
+            int menuOrder,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            var updateUrl = $"{baseUrl}/products/{wooProductId}";
+            var body = JsonSerializer.Serialize(new { menu_order = menuOrder });
+            using var content = new StringContent(body, Encoding.UTF8, "application/json");
+            var response = await httpClient.PutAsync(updateUrl, content, cancelToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                var err = await response.Content.ReadAsStringAsync(cancelToken);
+                throw new InvalidOperationException($"WooCommerce menu_order update failed ({(int)response.StatusCode}): {err}");
             }
         }
 

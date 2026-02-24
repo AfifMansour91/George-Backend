@@ -250,10 +250,11 @@ namespace George.Services
             await _productStorage.UpdateProductOrderAsync(req.ProductIds, cancelToken);
             response.Data = true;
 
-            // Sync updated order to WooCommerce (fire-and-forget per site so response stays fast)
+            // Sync only menu_order to WooCommerce (lightweight: one small PUT per product; no full product sync)
             var siteToProductIds = await _productStorage.GetProductIdsBySiteForProductIdsAsync(req.ProductIds, cancelToken);
             if (siteToProductIds.Count > 0)
             {
+                var productIdsCopy = req.ProductIds.ToList();
                 _ = Task.Run(async () =>
                 {
                     try
@@ -261,26 +262,26 @@ namespace George.Services
                         using var scope = _serviceScopeFactory.CreateScope();
                         var siteStorage = scope.ServiceProvider.GetRequiredService<George.Data.SiteStorage>();
                         var wooService = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
-                        foreach (var (siteId, productIdsForSite) in siteToProductIds)
+                        foreach (var (siteId, _) in siteToProductIds)
                         {
                             try
                             {
                                 var site = await siteStorage.GetSiteAsync(siteId, CancellationToken.None);
                                 if (site == null || !site.WooCommerceEnabled.HasValue || !site.WooCommerceEnabled.Value)
                                     continue;
-                                await wooService.SyncToWooCommerceAsync(new WooCommerceSyncReq { SiteId = siteId, ProductIds = productIdsForSite }, CancellationToken.None);
+                                await wooService.SyncMenuOrderOnlyAsync(siteId, productIdsCopy, CancellationToken.None);
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogError(ex, "WooCommerce sync after order update failed for site {SiteId}", siteId);
+                                _logger.LogError(ex, "WooCommerce menu_order sync failed for site {SiteId}", siteId);
                             }
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "WooCommerce sync after order update failed");
+                        _logger.LogError(ex, "WooCommerce menu_order sync after order update failed");
                     }
-                });
+                }, CancellationToken.None);
             }
 
             return response;
@@ -747,6 +748,7 @@ namespace George.Services
                 AccountId = existing.AccountId ?? req.AccountId,
                 SeoTitle = req.SeoTitle ?? existing.SeoTitle,
                 SeoDescription = req.SeoDescription ?? existing.SeoDescription,
+                DisplayOrder = existing.DisplayOrder,
                 // Preserve lookup IDs from existing; MapLookupsAsync will overwrite only when req has values
                 BrandId = existing.BrandId,
                 SupplierId = existing.SupplierId,

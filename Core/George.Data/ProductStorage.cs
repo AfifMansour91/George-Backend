@@ -249,6 +249,8 @@ namespace George.Data
             dbProduct.WeightConfigId = updated.WeightConfigId;
             dbProduct.SeoTitle = updated.SeoTitle;
             dbProduct.SeoDescription = updated.SeoDescription;
+            if (updated.DisplayOrder.HasValue)
+                dbProduct.DisplayOrder = updated.DisplayOrder;
             dbProduct.UpdatedDate = DateTime.UtcNow;
             dbProduct.UpdateUserId = updated.UpdateUserId;
 
@@ -413,6 +415,26 @@ namespace George.Data
                 .SelectMany(p => p.Sites.Select(s => new { ProductId = p.Id, SiteId = s.Id }))
                 .ToListAsync(cancelToken);
             return pairs.GroupBy(x => x.SiteId).ToDictionary(g => g.Key, g => g.Select(x => x.ProductId).ToList());
+        }
+
+        /// <summary>Returns (WooCommerceId, DisplayOrder) for products in orderedProductIds that belong to the site and have a WooCommerceId. DisplayOrder = index in orderedProductIds. Used for menu-order-only sync.</summary>
+        public async Task<List<(int WooCommerceId, int DisplayOrder)>> GetWooCommerceIdAndDisplayOrderForSiteAsync(List<int> orderedProductIds, int siteId, CancellationToken cancelToken)
+        {
+            if (orderedProductIds == null || !orderedProductIds.Any()) return new List<(int, int)>();
+            var productIdsSet = orderedProductIds.Distinct().ToHashSet();
+            var products = await _dbContext.Products
+                .AsNoTracking()
+                .Where(p => productIdsSet.Contains(p.Id) && p.WooCommerceId != null && p.Sites.Any(s => s.Id == siteId))
+                .Select(p => new { p.Id, WooId = p.WooCommerceId!.Value })
+                .ToListAsync(cancelToken);
+            var idToWooId = products.ToDictionary(p => p.Id, p => p.WooId);
+            var result = new List<(int, int)>();
+            for (var i = 0; i < orderedProductIds.Count; i++)
+            {
+                if (idToWooId.TryGetValue(orderedProductIds[i], out var wooId))
+                    result.Add((wooId, i));
+            }
+            return result;
         }
 
         public async Task<bool> UpdateProductWooCommerceIdAsync(int productId, int? wooCommerceId, CancellationToken cancelToken)
