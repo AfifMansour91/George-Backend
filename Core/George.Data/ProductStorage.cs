@@ -21,6 +21,7 @@ namespace George.Data
         {
             var res = new DataListResult<Product>();
 
+            // Lighter includes for list (options, variants, related/complementary loaded only in GetProductAsync)
             var query = _dbContext.Products
                 .Include(p => p.Brand)
                 .Include(p => p.Supplier)
@@ -39,12 +40,6 @@ namespace George.Data
                 .Include(p => p.ProductCategories)
                     .ThenInclude(pc => pc.Category)
                 .Include(p => p.ProductImages)
-                .Include(p => p.ProductOptions)
-                    .ThenInclude(po => po.ProductOptionValues)
-                .Include(p => p.ProductVariants)
-                    .ThenInclude(pv => pv.ProductVariantOptionValues)
-                .Include(p => p.RelatedProducts)
-                .Include(p => p.ComplementaryProducts)
                 .AsNoTracking()
                 .Where(p => !p.IsDeleted);
 
@@ -86,8 +81,6 @@ namespace George.Data
             query = query
                 .OrderBy(p => p.DisplayOrder ?? int.MaxValue)
                 .ThenByDescending(p => p.CreationTime);
-
-            //query = query.Skip(paging.Skip).Take(paging.Take);
 
             res.Items = await query.ToListAsync(cancelToken).ConfigureAwait(false);
 
