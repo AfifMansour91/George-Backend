@@ -239,8 +239,11 @@ namespace George.DB
 			modelBuilder.Entity<BusinessTypeCategory>().HasQueryFilter(a => a.IsDeleted == false);
 			modelBuilder.Entity<ProductOption>().HasQueryFilter(a => a.IsDeleted == false);
 			modelBuilder.Entity<TemplateProductOption>().HasQueryFilter(a => a.IsDeleted == false);
-			//modelBuilder.Entity<Account>().HasQueryFilter(ent => EF.Property<bool>(ent, PROP_IS_DELETED) == false);
+            modelBuilder.Entity<Product>().HasQueryFilter(a => a.IsDeleted == false);
+            modelBuilder.Entity<TemplateProduct>().HasQueryFilter(a => a.IsDeleted == false);
+            modelBuilder.Entity<GlobalCategory>().HasQueryFilter(a => a.IsDeleted == false);
+            //modelBuilder.Entity<Account>().HasQueryFilter(ent => EF.Property<bool>(ent, PROP_IS_DELETED) == false);
 
-		}
+        }
 	}
 }
