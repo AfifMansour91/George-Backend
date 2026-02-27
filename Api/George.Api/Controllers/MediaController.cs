@@ -59,9 +59,9 @@ namespace George.Api.Controllers
 
         [HttpDelete("{mediaId:int}")]
         [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
-        public async Task<IActionResult> DeleteMediaAsync([FromRoute] int mediaId, CancellationToken cancelToken = default)
+        public async Task<IActionResult> DeleteMediaAsync([FromRoute] int mediaId, [FromQuery] int? accountId, CancellationToken cancelToken = default)
         {
-            return await SafeCallWithErrorCatchingAsync(() => _mediaSvc.DeleteMediaAsync(mediaId, cancelToken));
+            return await SafeCallWithErrorCatchingAsync(() => _mediaSvc.DeleteMediaAsync(mediaId, accountId, cancelToken));
         }
 
         [HttpPost("{mediaId:int}/Use")]

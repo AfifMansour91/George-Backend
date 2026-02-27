@@ -944,13 +944,37 @@ namespace George.Services
                     .Cast<object>()
                     .ToList() ?? new List<object>();
 
-                // Map images
-                var images = product.ProductImages?
-    .OrderBy(pi => pi.SortOrder)
-    .Where(pi => IsPublicImageUrl(pi.Url))
-    .Select((pi, index) => new { src = pi.Url, position = index })
-    .Cast<object>()
-    .ToList() ?? new List<object>();
+                // Resolve WooCommerce product ID for update (so we can fetch existing images and use id to avoid duplicating)
+                int? existingWooId = product.WooCommerceId;
+                if (!existingWooId.HasValue && !string.IsNullOrWhiteSpace(product.Sku))
+                    existingWooId = await FindProductIdBySkuAsync(baseUrl, product.Sku, httpClient, cancelToken);
+
+                List<(int id, string? src)>? existingWooImages = null;
+                if (existingWooId.HasValue)
+                    existingWooImages = await GetWooCommerceProductImagesAsync(baseUrl, existingWooId.Value, httpClient, cancelToken);
+
+                // Map images: when updating, use existing WooCommerce image id when URL matches to avoid duplicating in media library
+                var ourImageUrls = product.ProductImages?
+                    .OrderBy(pi => pi.SortOrder)
+                    .Where(pi => IsPublicImageUrl(pi.Url))
+                    .Select(pi => pi.Url?.Trim() ?? "")
+                    .ToList() ?? new List<string>();
+                var images = new List<object>();
+                for (var i = 0; i < ourImageUrls.Count; i++)
+                {
+                    var url = ourImageUrls[i];
+                    var position = i;
+                    if (existingWooImages != null)
+                    {
+                        var match = existingWooImages.FirstOrDefault(ex => string.Equals((ex.src ?? "").Trim(), url, StringComparison.OrdinalIgnoreCase));
+                        if (match.src != null)
+                            images.Add(new { id = match.id, position });
+                        else
+                            images.Add(new { src = url, position });
+                    }
+                    else
+                        images.Add(new { src = url, position });
+                }
 
                 // Map tags
                 var tags = product.Tags?
@@ -1030,15 +1054,12 @@ namespace George.Services
                     ["weight"] = product.Weight?.ToString() ?? "",
                     ["shipping_class"] = shippingClass,
                     ["menu_order"] = product.DisplayOrder ?? 0,
-                    //["images"] = images,
+                    ["images"] = images,
                     ["categories"] = allCategoryIds,
                     ["tags"] = tags,
                     ["status"] = wooStatus,
                     ["meta_data"] = metaData
                 };
-
-                if (images.Count > 0)
-                    wooProduct["images"] = images;
 
                 // For variable products, ensure global attributes exist and use their IDs + actual slugs from WooCommerce
                 var attributeMap = new Dictionary<string, int?>();   // attribute name -> WooCommerce ID
@@ -1131,10 +1152,10 @@ namespace George.Services
                 int? wooCommerceId = null;
                 string action = "created";
 
-                if (product.WooCommerceId.HasValue)
+                if (existingWooId.HasValue)
                 {
-                    // Try to update
-                    var updateUrl = $"{baseUrl}/products/{product.WooCommerceId.Value}";
+                    // Update existing product (existingWooId was resolved above for image deduplication)
+                    var updateUrl = $"{baseUrl}/products/{existingWooId.Value}";
                     var updateJson = JsonSerializer.Serialize(wooProduct);
                     var updateContent = new StringContent(updateJson, Encoding.UTF8, "application/json");
 
@@ -1152,27 +1173,6 @@ namespace George.Services
                         // If update fails, try to create
                         var errorContent = await updateResponse.Content.ReadAsStringAsync(cancelToken);
                         _logger.LogWarning("Failed to update product {ProductId} in WooCommerce: {Error}", product.Id, errorContent);
-                    }
-                }
-
-                if (!wooCommerceId.HasValue && !string.IsNullOrWhiteSpace(product.Sku))
-                {
-                    // Product may already exist in WooCommerce (e.g. WooCommerceId was lost in our DB). Find by SKU and update instead of create to avoid product_invalid_sku.
-                    var existingId = await FindProductIdBySkuAsync(baseUrl, product.Sku, httpClient, cancelToken);
-                    if (existingId.HasValue)
-                    {
-                        var updateUrl = $"{baseUrl}/products/{existingId.Value}";
-                        var updateJson = JsonSerializer.Serialize(wooProduct);
-                        using var updateContent = new StringContent(updateJson, Encoding.UTF8, "application/json");
-                        var updateResponse = await httpClient.PutAsync(updateUrl, updateContent, cancelToken);
-                        if (updateResponse.IsSuccessStatusCode)
-                        {
-                            var updated = await JsonSerializer.DeserializeAsync<WooCommerceProductResponse>(
-                                await updateResponse.Content.ReadAsStreamAsync(cancelToken),
-                                cancellationToken: cancelToken);
-                            wooCommerceId = updated?.id;
-                            action = "updated";
-                        }
                     }
                 }
 
@@ -1544,6 +1544,27 @@ namespace George.Services
             }
         }
 
+        /// <summary>
+        /// Fetches existing product images from WooCommerce (id + src) so we can send id instead of src on update and avoid duplicating images in the media library.
+        /// </summary>
+        private static async Task<List<(int id, string? src)>?> GetWooCommerceProductImagesAsync(string baseUrl, int wooProductId, HttpClient httpClient, CancellationToken cancelToken)
+        {
+            try
+            {
+                var url = $"{baseUrl}/products/{wooProductId}";
+                var response = await httpClient.GetAsync(url, cancelToken);
+                if (!response.IsSuccessStatusCode) return null;
+                var body = await response.Content.ReadAsStringAsync(cancelToken);
+                var product = TryDeserialize<WooCommerceProductGetResponse>(body);
+                if (product?.images == null) return null;
+                return product.images.Select(img => (img.id, img.src)).ToList();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private static bool IsPublicImageUrl(string? url)
         {
             if (string.IsNullOrWhiteSpace(url)) return false;
@@ -1574,6 +1595,18 @@ namespace George.Services
         private class WooCommerceProductResponse
         {
             public int id { get; set; }
+        }
+
+        /// <summary>GET product response - includes images with id and src to avoid duplicating on update.</summary>
+        private class WooCommerceProductGetResponse
+        {
+            public List<WooCommerceImageItem>? images { get; set; }
+        }
+
+        private class WooCommerceImageItem
+        {
+            public int id { get; set; }
+            public string? src { get; set; }
         }
 
         private class WooCommerceVariationResponse
