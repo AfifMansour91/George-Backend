@@ -40,6 +40,7 @@ namespace George.Data
                 .Include(p => p.ProductCategories)
                     .ThenInclude(pc => pc.Category)
                 .Include(p => p.ProductImages)
+                    .ThenInclude(pi => pi.Media)
                 .AsNoTracking()
                 .Where(p => !p.IsDeleted);
 
@@ -107,6 +108,7 @@ namespace George.Data
                 .Include(p => p.ProductCategories)
                     .ThenInclude(pc => pc.Category)
                 .Include(p => p.ProductImages)
+                    .ThenInclude(pi => pi.Media)
                 .Include(p => p.ProductOptions)
                     .ThenInclude(po => po.ProductOptionValues)
                 .Include(p => p.ProductVariants)
