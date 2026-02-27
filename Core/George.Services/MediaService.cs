@@ -147,11 +147,12 @@ namespace George.Services
             return response;
         }
 
-        public async Task<IApiResponse<bool>> DeleteMediaAsync(int mediaId, CancellationToken cancelToken)
+        /// <param name="accountId">When set, delete only from this account's products (ProductImage). When null, delete from global/template products (TemplateProductImage) and soft-delete the media.</param>
+        public async Task<IApiResponse<bool>> DeleteMediaAsync(int mediaId, int? accountId, CancellationToken cancelToken)
         {
             var response = new ApiResponse<bool>();
 
-            var result = await _mediaStorage.DeleteMediaAsync(mediaId, cancelToken);
+            var result = await _mediaStorage.DeleteMediaAsync(mediaId, accountId, cancelToken);
             response.Data = result;
 
             return response;

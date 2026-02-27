@@ -244,28 +244,49 @@ namespace George.Data
             return true;
         }
 
-        public async Task<bool> DeleteMediaAsync(int mediaId, CancellationToken cancelToken)
+        /// <summary>
+        /// Delete media from the library. When accountId is set (account admin deleting from account library),
+        /// only removes the image from that account's products (ProductImage). When accountId is null (global delete),
+        /// only removes from template products (TemplateProductImage) and soft-deletes the media.
+        /// </summary>
+        public async Task<bool> DeleteMediaAsync(int mediaId, int? accountId, CancellationToken cancelToken)
         {
             var media = await _dbContext.Media
                 .FirstOrDefaultAsync(m => m.Id == mediaId && !m.IsDeleted, cancelToken);
 
             if (media == null) return false;
 
-            // Clear product image references so products no longer point to this media
-            var productImages = await _dbContext.ProductImages
-                .Where(pi => pi.MediaId == mediaId)
-                .ToListAsync(cancelToken);
-            foreach (var pi in productImages)
-                pi.MediaId = null;
+            if (accountId.HasValue)
+            {
+                // Account admin delete: remove image from this account's products only (ProductImage), and unlink from account library (AccountMedia)
+                var accountProductIds = await _dbContext.Products
+                    .Where(p => p.AccountId == accountId.Value)
+                    .Select(p => p.Id)
+                    .ToListAsync(cancelToken);
+                var productImagesToRemove = await _dbContext.ProductImages
+                    .Where(pi => pi.MediaId == mediaId && accountProductIds.Contains(pi.ProductId))
+                    .ToListAsync(cancelToken);
+                _dbContext.ProductImages.RemoveRange(productImagesToRemove);
 
-            var templateProductImages = await _dbContext.TemplateProductImages
-                .Where(tpi => tpi.MediaId == mediaId)
-                .ToListAsync(cancelToken);
-            foreach (var tpi in templateProductImages)
-                tpi.MediaId = null;
+                var accountMedia = await _dbContext.AccountMedia
+                    .FirstOrDefaultAsync(am => am.AccountId == accountId.Value && am.MediaId == mediaId, cancelToken);
+                if (accountMedia != null)
+                    _dbContext.AccountMedia.Remove(accountMedia);
 
-            media.IsDeleted = true;
-            media.UpdatedDate = DateTime.UtcNow;
+                // Do not set Media.IsDeleted - media may still be used globally or by other accounts
+            }
+            else
+            {
+                // Global delete: remove from template products (TemplateProductImage) and soft-delete the media
+                var templateProductImagesToRemove = await _dbContext.TemplateProductImages
+                    .Where(tpi => tpi.MediaId == mediaId)
+                    .ToListAsync(cancelToken);
+                _dbContext.TemplateProductImages.RemoveRange(templateProductImagesToRemove);
+
+                media.IsDeleted = true;
+                media.UpdatedDate = DateTime.UtcNow;
+            }
+
             await _dbContext.SaveChangesAsync(cancelToken);
             return true;
         }
