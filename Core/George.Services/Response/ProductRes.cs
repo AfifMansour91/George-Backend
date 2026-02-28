@@ -41,6 +41,8 @@ namespace George.Services.Response
         public string? ShortDescription { get; set; }
         public string? LongDescription { get; set; }
         public List<string> ImageUrls { get; set; } = new();
+        /// <summary>Display names for images (same order as ImageUrls). From Media.Name when available.</summary>
+        public List<string> ImageNames { get; set; } = new();
         public decimal? Price { get; set; }
         public decimal? SalePrice { get; set; }
         public DateTime? SalePriceStartDate { get; set; }

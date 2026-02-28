@@ -39,6 +39,7 @@ namespace George.Data
                 .Include(tp => tp.TemplateProductCategories)
                     .ThenInclude(tpc => tpc.GlobalCategory)
                 .Include(tp => tp.TemplateProductImages)
+                    .ThenInclude(tpi => tpi.Media)
                 .Include(tp => tp.TemplateProductOptions)
                     .ThenInclude(tpo => tpo.TemplateProductOptionValues)
                 .Include(tp => tp.TemplateProductVariants)
@@ -139,6 +140,7 @@ namespace George.Data
                 .Include(tp => tp.TemplateProductCategories)
                     .ThenInclude(tpc => tpc.GlobalCategory)
                 .Include(tp => tp.TemplateProductImages)
+                    .ThenInclude(tpi => tpi.Media)
                 .Include(tp => tp.TemplateProductOptions)
                     .ThenInclude(tpo => tpo.TemplateProductOptionValues)
                 .Include(tp => tp.TemplateProductVariants)
@@ -163,7 +165,8 @@ namespace George.Data
             {
                 templateProduct.Sku = null;
             }
-            
+            // New products appear at the top of the list (sort by DisplayOrder ascending, then CreationTime desc)
+            templateProduct.DisplayOrder = 0;
             _dbContext.TemplateProducts.Add(templateProduct);
 
             // Add sites

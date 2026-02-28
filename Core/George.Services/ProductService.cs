@@ -793,10 +793,9 @@ namespace George.Services
             // Map images
             if (product.ProductImages != null && product.ProductImages.Any())
             {
-                res.ImageUrls = product.ProductImages
-                    .OrderBy(pi => pi.SortOrder)
-                    .Select(pi => pi.Url)
-                    .ToList();
+                var ordered = product.ProductImages.OrderBy(pi => pi.SortOrder).ToList();
+                res.ImageUrls = ordered.Select(pi => pi.Url).ToList();
+                res.ImageNames = ordered.Select(pi => pi.Media?.Name ?? string.Empty).ToList();
             }
 
             // Map categories

@@ -949,31 +949,48 @@ namespace George.Services
                 if (!existingWooId.HasValue && !string.IsNullOrWhiteSpace(product.Sku))
                     existingWooId = await FindProductIdBySkuAsync(baseUrl, product.Sku, httpClient, cancelToken);
 
-                List<(int id, string? src)>? existingWooImages = null;
+                List<(int id, string? src, string? name)>? existingWooImages = null;
                 if (existingWooId.HasValue)
                     existingWooImages = await GetWooCommerceProductImagesAsync(baseUrl, existingWooId.Value, httpClient, cancelToken);
 
-                // Map images: when updating, use existing WooCommerce image id when URL matches to avoid duplicating in media library
-                var ourImageUrls = product.ProductImages?
+                // Map images: when updating, use existing WooCommerce image id when URL matches to avoid duplicating in media library.
+                // Use the image name from the system (Media.Name) so WooCommerce gets a friendly filename instead of the long URL.
+                var ourProductImages = product.ProductImages?
                     .OrderBy(pi => pi.SortOrder)
                     .Where(pi => IsPublicImageUrl(pi.Url))
-                    .Select(pi => pi.Url?.Trim() ?? "")
-                    .ToList() ?? new List<string>();
+                    .ToList() ?? new List<ProductImage>();
                 var images = new List<object>();
-                for (var i = 0; i < ourImageUrls.Count; i++)
+                for (var i = 0; i < ourProductImages.Count; i++)
                 {
-                    var url = ourImageUrls[i];
+                    var pi = ourProductImages[i];
+                    var url = pi.Url?.Trim() ?? "";
                     var position = i;
+                    var friendlyName = pi.Media?.Name?.Trim();
+                    if (string.IsNullOrEmpty(friendlyName) && !string.IsNullOrEmpty(url))
+                    {
+                        try
+                        {
+                            var lastSegment = new Uri(url, UriKind.RelativeOrAbsolute).Segments.LastOrDefault()?.Trim('/');
+                            if (!string.IsNullOrEmpty(lastSegment))
+                                friendlyName = lastSegment;
+                        }
+                        catch { /* ignore URI parse */ }
+                    }
                     if (existingWooImages != null)
                     {
-                        var match = existingWooImages.FirstOrDefault(ex => string.Equals((ex.src ?? "").Trim(), url, StringComparison.OrdinalIgnoreCase));
-                        if (match.src != null)
+                        // Match by name first (system/WooCommerce image name), then by URL
+                        var match = default((int id, string? src, string? name));
+                        if (!string.IsNullOrEmpty(friendlyName))
+                            match = existingWooImages.FirstOrDefault(ex => string.Equals((ex.name ?? "").Trim(), friendlyName, StringComparison.OrdinalIgnoreCase));
+                        if (match.id == 0)
+                            match = existingWooImages.FirstOrDefault(ex => string.Equals((ex.src ?? "").Trim(), url, StringComparison.OrdinalIgnoreCase));
+                        if (match.id != 0)
                             images.Add(new { id = match.id, position });
                         else
-                            images.Add(new { src = url, position });
+                            images.Add(string.IsNullOrEmpty(friendlyName) ? (object)new { src = url, position } : new { src = url, name = friendlyName, position });
                     }
                     else
-                        images.Add(new { src = url, position });
+                        images.Add(string.IsNullOrEmpty(friendlyName) ? (object)new { src = url, position } : new { src = url, name = friendlyName, position });
                 }
 
                 // Map tags
@@ -1545,9 +1562,9 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Fetches existing product images from WooCommerce (id + src) so we can send id instead of src on update and avoid duplicating images in the media library.
+        /// Fetches existing product images from WooCommerce (id, src, name) so we can send id instead of src on update and avoid duplicating images in the media library.
         /// </summary>
-        private static async Task<List<(int id, string? src)>?> GetWooCommerceProductImagesAsync(string baseUrl, int wooProductId, HttpClient httpClient, CancellationToken cancelToken)
+        private static async Task<List<(int id, string? src, string? name)>?> GetWooCommerceProductImagesAsync(string baseUrl, int wooProductId, HttpClient httpClient, CancellationToken cancelToken)
         {
             try
             {
@@ -1557,7 +1574,7 @@ namespace George.Services
                 var body = await response.Content.ReadAsStringAsync(cancelToken);
                 var product = TryDeserialize<WooCommerceProductGetResponse>(body);
                 if (product?.images == null) return null;
-                return product.images.Select(img => (img.id, img.src)).ToList();
+                return product.images.Select(img => (img.id, img.src, img.name)).ToList();
             }
             catch
             {
@@ -1572,8 +1589,8 @@ namespace George.Services
 
             if (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp) return false;
 
-            var host = uri.Host.ToLowerInvariant();
-            if (host == "localhost" || host == "127.0.0.1" || host == "::1") return false;
+            //var host = uri.Host.ToLowerInvariant();
+            //if (host == "localhost" || host == "127.0.0.1" || host == "::1") return false;
 
             // ?????????: ????? ?? private ranges ??? ????
             return true;
@@ -1607,6 +1624,7 @@ namespace George.Services
         {
             public int id { get; set; }
             public string? src { get; set; }
+            public string? name { get; set; }
         }
 
         private class WooCommerceVariationResponse
