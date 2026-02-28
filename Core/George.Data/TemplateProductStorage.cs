@@ -163,7 +163,8 @@ namespace George.Data
             {
                 templateProduct.Sku = null;
             }
-            
+            // New products appear at the top of the list (sort by DisplayOrder ascending, then CreationTime desc)
+            templateProduct.DisplayOrder = 0;
             _dbContext.TemplateProducts.Add(templateProduct);
 
             // Add sites

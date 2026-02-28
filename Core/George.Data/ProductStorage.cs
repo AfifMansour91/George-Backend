@@ -126,7 +126,8 @@ namespace George.Data
             {
                 product.Sku = null;
             }
-            
+            // New products appear at the top of the list (sort by DisplayOrder ascending, then CreationTime desc)
+            product.DisplayOrder = 0;
             _dbContext.Products.Add(product);
 
             // Add sites
