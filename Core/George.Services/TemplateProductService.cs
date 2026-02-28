@@ -639,10 +639,9 @@ namespace George.Services
             // Map images
             if (templateProduct.TemplateProductImages != null && templateProduct.TemplateProductImages.Any())
             {
-                res.ImageUrls = templateProduct.TemplateProductImages
-                    .OrderBy(tpi => tpi.SortOrder)
-                    .Select(tpi => tpi.Url)
-                    .ToList();
+                var ordered = templateProduct.TemplateProductImages.OrderBy(tpi => tpi.SortOrder).ToList();
+                res.ImageUrls = ordered.Select(tpi => tpi.Url).ToList();
+                res.ImageNames = ordered.Select(tpi => tpi.Media?.Name ?? string.Empty).ToList();
             }
 
             // Map categories - get GlobalCategory IDs directly from TemplateProductCategory
