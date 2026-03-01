@@ -56,6 +56,22 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _orderSvc.CancelOrderAsync(orderId, softDelete, cancelToken));
         }
 
+        /// <summary>Get customer profile by phone at site (for manual/phone order: name, manager note, last order date, order count, avg and total).</summary>
+        [HttpGet("CustomerByPhone")]
+        [ProducesResponseType(typeof(IApiResponse<CustomerProfileRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetCustomerProfileByPhoneAsync([FromQuery] int siteId, [FromQuery] string? phone, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _orderSvc.GetCustomerProfileByPhoneAsync(siteId, phone, cancelToken));
+        }
+
+        /// <summary>Get last order line items by customer phone at site (for "last purchase" / רכישה אחרונה quick add).</summary>
+        [HttpGet("LastOrderItems")]
+        [ProducesResponseType(typeof(IApiResponse<List<OrderItemRes>>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetLastOrderItemsAsync([FromQuery] int siteId, [FromQuery] string? phone, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _orderSvc.GetLastOrderItemsByPhoneAsync(siteId, phone, cancelToken));
+        }
+
         [ApiExplorerSettings(IgnoreApi = true)]
         public void SetAuthUser()
         {

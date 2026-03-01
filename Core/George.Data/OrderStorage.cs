@@ -1,3 +1,4 @@
+using System.Linq;
 using George.Common;
 using George.DB;
 using Microsoft.EntityFrameworkCore;
@@ -39,10 +40,10 @@ namespace George.Data
                 query = query.Where(o => o.PaymentStatus == filter.PaymentStatus!.Trim());
 
             //if (filter?.DeliveryDateFrom.HasValue == true)
-            //    query = query.Where(o => o.DeliveryDate >= filter.DeliveryDateFrom);
+            //    query = query.Where(o => (o.DeliveryDate ?? o.PickupDate) >= filter.DeliveryDateFrom);
 
             //if (filter?.DeliveryDateTo.HasValue == true)
-            //    query = query.Where(o => o.DeliveryDate <= filter.DeliveryDateTo);
+            //    query = query.Where(o => (o.DeliveryDate ?? o.PickupDate) <= filter.DeliveryDateTo);
 
             if (filter?.Search?.SearchTerm.HasValue() == true)
             {
@@ -132,5 +133,86 @@ namespace George.Data
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
             return db;
         }
+
+        /// <summary>Normalize phone for lookup: digits only (strip spaces, dashes).</summary>
+        private static string NormalizePhone(string? phone)
+        {
+            if (string.IsNullOrWhiteSpace(phone)) return string.Empty;
+            return new string(phone.Where(char.IsDigit).ToArray());
+        }
+
+        /// <summary>Get customer profile by phone at site: name, manager note, and stats from order history.</summary>
+        public async Task<CustomerOrderProfile> GetCustomerProfileByPhoneAsync(int siteId, string? phone, CancellationToken cancelToken)
+        {
+            var result = new CustomerOrderProfile();
+            if (siteId <= 0 || string.IsNullOrWhiteSpace(phone))
+                return result;
+
+            var normalized = NormalizePhone(phone);
+            if (normalized.Length < 4)
+                return result;
+
+            var siteOrders = await _dbContext.Orders
+                .AsNoTracking()
+                .Where(o => !o.IsDeleted && o.SiteId == siteId && o.CustomerPhone != null)
+                .OrderByDescending(o => o.CreationTime)
+                .Take(1000)
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+
+            var orders = siteOrders.Where(o => NormalizePhone(o.CustomerPhone) == normalized).ToList();
+            if (orders.Count == 0)
+                return result;
+
+            var last = orders[0];
+            result.Found = true;
+            result.CustomerName = last.CustomerName;
+            result.CustomerPhone = last.CustomerPhone;
+            result.ManagerNote = last.ManagerNote;
+            result.LastOrderDate = (last.DeliveryDate ?? last.PickupDate)?.ToString("yyyy-MM-dd");
+            result.OrderCount = orders.Count;
+            var totals = orders.Where(o => o.Total.HasValue).Select(o => o.Total!.Value).ToList();
+            if (totals.Count > 0)
+            {
+                result.TotalTransactions = totals.Sum();
+                result.AverageOrderTotal = totals.Sum() / totals.Count;
+            }
+            return result;
+        }
+
+        /// <summary>Get last order with items by customer phone at site (for "last purchase" quick add).</summary>
+        public async Task<Order?> GetLastOrderByCustomerPhoneAsync(int siteId, string? phone, CancellationToken cancelToken)
+        {
+            if (siteId <= 0 || string.IsNullOrWhiteSpace(phone)) return null;
+            var normalized = NormalizePhone(phone);
+            if (normalized.Length < 4) return null;
+
+            var siteOrders = await _dbContext.Orders
+                .AsNoTracking()
+                .Where(o => !o.IsDeleted && o.SiteId == siteId && o.CustomerPhone != null)
+                .OrderByDescending(o => o.CreationTime)
+                .Take(500)
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+
+            var lastOrderId = siteOrders.FirstOrDefault(o => NormalizePhone(o.CustomerPhone) == normalized)?.Id;
+            if (lastOrderId == null) return null;
+
+            return await _dbContext.Orders
+                .Include(o => o.OrderItems.OrderBy(i => i.SortOrder))
+                .AsNoTracking()
+                .FirstOrDefaultAsync(o => o.Id == lastOrderId.Value && !o.IsDeleted, cancelToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Internal DTO for customer profile from orders.</summary>
+    public class CustomerOrderProfile
+    {
+        public bool Found { get; set; }
+        public string? CustomerName { get; set; }
+        public string? CustomerPhone { get; set; }
+        public string? ManagerNote { get; set; }
+        public string? LastOrderDate { get; set; }
+        public int OrderCount { get; set; }
+        public decimal? AverageOrderTotal { get; set; }
+        public decimal? TotalTransactions { get; set; }
     }
 }

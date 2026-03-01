@@ -5,7 +5,7 @@ namespace George.Services.Request;
 /// <summary>Sprint 2: Create order request (manual or from ingest).</summary>
 public class CreateOrderReq
 {
-    [Required]
+    /// <summary>Optional. If not set, resolved from SiteId.</summary>
     public int AccountId { get; set; }
     [Required]
     public int SiteId { get; set; }

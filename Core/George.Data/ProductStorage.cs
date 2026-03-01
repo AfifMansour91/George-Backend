@@ -21,7 +21,7 @@ namespace George.Data
         {
             var res = new DataListResult<Product>();
 
-            // Lighter includes for list (options, variants, related/complementary loaded only in GetProductAsync)
+            // Include variants so list responses (e.g. search in New Manual Order) can display variant options
             var query = _dbContext.Products
                 .Include(p => p.Brand)
                 .Include(p => p.Supplier)
@@ -41,6 +41,8 @@ namespace George.Data
                     .ThenInclude(pc => pc.Category)
                 .Include(p => p.ProductImages)
                     .ThenInclude(pi => pi.Media)
+                .Include(p => p.ProductVariants)
+                    .ThenInclude(pv => pv.ProductVariantOptionValues)
                 .AsNoTracking()
                 .Where(p => !p.IsDeleted);
 

@@ -868,6 +868,7 @@ namespace George.Services
                     .Where(pv => !pv.IsDeleted)
                     .Select(pv => new ProductVariantRes
                     {
+                        Id = pv.Id,
                         ImageUrl = pv.ImageUrl,
                         Price = pv.Price,
                         SalePrice = pv.SalePrice,

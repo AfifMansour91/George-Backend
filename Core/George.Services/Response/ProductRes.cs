@@ -8,6 +8,7 @@ namespace George.Services.Response
 
     public class ProductVariantRes
     {
+        public int Id { get; set; }
         public string? ImageUrl { get; set; }
         public Dictionary<string, string>? OptionValues { get; set; }
         public decimal? Price { get; set; }
