@@ -291,7 +291,9 @@ namespace George.Services
                     CustomerChannel = e.NewOrder_CustomerChannel,
                     CustomerMessageShipping = e.NewOrder_CustomerMessageShipping,
                     CustomerMessagePickup = e.NewOrder_CustomerMessagePickup,
-                    CustomerMessageKiosk = e.NewOrder_CustomerMessageKiosk
+                    CustomerMessageKiosk = e.NewOrder_CustomerMessageKiosk,
+                    CustomerSmsOnPhoneOrderEnabled = e.NewOrder_CustomerSmsOnPhoneOrderEnabled,
+                    CustomerMessagePhoneOrder = e.NewOrder_CustomerMessagePhoneOrder
                 },
                 OrderReady = new OrderReadySettingsRes
                 {

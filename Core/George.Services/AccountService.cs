@@ -374,6 +374,8 @@ namespace George.Services
                 NewOrder_CustomerMessageShipping = string.IsNullOrWhiteSpace(n?.CustomerMessageShipping) ? null : n.CustomerMessageShipping,
                 NewOrder_CustomerMessagePickup = string.IsNullOrWhiteSpace(n?.CustomerMessagePickup) ? null : n.CustomerMessagePickup,
                 NewOrder_CustomerMessageKiosk = string.IsNullOrWhiteSpace(n?.CustomerMessageKiosk) ? null : n.CustomerMessageKiosk,
+                NewOrder_CustomerSmsOnPhoneOrderEnabled = n?.CustomerSmsOnPhoneOrderEnabled ?? false,
+                NewOrder_CustomerMessagePhoneOrder = string.IsNullOrWhiteSpace(n?.CustomerMessagePhoneOrder) ? null : n.CustomerMessagePhoneOrder,
                 OrderReady_ManagerNotifyEnabled = r?.ManagerNotifyEnabled ?? false,
                 OrderReady_CustomerChannel = string.IsNullOrWhiteSpace(r?.CustomerChannel) ? null : r.CustomerChannel,
                 OrderReady_CustomerMessageShipping = string.IsNullOrWhiteSpace(r?.CustomerMessageShipping) ? null : r.CustomerMessageShipping,

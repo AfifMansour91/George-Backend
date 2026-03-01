@@ -51,6 +51,8 @@ public partial class AccountNotificationSettings
     public string? NewOrder_CustomerMessageShipping { get; set; }
     public string? NewOrder_CustomerMessagePickup { get; set; }
     public string? NewOrder_CustomerMessageKiosk { get; set; }
+    public bool NewOrder_CustomerSmsOnPhoneOrderEnabled { get; set; }
+    public string? NewOrder_CustomerMessagePhoneOrder { get; set; }
 
     // ----- Order ready -----
     public bool OrderReady_ManagerNotifyEnabled { get; set; }

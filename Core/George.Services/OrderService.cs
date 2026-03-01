@@ -2,6 +2,7 @@ using AutoMapper;
 using George.Common;
 using George.Data;
 using George.DB;
+using George.Providers;
 using George.Services.Request;
 using George.Services.Response;
 using Microsoft.Extensions.Logging;
@@ -12,17 +13,23 @@ namespace George.Services
     {
         private readonly OrderStorage _orderStorage;
         private readonly SiteStorage _siteStorage;
+        private readonly AccountStorage _accountStorage;
+        private readonly SmsProvider _smsProvider;
 
         public OrderService(
             ILogger<OrderService> logger,
             IMapper mapper,
             CacheManager cache,
             OrderStorage orderStorage,
-            SiteStorage siteStorage)
+            SiteStorage siteStorage,
+            AccountStorage accountStorage,
+            SmsProvider smsProvider)
             : base(logger, mapper, cache)
         {
             _orderStorage = orderStorage;
             _siteStorage = siteStorage;
+            _accountStorage = accountStorage;
+            _smsProvider = smsProvider;
         }
 
         public async Task<IApiResponse<ApiListResponse<OrderRes>>> GetOrdersAsync(
@@ -87,8 +94,73 @@ namespace George.Services
             }
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken);
             var loaded = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken);
+            await TrySendNewOrderCustomerSmsAsync(loaded!, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(loaded);
             return response;
+        }
+
+        /// <summary>Sprint 2: Send customer SMS for new order (Kiosk or Phone) using notification settings. Does not fail the request on SMS errors.</summary>
+        private async Task TrySendNewOrderCustomerSmsAsync(Order order, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(order.CustomerPhone))
+                return;
+            var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken).ConfigureAwait(false);
+            var settings = account?.NotificationSettings;
+            if (settings == null)
+                return;
+
+            string? template = null;
+            var source = (order.Source ?? "").Trim();
+            if (string.Equals(source, "Kiosk", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.Equals(settings.NewOrder_CustomerChannel, "sms", StringComparison.OrdinalIgnoreCase))
+                    return;
+                template = settings.NewOrder_CustomerMessageKiosk;
+            }
+            else if (string.Equals(source, "Phone", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!settings.NewOrder_CustomerSmsOnPhoneOrderEnabled)
+                    return;
+                template = settings.NewOrder_CustomerMessagePhoneOrder;
+            }
+            else
+                return;
+
+            if (string.IsNullOrWhiteSpace(template))
+                return;
+
+            var body = ReplaceOrderPlaceholders(template, order);
+            try
+            {
+                if (!SmsProvider.IsInitialized)
+                {
+                    _logger.LogWarning("SMS provider not initialized; skipping new-order customer SMS.");
+                    return;
+                }
+                var sent = await _smsProvider.SendTextAsync(order.CustomerPhone, body, cancelToken).ConfigureAwait(false);
+                if (!sent)
+                    _logger.LogWarning("New-order customer SMS returned false for order {OrderId}.", order.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send new-order customer SMS for order {OrderId}; order creation succeeded.", order.Id);
+            }
+        }
+
+        private static string ReplaceOrderPlaceholders(string template, Order order)
+        {
+            var orderDate = order.CreationTime;
+            var deliveryDate = order.DeliveryDate;
+            var pickupDate = order.PickupDate;
+            return template
+                .Replace("[customer_name]", order.CustomerName ?? "")
+                .Replace("[order_number]", order.OrderNumber ?? "")
+                .Replace("[order_date]", orderDate.ToString("dd/MM/yyyy"))
+                .Replace("[order_total]", (order.Total ?? 0).ToString("N2"))
+                .Replace("[delivery_date]", deliveryDate.HasValue ? deliveryDate.Value.ToString("dd/MM/yyyy") : "")
+                .Replace("[delivery_time]", order.DeliveryTime ?? "")
+                .Replace("[pickup_date]", pickupDate.HasValue ? pickupDate.Value.ToString("dd/MM/yyyy") : "")
+                .Replace("[pickup_time]", order.PickupTime ?? "");
         }
 
         public async Task<IApiResponse<OrderRes>> UpdateOrderAsync(int orderId, UpdateOrderReq req, CancellationToken cancelToken = default)

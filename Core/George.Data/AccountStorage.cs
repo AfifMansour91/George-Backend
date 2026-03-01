@@ -214,6 +214,8 @@ namespace George.Data
                 existing.NewOrder_CustomerMessageShipping = settings.NewOrder_CustomerMessageShipping;
                 existing.NewOrder_CustomerMessagePickup = settings.NewOrder_CustomerMessagePickup;
                 existing.NewOrder_CustomerMessageKiosk = settings.NewOrder_CustomerMessageKiosk;
+                existing.NewOrder_CustomerSmsOnPhoneOrderEnabled = settings.NewOrder_CustomerSmsOnPhoneOrderEnabled;
+                existing.NewOrder_CustomerMessagePhoneOrder = settings.NewOrder_CustomerMessagePhoneOrder;
                 existing.OrderReady_ManagerNotifyEnabled = settings.OrderReady_ManagerNotifyEnabled;
                 existing.OrderReady_CustomerChannel = settings.OrderReady_CustomerChannel;
                 existing.OrderReady_CustomerMessageShipping = settings.OrderReady_CustomerMessageShipping;

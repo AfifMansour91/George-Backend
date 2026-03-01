@@ -282,6 +282,8 @@ namespace George.Common.Request
         public string? CustomerMessageShipping { get; set; }
         public string? CustomerMessagePickup { get; set; }
         public string? CustomerMessageKiosk { get; set; }
+        public bool? CustomerSmsOnPhoneOrderEnabled { get; set; }
+        public string? CustomerMessagePhoneOrder { get; set; }
     }
 
     public class OrderReadySettingsReq
