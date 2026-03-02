@@ -13,6 +13,8 @@ public class OrderItemRes
     public decimal? UnitWeightGrams { get; set; }
     public decimal? PricePerUnit { get; set; }
     public decimal? TotalPrice { get; set; }
+    /// <summary>Picked quantity/weight from picking flow; null when not yet picked.</summary>
+    public decimal? PickedQuantity { get; set; }
     public string? Notes { get; set; }
     public int SortOrder { get; set; }
 }

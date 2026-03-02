@@ -226,5 +226,55 @@ namespace George.Services
                 response.Data = order.OrderItems.Select(i => _mapper.Map<OrderItemRes>(i)).ToList();
             return response;
         }
+
+        /// <summary>Add items to an existing order (picking "הוסף פריט"). Body: { "items": [ CreateOrderItemReq, ... ] }. Returns updated order.</summary>
+        public async Task<IApiResponse<OrderRes>> AddItemsAsync(int orderId, List<CreateOrderItemReq>? items, CancellationToken cancelToken = default)
+        {
+            var response = new ApiResponse<OrderRes>();
+            if (items == null || items.Count == 0)
+                return CreateResponse(response, StatusCode.InvalidRequest, "At least one order item is required.");
+            if (items.Any(i => (i.ProductId ?? 0) <= 0))
+                return CreateResponse(response, StatusCode.InvalidRequest, "Each order item must have a valid ProductId.");
+
+            var order = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
+            if (order == null)
+                return CreateResponse(response, StatusCode.ItemNotFound, "Order not found.");
+            if (string.Equals(order.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+                return CreateResponse(response, StatusCode.InvalidRequest, "Cannot add items to a cancelled order.");
+
+            var newOrderItems = items.Select(req => _mapper.Map<OrderItem>(req)).ToList();
+            var updated = await _orderStorage.AddOrderItemsAsync(orderId, newOrderItems, cancelToken);
+            if (updated == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
+            var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
+            response.Data = _mapper.Map<OrderRes>(loaded);
+            return response;
+        }
+
+        /// <summary>Save picking state (שמור וצא). Body: { "items": [ { "orderItemId", "pickedQuantity", "totalPrice" }, ... ] }.</summary>
+        public async Task<IApiResponse<OrderRes>> UpdatePickingAsync(int orderId, UpdatePickingReq? req, CancellationToken cancelToken = default)
+        {
+            var response = new ApiResponse<OrderRes>();
+            if (req?.Items == null || req.Items.Count == 0)
+            {
+                var order = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
+                if (order == null) return CreateResponse(response, StatusCode.ItemNotFound);
+                response.Data = _mapper.Map<OrderRes>(order);
+                return response;
+            }
+            var orderCheck = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
+            if (orderCheck == null) return CreateResponse(response, StatusCode.ItemNotFound);
+            if (string.Equals(orderCheck.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+                return CreateResponse(response, StatusCode.InvalidRequest, "Cannot update picking for a cancelled order.");
+            var updates = req.Items
+                .Where(i => i.OrderItemId > 0)
+                .Select(i => (i.OrderItemId, i.PickedQuantity, i.TotalPrice))
+                .ToList();
+            var updated = await _orderStorage.UpdatePickingAsync(orderId, updates, cancelToken);
+            if (updated == null) return CreateResponse(response, StatusCode.ItemNotFound);
+            var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
+            response.Data = _mapper.Map<OrderRes>(loaded);
+            return response;
+        }
     }
 }

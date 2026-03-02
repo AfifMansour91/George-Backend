@@ -39,6 +39,10 @@ public partial class OrderItem
     [Column(TypeName = "decimal(18,2)")]
     public decimal? TotalPrice { get; set; }
 
+    /// <summary>Picked quantity/weight (kg or units) set during picking; null when not yet picked.</summary>
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal? PickedQuantity { get; set; }
+
     [StringLength(500)]
     public string? Notes { get; set; }
 

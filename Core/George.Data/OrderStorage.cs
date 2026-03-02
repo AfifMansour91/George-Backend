@@ -120,6 +120,47 @@ namespace George.Data
             return db;
         }
 
+        /// <summary>Add line items to an existing order (e.g. from picking "הוסף פריט").</summary>
+        public async Task<Order?> AddOrderItemsAsync(int orderId, List<OrderItem> newItems, CancellationToken cancelToken)
+        {
+            if (newItems == null || newItems.Count == 0) return null;
+            var db = await _dbContext.Orders
+                .Include(o => o.OrderItems)
+                .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
+            if (db == null) return null;
+            var maxSort = (db.OrderItems?.Count ?? 0) > 0 ? db.OrderItems!.Max(i => i.SortOrder) : -1;
+            for (var i = 0; i < newItems.Count; i++)
+            {
+                var item = newItems[i];
+                item.OrderId = orderId;
+                item.SortOrder = maxSort + 1 + i;
+                db.OrderItems.Add(item);
+            }
+            db.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            return db;
+        }
+
+        /// <summary>Update picked quantity (and optional line total) for order items (שמור וצא).</summary>
+        public async Task<Order?> UpdatePickingAsync(int orderId, List<(int OrderItemId, decimal? PickedQuantity, decimal? TotalPrice)> updates, CancellationToken cancelToken)
+        {
+            if (updates == null || updates.Count == 0) return null;
+            var db = await _dbContext.Orders
+                .Include(o => o.OrderItems)
+                .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
+            if (db == null) return null;
+            var itemMap = db.OrderItems?.ToDictionary(i => i.Id) ?? new Dictionary<int, OrderItem>();
+            foreach (var (orderItemId, pickedQty, totalPrice) in updates)
+            {
+                if (!itemMap.TryGetValue(orderItemId, out var item)) continue;
+                if (pickedQty.HasValue) item.PickedQuantity = pickedQty.Value;
+                if (totalPrice.HasValue) item.TotalPrice = totalPrice.Value;
+            }
+            db.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            return db;
+        }
+
         /// <summary>Set status to Cancelled and optionally set IsDeleted.</summary>
         public async Task<Order?> CancelOrderAsync(int orderId, int? updateUserId, bool softDelete, CancellationToken cancelToken)
         {

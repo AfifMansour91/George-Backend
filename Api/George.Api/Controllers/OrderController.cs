@@ -56,6 +56,22 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _orderSvc.CancelOrderAsync(orderId, softDelete, cancelToken));
         }
 
+        /// <summary>Add items to an existing order (picking "הוסף פריט"). Body: { "items": [ CreateOrderItemReq, ... ] }.</summary>
+        [HttpPost("{orderId:int}/Items")]
+        [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> AddItemsAsync([FromRoute] int orderId, [FromBody] AddOrderItemsReq? req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _orderSvc.AddItemsAsync(orderId, req?.Items ?? new(), cancelToken));
+        }
+
+        /// <summary>Save picking state (שמור וצא). Body: { "items": [ { "orderItemId", "pickedQuantity", "totalPrice" }, ... ] }.</summary>
+        [HttpPut("{orderId:int}/Picking")]
+        [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> UpdatePickingAsync([FromRoute] int orderId, [FromBody] UpdatePickingReq? req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _orderSvc.UpdatePickingAsync(orderId, req, cancelToken));
+        }
+
         /// <summary>Get customer profile by phone at site (for manual/phone order: name, manager note, last order date, order count, avg and total).</summary>
         [HttpGet("CustomerByPhone")]
         [ProducesResponseType(typeof(IApiResponse<CustomerProfileRes>), (int)HttpStatusCode.OK)]

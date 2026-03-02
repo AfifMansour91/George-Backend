@@ -46,6 +46,25 @@ public class CreateOrderItemReq
     public int SortOrder { get; set; }
 }
 
+/// <summary>Sprint 2: Add items to existing order (picking "הוסף פריט"). POST Order/{orderId}/Items.</summary>
+public class AddOrderItemsReq
+{
+    public List<CreateOrderItemReq> Items { get; set; } = new();
+}
+
+/// <summary>Sprint 2: Save picking state (שמור וצא). PUT Order/{id}/Picking.</summary>
+public class UpdatePickingReq
+{
+    public List<UpdatePickingItemReq> Items { get; set; } = new();
+}
+
+public class UpdatePickingItemReq
+{
+    public int OrderItemId { get; set; }
+    public decimal? PickedQuantity { get; set; }
+    public decimal? TotalPrice { get; set; }
+}
+
 /// <summary>Sprint 2: Update order (status, notes, delivery).</summary>
 public class UpdateOrderReq
 {
