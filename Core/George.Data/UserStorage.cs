@@ -28,7 +28,7 @@ namespace George.Data
 			DataListResult<User> res = new DataListResult<User>();
 
 			// Build the query.
-			var query = _dbContext.Users.Include(u => u.Sites).AsNoTracking();
+			var query = _dbContext.User.Include(u => u.Site).AsNoTracking();
 
 			// Filter
 			if (filter.StatusId.HasValue)
@@ -56,7 +56,7 @@ namespace George.Data
 			{
 				// Check for user dependencies.
 				//List<int> userIds = res.Items.Select(a => a.Id).ToList();
-				//var usersDependencies = await _dbContext.Users.AsNoTracking()
+				//var usersDependencies = await _dbContext.User.AsNoTracking()
 				//		.Where(a => userIds.Contains(a.Id))
 				//		.Select(a => new {
 				//			Id = a.Id
@@ -80,7 +80,7 @@ namespace George.Data
 
 		//public async Task<User?> GetUserAsync(int id, CancellationToken cancelToken = default)
 		//{
-		//	return await _dbContext.Users.AsNoTracking()
+		//	return await _dbContext.User.AsNoTracking()
 		//					.Include(a => a.SiteUsers)
 		//					.Include(a => a.AccountUsers).ThenInclude(b => b.Account)
 		//					.Include(a => a.UserQualifications)
@@ -89,15 +89,15 @@ namespace George.Data
 
 		public async Task<User?> GetUserAsync(int id, CancellationToken cancelToken = default)
 		{
-			return await _dbContext.Users.AsNoTracking()
-				.Include(u => u.Sites)
+			return await _dbContext.User.AsNoTracking()
+				.Include(u => u.Site)
 				.Where(a => a.Id == id)
 				.FirstOrDefaultAsync(cancelToken);
 		}
 
 		public async Task<User?> GetThinUserAsync(int id, CancellationToken cancelToken = default)
 		{
-			return await _dbContext.Users.AsNoTracking()
+			return await _dbContext.User.AsNoTracking()
 							.FirstOrDefaultAsync(a => a.Id == id, cancelToken);
 		}
 
@@ -109,13 +109,13 @@ namespace George.Data
 				return null;
 
 			// Get the data from the DB.
-			return await _dbContext.Users.AsNoTracking()
+			return await _dbContext.User.AsNoTracking()
 					.FirstOrDefaultAsync(a => a.Email == email, cancelToken).ConfigureAwait(false);
         }
 
         public async Task<User?> GetUserByPhoneAsync(string phone, CancellationToken cancelToken = default)
         {
-            return await _dbContext.Users.AsNoTracking()
+            return await _dbContext.User.AsNoTracking()
                             .FirstOrDefaultAsync(a => a.Phone == phone, cancelToken);
         }
 
@@ -126,7 +126,7 @@ namespace George.Data
             string otp = random.Next(100000, 999999).ToString();
 
             // Get the user from the DB
-            User? dbModel = await _dbContext.Users
+            User? dbModel = await _dbContext.User
                                     .Where(a => a.Id == id)
                                     .FirstOrDefaultAsync(cancelToken);
             if (dbModel == null)
@@ -150,7 +150,7 @@ namespace George.Data
             if (string.IsNullOrWhiteSpace(otp))
                 return false;
 
-            User? dbModel = await _dbContext.Users
+            User? dbModel = await _dbContext.User
                 .Where(a => a.Id == id)
                 .FirstOrDefaultAsync(cancelToken);
             if (dbModel == null)
@@ -168,14 +168,14 @@ namespace George.Data
 			if (!email.HasValue())
 				return false;
 
-			return await _dbContext.Users.AsNoTracking()
+			return await _dbContext.User.AsNoTracking()
 							.AnyAsync(a => a.Email == email, cancelToken);
 		}
 
 		public async Task<User?> GetUserByCredentialsAsync(string email, string password, CancellationToken cancelToken = default)
 		{
 			// Get user by email
-			var user = await _dbContext.Users.AsNoTracking()
+			var user = await _dbContext.User.AsNoTracking()
 							.FirstOrDefaultAsync(a => a.Email == email, cancelToken);
 			
 			if (user == null || string.IsNullOrWhiteSpace(user.Password))
@@ -201,7 +201,7 @@ namespace George.Data
 
 		public async Task<string?> GetUserNameAsync(int id, CancellationToken cancelToken = default)
 		{
-			return await _dbContext.Users.AsNoTracking()
+			return await _dbContext.User.AsNoTracking()
 							.Where(a => a.Id == id)
 							.Select(a => a.FullName)
 							.FirstOrDefaultAsync(cancelToken);
@@ -209,7 +209,7 @@ namespace George.Data
 
 		public async Task<Common.UserStatus?> GetUserStatusAsync(int id, CancellationToken cancelToken = default)
 		{
-			return await _dbContext.Users.AsNoTracking()
+			return await _dbContext.User.AsNoTracking()
 							.Where(a => a.Id == id)
 							.Select(a => (Common.UserStatus?)a.StatusId)
 							.FirstOrDefaultAsync(cancelToken);
@@ -218,7 +218,7 @@ namespace George.Data
 		public async Task<User?> UpdateUserProfileAsync(User model, CancellationToken cancelToken = default)
 		{
 			// Get the data from the DB.
-			User? dbModel = await _dbContext.Users
+			User? dbModel = await _dbContext.User
 										.Where(a => a.Id == model.Id)
 										.FirstOrDefaultAsync(cancelToken);
 			if (dbModel != null)
@@ -245,7 +245,7 @@ namespace George.Data
 		public async Task<bool> IsEmailAvailableAsync(string email, CancellationToken cancelToken = default)
 		{
 			// Get the data from the DB.
-			bool isExists = await _dbContext.Users.AsNoTracking()
+			bool isExists = await _dbContext.User.AsNoTracking()
 							.AnyAsync(a => a.Email == email, cancelToken).ConfigureAwait(false);
 
 			return !isExists;
@@ -254,7 +254,7 @@ namespace George.Data
 		public async Task<User?> RemoveRefreshTokenAsync(int userId, CancellationToken cancelToken = default)
 		{
 			// Get the data from the DB.
-			var dbModel = await _dbContext.Users
+			var dbModel = await _dbContext.User
 									.Where(a => a.Id == userId)
 									.FirstOrDefaultAsync(cancelToken);
 			if (dbModel != null)
@@ -274,7 +274,7 @@ namespace George.Data
 		public async Task UpdateUserLockoutFailCountAsync(int id, int lockoutFailCount, DateTime? lockoutExpiration = null, CancellationToken cancelToken = default)
 		{
 			// Check if the model is already in the local cache (no DB access).
-			var model = _dbContext.Users.Local.FirstOrDefault(a => a.Id == id);
+			var model = _dbContext.User.Local.FirstOrDefault(a => a.Id == id);
 			if (model == null)
 				model = new User() { Id = id, LockoutFailCount = lockoutFailCount, LockoutExpiration = lockoutExpiration };
 			else
@@ -298,7 +298,7 @@ namespace George.Data
 		public async Task<User?> UpdateUserLoginAsync(int id, string refreshToken, DateTime refreshTokenExpiration, bool isSetUserEmailOtpToValid = false, Common.UserStatus? statusId = null, CancellationToken cancelToken = default)
 		{
 			// Get the data from the DB.
-			User? dbModel = await _dbContext.Users
+			User? dbModel = await _dbContext.User
 									.Where(a => a.Id == id)
 									.FirstOrDefaultAsync(cancelToken).ConfigureAwait(false);
 			if (dbModel != null)
@@ -337,12 +337,12 @@ namespace George.Data
 		public async Task<User?> DeleteUserAsync(int id, CancellationToken cancelToken = default)
 		{
 			// Get the data from the DB.
-			var dbModel = await _dbContext.Users
+			var dbModel = await _dbContext.User
 								.FirstOrDefaultAsync(a => a.Id == id, cancelToken).ConfigureAwait(false);
 			if (dbModel != null)
 			{
 				// Delete the entity.
-				_dbContext.Users.Remove(dbModel);
+				_dbContext.User.Remove(dbModel);
 
 				// Save to the DB.
 				await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
@@ -354,7 +354,7 @@ namespace George.Data
 		public async Task<User?> BlockUserAsync(int id, bool isBlocked, CancellationToken cancelToken = default)
 		{
 			// Get the data from the DB.
-			var dbModel = await _dbContext.Users
+			var dbModel = await _dbContext.User
 								.FirstOrDefaultAsync(a => a.Id == id, cancelToken).ConfigureAwait(false);
 			if (dbModel != null)
 			{
@@ -407,18 +407,18 @@ namespace George.Data
 			}
 
 			// Add to DB
-			_dbContext.Users.Add(user);
+			_dbContext.User.Add(user);
 			await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
 
 			// Add site associations for site_admin role
 			if (siteIds != null && siteIds.Any())
 			{
-				var sites = await _dbContext.Sites
+				var sites = await _dbContext.Site
 					.Where(s => siteIds.Contains(s.Id))
 					.ToListAsync(cancelToken);
 				foreach (var site in sites)
 				{
-					user.Sites.Add(site);
+					user.Site.Add(site);
 				}
 				await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
 			}
@@ -434,8 +434,8 @@ namespace George.Data
 		public async Task<User?> UpdateUserAsync(User user, List<int>? siteIds, CancellationToken cancelToken = default)
 		{
 			// Get the data from the DB (include Sites for site_admin updates)
-			User? dbModel = await _dbContext.Users
-									.Include(u => u.Sites)
+			User? dbModel = await _dbContext.User
+									.Include(u => u.Site)
 									.Where(a => a.Id == user.Id)
 									.FirstOrDefaultAsync(cancelToken);
 			if (dbModel == null)
@@ -500,15 +500,15 @@ namespace George.Data
 			// Update site associations for site_admin role
 			if (siteIds != null)
 			{
-				dbModel.Sites.Clear();
+				dbModel.Site.Clear();
 				if (siteIds.Any())
 				{
-					var sites = await _dbContext.Sites
+					var sites = await _dbContext.Site
 						.Where(s => siteIds.Contains(s.Id))
 						.ToListAsync(cancelToken);
 					foreach (var site in sites)
 					{
-						dbModel.Sites.Add(site);
+						dbModel.Site.Add(site);
 					}
 				}
 			}
@@ -525,7 +525,7 @@ namespace George.Data
 		public async Task<User?> UpdateUserPasswordAsync(int userId, string passwordHash, CancellationToken cancelToken = default)
 		{
 			// Get the data from the DB.
-			User? dbModel = await _dbContext.Users
+			User? dbModel = await _dbContext.User
 									.Where(a => a.Id == userId)
 									.FirstOrDefaultAsync(cancelToken);
 			if (dbModel == null)

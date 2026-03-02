@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("Attribute")]
 public partial class Attribute
 {
     [Key]
@@ -34,17 +33,17 @@ public partial class Attribute
     public int? WooCommerceId { get; set; }
 
     [InverseProperty("Attribute")]
-    public virtual ICollection<AttributeValue> AttributeValues { get; set; } = new List<AttributeValue>();
+    public virtual ICollection<AttributeValue> AttributeValue { get; set; } = new List<AttributeValue>();
 
     [ForeignKey("CreationUserId")]
-    [InverseProperty("AttributeCreationUsers")]
+    [InverseProperty("AttributeCreationUser")]
     public virtual User? CreationUser { get; set; }
 
     [ForeignKey("SiteId")]
-    [InverseProperty("Attributes")]
+    [InverseProperty("Attribute")]
     public virtual Site Site { get; set; } = null!;
 
     [ForeignKey("UpdateUserId")]
-    [InverseProperty("AttributeUpdateUsers")]
+    [InverseProperty("AttributeUpdateUser")]
     public virtual User? UpdateUser { get; set; }
 }

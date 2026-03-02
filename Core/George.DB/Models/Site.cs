@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("Site")]
 public partial class Site
 {
     [Key]
@@ -66,63 +65,82 @@ public partial class Site
 
     public bool? WooCommerceEnabled { get; set; }
 
-    // Shop settings (Sprint 2)
     public int? WeightTolerancePercent { get; set; }
+
     public bool? DepreciationEnabled { get; set; }
+
     [StringLength(200)]
     public string? DepreciationPercentagesJson { get; set; }
+
     public int? PrepTimeMinutes { get; set; }
-    [Column(TypeName = "decimal(18,2)")]
+
+    [Column(TypeName = "decimal(18, 2)")]
     public decimal? ShippingCost { get; set; }
-    [Column(TypeName = "decimal(18,2)")]
+
+    [Column(TypeName = "decimal(18, 2)")]
     public decimal? FreeShippingAbove { get; set; }
+
     public bool? AutoPrintEnabled { get; set; }
+
     public bool? PrintNewOrderImmediate { get; set; }
+
     public bool? PrintMovedToTreatment { get; set; }
+
     public bool? PrintFutureImmediate { get; set; }
+
     public bool? PrintFutureAtTimeEnabled { get; set; }
+
     [StringLength(10)]
     public string? PrintFutureAtTime { get; set; }
 
     [ForeignKey("AccountId")]
-    [InverseProperty("Sites")]
+    [InverseProperty("Site")]
     public virtual Account Account { get; set; } = null!;
 
     [InverseProperty("Site")]
     public virtual ICollection<AccountMedia> AccountMedia { get; set; } = new List<AccountMedia>();
 
     [InverseProperty("Site")]
-    public virtual ICollection<Attribute> Attributes { get; set; } = new List<Attribute>();
+    public virtual ICollection<AccountWizardStepData> AccountWizardStepData { get; set; } = new List<AccountWizardStepData>();
+
+    [InverseProperty("Site")]
+    public virtual ICollection<Attribute> Attribute { get; set; } = new List<Attribute>();
 
     [ForeignKey("CreationUserId")]
-    [InverseProperty("SiteCreationUsers")]
+    [InverseProperty("SiteCreationUser")]
     public virtual User? CreationUser { get; set; }
 
+    [InverseProperty("Site")]
+    public virtual ICollection<Order> Order { get; set; } = new List<Order>();
+
+    [InverseProperty("Site")]
+    public virtual ICollection<SiteOrderReceptionClosed> SiteOrderReceptionClosed { get; set; } = new List<SiteOrderReceptionClosed>();
+
     [ForeignKey("UpdateUserId")]
-    [InverseProperty("SiteUpdateUsers")]
+    [InverseProperty("SiteUpdateUser")]
     public virtual User? UpdateUser { get; set; }
 
     [ForeignKey("SiteId")]
-    [InverseProperty("Sites")]
-    public virtual ICollection<BusinessType> BusinessTypes { get; set; } = new List<BusinessType>();
+    [InverseProperty("Site")]
+    public virtual ICollection<BusinessType> BusinessType { get; set; } = new List<BusinessType>();
 
     [ForeignKey("SiteId")]
-    [InverseProperty("Sites")]
-    public virtual ICollection<Category> Categories { get; set; } = new List<Category>();
+    [InverseProperty("Site")]
+    public virtual ICollection<Category> Category { get; set; } = new List<Category>();
 
     [ForeignKey("SiteId")]
-    [InverseProperty("Sites")]
-    public virtual ICollection<Product> Products { get; set; } = new List<Product>();
+    [InverseProperty("Site")]
+    public virtual ICollection<Product> Product { get; set; } = new List<Product>();
 
     [ForeignKey("SiteId")]
-    [InverseProperty("Sites")]
-    public virtual ICollection<TemplateAttribute> TemplateAttributes { get; set; } = new List<TemplateAttribute>();
+    [InverseProperty("Site")]
+    public virtual ICollection<TemplateAttribute> TemplateAttribute { get; set; } = new List<TemplateAttribute>();
 
     [ForeignKey("SiteId")]
-    [InverseProperty("Sites")]
-    public virtual ICollection<TemplateProduct> TemplateProducts { get; set; } = new List<TemplateProduct>();
+    [InverseProperty("Site")]
+    public virtual ICollection<TemplateProduct> TemplateProduct { get; set; } = new List<TemplateProduct>();
 
     [ForeignKey("SiteId")]
-    [InverseProperty("Sites")]
-    public virtual ICollection<User> Users { get; set; } = new List<User>();
+    [InverseProperty("Site")]
+    public virtual ICollection<User> User { get; set; } = new List<User>();
 }

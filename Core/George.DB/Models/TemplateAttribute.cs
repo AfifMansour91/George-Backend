@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("TemplateAttribute")]
 public partial class TemplateAttribute
 {
     [Key]
@@ -30,17 +29,17 @@ public partial class TemplateAttribute
     public string Name { get; set; } = null!;
 
     [ForeignKey("CreationUserId")]
-    [InverseProperty("TemplateAttributeCreationUsers")]
+    [InverseProperty("TemplateAttributeCreationUser")]
     public virtual User? CreationUser { get; set; }
 
     [InverseProperty("TemplateAttribute")]
-    public virtual ICollection<TemplateAttributeValue> TemplateAttributeValues { get; set; } = new List<TemplateAttributeValue>();
+    public virtual ICollection<TemplateAttributeValue> TemplateAttributeValue { get; set; } = new List<TemplateAttributeValue>();
 
     [ForeignKey("UpdateUserId")]
-    [InverseProperty("TemplateAttributeUpdateUsers")]
+    [InverseProperty("TemplateAttributeUpdateUser")]
     public virtual User? UpdateUser { get; set; }
 
     [ForeignKey("TemplateAttributeId")]
-    [InverseProperty("TemplateAttributes")]
-    public virtual ICollection<Site> Sites { get; set; } = new List<Site>();
+    [InverseProperty("TemplateAttribute")]
+    public virtual ICollection<Site> Site { get; set; } = new List<Site>();
 }

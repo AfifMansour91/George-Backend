@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("GlobalCategory")]
 public partial class GlobalCategory
 {
     [Key]
@@ -45,10 +44,10 @@ public partial class GlobalCategory
     public string? IconUrl { get; set; }
 
     [InverseProperty("SourceGlobalCategory")]
-    public virtual ICollection<Category> Categories { get; set; } = new List<Category>();
+    public virtual ICollection<Category> Category { get; set; } = new List<Category>();
 
     [ForeignKey("CreationUserId")]
-    [InverseProperty("GlobalCategoryCreationUsers")]
+    [InverseProperty("GlobalCategoryCreationUser")]
     public virtual User? CreationUser { get; set; }
 
     [InverseProperty("ParentGlobalCategory")]
@@ -59,13 +58,13 @@ public partial class GlobalCategory
     public virtual GlobalCategory? ParentGlobalCategory { get; set; }
 
     [InverseProperty("GlobalCategory")]
-    public virtual ICollection<TemplateProductCategory> TemplateProductCategories { get; set; } = new List<TemplateProductCategory>();
+    public virtual ICollection<TemplateProductCategory> TemplateProductCategory { get; set; } = new List<TemplateProductCategory>();
 
     [ForeignKey("UpdateUserId")]
-    [InverseProperty("GlobalCategoryUpdateUsers")]
+    [InverseProperty("GlobalCategoryUpdateUser")]
     public virtual User? UpdateUser { get; set; }
 
     [ForeignKey("GlobalCategoryId")]
-    [InverseProperty("GlobalCategories")]
-    public virtual ICollection<BusinessType> BusinessTypes { get; set; } = new List<BusinessType>();
+    [InverseProperty("GlobalCategory")]
+    public virtual ICollection<BusinessType> BusinessType { get; set; } = new List<BusinessType>();
 }

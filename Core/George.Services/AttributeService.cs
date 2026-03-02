@@ -139,9 +139,9 @@ namespace George.Services
             };
 
             // Map attribute values
-            if (attribute.AttributeValues != null && attribute.AttributeValues.Any())
+            if (attribute.AttributeValue != null && attribute.AttributeValue.Any())
             {
-                res.Values = attribute.AttributeValues.Select(av => av.Value).ToList();
+                res.Values = attribute.AttributeValue.Select(av => av.Value).ToList();
             }
 
             return res;

@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("ProductOption")]
 public partial class ProductOption
 {
     [Key]
@@ -20,9 +19,9 @@ public partial class ProductOption
     public bool IsDeleted { get; set; }
 
     [ForeignKey("ProductId")]
-    [InverseProperty("ProductOptions")]
+    [InverseProperty("ProductOption")]
     public virtual Product Product { get; set; } = null!;
 
     [InverseProperty("ProductOption")]
-    public virtual ICollection<ProductOptionValue> ProductOptionValues { get; set; } = new List<ProductOptionValue>();
+    public virtual ICollection<ProductOptionValue> ProductOptionValue { get; set; } = new List<ProductOptionValue>();
 }

@@ -21,11 +21,11 @@ namespace George.Data
         {
             var res = new DataListResult<User>();
 
-            var query = _dbContext.Users
+            var query = _dbContext.User
                 .Include(u => u.Role)
                 .Include(u => u.Status)
                 .Include(u => u.Account)
-                .Include(u => u.Sites)
+                .Include(u => u.Site)
                 .AsNoTracking();
 
             // Apply filters
@@ -38,7 +38,7 @@ namespace George.Data
 
                 if (filter.SiteId.HasValue)
                 {
-                    query = query.Where(u => u.Sites.Any(s => s.Id == filter.SiteId.Value));
+                    query = query.Where(u => u.Site.Any(s => s.Id == filter.SiteId.Value));
                 }
 
                 if (filter.ClientRole.HasValue())
@@ -86,11 +86,11 @@ namespace George.Data
 
         public async Task<User?> GetClientAsync(int clientId, CancellationToken cancelToken)
         {
-            return await _dbContext.Users
+            return await _dbContext.User
                 .Include(u => u.Role)
                 .Include(u => u.Status)
                 .Include(u => u.Account)
-                .Include(u => u.Sites)
+                .Include(u => u.Site)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(u => u.Id == clientId && !u.IsDeleted, cancelToken);
         }
@@ -100,18 +100,18 @@ namespace George.Data
             List<int>? siteIds,
             CancellationToken cancelToken)
         {
-            _dbContext.Users.Add(user);
+            _dbContext.User.Add(user);
 
             // Add sites if provided
             if (siteIds != null && siteIds.Any())
             {
-                var sites = await _dbContext.Sites
+                var sites = await _dbContext.Site
                     .Where(s => siteIds.Contains(s.Id))
                     .ToListAsync(cancelToken);
                 
                 foreach (var site in sites)
                 {
-                    user.Sites.Add(site);
+                    user.Site.Add(site);
                 }
             }
 
@@ -124,8 +124,8 @@ namespace George.Data
             List<int>? siteIds,
             CancellationToken cancelToken)
         {
-            var dbUser = await _dbContext.Users
-                .Include(u => u.Sites)
+            var dbUser = await _dbContext.User
+                .Include(u => u.Site)
                 .FirstOrDefaultAsync(u => u.Id == updated.Id && !u.IsDeleted, cancelToken);
 
             if (dbUser == null) return null;
@@ -147,16 +147,16 @@ namespace George.Data
             // Update sites
             if (siteIds != null)
             {
-                dbUser.Sites.Clear();
+                dbUser.Site.Clear();
                 if (siteIds.Any())
                 {
-                    var sites = await _dbContext.Sites
+                    var sites = await _dbContext.Site
                         .Where(s => siteIds.Contains(s.Id))
                         .ToListAsync(cancelToken);
                     
                     foreach (var site in sites)
                     {
-                        dbUser.Sites.Add(site);
+                        dbUser.Site.Add(site);
                     }
                 }
             }
@@ -167,7 +167,7 @@ namespace George.Data
 
         public async Task<bool> DeleteClientAsync(int clientId, CancellationToken cancelToken)
         {
-            var user = await _dbContext.Users
+            var user = await _dbContext.User
                 .FirstOrDefaultAsync(u => u.Id == clientId && !u.IsDeleted, cancelToken);
 
             if (user == null) return false;
@@ -193,7 +193,7 @@ namespace George.Data
         {
             if (string.IsNullOrWhiteSpace(roleName)) return null;
 
-            var role = await _dbContext.Roles
+            var role = await _dbContext.Role
                 .FirstOrDefaultAsync(r => r.Name == roleName && !r.IsDeleted, cancelToken);
 
             return role?.Id;

@@ -637,23 +637,23 @@ namespace George.Services
             };
 
             // Map images
-            if (templateProduct.TemplateProductImages != null && templateProduct.TemplateProductImages.Any())
+            if (templateProduct.TemplateProductImage != null && templateProduct.TemplateProductImage.Any())
             {
-                var ordered = templateProduct.TemplateProductImages.OrderBy(tpi => tpi.SortOrder).ToList();
+                var ordered = templateProduct.TemplateProductImage.OrderBy(tpi => tpi.SortOrder).ToList();
                 res.ImageUrls = ordered.Select(tpi => tpi.Url).ToList();
                 res.ImageNames = ordered.Select(tpi => tpi.Media?.Name ?? string.Empty).ToList();
             }
 
             // Map categories - get GlobalCategory IDs directly from TemplateProductCategory
-            if (templateProduct.TemplateProductCategories != null && templateProduct.TemplateProductCategories.Any())
+            if (templateProduct.TemplateProductCategory != null && templateProduct.TemplateProductCategory.Any())
             {
-                var mainCategories = templateProduct.TemplateProductCategories
+                var mainCategories = templateProduct.TemplateProductCategory
                     .Where(tpc => tpc.GlobalCategory != null && 
                                  tpc.GlobalCategory.ParentGlobalCategoryId == null)
                     .Select(tpc => tpc.GlobalCategoryId)
                     .Distinct()
                     .ToList();
-                var subCategories = templateProduct.TemplateProductCategories
+                var subCategories = templateProduct.TemplateProductCategory
                     .Where(tpc => tpc.GlobalCategory != null && 
                                  tpc.GlobalCategory.ParentGlobalCategoryId != null)
                     .Select(tpc => tpc.GlobalCategoryId)
@@ -665,27 +665,27 @@ namespace George.Services
             }
 
             // Map tags
-            if (templateProduct.Tags != null && templateProduct.Tags.Any())
+            if (templateProduct.Tag != null && templateProduct.Tag.Any())
             {
-                res.Tags = templateProduct.Tags.Select(t => t.Name).ToList();
+                res.Tags = templateProduct.Tag.Select(t => t.Name).ToList();
             }
 
             // Map sites
-            if (templateProduct.Sites != null && templateProduct.Sites.Any())
+            if (templateProduct.Site != null && templateProduct.Site.Any())
             {
-                res.SiteIds = templateProduct.Sites.Select(s => s.Id).ToList();
+                res.SiteIds = templateProduct.Site.Select(s => s.Id).ToList();
             }
 
             // Map related products (נלווים)
-            if (templateProduct.RelatedProducts != null && templateProduct.RelatedProducts.Any())
+            if (templateProduct.RelatedTemplateProduct != null && templateProduct.RelatedTemplateProduct.Any())
             {
-                res.RelatedProductIds = templateProduct.RelatedProducts.Select(p => p.Id).ToList();
+                res.RelatedProductIds = templateProduct.RelatedTemplateProduct.Select(p => p.Id).ToList();
             }
 
             // Map complementary products (מוצרים משלימים)
-            if (templateProduct.ComplementaryProducts != null && templateProduct.ComplementaryProducts.Any())
+            if (templateProduct.ComplementaryTemplateProduct != null && templateProduct.ComplementaryTemplateProduct.Any())
             {
-                res.ComplementaryProductIds = templateProduct.ComplementaryProducts.Select(p => p.Id).ToList();
+                res.ComplementaryProductIds = templateProduct.ComplementaryTemplateProduct.Select(p => p.Id).ToList();
             }
 
             // Map lookups
@@ -699,22 +699,22 @@ namespace George.Services
             res.Supplier = templateProduct.Supplier?.Name;
 
             // Map options
-            if (templateProduct.TemplateProductOptions != null && templateProduct.TemplateProductOptions.Any())
+            if (templateProduct.TemplateProductOption != null && templateProduct.TemplateProductOption.Any())
             {
-                res.ProductOptions = templateProduct.TemplateProductOptions
+                res.ProductOptions = templateProduct.TemplateProductOption
                     .Where(tpo => !tpo.IsDeleted)
                     .Select(tpo => new TemplateProductOptionRes
                     {
                         Name = tpo.Name,
-                        Values = tpo.TemplateProductOptionValues?.Select(tpov => tpov.Value).ToList() ?? new List<string>()
+                        Values = tpo.TemplateProductOptionValue?.Select(tpov => tpov.Value).ToList() ?? new List<string>()
                     })
                     .ToList();
             }
 
             // Map variants
-            if (templateProduct.TemplateProductVariants != null && templateProduct.TemplateProductVariants.Any())
+            if (templateProduct.TemplateProductVariant != null && templateProduct.TemplateProductVariant.Any())
             {
-                res.Variants = templateProduct.TemplateProductVariants
+                res.Variants = templateProduct.TemplateProductVariant
                     .Where(tpv => !tpv.IsDeleted)
                     .Select(tpv => new TemplateProductVariantRes
                     {
@@ -724,7 +724,7 @@ namespace George.Services
                         StockQuantity = tpv.StockQuantity,
                         Sku = tpv.Sku,
                         Weight = tpv.Weight,
-                        OptionValues = tpv.TemplateProductVariantOptionValues?
+                        OptionValues = tpv.TemplateProductVariantOptionValue?
                             .ToDictionary(tpvov => tpvov.OptionName ?? "", 
                                          tpvov => tpvov.OptionValue ?? "")
                     })

@@ -144,15 +144,15 @@ namespace George.Services
             };
 
             // Map values
-            if (templateAttribute.TemplateAttributeValues != null && templateAttribute.TemplateAttributeValues.Any())
+            if (templateAttribute.TemplateAttributeValue != null && templateAttribute.TemplateAttributeValue.Any())
             {
-                res.Values = templateAttribute.TemplateAttributeValues.Select(tav => tav.Value).ToList();
+                res.Values = templateAttribute.TemplateAttributeValue.Select(tav => tav.Value).ToList();
             }
 
             // Map sites
-            if (templateAttribute.Sites != null && templateAttribute.Sites.Any())
+            if (templateAttribute.Site != null && templateAttribute.Site.Any())
             {
-                res.SiteIds = templateAttribute.Sites.Select(s => s.Id).ToList();
+                res.SiteIds = templateAttribute.Site.Select(s => s.Id).ToList();
             }
 
             return res;

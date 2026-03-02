@@ -13,7 +13,7 @@ namespace George.Data
 
 		public async Task<string?> GetPreferencesJsonAsync(int userId, CancellationToken cancelToken = default)
 		{
-			var row = await _dbContext.UserPreferences
+			var row = await _dbContext.UserPreference
 				.AsNoTracking()
 				.Where(p => p.UserId == userId)
 				.Select(p => p.PreferencesJson)
@@ -23,7 +23,7 @@ namespace George.Data
 
 		public async Task SavePreferencesJsonAsync(int userId, string? preferencesJson, CancellationToken cancelToken = default)
 		{
-			var existing = await _dbContext.UserPreferences
+			var existing = await _dbContext.UserPreference
 				.FirstOrDefaultAsync(p => p.UserId == userId, cancelToken);
 
 			if (existing != null)
@@ -32,7 +32,7 @@ namespace George.Data
 			}
 			else
 			{
-				_dbContext.UserPreferences.Add(new UserPreference
+				_dbContext.UserPreference.Add(new UserPreference
 				{
 					UserId = userId,
 					PreferencesJson = preferencesJson

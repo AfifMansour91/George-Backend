@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("TemplateProductOption")]
 public partial class TemplateProductOption
 {
     [Key]
@@ -20,9 +19,9 @@ public partial class TemplateProductOption
     public bool IsDeleted { get; set; }
 
     [ForeignKey("TemplateProductId")]
-    [InverseProperty("TemplateProductOptions")]
+    [InverseProperty("TemplateProductOption")]
     public virtual TemplateProduct TemplateProduct { get; set; } = null!;
 
     [InverseProperty("TemplateProductOption")]
-    public virtual ICollection<TemplateProductOptionValue> TemplateProductOptionValues { get; set; } = new List<TemplateProductOptionValue>();
+    public virtual ICollection<TemplateProductOptionValue> TemplateProductOptionValue { get; set; } = new List<TemplateProductOptionValue>();
 }

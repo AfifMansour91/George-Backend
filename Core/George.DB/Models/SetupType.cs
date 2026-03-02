@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("SetupType")]
 [Index("Name", Name = "UQ__SetupTyp__737584F63DF762F1", IsUnique = true)]
 public partial class SetupType
 {
@@ -19,8 +18,8 @@ public partial class SetupType
     public bool IsDeleted { get; set; }
 
     [InverseProperty("SetupType")]
-    public virtual ICollection<Product> Products { get; set; } = new List<Product>();
+    public virtual ICollection<Product> Product { get; set; } = new List<Product>();
 
     [InverseProperty("SetupType")]
-    public virtual ICollection<TemplateProduct> TemplateProducts { get; set; } = new List<TemplateProduct>();
+    public virtual ICollection<TemplateProduct> TemplateProduct { get; set; } = new List<TemplateProduct>();
 }

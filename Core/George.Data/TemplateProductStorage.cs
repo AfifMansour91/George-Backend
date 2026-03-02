@@ -21,7 +21,7 @@ namespace George.Data
         {
             var res = new DataListResult<TemplateProduct>();
 
-            var query = _dbContext.TemplateProducts
+            var query = _dbContext.TemplateProduct
                 .Include(tp => tp.Brand)
                 .Include(tp => tp.Supplier)
                 .Include(tp => tp.Status)
@@ -34,18 +34,18 @@ namespace George.Data
                     .ThenInclude(wc => wc.Unit)
                 .Include(tp => tp.WeightConfig)
                     .ThenInclude(wc => wc.UnitWeightMode)
-                .Include(tp => tp.Sites)
-                .Include(tp => tp.Tags)
-                .Include(tp => tp.TemplateProductCategories)
+                .Include(tp => tp.Site)
+                .Include(tp => tp.Tag)
+                .Include(tp => tp.TemplateProductCategory)
                     .ThenInclude(tpc => tpc.GlobalCategory)
-                .Include(tp => tp.TemplateProductImages)
+                .Include(tp => tp.TemplateProductImage)
                     .ThenInclude(tpi => tpi.Media)
-                .Include(tp => tp.TemplateProductOptions)
-                    .ThenInclude(tpo => tpo.TemplateProductOptionValues)
-                .Include(tp => tp.TemplateProductVariants)
-                    .ThenInclude(tpv => tpv.TemplateProductVariantOptionValues)
-                .Include(tp => tp.RelatedProducts)
-                .Include(tp => tp.ComplementaryProducts)
+                .Include(tp => tp.TemplateProductOption)
+                    .ThenInclude(tpo => tpo.TemplateProductOptionValue)
+                .Include(tp => tp.TemplateProductVariant)
+                    .ThenInclude(tpv => tpv.TemplateProductVariantOptionValue)
+                .Include(tp => tp.RelatedTemplateProduct)
+                .Include(tp => tp.ComplementaryTemplateProduct)
                 .AsNoTracking();
 
             // Apply filters
@@ -58,12 +58,12 @@ namespace George.Data
 
                 if (filter.SiteId.HasValue)
                 {
-                    query = query.Where(tp => tp.Sites.Any(s => s.Id == filter.SiteId.Value) || !tp.Sites.Any());
+                    query = query.Where(tp => tp.Site.Any(s => s.Id == filter.SiteId.Value) || !tp.Site.Any());
                 }
 
                 if (filter.GlobalCategoryId.HasValue)
                 {
-                    query = query.Where(tp => tp.TemplateProductCategories.Any(tpc =>
+                    query = query.Where(tp => tp.TemplateProductCategory.Any(tpc =>
                         tpc.GlobalCategoryId == filter.GlobalCategoryId.Value));
                 }
 
@@ -102,7 +102,7 @@ namespace George.Data
         {
             if (string.IsNullOrWhiteSpace(sku)) return null;
 
-            return await _dbContext.TemplateProducts
+            return await _dbContext.TemplateProduct
                 .Where(tp => !tp.IsDeleted && tp.Sku != null && tp.Sku.ToLower().Trim() == sku.ToLower().Trim())
                 .AsNoTracking()
                 .FirstOrDefaultAsync(cancelToken);
@@ -113,7 +113,7 @@ namespace George.Data
         {
             if (string.IsNullOrWhiteSpace(name)) return null;
 
-            return await _dbContext.TemplateProducts
+            return await _dbContext.TemplateProduct
                 .Where(tp => !tp.IsDeleted && tp.Name != null && tp.Name.Trim().ToLower() == name.Trim().ToLower())
                 .OrderBy(tp => tp.Id)
                 .AsNoTracking()
@@ -122,7 +122,7 @@ namespace George.Data
 
         public async Task<TemplateProduct?> GetTemplateProductAsync(int templateProductId, CancellationToken cancelToken)
         {
-            return await _dbContext.TemplateProducts
+            return await _dbContext.TemplateProduct
                 .Include(tp => tp.Brand)
                 .Include(tp => tp.Supplier)
                 .Include(tp => tp.Status)
@@ -135,18 +135,18 @@ namespace George.Data
                     .ThenInclude(wc => wc.Unit)
                 .Include(tp => tp.WeightConfig)
                     .ThenInclude(wc => wc.UnitWeightMode)
-                .Include(tp => tp.Sites)
-                .Include(tp => tp.Tags)
-                .Include(tp => tp.TemplateProductCategories)
+                .Include(tp => tp.Site)
+                .Include(tp => tp.Tag)
+                .Include(tp => tp.TemplateProductCategory)
                     .ThenInclude(tpc => tpc.GlobalCategory)
-                .Include(tp => tp.TemplateProductImages)
+                .Include(tp => tp.TemplateProductImage)
                     .ThenInclude(tpi => tpi.Media)
-                .Include(tp => tp.TemplateProductOptions)
-                    .ThenInclude(tpo => tpo.TemplateProductOptionValues)
-                .Include(tp => tp.TemplateProductVariants)
-                    .ThenInclude(tpv => tpv.TemplateProductVariantOptionValues)
-                .Include(tp => tp.RelatedProducts)
-                .Include(tp => tp.ComplementaryProducts)
+                .Include(tp => tp.TemplateProductOption)
+                    .ThenInclude(tpo => tpo.TemplateProductOptionValue)
+                .Include(tp => tp.TemplateProductVariant)
+                    .ThenInclude(tpv => tpv.TemplateProductVariantOptionValue)
+                .Include(tp => tp.RelatedTemplateProduct)
+                .Include(tp => tp.ComplementaryTemplateProduct)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(tp => tp.Id == templateProductId && !tp.IsDeleted, cancelToken);
         }
@@ -167,17 +167,17 @@ namespace George.Data
             }
             // New products appear at the top of the list (sort by DisplayOrder ascending, then CreationTime desc)
             templateProduct.DisplayOrder = 0;
-            _dbContext.TemplateProducts.Add(templateProduct);
+            _dbContext.TemplateProduct.Add(templateProduct);
 
             // Add sites
             if (siteIds != null && siteIds.Any())
             {
-                var sites = await _dbContext.Sites
+                var sites = await _dbContext.Site
                     .Where(s => siteIds.Contains(s.Id))
                     .ToListAsync(cancelToken);
                 foreach (var site in sites)
                 {
-                    templateProduct.Sites.Add(site);
+                    templateProduct.Site.Add(site);
                 }
             }
 
@@ -185,13 +185,13 @@ namespace George.Data
             if (globalCategoryIds != null && globalCategoryIds.Any())
             {
                 // Find Categories that have SourceGlobalCategoryId matching the GlobalCategory IDs
-                var categories = await _dbContext.GlobalCategories
+                var categories = await _dbContext.GlobalCategory
                     .Where(c => globalCategoryIds.Contains(c.Id))
                     .ToListAsync(cancelToken);
 
                 foreach (var category in categories)
                 {
-                    templateProduct.TemplateProductCategories.Add(new TemplateProductCategory
+                    templateProduct.TemplateProductCategory.Add(new TemplateProductCategory
                     {
                         TemplateProductId = templateProduct.Id,
                         GlobalCategoryId = category.Id,
@@ -206,7 +206,7 @@ namespace George.Data
                 foreach (var tagName in tags)
                 {
                     // For template products, tags might not have AccountId, so we search more broadly
-                    var tag = await _dbContext.Tags
+                    var tag = await _dbContext.Tag
                         .FirstOrDefaultAsync(t => t.Name == tagName, cancelToken);
 
                     if (tag == null)
@@ -217,9 +217,9 @@ namespace George.Data
                             AccountId = null, // Template products are global
                             CreationTime = DateTime.UtcNow
                         };
-                        _dbContext.Tags.Add(tag);
+                        _dbContext.Tag.Add(tag);
                     }
-                    templateProduct.Tags.Add(tag);
+                    templateProduct.Tag.Add(tag);
                 }
             }
 
@@ -228,26 +228,26 @@ namespace George.Data
             // Add related products (נלווים) and complementary products (מוצרים משלימים) after we have templateProduct.Id
             if ((relatedProductIds != null && relatedProductIds.Any()) || (complementaryProductIds != null && complementaryProductIds.Any()))
             {
-                var dbProduct = await _dbContext.TemplateProducts
-                    .Include(tp => tp.RelatedProducts)
-                    .Include(tp => tp.ComplementaryProducts)
+                var dbProduct = await _dbContext.TemplateProduct
+                    .Include(tp => tp.RelatedTemplateProduct)
+                    .Include(tp => tp.ComplementaryTemplateProduct)
                     .FirstAsync(tp => tp.Id == templateProduct.Id, cancelToken);
                 if (relatedProductIds != null)
                 {
                     foreach (var id in relatedProductIds.Where(id => id != templateProduct.Id))
                     {
-                        var related = await _dbContext.TemplateProducts.FindAsync(new object[] { id }, cancelToken);
+                        var related = await _dbContext.TemplateProduct.FindAsync(new object[] { id }, cancelToken);
                         if (related != null && !related.IsDeleted)
-                            dbProduct.RelatedProducts.Add(related);
+                            dbProduct.RelatedTemplateProduct.Add(related);
                     }
                 }
                 if (complementaryProductIds != null)
                 {
                     foreach (var id in complementaryProductIds.Where(id => id != templateProduct.Id))
                     {
-                        var comp = await _dbContext.TemplateProducts.FindAsync(new object[] { id }, cancelToken);
+                        var comp = await _dbContext.TemplateProduct.FindAsync(new object[] { id }, cancelToken);
                         if (comp != null && !comp.IsDeleted)
-                            dbProduct.ComplementaryProducts.Add(comp);
+                            dbProduct.ComplementaryTemplateProduct.Add(comp);
                     }
                 }
                 await _dbContext.SaveChangesAsync(cancelToken);
@@ -266,12 +266,12 @@ namespace George.Data
             List<int>? complementaryProductIds,
             CancellationToken cancelToken)
         {
-            var dbTemplateProduct = await _dbContext.TemplateProducts
-                .Include(tp => tp.Sites)
-                .Include(tp => tp.Tags)
-                .Include(tp => tp.TemplateProductCategories)
-                .Include(tp => tp.RelatedProducts)
-                .Include(tp => tp.ComplementaryProducts)
+            var dbTemplateProduct = await _dbContext.TemplateProduct
+                .Include(tp => tp.Site)
+                .Include(tp => tp.Tag)
+                .Include(tp => tp.TemplateProductCategory)
+                .Include(tp => tp.RelatedTemplateProduct)
+                .Include(tp => tp.ComplementaryTemplateProduct)
                 .FirstOrDefaultAsync(tp => tp.Id == updated.Id && !tp.IsDeleted, cancelToken);
 
             if (dbTemplateProduct == null) return null;
@@ -310,15 +310,15 @@ namespace George.Data
             // Update sites
             if (siteIds != null)
             {
-                dbTemplateProduct.Sites.Clear();
+                dbTemplateProduct.Site.Clear();
                 if (siteIds.Any())
                 {
-                    var sites = await _dbContext.Sites
+                    var sites = await _dbContext.Site
                         .Where(s => siteIds.Contains(s.Id))
                         .ToListAsync(cancelToken);
                     foreach (var site in sites)
                     {
-                        dbTemplateProduct.Sites.Add(site);
+                        dbTemplateProduct.Site.Add(site);
                     }
                 }
             }
@@ -326,17 +326,17 @@ namespace George.Data
             // Update categories (map GlobalCategory IDs to Category IDs)
             if (globalCategoryIds != null)
             {
-                dbTemplateProduct.TemplateProductCategories.Clear();
+                dbTemplateProduct.TemplateProductCategory.Clear();
                 if (globalCategoryIds.Any())
                 {
                     // Find Categories that have SourceGlobalCategoryId matching the GlobalCategory IDs
-                    var categories = await _dbContext.GlobalCategories
+                    var categories = await _dbContext.GlobalCategory
                         .Where(c => globalCategoryIds.Contains(c.Id))
                         .ToListAsync(cancelToken);
 
                     foreach (var category in categories)
                     {
-                        dbTemplateProduct.TemplateProductCategories.Add(new TemplateProductCategory
+                        dbTemplateProduct.TemplateProductCategory.Add(new TemplateProductCategory
                         {
                             TemplateProductId = dbTemplateProduct.Id,
                             GlobalCategoryId = category.Id,
@@ -349,12 +349,12 @@ namespace George.Data
             // Update tags
             if (tags != null)
             {
-                dbTemplateProduct.Tags.Clear();
+                dbTemplateProduct.Tag.Clear();
                 if (tags.Any())
                 {
                     foreach (var tagName in tags)
                     {
-                        var tag = await _dbContext.Tags
+                        var tag = await _dbContext.Tag
                             .FirstOrDefaultAsync(t => t.Name == tagName, cancelToken);
 
                         if (tag == null)
@@ -365,9 +365,9 @@ namespace George.Data
                                 AccountId = null,
                                 CreationTime = DateTime.UtcNow
                             };
-                            _dbContext.Tags.Add(tag);
+                            _dbContext.Tag.Add(tag);
                         }
-                        dbTemplateProduct.Tags.Add(tag);
+                        dbTemplateProduct.Tag.Add(tag);
                     }
                 }
             }
@@ -375,24 +375,24 @@ namespace George.Data
             // Update related products (נלווים)
             if (relatedProductIds != null)
             {
-                dbTemplateProduct.RelatedProducts.Clear();
+                dbTemplateProduct.RelatedTemplateProduct.Clear();
                 foreach (var id in relatedProductIds.Where(id => id != dbTemplateProduct.Id))
                 {
-                    var related = await _dbContext.TemplateProducts.FindAsync(new object[] { id }, cancelToken);
+                    var related = await _dbContext.TemplateProduct.FindAsync(new object[] { id }, cancelToken);
                     if (related != null && !related.IsDeleted)
-                        dbTemplateProduct.RelatedProducts.Add(related);
+                        dbTemplateProduct.RelatedTemplateProduct.Add(related);
                 }
             }
 
             // Update complementary products (מוצרים משלימים)
             if (complementaryProductIds != null)
             {
-                dbTemplateProduct.ComplementaryProducts.Clear();
+                dbTemplateProduct.ComplementaryTemplateProduct.Clear();
                 foreach (var id in complementaryProductIds.Where(id => id != dbTemplateProduct.Id))
                 {
-                    var comp = await _dbContext.TemplateProducts.FindAsync(new object[] { id }, cancelToken);
+                    var comp = await _dbContext.TemplateProduct.FindAsync(new object[] { id }, cancelToken);
                     if (comp != null && !comp.IsDeleted)
-                        dbTemplateProduct.ComplementaryProducts.Add(comp);
+                        dbTemplateProduct.ComplementaryTemplateProduct.Add(comp);
                 }
             }
 
@@ -402,7 +402,7 @@ namespace George.Data
 
         public async Task<bool> DeleteTemplateProductAsync(int templateProductId, CancellationToken cancelToken)
         {
-            var templateProduct = await _dbContext.TemplateProducts
+            var templateProduct = await _dbContext.TemplateProduct
                 .FirstOrDefaultAsync(tp => tp.Id == templateProductId && !tp.IsDeleted, cancelToken);
 
             if (templateProduct == null) return false;
@@ -417,7 +417,7 @@ namespace George.Data
         public async Task UpdateTemplateProductOrderAsync(List<int> templateProductIds, CancellationToken cancelToken)
         {
             if (templateProductIds == null || !templateProductIds.Any()) return;
-            var list = await _dbContext.TemplateProducts
+            var list = await _dbContext.TemplateProduct
                 .Where(p => templateProductIds.Contains(p.Id))
                 .ToListAsync(cancelToken);
             var idToIndex = templateProductIds.Select((id, i) => (id, i)).ToDictionary(x => x.id, x => x.i);
@@ -436,16 +436,16 @@ namespace George.Data
         // Helper methods for service layer. Each item has Url and optional MediaId (template products typically use Url only).
         public async Task CreateTemplateProductImagesAsync(int templateProductId, List<(string Url, int? MediaId)> images, CancellationToken cancelToken)
         {
-            var existingImages = await _dbContext.TemplateProductImages
+            var existingImages = await _dbContext.TemplateProductImage
                 .Where(tpi => tpi.TemplateProductId == templateProductId)
                 .ToListAsync(cancelToken);
 
-            _dbContext.TemplateProductImages.RemoveRange(existingImages);
+            _dbContext.TemplateProductImage.RemoveRange(existingImages);
 
             for (int i = 0; i < images.Count; i++)
             {
                 var (url, mediaId) = images[i];
-                _dbContext.TemplateProductImages.Add(new TemplateProductImage
+                _dbContext.TemplateProductImage.Add(new TemplateProductImage
                 {
                     TemplateProductId = templateProductId,
                     Url = url,
@@ -460,11 +460,11 @@ namespace George.Data
         public async Task CreateTemplateProductOptionsAsync(int templateProductId, List<ProductOptionDto> options, CancellationToken cancelToken)
         {
             // Get template product's sites to create attributes for each site
-            var templateProduct = await _dbContext.TemplateProducts
-                .Include(tp => tp.Sites)
+            var templateProduct = await _dbContext.TemplateProduct
+                .Include(tp => tp.Site)
                 .FirstOrDefaultAsync(tp => tp.Id == templateProductId, cancelToken);
             
-            var siteIds = templateProduct?.Sites?.Select(s => s.Id).ToList() ?? new List<int>();
+            var siteIds = templateProduct?.Site?.Select(s => s.Id).ToList() ?? new List<int>();
 
             foreach (var opt in options)
             {
@@ -474,14 +474,14 @@ namespace George.Data
                     Name = opt.Name,
                     IsDeleted = false
                 };
-                _dbContext.TemplateProductOptions.Add(templateProductOption);
+                _dbContext.TemplateProductOption.Add(templateProductOption);
                 await _dbContext.SaveChangesAsync(cancelToken);
 
                 if (opt.Values != null && opt.Values.Any())
                 {
                     foreach (var value in opt.Values)
                     {
-                        _dbContext.TemplateProductOptionValues.Add(new TemplateProductOptionValue
+                        _dbContext.TemplateProductOptionValue.Add(new TemplateProductOptionValue
                         {
                             TemplateProductOptionId = templateProductOption.Id,
                             Value = value
@@ -494,9 +494,9 @@ namespace George.Data
                 foreach (var siteId in siteIds)
                 {
                     // Find or create TemplateAttribute
-                    var templateAttribute = await _dbContext.TemplateAttributes
-                        .Include(ta => ta.TemplateAttributeValues)
-                        .Include(ta => ta.Sites)
+                    var templateAttribute = await _dbContext.TemplateAttribute
+                        .Include(ta => ta.TemplateAttributeValue)
+                        .Include(ta => ta.Site)
                         .FirstOrDefaultAsync(ta => ta.Name == opt.Name && !ta.IsDeleted, cancelToken);
 
                     if (templateAttribute == null)
@@ -508,17 +508,17 @@ namespace George.Data
                             IsDeleted = false,
                             GuidId = Guid.NewGuid()
                         };
-                        _dbContext.TemplateAttributes.Add(templateAttribute);
+                        _dbContext.TemplateAttribute.Add(templateAttribute);
                         await _dbContext.SaveChangesAsync(cancelToken);
                     }
 
                     // Add site to TemplateAttribute if not already added
-                    if (!templateAttribute.Sites.Any(s => s.Id == siteId))
+                    if (!templateAttribute.Site.Any(s => s.Id == siteId))
                     {
-                        var site = await _dbContext.Sites.FindAsync(new object[] { siteId }, cancelToken);
+                        var site = await _dbContext.Site.FindAsync(new object[] { siteId }, cancelToken);
                         if (site != null)
                         {
-                            templateAttribute.Sites.Add(site);
+                            templateAttribute.Site.Add(site);
                             await _dbContext.SaveChangesAsync(cancelToken);
                         }
                     }
@@ -529,12 +529,12 @@ namespace George.Data
                         foreach (var value in opt.Values)
                         {
                             // Check if TemplateAttributeValue already exists
-                            var existingValue = templateAttribute.TemplateAttributeValues
+                            var existingValue = templateAttribute.TemplateAttributeValue
                                 .FirstOrDefault(tav => tav.Value == value);
 
                             if (existingValue == null)
                             {
-                                _dbContext.TemplateAttributeValues.Add(new TemplateAttributeValue
+                                _dbContext.TemplateAttributeValue.Add(new TemplateAttributeValue
                                 {
                                     TemplateAttributeId = templateAttribute.Id,
                                     Value = value
@@ -551,7 +551,7 @@ namespace George.Data
         {
             if (options == null) return;
 
-            var existingOptions = await _dbContext.TemplateProductOptions
+            var existingOptions = await _dbContext.TemplateProductOption
                 .Where(tpo => tpo.TemplateProductId == templateProductId)
                 .ToListAsync(cancelToken);
 
@@ -579,7 +579,7 @@ namespace George.Data
                     Weight = variant.Weight,
                     IsDeleted = false
                 };
-                _dbContext.TemplateProductVariants.Add(templateProductVariant);
+                _dbContext.TemplateProductVariant.Add(templateProductVariant);
                 await _dbContext.SaveChangesAsync(cancelToken);
 
                 // Map option values if provided
@@ -587,7 +587,7 @@ namespace George.Data
                 {
                     foreach (var kvp in variant.OptionValues)
                     {
-                        _dbContext.TemplateProductVariantOptionValues.Add(new TemplateProductVariantOptionValue
+                        _dbContext.TemplateProductVariantOptionValue.Add(new TemplateProductVariantOptionValue
                         {
                             TemplateProductVariantId = templateProductVariant.Id,
                             OptionName = kvp.Key,
@@ -603,7 +603,7 @@ namespace George.Data
         {
             if (variants == null) return;
 
-            var existingVariants = await _dbContext.TemplateProductVariants
+            var existingVariants = await _dbContext.TemplateProductVariant
                 .Where(tpv => tpv.TemplateProductId == templateProductId)
                 .ToListAsync(cancelToken);
 
@@ -633,19 +633,19 @@ namespace George.Data
 
             if (req.Unit.HasValue())
             {
-                var unit = await _dbContext.Units
+                var unit = await _dbContext.Unit
                     .FirstOrDefaultAsync(u => u.Name == req.Unit, cancelToken);
                 weightConfig.UnitId = unit?.Id;
             }
 
             if (req.UnitWeightMode.HasValue())
             {
-                var mode = await _dbContext.UnitWeightModes
+                var mode = await _dbContext.UnitWeightMode
                     .FirstOrDefaultAsync(m => m.Name == req.UnitWeightMode, cancelToken);
                 weightConfig.UnitWeightModeId = mode?.Id;
             }
 
-            _dbContext.WeightConfigs.Add(weightConfig);
+            _dbContext.WeightConfig.Add(weightConfig);
             await _dbContext.SaveChangesAsync(cancelToken);
             return weightConfig;
         }
@@ -662,7 +662,7 @@ namespace George.Data
                 if (statusName == "draft") statusName = "hidden";
                 if (statusName == "archived") statusName = "hidden";
 
-                var status = await _dbContext.ProductStatuses
+                var status = await _dbContext.ProductStatus
                     .FirstOrDefaultAsync(s => s.Name.ToLower() == statusName.ToLower().Trim(), cancelToken);
                 templateProduct.StatusId = status?.Id;
             }
@@ -677,7 +677,7 @@ namespace George.Data
                 if (visibilityName == "draft") visibilityName = "hidden";
                 if (visibilityName == "archived") visibilityName = "hidden";
 
-                var visibility = await _dbContext.Visibilities
+                var visibility = await _dbContext.Visibility
                     .FirstOrDefaultAsync(v => v.Name.ToLower() == visibilityName.ToLower().Trim(), cancelToken);
                 templateProduct.VisibilityId = visibility?.Id;
             }
@@ -685,7 +685,7 @@ namespace George.Data
             // Map stock management type
             if (req.StockManagementType.HasValue())
             {
-                var smt = await _dbContext.StockManagementTypes
+                var smt = await _dbContext.StockManagementType
                     .FirstOrDefaultAsync(s => s.Name == req.StockManagementType && !s.IsDeleted, cancelToken);
                 
                 if (smt == null)
@@ -696,7 +696,7 @@ namespace George.Data
                         Name = req.StockManagementType,
                         IsDeleted = false
                     };
-                    _dbContext.StockManagementTypes.Add(smt);
+                    _dbContext.StockManagementType.Add(smt);
                     await _dbContext.SaveChangesAsync(cancelToken);
                 }
                 
@@ -706,7 +706,7 @@ namespace George.Data
             // Map stock status
             if (req.StockStatus.HasValue())
             {
-                var ss = await _dbContext.StockStatuses
+                var ss = await _dbContext.StockStatus
                     .FirstOrDefaultAsync(s => s.Name == req.StockStatus, cancelToken);
                 templateProduct.StockStatusId = ss?.Id;
             }
@@ -714,7 +714,7 @@ namespace George.Data
             // Map shipping class
             if (req.ShippingClass.HasValue())
             {
-                var sc = await _dbContext.ShippingClasses
+                var sc = await _dbContext.ShippingClass
                     .FirstOrDefaultAsync(s => s.Name == req.ShippingClass, cancelToken);
                 templateProduct.ShippingClassId = sc?.Id;
             }
@@ -722,7 +722,7 @@ namespace George.Data
             // Map setup type
             if (req.SetupType.HasValue())
             {
-                var st = await _dbContext.SetupTypes
+                var st = await _dbContext.SetupType
                     .FirstOrDefaultAsync(s => s.Name == req.SetupType, cancelToken);
                 templateProduct.SetupTypeId = st?.Id;
             }
@@ -730,7 +730,7 @@ namespace George.Data
             // Map brand (template products might not have AccountId, so search more broadly)
             if (req.Brand.HasValue())
             {
-                var brand = await _dbContext.Brands
+                var brand = await _dbContext.Brand
                     .FirstOrDefaultAsync(b => b.Name == req.Brand && !b.IsDeleted, cancelToken);
                 
                 if (brand == null)
@@ -744,7 +744,7 @@ namespace George.Data
                         CreationTime = DateTime.UtcNow,
                         CreationUserId = null
                     };
-                    _dbContext.Brands.Add(brand);
+                    _dbContext.Brand.Add(brand);
                     await _dbContext.SaveChangesAsync(cancelToken);
                 }
                 templateProduct.BrandId = brand.Id;
@@ -758,7 +758,7 @@ namespace George.Data
             // Map supplier
             if (req.Supplier.HasValue())
             {
-                var supplier = await _dbContext.Suppliers
+                var supplier = await _dbContext.Supplier
                     .FirstOrDefaultAsync(s => s.Name == req.Supplier && !s.IsDeleted, cancelToken);
                 
                 if (supplier == null)
@@ -772,7 +772,7 @@ namespace George.Data
                         CreationTime = DateTime.UtcNow,
                         CreationUserId = null
                     };
-                    _dbContext.Suppliers.Add(supplier);
+                    _dbContext.Supplier.Add(supplier);
                     await _dbContext.SaveChangesAsync(cancelToken);
                 }
                 templateProduct.SupplierId = supplier.Id;

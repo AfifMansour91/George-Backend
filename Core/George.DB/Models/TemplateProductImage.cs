@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -6,13 +6,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("TemplateProductImage")]
+[Index("MediaId", Name = "IX_TemplateProductImage_MediaId")]
+[Index("TemplateProductId", "Url", Name = "IX_TemplateProductImage_TemplateProductId_Url", IsUnique = true)]
 public partial class TemplateProductImage
 {
-    [Key]
-    [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
-    public long Id { get; set; }
-
     public int TemplateProductId { get; set; }
 
     public int SortOrder { get; set; }
@@ -22,11 +19,14 @@ public partial class TemplateProductImage
 
     public int? MediaId { get; set; }
 
-    [ForeignKey("TemplateProductId")]
-    [InverseProperty("TemplateProductImages")]
-    public virtual TemplateProduct TemplateProduct { get; set; } = null!;
+    [Key]
+    public long Id { get; set; }
 
     [ForeignKey("MediaId")]
-    [InverseProperty("TemplateProductImages")]
-    public virtual Medium? Media { get; set; }
+    [InverseProperty("TemplateProductImage")]
+    public virtual Media? Media { get; set; }
+
+    [ForeignKey("TemplateProductId")]
+    [InverseProperty("TemplateProductImage")]
+    public virtual TemplateProduct TemplateProduct { get; set; } = null!;
 }

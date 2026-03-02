@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("ProductVariant")]
 public partial class ProductVariant
 {
     [Key]
@@ -36,9 +35,9 @@ public partial class ProductVariant
     public int? WooCommerceVariationId { get; set; }
 
     [ForeignKey("ProductId")]
-    [InverseProperty("ProductVariants")]
+    [InverseProperty("ProductVariant")]
     public virtual Product Product { get; set; } = null!;
 
     [InverseProperty("ProductVariant")]
-    public virtual ICollection<ProductVariantOptionValue> ProductVariantOptionValues { get; set; } = new List<ProductVariantOptionValue>();
+    public virtual ICollection<ProductVariantOptionValue> ProductVariantOptionValue { get; set; } = new List<ProductVariantOptionValue>();
 }

@@ -22,7 +22,7 @@ namespace George.Data
             var res = new DataListResult<Product>();
 
             // Lighter includes for list (options, variants, related/complementary loaded only in GetProductAsync)
-            var query = _dbContext.Products
+            var query = _dbContext.Product
                 .Include(p => p.Brand)
                 .Include(p => p.Supplier)
                 .Include(p => p.Status)
@@ -35,11 +35,11 @@ namespace George.Data
                     .ThenInclude(wc => wc!.Unit)
                 .Include(p => p.WeightConfig)
                     .ThenInclude(wc => wc!.UnitWeightMode)
-                .Include(p => p.Sites)
-                .Include(p => p.Tags)
-                .Include(p => p.ProductCategories)
+                .Include(p => p.Site)
+                .Include(p => p.Tag)
+                .Include(p => p.ProductCategory)
                     .ThenInclude(pc => pc.Category)
-                .Include(p => p.ProductImages)
+                .Include(p => p.ProductImage)
                     .ThenInclude(pi => pi.Media)
                 .AsNoTracking()
                 .Where(p => !p.IsDeleted);
@@ -54,12 +54,12 @@ namespace George.Data
 
                 if (filter.SiteId.HasValue)
                 {
-                    query = query.Where(p => p.Sites.Any(s => s.Id == filter.SiteId.Value));
+                    query = query.Where(p => p.Site.Any(s => s.Id == filter.SiteId.Value));
                 }
 
                 if (filter.CategoryId.HasValue)
                 {
-                    query = query.Where(p => p.ProductCategories.Any(pc => pc.CategoryId == filter.CategoryId.Value));
+                    query = query.Where(p => p.ProductCategory.Any(pc => pc.CategoryId == filter.CategoryId.Value));
                 }
 
                 if (filter.Search?.SearchTerm.HasValue() == true)
@@ -90,7 +90,7 @@ namespace George.Data
 
         public async Task<Product?> GetProductAsync(int productId, CancellationToken cancelToken)
         {
-            return await _dbContext.Products
+            return await _dbContext.Product
                 .Include(p => p.Brand)
                 .Include(p => p.Supplier)
                 .Include(p => p.Status)
@@ -103,18 +103,18 @@ namespace George.Data
                     .ThenInclude(wc => wc.Unit)
                 .Include(p => p.WeightConfig)
                     .ThenInclude(wc => wc.UnitWeightMode)
-                .Include(p => p.Sites)
-                .Include(p => p.Tags)
-                .Include(p => p.ProductCategories)
+                .Include(p => p.Site)
+                .Include(p => p.Tag)
+                .Include(p => p.ProductCategory)
                     .ThenInclude(pc => pc.Category)
-                .Include(p => p.ProductImages)
+                .Include(p => p.ProductImage)
                     .ThenInclude(pi => pi.Media)
-                .Include(p => p.ProductOptions)
-                    .ThenInclude(po => po.ProductOptionValues)
-                .Include(p => p.ProductVariants)
-                    .ThenInclude(pv => pv.ProductVariantOptionValues)
-                .Include(p => p.RelatedProducts)
-                .Include(p => p.ComplementaryProducts)
+                .Include(p => p.ProductOption)
+                    .ThenInclude(po => po.ProductOptionValue)
+                .Include(p => p.ProductVariant)
+                    .ThenInclude(pv => pv.ProductVariantOptionValue)
+                .Include(p => p.RelatedProduct)
+                .Include(p => p.ComplementaryProduct)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
         }
@@ -128,29 +128,29 @@ namespace George.Data
             }
             // New products appear at the top of the list (sort by DisplayOrder ascending, then CreationTime desc)
             product.DisplayOrder = 0;
-            _dbContext.Products.Add(product);
+            _dbContext.Product.Add(product);
 
             // Add sites
             if (siteIds != null && siteIds.Any())
             {
-                var sites = await _dbContext.Sites
+                var sites = await _dbContext.Site
                     .Where(s => siteIds.Contains(s.Id))
                     .ToListAsync(cancelToken);
                 foreach (var site in sites)
                 {
-                    product.Sites.Add(site);
+                    product.Site.Add(site);
                 }
             }
 
             // Add categories
             if (categoryIds != null && categoryIds.Any())
             {
-                var categories = await _dbContext.Categories
+                var categories = await _dbContext.Category
                     .Where(c => categoryIds.Contains(c.Id))
                     .ToListAsync(cancelToken);
                 foreach (var category in categories)
                 {
-                    product.ProductCategories.Add(new ProductCategory
+                    product.ProductCategory.Add(new ProductCategory
                     {
                         ProductId = product.Id,
                         CategoryId = category.Id
@@ -163,7 +163,7 @@ namespace George.Data
             {
                 foreach (var tagName in tags)
                 {
-                    var tag = await _dbContext.Tags
+                    var tag = await _dbContext.Tag
                         .FirstOrDefaultAsync(t => t.Name == tagName && t.AccountId == product.AccountId, cancelToken);
                     
                     if (tag == null)
@@ -174,9 +174,9 @@ namespace George.Data
                             AccountId = product.AccountId,
                             CreationTime = DateTime.UtcNow
                         };
-                        _dbContext.Tags.Add(tag);
+                        _dbContext.Tag.Add(tag);
                     }
-                    product.Tags.Add(tag);
+                    product.Tag.Add(tag);
                 }
             }
 
@@ -185,26 +185,26 @@ namespace George.Data
             // Add related (נלווים) and complementary (מוצרים משלימים) products after we have product.Id
             if ((relatedProductIds != null && relatedProductIds.Any()) || (complementaryProductIds != null && complementaryProductIds.Any()))
             {
-                var dbProduct = await _dbContext.Products
-                    .Include(p => p.RelatedProducts)
-                    .Include(p => p.ComplementaryProducts)
+                var dbProduct = await _dbContext.Product
+                    .Include(p => p.RelatedProduct)
+                    .Include(p => p.ComplementaryProduct)
                     .FirstAsync(p => p.Id == product.Id, cancelToken);
                 if (relatedProductIds != null)
                 {
                     foreach (var id in relatedProductIds.Where(id => id != product.Id))
                     {
-                        var related = await _dbContext.Products.FindAsync(new object[] { id }, cancelToken);
+                        var related = await _dbContext.Product.FindAsync(new object[] { id }, cancelToken);
                         if (related != null && !related.IsDeleted && related.AccountId == product.AccountId)
-                            dbProduct.RelatedProducts.Add(related);
+                            dbProduct.RelatedProduct.Add(related);
                     }
                 }
                 if (complementaryProductIds != null)
                 {
                     foreach (var id in complementaryProductIds.Where(id => id != product.Id))
                     {
-                        var comp = await _dbContext.Products.FindAsync(new object[] { id }, cancelToken);
+                        var comp = await _dbContext.Product.FindAsync(new object[] { id }, cancelToken);
                         if (comp != null && !comp.IsDeleted && comp.AccountId == product.AccountId)
-                            dbProduct.ComplementaryProducts.Add(comp);
+                            dbProduct.ComplementaryProduct.Add(comp);
                     }
                 }
                 await _dbContext.SaveChangesAsync(cancelToken);
@@ -216,12 +216,12 @@ namespace George.Data
 
         public async Task<Product?> UpdateProductAsync(Product updated, List<int>? siteIds, List<int>? categoryIds, List<string>? tags, List<int>? relatedProductIds, List<int>? complementaryProductIds, CancellationToken cancelToken)
         {
-            var dbProduct = await _dbContext.Products
-                .Include(p => p.Sites)
-                .Include(p => p.Tags)
-                .Include(p => p.ProductCategories)
-                .Include(p => p.RelatedProducts)
-                .Include(p => p.ComplementaryProducts)
+            var dbProduct = await _dbContext.Product
+                .Include(p => p.Site)
+                .Include(p => p.Tag)
+                .Include(p => p.ProductCategory)
+                .Include(p => p.RelatedProduct)
+                .Include(p => p.ComplementaryProduct)
                 .FirstOrDefaultAsync(p => p.Id == updated.Id, cancelToken);
 
             if (dbProduct == null) return null;
@@ -260,15 +260,15 @@ namespace George.Data
             // Update sites
             if (siteIds != null)
             {
-                dbProduct.Sites.Clear();
+                dbProduct.Site.Clear();
                 if (siteIds.Any())
                 {
-                    var sites = await _dbContext.Sites
+                    var sites = await _dbContext.Site
                         .Where(s => siteIds.Contains(s.Id))
                         .ToListAsync(cancelToken);
                     foreach (var site in sites)
                     {
-                        dbProduct.Sites.Add(site);
+                        dbProduct.Site.Add(site);
                     }
                 }
             }
@@ -276,15 +276,15 @@ namespace George.Data
             // Update categories
             if (categoryIds != null)
             {
-                dbProduct.ProductCategories.Clear();
+                dbProduct.ProductCategory.Clear();
                 if (categoryIds.Any())
                 {
-                    var categories = await _dbContext.Categories
+                    var categories = await _dbContext.Category
                         .Where(c => categoryIds.Contains(c.Id))
                         .ToListAsync(cancelToken);
                     foreach (var category in categories)
                     {
-                        dbProduct.ProductCategories.Add(new ProductCategory
+                        dbProduct.ProductCategory.Add(new ProductCategory
                         {
                             ProductId = dbProduct.Id,
                             CategoryId = category.Id
@@ -296,12 +296,12 @@ namespace George.Data
             // Update tags
             if (tags != null)
             {
-                dbProduct.Tags.Clear();
+                dbProduct.Tag.Clear();
                 if (tags.Any())
                 {
                     foreach (var tagName in tags)
                     {
-                        var tag = await _dbContext.Tags
+                        var tag = await _dbContext.Tag
                             .FirstOrDefaultAsync(t => t.Name == tagName && t.AccountId == dbProduct.AccountId, cancelToken);
                         
                         if (tag == null)
@@ -312,9 +312,9 @@ namespace George.Data
                                 AccountId = dbProduct.AccountId,
                                 CreationTime = DateTime.UtcNow
                             };
-                            _dbContext.Tags.Add(tag);
+                            _dbContext.Tag.Add(tag);
                         }
-                        dbProduct.Tags.Add(tag);
+                        dbProduct.Tag.Add(tag);
                     }
                 }
             }
@@ -322,24 +322,24 @@ namespace George.Data
             // Update related products (נלווים)
             if (relatedProductIds != null)
             {
-                dbProduct.RelatedProducts.Clear();
+                dbProduct.RelatedProduct.Clear();
                 foreach (var id in relatedProductIds.Where(id => id != dbProduct.Id))
                 {
-                    var related = await _dbContext.Products.FindAsync(new object[] { id }, cancelToken);
+                    var related = await _dbContext.Product.FindAsync(new object[] { id }, cancelToken);
                     if (related != null && !related.IsDeleted && related.AccountId == dbProduct.AccountId)
-                        dbProduct.RelatedProducts.Add(related);
+                        dbProduct.RelatedProduct.Add(related);
                 }
             }
 
             // Update complementary products (מוצרים משלימים)
             if (complementaryProductIds != null)
             {
-                dbProduct.ComplementaryProducts.Clear();
+                dbProduct.ComplementaryProduct.Clear();
                 foreach (var id in complementaryProductIds.Where(id => id != dbProduct.Id))
                 {
-                    var comp = await _dbContext.Products.FindAsync(new object[] { id }, cancelToken);
+                    var comp = await _dbContext.Product.FindAsync(new object[] { id }, cancelToken);
                     if (comp != null && !comp.IsDeleted && comp.AccountId == dbProduct.AccountId)
-                        dbProduct.ComplementaryProducts.Add(comp);
+                        dbProduct.ComplementaryProduct.Add(comp);
                 }
             }
 
@@ -353,20 +353,20 @@ namespace George.Data
         /// </summary>
         public async Task<bool> RemoveProductFromSiteAsync(int productId, int siteId, CancellationToken cancelToken)
         {
-            var product = await _dbContext.Products
-                .Include(p => p.Sites)
+            var product = await _dbContext.Product
+                .Include(p => p.Site)
                 .FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
 
             if (product == null) return false;
 
-            var siteToRemove = product.Sites.FirstOrDefault(s => s.Id == siteId);
+            var siteToRemove = product.Site.FirstOrDefault(s => s.Id == siteId);
             if (siteToRemove == null) return true; // already not on this site
 
-            product.Sites.Remove(siteToRemove);
+            product.Site.Remove(siteToRemove);
             product.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken);
 
-            if (!product.Sites.Any())
+            if (!product.Site.Any())
             {
                 product.IsDeleted = true;
                 await _dbContext.SaveChangesAsync(cancelToken);
@@ -377,7 +377,7 @@ namespace George.Data
 
         public async Task<bool> DeleteProductAsync(int productId, CancellationToken cancelToken)
         {
-            var product = await _dbContext.Products
+            var product = await _dbContext.Product
                 .FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
 
             if (product == null) return false;
@@ -392,7 +392,7 @@ namespace George.Data
         public async Task UpdateProductOrderAsync(List<int> productIds, CancellationToken cancelToken)
         {
             if (productIds == null || !productIds.Any()) return;
-            var products = await _dbContext.Products
+            var products = await _dbContext.Product
                 .Where(p => productIds.Contains(p.Id))
                 .ToListAsync(cancelToken);
             var idToIndex = productIds.Select((id, i) => (id, i)).ToDictionary(x => x.id, x => x.i);
@@ -412,10 +412,10 @@ namespace George.Data
         public async Task<Dictionary<int, List<int>>> GetProductIdsBySiteForProductIdsAsync(List<int> productIds, CancellationToken cancelToken)
         {
             if (productIds == null || !productIds.Any()) return new Dictionary<int, List<int>>();
-            var pairs = await _dbContext.Products
+            var pairs = await _dbContext.Product
                 .AsNoTracking()
                 .Where(p => productIds.Contains(p.Id))
-                .SelectMany(p => p.Sites.Select(s => new { ProductId = p.Id, SiteId = s.Id }))
+                .SelectMany(p => p.Site.Select(s => new { ProductId = p.Id, SiteId = s.Id }))
                 .ToListAsync(cancelToken);
             return pairs.GroupBy(x => x.SiteId).ToDictionary(g => g.Key, g => g.Select(x => x.ProductId).ToList());
         }
@@ -425,9 +425,9 @@ namespace George.Data
         {
             if (orderedProductIds == null || !orderedProductIds.Any()) return new List<(int, int)>();
             var productIdsSet = orderedProductIds.Distinct().ToHashSet();
-            var products = await _dbContext.Products
+            var products = await _dbContext.Product
                 .AsNoTracking()
-                .Where(p => productIdsSet.Contains(p.Id) && p.WooCommerceId != null && p.Sites.Any(s => s.Id == siteId))
+                .Where(p => productIdsSet.Contains(p.Id) && p.WooCommerceId != null && p.Site.Any(s => s.Id == siteId))
                 .Select(p => new { p.Id, WooId = p.WooCommerceId!.Value })
                 .ToListAsync(cancelToken);
             var idToWooId = products.ToDictionary(p => p.Id, p => p.WooId);
@@ -442,7 +442,7 @@ namespace George.Data
 
         public async Task<bool> UpdateProductWooCommerceIdAsync(int productId, int? wooCommerceId, CancellationToken cancelToken)
         {
-            var product = await _dbContext.Products
+            var product = await _dbContext.Product
                 .FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
 
             if (product == null) return false;
@@ -455,7 +455,7 @@ namespace George.Data
 
         public async Task<bool> UpdateProductVariantWooCommerceIdAsync(int variantId, int? wooCommerceVariationId, CancellationToken cancelToken)
         {
-            var variant = await _dbContext.ProductVariants
+            var variant = await _dbContext.ProductVariant
                 .FirstOrDefaultAsync(pv => pv.Id == variantId, cancelToken);
 
             if (variant == null) return false;
@@ -468,16 +468,16 @@ namespace George.Data
         // Helper methods for service layer. Each item has Url and optional MediaId (when linked to account media).
         public async Task CreateProductImagesAsync(int productId, List<(string Url, int? MediaId)> images, CancellationToken cancelToken)
         {
-            var existingImages = await _dbContext.ProductImages
+            var existingImages = await _dbContext.ProductImage
                 .Where(pi => pi.ProductId == productId)
                 .ToListAsync(cancelToken);
 
-            _dbContext.ProductImages.RemoveRange(existingImages);
+            _dbContext.ProductImage.RemoveRange(existingImages);
 
             for (int i = 0; i < images.Count; i++)
             {
                 var (url, mediaId) = images[i];
-                _dbContext.ProductImages.Add(new ProductImage
+                _dbContext.ProductImage.Add(new ProductImage
                 {
                     ProductId = productId,
                     Url = url,
@@ -492,11 +492,11 @@ namespace George.Data
         public async Task CreateProductOptionsAsync(int productId, List<ProductOptionDto> options, CancellationToken cancelToken)
         {
             // Get product's sites to create attributes for each site
-            var product = await _dbContext.Products
-                .Include(p => p.Sites)
+            var product = await _dbContext.Product
+                .Include(p => p.Site)
                 .FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
             
-            var siteIds = product?.Sites?.Select(s => s.Id).ToList() ?? new List<int>();
+            var siteIds = product?.Site?.Select(s => s.Id).ToList() ?? new List<int>();
 
             foreach (var opt in options)
             {
@@ -506,14 +506,14 @@ namespace George.Data
                     Name = opt.Name,
                     IsDeleted = false
                 };
-                _dbContext.ProductOptions.Add(productOption);
+                _dbContext.ProductOption.Add(productOption);
                 await _dbContext.SaveChangesAsync(cancelToken);
 
                 if (opt.Values != null && opt.Values.Any())
                 {
                     foreach (var value in opt.Values)
                     {
-                        _dbContext.ProductOptionValues.Add(new ProductOptionValue
+                        _dbContext.ProductOptionValue.Add(new ProductOptionValue
                         {
                             ProductOptionId = productOption.Id,
                             Value = value
@@ -526,8 +526,8 @@ namespace George.Data
                 foreach (var siteId in siteIds)
                 {
                     // Find or create Attribute (use fully qualified name to avoid ambiguity)
-                    var attribute = await _dbContext.Attributes
-                        .Include(a => a.AttributeValues)
+                    var attribute = await _dbContext.Attribute
+                        .Include(a => a.AttributeValue)
                         .FirstOrDefaultAsync(a => a.Name == opt.Name && a.SiteId == siteId && !a.IsDeleted, cancelToken);
 
                     if (attribute == null)
@@ -540,12 +540,12 @@ namespace George.Data
                             IsDeleted = false,
                             GuidId = Guid.NewGuid()
                         };
-                        _dbContext.Attributes.Add(attribute);
+                        _dbContext.Attribute.Add(attribute);
                         await _dbContext.SaveChangesAsync(cancelToken);
                         
                         // Reload to get AttributeValues collection
-                        attribute = await _dbContext.Attributes
-                            .Include(a => a.AttributeValues)
+                        attribute = await _dbContext.Attribute
+                            .Include(a => a.AttributeValue)
                             .FirstOrDefaultAsync(a => a.Id == attribute.Id, cancelToken);
                     }
 
@@ -555,12 +555,12 @@ namespace George.Data
                         foreach (var value in opt.Values)
                         {
                             // Check if AttributeValue already exists
-                            var existingValue = attribute.AttributeValues
+                            var existingValue = attribute.AttributeValue
                                 .FirstOrDefault(av => av.Value == value);
 
                             if (existingValue == null)
                             {
-                                _dbContext.AttributeValues.Add(new AttributeValue
+                                _dbContext.AttributeValue.Add(new AttributeValue
                                 {
                                     AttributeId = attribute.Id,
                                     Value = value
@@ -577,7 +577,7 @@ namespace George.Data
         {
             if (options == null) return;
 
-            var existingOptions = await _dbContext.ProductOptions
+            var existingOptions = await _dbContext.ProductOption
                 .Where(po => po.ProductId == productId)
                 .ToListAsync(cancelToken);
 
@@ -605,7 +605,7 @@ namespace George.Data
                     Weight = variant.Weight,
                     IsDeleted = false
                 };
-                _dbContext.ProductVariants.Add(productVariant);
+                _dbContext.ProductVariant.Add(productVariant);
                 await _dbContext.SaveChangesAsync(cancelToken);
 
                 // Map option values if provided
@@ -613,7 +613,7 @@ namespace George.Data
                 {
                     foreach (var kvp in variant.OptionValues)
                     {
-                        _dbContext.ProductVariantOptionValues.Add(new ProductVariantOptionValue
+                        _dbContext.ProductVariantOptionValue.Add(new ProductVariantOptionValue
                         {
                             ProductVariantId = productVariant.Id,
                             OptionName = kvp.Key,
@@ -629,7 +629,7 @@ namespace George.Data
         {
             if (variants == null) return;
 
-            var existingVariants = await _dbContext.ProductVariants
+            var existingVariants = await _dbContext.ProductVariant
                 .Where(pv => pv.ProductId == productId)
                 .ToListAsync(cancelToken);
 
@@ -646,7 +646,7 @@ namespace George.Data
         {
             if (string.IsNullOrWhiteSpace(sku)) return null;
 
-            var query = _dbContext.Products
+            var query = _dbContext.Product
                 .Where(p => !p.IsDeleted && p.Sku != null && p.Sku.ToLower().Trim() == sku.ToLower().Trim());
 
             if (accountId.HasValue)
@@ -668,7 +668,7 @@ namespace George.Data
             if (string.IsNullOrWhiteSpace(sku)) return null;
             if (siteIds == null || !siteIds.Any()) return null;
 
-            var query = _dbContext.Products
+            var query = _dbContext.Product
                 .Where(p => !p.IsDeleted && p.Sku != null && p.Sku.ToLower().Trim() == sku.ToLower().Trim());
 
             if (accountId.HasValue)
@@ -676,7 +676,7 @@ namespace George.Data
                 query = query.Where(p => p.AccountId == accountId.Value);
             }
 
-            query = query.Where(p => p.Sites.Any(s => siteIds.Contains(s.Id)));
+            query = query.Where(p => p.Site.Any(s => siteIds.Contains(s.Id)));
 
             return await query
                 .AsNoTracking()
@@ -692,7 +692,7 @@ namespace George.Data
         {
             if (string.IsNullOrWhiteSpace(name)) return null;
 
-            var query = _dbContext.Products
+            var query = _dbContext.Product
                 .Where(p => !p.IsDeleted && p.Name != null && p.Name.Trim().ToLower() == name.Trim().ToLower());
 
             if (accountId.HasValue)
@@ -702,7 +702,7 @@ namespace George.Data
 
             if (siteIds != null && siteIds.Any())
             {
-                query = query.Where(p => p.Sites.Any(s => siteIds.Contains(s.Id)));
+                query = query.Where(p => p.Site.Any(s => siteIds.Contains(s.Id)));
             }
 
             return await query
@@ -728,19 +728,19 @@ namespace George.Data
 
             if (req.Unit.HasValue())
             {
-                var unit = await _dbContext.Units
+                var unit = await _dbContext.Unit
                     .FirstOrDefaultAsync(u => u.Name == req.Unit, cancelToken);
                 weightConfig.UnitId = unit?.Id;
             }
 
             if (req.UnitWeightMode.HasValue())
             {
-                var mode = await _dbContext.UnitWeightModes
+                var mode = await _dbContext.UnitWeightMode
                     .FirstOrDefaultAsync(m => m.Name == req.UnitWeightMode, cancelToken);
                 weightConfig.UnitWeightModeId = mode?.Id;
             }
 
-            _dbContext.WeightConfigs.Add(weightConfig);
+            _dbContext.WeightConfig.Add(weightConfig);
             await _dbContext.SaveChangesAsync(cancelToken);
             return weightConfig;
         }
@@ -757,7 +757,7 @@ namespace George.Data
                 if (statusName == "draft") statusName = "hidden";
                 if (statusName == "archived") statusName = "hidden";
 
-                var status = await _dbContext.ProductStatuses
+                var status = await _dbContext.ProductStatus
                     .FirstOrDefaultAsync(s => s.Name.ToLower() == statusName.ToLower().Trim(), cancelToken);
                 product.StatusId = status?.Id;
             }
@@ -772,7 +772,7 @@ namespace George.Data
                 if (visibilityName == "draft") visibilityName = "hidden";
                 if (visibilityName == "archived") visibilityName = "hidden";
 
-                var visibility = await _dbContext.Visibilities
+                var visibility = await _dbContext.Visibility
                     .FirstOrDefaultAsync(v => v.Name.ToLower() == visibilityName.ToLower().Trim(), cancelToken);
                 product.VisibilityId = visibility?.Id;
             }
@@ -780,7 +780,7 @@ namespace George.Data
             // Map stock management type
             if (req.StockManagementType.HasValue())
             {
-                var smt = await _dbContext.StockManagementTypes
+                var smt = await _dbContext.StockManagementType
                     .FirstOrDefaultAsync(s => s.Name == req.StockManagementType && !s.IsDeleted, cancelToken);
                 
                 if (smt == null)
@@ -791,7 +791,7 @@ namespace George.Data
                         Name = req.StockManagementType,
                         IsDeleted = false
                     };
-                    _dbContext.StockManagementTypes.Add(smt);
+                    _dbContext.StockManagementType.Add(smt);
                     await _dbContext.SaveChangesAsync(cancelToken);
                 }
                 
@@ -801,7 +801,7 @@ namespace George.Data
             // Map stock status
             if (req.StockStatus.HasValue())
             {
-                var ss = await _dbContext.StockStatuses
+                var ss = await _dbContext.StockStatus
                     .FirstOrDefaultAsync(s => s.Name == req.StockStatus, cancelToken);
                 product.StockStatusId = ss?.Id;
             }
@@ -809,7 +809,7 @@ namespace George.Data
             // Map shipping class
             if (req.ShippingClass.HasValue())
             {
-                var sc = await _dbContext.ShippingClasses
+                var sc = await _dbContext.ShippingClass
                     .FirstOrDefaultAsync(s => s.Name == req.ShippingClass, cancelToken);
                 product.ShippingClassId = sc?.Id;
             }
@@ -817,7 +817,7 @@ namespace George.Data
             // Map setup type
             if (req.SetupType.HasValue())
             {
-                var st = await _dbContext.SetupTypes
+                var st = await _dbContext.SetupType
                     .FirstOrDefaultAsync(s => s.Name == req.SetupType, cancelToken);
                 product.SetupTypeId = st?.Id;
             }
@@ -825,7 +825,7 @@ namespace George.Data
             // Map brand
             if (req.Brand.HasValue())
             {
-                var brand = await _dbContext.Brands
+                var brand = await _dbContext.Brand
                     .FirstOrDefaultAsync(b => b.Name == req.Brand && b.AccountId == product.AccountId, cancelToken);
                 product.BrandId = brand?.Id;
             }
@@ -833,7 +833,7 @@ namespace George.Data
             // Map supplier
             if (req.Supplier.HasValue())
             {
-                var supplier = await _dbContext.Suppliers
+                var supplier = await _dbContext.Supplier
                     .FirstOrDefaultAsync(s => s.Name == req.Supplier && s.AccountId == product.AccountId, cancelToken);
                 product.SupplierId = supplier?.Id;
             }

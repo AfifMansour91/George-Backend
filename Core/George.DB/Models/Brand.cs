@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("Brand")]
 [Index("AccountId", Name = "IX_Brand_AccountId")]
 public partial class Brand
 {
@@ -31,20 +30,20 @@ public partial class Brand
     public int? AccountId { get; set; }
 
     [ForeignKey("AccountId")]
-    [InverseProperty("Brands")]
+    [InverseProperty("Brand")]
     public virtual Account? Account { get; set; }
 
     [ForeignKey("CreationUserId")]
-    [InverseProperty("BrandCreationUsers")]
+    [InverseProperty("BrandCreationUser")]
     public virtual User? CreationUser { get; set; }
 
     [InverseProperty("Brand")]
-    public virtual ICollection<Product> Products { get; set; } = new List<Product>();
+    public virtual ICollection<Product> Product { get; set; } = new List<Product>();
 
     [InverseProperty("Brand")]
-    public virtual ICollection<TemplateProduct> TemplateProducts { get; set; } = new List<TemplateProduct>();
+    public virtual ICollection<TemplateProduct> TemplateProduct { get; set; } = new List<TemplateProduct>();
 
     [ForeignKey("UpdateUserId")]
-    [InverseProperty("BrandUpdateUsers")]
+    [InverseProperty("BrandUpdateUser")]
     public virtual User? UpdateUser { get; set; }
 }

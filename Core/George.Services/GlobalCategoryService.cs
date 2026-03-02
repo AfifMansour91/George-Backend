@@ -148,9 +148,9 @@ namespace George.Services
             };
 
             // Map business types
-            if (globalCategory.BusinessTypes != null && globalCategory.BusinessTypes.Any())
+            if (globalCategory.BusinessType != null && globalCategory.BusinessType.Any())
             {
-                res.BusinessTypeIds = globalCategory.BusinessTypes.Select(bt => bt.Id).ToList();
+                res.BusinessTypeIds = globalCategory.BusinessType.Select(bt => bt.Id).ToList();
             }
 
             return res;

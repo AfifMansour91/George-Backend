@@ -19,9 +19,9 @@ namespace George.Data
             var res = new DataListResult<Site>();
 
             // Base sites query (only non-deleted business types)
-            var query = _dbContext.Sites
+            var query = _dbContext.Site
                 .Include(a => a.Account)
-                .Include(s => s.BusinessTypes.Where(bt => !bt.IsDeleted))
+                .Include(s => s.BusinessType.Where(bt => !bt.IsDeleted))
                 .AsNoTracking();
 
             if (filter?.Search?.SearchTerm.HasValue() == true)
@@ -51,17 +51,17 @@ namespace George.Data
 
         public async Task<Site?> GetSiteAsync(int siteId, CancellationToken cancelToken)
         {
-            return await _dbContext.Sites
+            return await _dbContext.Site
                 .Include(a => a.Account)
-                .Include(s => s.BusinessTypes)
+                .Include(s => s.BusinessType)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(a => a.Id == siteId, cancelToken);
         }
 
         public async Task<List<Site>> GetSitesByAccountAsync(int accountId, CancellationToken cancelToken)
         {
-            return await _dbContext.Sites
-                .Include(s => s.BusinessTypes.Where(bt => !bt.IsDeleted))
+            return await _dbContext.Site
+                .Include(s => s.BusinessType.Where(bt => !bt.IsDeleted))
                 .Where(s => s.AccountId == accountId && !s.IsDeleted)
                 .AsNoTracking()
                 .OrderBy(s => s.SiteName)
@@ -70,18 +70,18 @@ namespace George.Data
 
         public async Task<Site> CreateSiteAsync(Site site, List<int>? businessTypeIds, CancellationToken cancelToken)
         {
-            _dbContext.Sites.Add(site);
+            _dbContext.Site.Add(site);
             
             // Add business types if provided (only non-deleted)
             if (businessTypeIds != null && businessTypeIds.Any())
             {
-                var businessTypes = await _dbContext.BusinessTypes
+                var businessTypes = await _dbContext.BusinessType
                     .Where(bt => businessTypeIds.Contains(bt.Id) && !bt.IsDeleted)
                     .ToListAsync(cancelToken);
                 
                 foreach (var bt in businessTypes)
                 {
-                    site.BusinessTypes.Add(bt);
+                    site.BusinessType.Add(bt);
                 }
             }
             
@@ -91,8 +91,8 @@ namespace George.Data
 
         public async Task<Site?> UpdateSiteAsync(Site updated, List<int>? businessTypeIds, CancellationToken cancelToken)
         {
-            var dbSite = await _dbContext.Sites
-                .Include(s => s.BusinessTypes.Where(bt => !bt.IsDeleted))
+            var dbSite = await _dbContext.Site
+                .Include(s => s.BusinessType.Where(bt => !bt.IsDeleted))
                 .FirstOrDefaultAsync(a => a.Id == updated.Id, cancelToken);
 
             if (dbSite == null) return null;
@@ -133,16 +133,16 @@ namespace George.Data
             // Update business types
             if (businessTypeIds != null)
             {
-                dbSite.BusinessTypes.Clear();
+                dbSite.BusinessType.Clear();
                 if (businessTypeIds.Any())
                 {
-                    var businessTypes = await _dbContext.BusinessTypes
+                    var businessTypes = await _dbContext.BusinessType
                         .Where(bt => businessTypeIds.Contains(bt.Id) && !bt.IsDeleted)
                         .ToListAsync(cancelToken);
                     
                     foreach (var bt in businessTypes)
                     {
-                        dbSite.BusinessTypes.Add(bt);
+                        dbSite.BusinessType.Add(bt);
                     }
                 }
             }
@@ -154,14 +154,14 @@ namespace George.Data
         public async Task<Site?> DeleteSiteAsync(int id, CancellationToken cancelToken = default)
         {
             // Get the data from the DB.
-            var dbModel = await _dbContext.Sites
+            var dbModel = await _dbContext.Site
                                 .Where(a => a.Id == id)
                                 .FirstOrDefaultAsync(cancelToken)
                                 .ConfigureAwait(false);
             if (dbModel != null)
             {
                 // Delete the entity.
-                _dbContext.Sites.Remove(dbModel);
+                _dbContext.Site.Remove(dbModel);
 
                 // Save to the DB.
                 await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
@@ -173,7 +173,7 @@ namespace George.Data
         public async Task<Site?> ActivateSiteAsync(int id, CancellationToken cancelToken = default)
         {
             // Get the data from the DB.
-            var dbModel = await _dbContext.Sites
+            var dbModel = await _dbContext.Site
                                 .Where(a => a.Id == id)
                                 .FirstOrDefaultAsync(cancelToken)
                                 .ConfigureAwait(false);

@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("WizardType")]
 [Index("Name", Name = "UQ__WizardTy__737584F630854B67", IsUnique = true)]
 public partial class WizardType
 {
@@ -19,5 +18,5 @@ public partial class WizardType
     public bool IsDeleted { get; set; }
 
     [InverseProperty("WizardType")]
-    public virtual ICollection<Account> Accounts { get; set; } = new List<Account>();
+    public virtual ICollection<Account> Account { get; set; } = new List<Account>();
 }

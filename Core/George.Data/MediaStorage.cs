@@ -13,18 +13,18 @@ namespace George.Data
         {
         }
 
-        public async Task<DataListResult<Medium>> GetMediaAsync(
+        public async Task<DataListResult<Media>> GetMediaAsync(
             MediaFilter? filter,
             PagingExDto paging,
             CancellationToken cancelToken)
         {
-            var res = new DataListResult<Medium>();
+            var res = new DataListResult<Media>();
 
             var query = _dbContext.Media
                 .Include(m => m.BusinessType)
                 .Include(m => m.Type)
-                .Include(m => m.Categories)
-                .Include(m => m.Tags)
+                .Include(m => m.Category)
+                .Include(m => m.Tag)
                 .AsNoTracking();
 
             // Apply filters
@@ -55,7 +55,7 @@ namespace George.Data
 
                 if (filter.CategoryId.HasValue)
                 {
-                    query = query.Where(m => m.Categories.Any(c => c.Id == filter.CategoryId.Value));
+                    query = query.Where(m => m.Category.Any(c => c.Id == filter.CategoryId.Value));
                 }
 
                 if (filter.Type.HasValue())
@@ -85,13 +85,13 @@ namespace George.Data
             return res;
         }
 
-        public async Task<Medium?> GetMediaAsync(int mediaId, CancellationToken cancelToken)
+        public async Task<Media?> GetMediaAsync(int mediaId, CancellationToken cancelToken)
         {
             return await _dbContext.Media
                 .Include(m => m.BusinessType)
                 .Include(m => m.Type)
-                .Include(m => m.Categories)
-                .Include(m => m.Tags)
+                .Include(m => m.Category)
+                .Include(m => m.Tag)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(m => m.Id == mediaId && !m.IsDeleted, cancelToken);
         }
@@ -106,8 +106,8 @@ namespace George.Data
                 .FirstOrDefaultAsync(cancelToken);
         }
 
-        public async Task<Medium> CreateMediaAsync(
-            Medium media,
+        public async Task<Media> CreateMediaAsync(
+            Media media,
             List<int>? categoryIds,
             List<string>? tags,
             int? accountIdForTags,
@@ -120,13 +120,13 @@ namespace George.Data
             // Add categories if provided
             if (categoryIds != null && categoryIds.Any())
             {
-                var categories = await _dbContext.Categories
+                var categories = await _dbContext.Category
                     .Where(c => categoryIds.Contains(c.Id))
                     .ToListAsync(cancelToken);
                 
                 foreach (var category in categories)
                 {
-                    media.Categories.Add(category);
+                    media.Category.Add(category);
                 }
             }
 
@@ -135,7 +135,7 @@ namespace George.Data
             {
                 foreach (var tagName in tags)
                 {
-                    var tag = await _dbContext.Tags
+                    var tag = await _dbContext.Tag
                         .FirstOrDefaultAsync(t => t.Name == tagName && t.AccountId == accountIdForTags.Value, cancelToken);
                     
                     if (tag == null)
@@ -146,9 +146,9 @@ namespace George.Data
                             AccountId = accountIdForTags.Value,
                             CreationTime = DateTime.UtcNow
                         };
-                        _dbContext.Tags.Add(tag);
+                        _dbContext.Tag.Add(tag);
                     }
-                    media.Tags.Add(tag);
+                    media.Tag.Add(tag);
                 }
             }
 
@@ -156,8 +156,8 @@ namespace George.Data
             return media;
         }
 
-        public async Task<Medium?> UpdateMediaAsync(
-            Medium updated,
+        public async Task<Media?> UpdateMediaAsync(
+            Media updated,
             List<int>? categoryIds,
             List<string>? tags,
             int? accountIdForTags,
@@ -165,8 +165,8 @@ namespace George.Data
             bool? isGlobal = null)
         {
             var dbMedia = await _dbContext.Media
-                .Include(m => m.Categories)
-                .Include(m => m.Tags)
+                .Include(m => m.Category)
+                .Include(m => m.Tag)
                 .FirstOrDefaultAsync(m => m.Id == updated.Id && !m.IsDeleted, cancelToken);
 
             if (dbMedia == null) return null;
@@ -187,16 +187,16 @@ namespace George.Data
             // Update categories
             if (categoryIds != null)
             {
-                dbMedia.Categories.Clear();
+                dbMedia.Category.Clear();
                 if (categoryIds.Any())
                 {
-                    var categories = await _dbContext.Categories
+                    var categories = await _dbContext.Category
                         .Where(c => categoryIds.Contains(c.Id))
                         .ToListAsync(cancelToken);
                     
                     foreach (var category in categories)
                     {
-                        dbMedia.Categories.Add(category);
+                        dbMedia.Category.Add(category);
                     }
                 }
             }
@@ -204,12 +204,12 @@ namespace George.Data
             // Update tags (use accountIdForTags for per-account tag lookup)
             if (tags != null)
             {
-                dbMedia.Tags.Clear();
+                dbMedia.Tag.Clear();
                 if (tags.Any() && accountIdForTags.HasValue)
                 {
                     foreach (var tagName in tags)
                     {
-                        var tag = await _dbContext.Tags
+                        var tag = await _dbContext.Tag
                             .FirstOrDefaultAsync(t => t.Name == tagName && t.AccountId == accountIdForTags.Value, cancelToken);
                         
                         if (tag == null)
@@ -220,9 +220,9 @@ namespace George.Data
                                 AccountId = accountIdForTags.Value,
                                 CreationTime = DateTime.UtcNow
                             };
-                            _dbContext.Tags.Add(tag);
+                            _dbContext.Tag.Add(tag);
                         }
-                        dbMedia.Tags.Add(tag);
+                        dbMedia.Tag.Add(tag);
                     }
                 }
             }
@@ -243,13 +243,13 @@ namespace George.Data
             media.UpdateUserId = updateUserId;
 
             // Update ProductImage and TemplateProductImage URLs in place (Id is PK so Url can be updated)
-            var productImages = await _dbContext.ProductImages
+            var productImages = await _dbContext.ProductImage
                 .Where(pi => pi.MediaId == mediaId)
                 .ToListAsync(cancelToken);
             foreach (var pi in productImages)
                 pi.Url = url;
 
-            var templateProductImages = await _dbContext.TemplateProductImages
+            var templateProductImages = await _dbContext.TemplateProductImage
                 .Where(tpi => tpi.MediaId == mediaId)
                 .ToListAsync(cancelToken);
             foreach (var tpi in templateProductImages)
@@ -275,14 +275,14 @@ namespace George.Data
             if (accountId.HasValue)
             {
                 // Account admin delete: remove image from this account's products (optionally scoped to site via ProductSite)
-                var accountProductIds = await _dbContext.Products
+                var accountProductIds = await _dbContext.Product
                     .Where(p => p.AccountId == accountId.Value)
                     .Select(p => p.Id)
                     .ToListAsync(cancelToken);
-                var productImagesToRemove = await _dbContext.ProductImages
+                var productImagesToRemove = await _dbContext.ProductImage
                     .Where(pi => pi.MediaId == mediaId && accountProductIds.Contains(pi.ProductId))
                     .ToListAsync(cancelToken);
-                _dbContext.ProductImages.RemoveRange(productImagesToRemove);
+                _dbContext.ProductImage.RemoveRange(productImagesToRemove);
 
                 // When siteId is provided, remove only that site's link; otherwise remove all links for this account+media
                 var accountMediaQuery = _dbContext.AccountMedia
@@ -301,10 +301,10 @@ namespace George.Data
                 var isGlobal = await GetMediaIsGlobalAsync(mediaId, cancelToken);
                 if (!isGlobal) return false;
 
-                var templateProductImagesToRemove = await _dbContext.TemplateProductImages
+                var templateProductImagesToRemove = await _dbContext.TemplateProductImage
                     .Where(tpi => tpi.MediaId == mediaId)
                     .ToListAsync(cancelToken);
-                _dbContext.TemplateProductImages.RemoveRange(templateProductImagesToRemove);
+                _dbContext.TemplateProductImage.RemoveRange(templateProductImagesToRemove);
 
                 media.IsDeleted = true;
                 media.UpdatedDate = DateTime.UtcNow;
@@ -317,7 +317,7 @@ namespace George.Data
         /// <summary>Returns the first (min Id) site for the account, or null if account has no sites.</summary>
         public async Task<int?> GetFirstSiteIdForAccountAsync(int accountId, CancellationToken cancelToken)
         {
-            return await _dbContext.Sites
+            return await _dbContext.Site
                 .Where(s => s.AccountId == accountId && !s.IsDeleted)
                 .OrderBy(s => s.Id)
                 .Select(s => (int?)s.Id)
@@ -375,7 +375,7 @@ namespace George.Data
 
             var typeId = await GetOrCreateMediaTypeAsync("image", cancelToken);
             var name = GetFileNameFromUrl(trimmed) ?? "image";
-            var media = new Medium
+            var media = new Media
             {
                 Url = trimmed,
                 Name = name,
@@ -401,7 +401,7 @@ namespace George.Data
 
             var typeId = await GetOrCreateMediaTypeAsync("image", cancelToken);
             var name = GetFileNameFromUrl(trimmed) ?? "image";
-            var media = new Medium
+            var media = new Media
             {
                 Url = trimmed,
                 Name = name,
@@ -438,7 +438,7 @@ namespace George.Data
         {
             if (string.IsNullOrWhiteSpace(typeName)) return null;
 
-            var mediaType = await _dbContext.MediaTypes
+            var mediaType = await _dbContext.MediaType
                 .FirstOrDefaultAsync(mt => mt.Name == typeName && !mt.IsDeleted, cancelToken);
 
             if (mediaType == null)
@@ -448,7 +448,7 @@ namespace George.Data
                     Name = typeName,
                     IsDeleted = false
                 };
-                _dbContext.MediaTypes.Add(mediaType);
+                _dbContext.MediaType.Add(mediaType);
                 await _dbContext.SaveChangesAsync(cancelToken);
             }
 

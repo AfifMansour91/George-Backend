@@ -7,7 +7,6 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [PrimaryKey("ProductVariantId", "OptionName")]
-[Table("ProductVariantOptionValue")]
 public partial class ProductVariantOptionValue
 {
     [Key]
@@ -21,6 +20,6 @@ public partial class ProductVariantOptionValue
     public string OptionValue { get; set; } = null!;
 
     [ForeignKey("ProductVariantId")]
-    [InverseProperty("ProductVariantOptionValues")]
+    [InverseProperty("ProductVariantOptionValue")]
     public virtual ProductVariant ProductVariant { get; set; } = null!;
 }

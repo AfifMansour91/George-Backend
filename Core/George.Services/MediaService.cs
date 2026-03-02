@@ -179,9 +179,9 @@ namespace George.Services
         }
 
         // Helper methods
-        private Medium MapReqToMedia(MediaReq req)
+        private Media MapReqToMedia(MediaReq req)
         {
-            return new Medium
+            return new Media
             {
                 Url = req.Url,
                 Name = req.Name,
@@ -191,7 +191,7 @@ namespace George.Services
             };
         }
 
-        private MediaRes MapMediaToRes(Medium media, bool? isGlobal = null)
+        private MediaRes MapMediaToRes(Media media, bool? isGlobal = null)
         {
             var res = new MediaRes
             {
@@ -214,13 +214,13 @@ namespace George.Services
             }
 
             // Map categories (separate main categories from subcategories)
-            if (media.Categories != null && media.Categories.Any())
+            if (media.Category != null && media.Category.Any())
             {
-                var mainCategories = media.Categories
+                var mainCategories = media.Category
                     .Where(c => c.ParentCategoryId == null)
                     .Select(c => c.Id)
                     .ToList();
-                var subCategories = media.Categories
+                var subCategories = media.Category
                     .Where(c => c.ParentCategoryId != null)
                     .Select(c => c.Id)
                     .ToList();
@@ -230,9 +230,9 @@ namespace George.Services
             }
 
             // Map tags
-            if (media.Tags != null && media.Tags.Any())
+            if (media.Tag != null && media.Tag.Any())
             {
-                res.Tags = media.Tags.Select(t => t.Name).ToList();
+                res.Tags = media.Tag.Select(t => t.Name).ToList();
             }
 
             return res;

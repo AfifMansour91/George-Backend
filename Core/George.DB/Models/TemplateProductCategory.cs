@@ -7,7 +7,6 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [PrimaryKey("TemplateProductId", "GlobalCategoryId")]
-[Table("TemplateProductCategory")]
 public partial class TemplateProductCategory
 {
     [Key]
@@ -19,10 +18,10 @@ public partial class TemplateProductCategory
     public int GlobalCategoryId { get; set; }
 
     [ForeignKey("GlobalCategoryId")]
-    [InverseProperty("TemplateProductCategories")]
+    [InverseProperty("TemplateProductCategory")]
     public virtual GlobalCategory GlobalCategory { get; set; } = null!;
 
     [ForeignKey("TemplateProductId")]
-    [InverseProperty("TemplateProductCategories")]
+    [InverseProperty("TemplateProductCategory")]
     public virtual TemplateProduct TemplateProduct { get; set; } = null!;
 }

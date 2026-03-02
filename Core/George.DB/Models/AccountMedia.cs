@@ -1,25 +1,22 @@
-using System;
+﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-/// <summary>
-/// Records that an account/site "uses" a media file. Media is scoped per site so multiple sites under one account do not see each other's media.
-/// </summary>
 [PrimaryKey("AccountId", "SiteId", "MediaId")]
-[Table("AccountMedia")]
 [Index("AccountId", Name = "IX_AccountMedia_AccountId")]
 [Index("AccountId", "SiteId", Name = "IX_AccountMedia_AccountId_SiteId")]
 [Index("MediaId", Name = "IX_AccountMedia_MediaId")]
+[Index("AccountId", "MediaId", Name = "UQ_AccountMedia_AccountId_MediaId", IsUnique = true)]
 public partial class AccountMedia
 {
-    [Key]
-    public int AccountId { get; set; }
+    public int Id { get; set; }
 
     [Key]
-    public int SiteId { get; set; }
+    public int AccountId { get; set; }
 
     [Key]
     public int MediaId { get; set; }
@@ -27,15 +24,24 @@ public partial class AccountMedia
     [Precision(0)]
     public DateTime CreationTime { get; set; }
 
+    public int? CreationUserId { get; set; }
+
+    [Key]
+    public int SiteId { get; set; }
+
     [ForeignKey("AccountId")]
     [InverseProperty("AccountMedia")]
     public virtual Account Account { get; set; } = null!;
 
-    [ForeignKey("SiteId")]
+    [ForeignKey("CreationUserId")]
     [InverseProperty("AccountMedia")]
-    public virtual Site Site { get; set; } = null!;  // Required: media is scoped per site
+    public virtual User? CreationUser { get; set; }
 
     [ForeignKey("MediaId")]
     [InverseProperty("AccountMedia")]
-    public virtual Medium Media { get; set; } = null!;
+    public virtual Media Media { get; set; } = null!;
+
+    [ForeignKey("SiteId")]
+    [InverseProperty("AccountMedia")]
+    public virtual Site Site { get; set; } = null!;
 }

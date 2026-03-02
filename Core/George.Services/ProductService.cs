@@ -193,7 +193,7 @@ namespace George.Services
                 {
                     var resolutionSiteId = req.SiteIds != null && req.SiteIds.Any()
                         ? (int?)req.SiteIds.First()
-                        : existingProduct.Sites?.OrderBy(s => s.Id).Select(s => s.Id).FirstOrDefault();
+                        : existingProduct.Site?.OrderBy(s => s.Id).Select(s => s.Id).FirstOrDefault();
                     var imageList = await ResolveImageUrlsToMediaAsync(existingProduct.AccountId, req.ImageUrls, createMediaIfMissing: true, siteId: resolutionSiteId, cancelToken);
                     await _productStorage.CreateProductImagesAsync(productId, imageList, cancelToken);
                 }
@@ -507,7 +507,7 @@ namespace George.Services
                         if (targetSiteIds != null && targetSiteIds.Any())
                         {
                             var existingWithSites = await _productStorage.GetProductAsync(existingProduct.Id, cancelToken);
-                            var existingSiteIds = existingWithSites?.Sites?.Select(s => s.Id).ToList() ?? new List<int>();
+                            var existingSiteIds = existingWithSites?.Site?.Select(s => s.Id).ToList() ?? new List<int>();
                             var onTargetSite = existingSiteIds.Any(id => targetSiteIds.Contains(id));
                             if (!onTargetSite && existingSiteIds.Any())
                             {
@@ -798,22 +798,22 @@ namespace George.Services
             };
 
             // Map images
-            if (product.ProductImages != null && product.ProductImages.Any())
+            if (product.ProductImage != null && product.ProductImage.Any())
             {
-                var ordered = product.ProductImages.OrderBy(pi => pi.SortOrder).ToList();
+                var ordered = product.ProductImage.OrderBy(pi => pi.SortOrder).ToList();
                 res.ImageUrls = ordered.Select(pi => pi.Url).ToList();
                 res.ImageNames = ordered.Select(pi => pi.Media?.Name ?? string.Empty).ToList();
             }
 
             // Map categories
-            if (product.ProductCategories != null && product.ProductCategories.Any())
+            if (product.ProductCategory != null && product.ProductCategory.Any())
             {
-                var mainCategories = product.ProductCategories
+                var mainCategories = product.ProductCategory
                     .Where(pc => pc.Category?.ParentCategoryId == null)
                     .Select(pc => pc.CategoryId)
                     .ToList();
-                var subCategories = product.ProductCategories
-                    .Where(pc => pc.Category?.ParentCategoryId != null)
+                var subCategories = product.ProductCategory
+                    .Where(pc => pc.Category?.ProductCategory != null)
                     .Select(pc => pc.CategoryId)
                     .ToList();
                 
@@ -822,27 +822,27 @@ namespace George.Services
             }
 
             // Map tags
-            if (product.Tags != null && product.Tags.Any())
+            if (product.Tag != null && product.Tag.Any())
             {
-                res.Tags = product.Tags.Select(t => t.Name).ToList();
+                res.Tags = product.Tag.Select(t => t.Name).ToList();
             }
 
             // Map sites
-            if (product.Sites != null && product.Sites.Any())
+            if (product.Site != null && product.Site.Any())
             {
-                res.SiteIds = product.Sites.Select(s => s.Id).ToList();
+                res.SiteIds = product.Site.Select(s => s.Id).ToList();
             }
 
             // Map related products (נלווים)
-            if (product.RelatedProducts != null && product.RelatedProducts.Any())
+            if (product.RelatedProduct != null && product.RelatedProduct.Any())
             {
-                res.RelatedProductIds = product.RelatedProducts.Select(p => p.Id).ToList();
+                res.RelatedProductIds = product.RelatedProduct.Select(p => p.Id).ToList();
             }
 
             // Map complementary products (מוצרים משלימים)
-            if (product.ComplementaryProducts != null && product.ComplementaryProducts.Any())
+            if (product.ComplementaryProduct != null && product.ComplementaryProduct.Any())
             {
-                res.ComplementaryProductIds = product.ComplementaryProducts.Select(p => p.Id).ToList();
+                res.ComplementaryProductIds = product.ComplementaryProduct.Select(p => p.Id).ToList();
             }
 
             // Map lookups
@@ -856,22 +856,22 @@ namespace George.Services
             res.Supplier = product.Supplier?.Name;
 
             // Map options
-            if (product.ProductOptions != null && product.ProductOptions.Any())
+            if (product.ProductOption != null && product.ProductOption.Any())
             {
-                res.ProductOptions = product.ProductOptions
+                res.ProductOptions = product.ProductOption
                     .Where(po => !po.IsDeleted)
                     .Select(po => new ProductOptionRes
                     {
                         Name = po.Name,
-                        Values = po.ProductOptionValues?.Select(pov => pov.Value).ToList() ?? new List<string>()
+                        Values = po.ProductOptionValue?.Select(pov => pov.Value).ToList() ?? new List<string>()
                     })
                     .ToList();
             }
 
             // Map variants
-            if (product.ProductVariants != null && product.ProductVariants.Any())
+            if (product.ProductVariant != null && product.ProductVariant.Any())
             {
-                res.Variants = product.ProductVariants
+                res.Variants = product.ProductVariant
                     .Where(pv => !pv.IsDeleted)
                     .Select(pv => new ProductVariantRes
                     {
@@ -881,7 +881,7 @@ namespace George.Services
                         StockQuantity = pv.StockQuantity,
                         Sku = pv.Sku,
                         Weight = pv.Weight,
-                        OptionValues = pv.ProductVariantOptionValues?
+                        OptionValues = pv.ProductVariantOptionValue?
                             .ToDictionary(pvov => pvov.OptionName ?? "", 
                                          pvov => pvov.OptionValue ?? "")
                     })
