@@ -1,4 +1,4 @@
-﻿using Amazon.S3;
+using Amazon.S3;
 using Amazon.S3.Model;
 //using SharpCompress.Common;
 using George.Common;
@@ -389,24 +389,34 @@ namespace George.Services
 
 
 		//*************************    Private/Protected Methods    *************************//
+		/// <summary>Builds a file path using the original file name. Adds a short GUID only when the filename is not good (empty or invalid after sanitization).</summary>
 		private string CreateUniqueFilePath(IFormFile file, string? path)
 		{
-			string res;
+			var extension = Path.GetExtension(file.FileName).TrimStart('.').ToLowerInvariant();
+			if (string.IsNullOrEmpty(extension))
+				extension = "bin";
 
-			var extension = Path.GetExtension(file.FileName).TrimStart('.').ToLower();
+			// Sanitize original name: remove path/invalid chars, limit length
+			string baseName = Path.GetFileNameWithoutExtension(file.FileName) ?? "";
+			char[] invalid = Path.GetInvalidFileNameChars();
+			baseName = string.Join("", baseName.Split(invalid, StringSplitOptions.RemoveEmptyEntries)).Trim();
+			baseName = baseName.Replace(' ', '-');
+			if (baseName.Length > 50)
+				baseName = baseName.Substring(0, 50);
+			if (string.IsNullOrEmpty(baseName))
+				baseName = "file";
 
-			string fileName = Guid.NewGuid().ToString("N") + "." + extension;
+			// Only add GUID when filename was not good (empty/invalid → we used fallback "file") to avoid collisions
+			string fileName = baseName == "file"
+				? $"file-{Guid.NewGuid().ToString("N").Substring(0, 8)}.{extension}"
+				: $"{baseName}.{extension}";
+
 			if (!string.IsNullOrEmpty(path))
 			{
 				path = path.Trim('/').Trim('\\');
-				res = $"{_env}/{path}/{fileName}";
+				return $"{_env}/{path}/{fileName}";
 			}
-			else
-			{
-				res = $"{_env}/{fileName}";
-			}
-
-			return res;
+			return $"{_env}/{fileName}";
 		}
 
 		private string AddEnvToPath(string path)

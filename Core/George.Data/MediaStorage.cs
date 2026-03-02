@@ -32,14 +32,8 @@ namespace George.Data
             {
                 if (filter.GlobalOnly == true)
                 {
-                    // Global media: only media not used by any account (super-admin pool). Exclude all account media.
-                    var usedMediaIds = await _dbContext.AccountMedia
-                        .Select(am => am.MediaId)
-                        .Distinct()
-                        .ToListAsync(cancelToken)
-                        .ConfigureAwait(false);
-                    if (usedMediaIds.Count > 0)
-                        query = query.Where(m => !usedMediaIds.Contains(m.Id));
+                    // Global media: only rows explicitly marked as global (IsGlobal = true).
+                    query = query.Where(m => EF.Property<bool>(m, "IsGlobal"));
                 }
                 else if (filter.AccountId.HasValue)
                 {
@@ -102,14 +96,26 @@ namespace George.Data
                 .FirstOrDefaultAsync(m => m.Id == mediaId && !m.IsDeleted, cancelToken);
         }
 
+        /// <summary>Returns whether the media is marked as global (shadow property IsGlobal).</summary>
+        public async Task<bool> GetMediaIsGlobalAsync(int mediaId, CancellationToken cancelToken)
+        {
+            return await _dbContext.Media
+                .AsNoTracking()
+                .Where(m => m.Id == mediaId && !m.IsDeleted)
+                .Select(m => EF.Property<bool>(m, "IsGlobal"))
+                .FirstOrDefaultAsync(cancelToken);
+        }
+
         public async Task<Medium> CreateMediaAsync(
             Medium media,
             List<int>? categoryIds,
             List<string>? tags,
             int? accountIdForTags,
-            CancellationToken cancelToken)
+            CancellationToken cancelToken,
+            bool? isGlobal = null)
         {
             _dbContext.Media.Add(media);
+            _dbContext.Entry(media).Property("IsGlobal").CurrentValue = isGlobal ?? !accountIdForTags.HasValue;
 
             // Add categories if provided
             if (categoryIds != null && categoryIds.Any())
@@ -155,7 +161,8 @@ namespace George.Data
             List<int>? categoryIds,
             List<string>? tags,
             int? accountIdForTags,
-            CancellationToken cancelToken)
+            CancellationToken cancelToken,
+            bool? isGlobal = null)
         {
             var dbMedia = await _dbContext.Media
                 .Include(m => m.Categories)
@@ -163,6 +170,9 @@ namespace George.Data
                 .FirstOrDefaultAsync(m => m.Id == updated.Id && !m.IsDeleted, cancelToken);
 
             if (dbMedia == null) return null;
+
+            if (isGlobal.HasValue)
+                _dbContext.Entry(dbMedia).Property("IsGlobal").CurrentValue = isGlobal.Value;
 
             // Update basic properties (no AccountId on Media)
             dbMedia.Url = updated.Url;
@@ -287,7 +297,10 @@ namespace George.Data
             }
             else
             {
-                // Global delete: remove from template products (TemplateProductImage) and soft-delete the media
+                // Global delete: only soft-delete if media is marked global (IsGlobal = true)
+                var isGlobal = await GetMediaIsGlobalAsync(mediaId, cancelToken);
+                if (!isGlobal) return false;
+
                 var templateProductImagesToRemove = await _dbContext.TemplateProductImages
                     .Where(tpi => tpi.MediaId == mediaId)
                     .ToListAsync(cancelToken);
@@ -372,6 +385,7 @@ namespace George.Data
                 IsDeleted = false
             };
             _dbContext.Media.Add(media);
+            _dbContext.Entry(media).Property("IsGlobal").CurrentValue = true;
             await _dbContext.SaveChangesAsync(cancelToken);
             return media.Id;
         }
@@ -397,6 +411,7 @@ namespace George.Data
                 IsDeleted = false
             };
             _dbContext.Media.Add(media);
+            _dbContext.Entry(media).Property("IsGlobal").CurrentValue = false;
             await _dbContext.SaveChangesAsync(cancelToken);
             await AddAccountMediaUsageAsync(accountId, siteId, media.Id, cancelToken);
             return media.Id;

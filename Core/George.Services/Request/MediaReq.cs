@@ -20,6 +20,8 @@ public class CreateMediaReq : MediaReq
     public int? AccountId { get; set; }
     /// <summary>When set with AccountId, media is scoped to this site so other sites under the account do not see it.</summary>
     public int? SiteId { get; set; }
+    /// <summary>When true, media is global (super-admin library). When false or null and AccountId is null, still treated as global.</summary>
+    public bool? IsGlobal { get; set; }
 }
 
 public class UpdateMediaReq : CreateMediaReq

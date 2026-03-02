@@ -42,8 +42,8 @@ namespace George.Services
             };
 
             var res = await _mediaStorage.GetMediaAsync(request.Filter, request, cancelToken);
-
-            response.Data!.Items = res.Items.ConvertAll(m => MapMediaToRes(m));
+            var isGlobalForList = request.Filter?.GlobalOnly == true;
+            response.Data!.Items = res.Items.ConvertAll(m => MapMediaToRes(m, isGlobalForList));
 
             response.Data.Skip = request.Skip;
             response.Data.Limit = request.Take;
@@ -60,7 +60,8 @@ namespace George.Services
             if (media == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
 
-            response.Data = MapMediaToRes(media);
+            var isGlobal = await _mediaStorage.GetMediaIsGlobalAsync(mediaId, cancelToken);
+            response.Data = MapMediaToRes(media, isGlobal);
             return response;
         }
 
@@ -95,8 +96,9 @@ namespace George.Services
             // Combine category IDs
             var categoryIds = CombineCategoryIds(req.CategoryIds, req.SubcategoryIds);
 
-            // Create the data in the DB (accountIdForTags used for per-account tag lookup)
-            media = await _mediaStorage.CreateMediaAsync(media, categoryIds, req.Tags, req.AccountId, cancelToken).ConfigureAwait(false);
+            // Create the data in the DB (accountIdForTags used for per-account tag lookup; IsGlobal from request or derived)
+            var isGlobalCreate = req.IsGlobal ?? !req.AccountId.HasValue;
+            media = await _mediaStorage.CreateMediaAsync(media, categoryIds, req.Tags, req.AccountId, cancelToken, isGlobalCreate).ConfigureAwait(false);
             
             if (media != null)
             {
@@ -106,8 +108,7 @@ namespace George.Services
                     await _mediaStorage.AddAccountMediaUsageAsync(req.AccountId.Value, req.SiteId.Value, media.Id, cancelToken).ConfigureAwait(false);
                 // Load with relationships for mapping
                 media = await _mediaStorage.GetMediaAsync(media.Id, cancelToken);
-                // Convert to response
-                response.Data = MapMediaToRes(media!);
+                response.Data = MapMediaToRes(media!, isGlobalCreate);
             }
 
             return response;
@@ -135,14 +136,15 @@ namespace George.Services
             // Combine category IDs
             var categoryIds = CombineCategoryIds(req.CategoryIds, req.SubcategoryIds);
 
-            // Update media (accountIdForTags used for per-account tag lookup)
-            media = await _mediaStorage.UpdateMediaAsync(media, categoryIds, req.Tags, req.AccountId, cancelToken);
+            // Update media (accountIdForTags used for per-account tag lookup; isGlobal from request when provided)
+            media = await _mediaStorage.UpdateMediaAsync(media, categoryIds, req.Tags, req.AccountId, cancelToken, req.IsGlobal);
 
             if (media != null)
             {
                 // Reload with all relationships
                 media = await _mediaStorage.GetMediaAsync(mediaId, cancelToken);
-                response.Data = MapMediaToRes(media!);
+                var isGlobalUpdate = await _mediaStorage.GetMediaIsGlobalAsync(mediaId, cancelToken);
+                response.Data = MapMediaToRes(media!, isGlobalUpdate);
             }
 
             return response;
@@ -189,7 +191,7 @@ namespace George.Services
             };
         }
 
-        private MediaRes MapMediaToRes(Medium media)
+        private MediaRes MapMediaToRes(Medium media, bool? isGlobal = null)
         {
             var res = new MediaRes
             {
@@ -201,7 +203,8 @@ namespace George.Services
                 Name = media.Name,
                 BusinessTypeId = media.BusinessTypeId,
                 FileSize = media.FileSize,
-                UsageCount = media.UsageCount
+                UsageCount = media.UsageCount,
+                IsGlobal = isGlobal ?? false
             };
 
             // Map type

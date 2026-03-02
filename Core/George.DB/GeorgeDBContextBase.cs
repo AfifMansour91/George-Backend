@@ -312,6 +312,7 @@ public partial class GeorgeDBContextBase : DbContext
         modelBuilder.Entity<Medium>(entity =>
         {
             entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property<bool>("IsGlobal").HasDefaultValue(false);
 
             entity.HasOne(d => d.BusinessType).WithMany(p => p.Media).HasConstraintName("FK_Media_BusinessType");
 

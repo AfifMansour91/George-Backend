@@ -28,10 +28,11 @@ namespace George.Api.Controllers
             [FromQuery] bool? globalOnly,
             CancellationToken cancelToken = default)
         {
-            if (globalOnly == true)
+            if (globalOnly == true || (request.Filter?.GlobalOnly == true))
             {
                 request.Filter ??= new MediaFilter();
                 request.Filter.GlobalOnly = true;
+                request.Filter.AccountId = null; // ensure we never mix with account filter
             }
             return await SafeCallWithErrorCatchingAsync(() => _mediaSvc.GetMediaAsync(request, cancelToken));
         }
