@@ -99,10 +99,11 @@ namespace George.Services
 
             if (product != null)
             {
-                // Create images (link to existing account media when URL matches; do not create new media)
+                // Create images (link to existing account media when URL matches; resolve in the product's site context so the same URL picks media for that site only)
                 if (req.ImageUrls != null && req.ImageUrls.Any())
                 {
-                    var imageList = await ResolveImageUrlsToMediaAsync(product.AccountId, req.ImageUrls, createMediaIfMissing: true, cancelToken);
+                    var resolutionSiteId = req.SiteIds != null && req.SiteIds.Any() ? (int?)req.SiteIds.First() : null;
+                    var imageList = await ResolveImageUrlsToMediaAsync(product.AccountId, req.ImageUrls, createMediaIfMissing: true, siteId: resolutionSiteId, cancelToken);
                     await _productStorage.CreateProductImagesAsync(product.Id, imageList, cancelToken);
                 }
 
@@ -187,10 +188,13 @@ namespace George.Services
 
             if (product != null)
             {
-                // Update images (link to existing account media when URL matches; do not create new media)
+                // Update images (link to existing account media when URL matches; resolve in the product's site context so the same URL picks media for that site only)
                 if (req.ImageUrls != null)
                 {
-                    var imageList = await ResolveImageUrlsToMediaAsync(existingProduct.AccountId, req.ImageUrls, createMediaIfMissing: true, cancelToken);
+                    var resolutionSiteId = req.SiteIds != null && req.SiteIds.Any()
+                        ? (int?)req.SiteIds.First()
+                        : existingProduct.Sites?.OrderBy(s => s.Id).Select(s => s.Id).FirstOrDefault();
+                    var imageList = await ResolveImageUrlsToMediaAsync(existingProduct.AccountId, req.ImageUrls, createMediaIfMissing: true, siteId: resolutionSiteId, cancelToken);
                     await _productStorage.CreateProductImagesAsync(productId, imageList, cancelToken);
                 }
 
@@ -523,11 +527,12 @@ namespace George.Services
 
                         if (product != null)
                         {
-                            // Update images (link to existing account media; do not create new media)
+                            // Update images (resolve in product's site context so same URL picks media for that site only)
                             if (productReq.ImageUrls != null)
                             {
                                 var accountIdForImages = product.AccountId ?? userAccountId;
-                                var imageList = await ResolveImageUrlsToMediaAsync(accountIdForImages, productReq.ImageUrls, createMediaIfMissing: true, cancelToken);
+                                var resolutionSiteId = productReq.SiteIds != null && productReq.SiteIds.Any() ? (int?)productReq.SiteIds.First() : targetSiteIds?.FirstOrDefault();
+                                var imageList = await ResolveImageUrlsToMediaAsync(accountIdForImages, productReq.ImageUrls, createMediaIfMissing: true, siteId: resolutionSiteId, cancelToken);
                                 await _productStorage.CreateProductImagesAsync(product.Id, imageList, cancelToken);
                             }
 
@@ -587,11 +592,12 @@ namespace George.Services
 
                         if (product != null)
                         {
-                            // Create images (link to existing account media; do not create new media)
+                            // Create images (resolve in product's site context so same URL picks media for that site only)
                             if (productReq.ImageUrls != null && productReq.ImageUrls.Any())
                             {
                                 var accountIdForImages = product.AccountId ?? userAccountId;
-                                var imageList = await ResolveImageUrlsToMediaAsync(accountIdForImages, productReq.ImageUrls, createMediaIfMissing: true, cancelToken);
+                                var resolutionSiteId = productReq.SiteIds != null && productReq.SiteIds.Any() ? (int?)productReq.SiteIds.First() : targetSiteIds?.FirstOrDefault();
+                                var imageList = await ResolveImageUrlsToMediaAsync(accountIdForImages, productReq.ImageUrls, createMediaIfMissing: true, siteId: resolutionSiteId, cancelToken);
                                 await _productStorage.CreateProductImagesAsync(product.Id, imageList, cancelToken);
                             }
 
@@ -645,12 +651,13 @@ namespace George.Services
             return response;
         }
 
-        /// <summary>Resolve image URLs to (Url, MediaId). Uses existing account media when URL matches; when createMediaIfMissing is true (e.g. import), creates Media + AccountMedia for external URLs.</summary>
-        private async Task<List<(string Url, int? MediaId)>> ResolveImageUrlsToMediaAsync(int? accountId, List<string>? imageUrls, bool createMediaIfMissing, CancellationToken cancelToken)
+        /// <summary>Resolve image URLs to (Url, MediaId). Uses existing account/site media when URL matches; when createMediaIfMissing is true, creates Media + AccountMedia for external URLs. When siteId is null, first site of account is used.</summary>
+        private async Task<List<(string Url, int? MediaId)>> ResolveImageUrlsToMediaAsync(int? accountId, List<string>? imageUrls, bool createMediaIfMissing, int? siteId, CancellationToken cancelToken)
         {
             if (imageUrls == null || !imageUrls.Any()) return new List<(string, int?)>();
             if (!accountId.HasValue) return imageUrls.Select(u => (u, (int?)null)).ToList();
-            var urlToMediaId = await _mediaStorage.GetMediaIdsByUrlsForAccountAsync(accountId.Value, imageUrls, cancelToken);
+            var effectiveSiteId = siteId ?? (await _mediaStorage.GetFirstSiteIdForAccountAsync(accountId.Value, cancelToken));
+            var urlToMediaId = await _mediaStorage.GetMediaIdsByUrlsForAccountAsync(accountId.Value, imageUrls, effectiveSiteId, cancelToken);
             var result = new List<(string Url, int? MediaId)>();
             foreach (var u in imageUrls)
             {
@@ -661,9 +668,9 @@ namespace George.Services
                     result.Add((u!, id));
                     continue;
                 }
-                if (createMediaIfMissing)
+                if (createMediaIfMissing && effectiveSiteId.HasValue)
                 {
-                    var newId = await _mediaStorage.GetOrCreateMediaByUrlForAccountAsync(accountId.Value, trimmed, AuthUser?.Id, cancelToken);
+                    var newId = await _mediaStorage.GetOrCreateMediaByUrlForAccountAsync(accountId.Value, effectiveSiteId.Value, trimmed, AuthUser?.Id, cancelToken);
                     result.Add((u!, newId));
                 }
                 else

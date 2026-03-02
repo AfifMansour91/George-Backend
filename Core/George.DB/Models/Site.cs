@@ -89,6 +89,9 @@ public partial class Site
     public virtual Account Account { get; set; } = null!;
 
     [InverseProperty("Site")]
+    public virtual ICollection<AccountMedia> AccountMedia { get; set; } = new List<AccountMedia>();
+
+    [InverseProperty("Site")]
     public virtual ICollection<Attribute> Attributes { get; set; } = new List<Attribute>();
 
     [ForeignKey("CreationUserId")]

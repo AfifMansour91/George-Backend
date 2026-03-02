@@ -68,14 +68,16 @@ namespace George.Services
         {
             var response = new ApiResponse<MediaRes>();
 
-            // When URL is external (e.g. from bulk import), use filename from URL as media name if current name is missing or looks like a storage Guid
+            // Prefer client-provided name. Only derive from URL when name is missing (so uploads keep their file name, not a storage GUID).
             var nameToUse = req.Name;
-            if (req.Url != null && (req.Url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || req.Url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+            if (string.IsNullOrWhiteSpace(nameToUse) && req.Url != null && (req.Url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || req.Url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
             {
                 var fileNameFromUrl = GetFileNameFromUrl(req.Url);
-                if (!string.IsNullOrWhiteSpace(fileNameFromUrl) && (string.IsNullOrWhiteSpace(nameToUse) || LooksLikeStorageFileName(nameToUse)))
+                if (!string.IsNullOrWhiteSpace(fileNameFromUrl))
                     nameToUse = fileNameFromUrl;
             }
+            if (string.IsNullOrWhiteSpace(nameToUse))
+                nameToUse = "image";
 
             // Convert to EF model
             var media = MapReqToMedia(req);
@@ -98,11 +100,10 @@ namespace George.Services
             
             if (media != null)
             {
-                // When account uploads media, record usage so it appears in AccountMedia (consistent with "Add to my media")
-                if (req.AccountId.HasValue)
-                {
-                    await _mediaStorage.AddAccountMediaUsageAsync(req.AccountId.Value, media.Id, cancelToken).ConfigureAwait(false);
-                }
+                // When account uploads media, record usage so it appears in AccountMedia (scoped to account + site).
+                // Only add a single row for the requested site; do not fall back to first site, so we never create links for multiple sites.
+                if (req.AccountId.HasValue && req.SiteId.HasValue)
+                    await _mediaStorage.AddAccountMediaUsageAsync(req.AccountId.Value, req.SiteId.Value, media.Id, cancelToken).ConfigureAwait(false);
                 // Load with relationships for mapping
                 media = await _mediaStorage.GetMediaAsync(media.Id, cancelToken);
                 // Convert to response
@@ -147,18 +148,19 @@ namespace George.Services
             return response;
         }
 
-        /// <param name="accountId">When set, delete only from this account's products (ProductImage). When null, delete from global/template products (TemplateProductImage) and soft-delete the media.</param>
-        public async Task<IApiResponse<bool>> DeleteMediaAsync(int mediaId, int? accountId, CancellationToken cancelToken)
+        /// <param name="accountId">When set, delete only from this account's library. When null, global delete (soft-delete media).</param>
+        /// <param name="siteId">When set with accountId, remove only this site's link so other sites keep the media.</param>
+        public async Task<IApiResponse<bool>> DeleteMediaAsync(int mediaId, int? accountId, int? siteId, CancellationToken cancelToken)
         {
             var response = new ApiResponse<bool>();
 
-            var result = await _mediaStorage.DeleteMediaAsync(mediaId, accountId, cancelToken);
+            var result = await _mediaStorage.DeleteMediaAsync(mediaId, accountId, siteId, cancelToken);
             response.Data = result;
 
             return response;
         }
 
-        /// <summary>Record that an account uses a media item (idempotent).</summary>
+        /// <summary>Record that an account/site uses a media item (idempotent).</summary>
         public async Task<IApiResponse<bool>> UseMediaAsync(int mediaId, UseMediaReq req, CancellationToken cancelToken)
         {
             var response = new ApiResponse<bool>();
@@ -167,7 +169,9 @@ namespace George.Services
             if (media == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
 
-            await _mediaStorage.AddAccountMediaUsageAsync(req.AccountId, mediaId, cancelToken).ConfigureAwait(false);
+            var siteId = req.SiteId ?? await _mediaStorage.GetFirstSiteIdForAccountAsync(req.AccountId, cancelToken).ConfigureAwait(false);
+            if (siteId.HasValue)
+                await _mediaStorage.AddAccountMediaUsageAsync(req.AccountId, siteId.Value, mediaId, cancelToken).ConfigureAwait(false);
             response.Data = true;
             return response;
         }

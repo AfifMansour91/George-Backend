@@ -167,13 +167,17 @@ public partial class GeorgeDBContextBase : DbContext
 
         modelBuilder.Entity<AccountMedia>(entity =>
         {
-            entity.HasKey(e => new { e.AccountId, e.MediaId });
+            entity.HasKey(e => new { e.AccountId, e.SiteId, e.MediaId });
 
             entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
 
             entity.HasOne(d => d.Account).WithMany(p => p.AccountMedia)
                 .OnDelete(DeleteBehavior.Cascade)
                 .HasConstraintName("FK_AccountMedia_Account");
+
+            entity.HasOne(d => d.Site).WithMany(p => p.AccountMedia)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_AccountMedia_Site");
 
             entity.HasOne(d => d.Media).WithMany(p => p.AccountMedia)
                 .OnDelete(DeleteBehavior.Cascade)

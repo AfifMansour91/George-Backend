@@ -59,9 +59,9 @@ namespace George.Api.Controllers
 
         [HttpDelete("{mediaId:int}")]
         [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
-        public async Task<IActionResult> DeleteMediaAsync([FromRoute] int mediaId, [FromQuery] int? accountId, CancellationToken cancelToken = default)
+        public async Task<IActionResult> DeleteMediaAsync([FromRoute] int mediaId, [FromQuery] int? accountId, [FromQuery] int? siteId, CancellationToken cancelToken = default)
         {
-            return await SafeCallWithErrorCatchingAsync(() => _mediaSvc.DeleteMediaAsync(mediaId, accountId, cancelToken));
+            return await SafeCallWithErrorCatchingAsync(() => _mediaSvc.DeleteMediaAsync(mediaId, accountId, siteId, cancelToken));
         }
 
         [HttpPost("{mediaId:int}/Use")]
@@ -84,10 +84,12 @@ namespace George.Api.Controllers
         public async Task<IActionResult> GetMediaByAccountAsync(
             [FromRoute] int accountId,
             [FromQuery] ApiListReq<MediaFilter> request,
+            [FromQuery] int? siteId,
             CancellationToken cancelToken = default)
         {
             if (request.Filter == null) request.Filter = new MediaFilter();
             request.Filter.AccountId = accountId;
+            if (siteId.HasValue) request.Filter.SiteId = siteId;
             return await SafeCallWithErrorCatchingAsync(() => _mediaSvc.GetMediaAsync(request, cancelToken));
         }
 
