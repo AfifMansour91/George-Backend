@@ -20,8 +20,9 @@ namespace George.Data
             CancellationToken cancelToken)
         {
             var res = new DataListResult<TemplateProduct>();
+            bool lightList = filter?.LightList == true;
 
-            var query = _dbContext.TemplateProduct
+            IQueryable<TemplateProduct> query = _dbContext.TemplateProduct
                 .Include(tp => tp.Brand)
                 .Include(tp => tp.Supplier)
                 .Include(tp => tp.Status)
@@ -43,10 +44,16 @@ namespace George.Data
                 .Include(tp => tp.TemplateProductOption)
                     .ThenInclude(tpo => tpo.TemplateProductOptionValue)
                 .Include(tp => tp.TemplateProductVariant)
-                    .ThenInclude(tpv => tpv.TemplateProductVariantOptionValue)
-                .Include(tp => tp.RelatedTemplateProduct)
-                .Include(tp => tp.ComplementaryTemplateProduct)
-                .AsNoTracking();
+                    .ThenInclude(tpv => tpv.TemplateProductVariantOptionValue);
+
+            if (!lightList)
+            {
+                query = query
+                    .Include(tp => tp.RelatedTemplateProduct)
+                    .Include(tp => tp.ComplementaryTemplateProduct);
+            }
+
+            query = query.AsNoTracking();
 
             // Apply filters
             if (filter != null)
