@@ -141,6 +141,8 @@ namespace George.Common
         public int? GlobalCategoryId { get; set; }
         public string? Status { get; set; }
         public SearchFilter? Search { get; set; }
+        /// <summary>When true, list query omits Related and Complementary product includes for faster list/catalog loading.</summary>
+        public bool LightList { get; set; }
     }
 
 }
