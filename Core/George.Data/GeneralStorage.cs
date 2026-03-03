@@ -21,14 +21,14 @@ namespace George.Data
 		public List<SystemConfiguration> GetSystemConfiguration()
 		{
 			// Get the data from the DB.
-			return _dbContext.SystemConfigurations.AsNoTracking().ToList();
+			return _dbContext.SystemConfiguration.AsNoTracking().ToList();
 		}
 		
 		public async Task<List<SystemConfiguration>> GetSystemConfigurationAsync(CancellationToken cancelToken = default)
 		{
 			List<SystemConfiguration> res;
 			// Get the data from the DB.
-			res = await _dbContext.SystemConfigurations.AsNoTracking()
+			res = await _dbContext.SystemConfiguration.AsNoTracking()
 							.ToListAsync(cancelToken).ConfigureAwait(false);
 			return res;
 		}

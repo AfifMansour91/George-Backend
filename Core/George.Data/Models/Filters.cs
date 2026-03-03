@@ -101,6 +101,8 @@ namespace George.Common
     public class MediaFilter
     {
         public int? AccountId { get; set; }
+        /// <summary>When set with AccountId, return only media linked to this site. Required for account+site media library.</summary>
+        public int? SiteId { get; set; }
         /// <summary>When true, return only global media (AccountId is null). Super-admin use.</summary>
         public bool? GlobalOnly { get; set; }
         public int? BusinessTypeId { get; set; }

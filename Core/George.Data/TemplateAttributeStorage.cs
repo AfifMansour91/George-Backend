@@ -20,9 +20,9 @@ namespace George.Data
         {
             var res = new DataListResult<TemplateAttribute>();
 
-            var query = _dbContext.TemplateAttributes
-                .Include(ta => ta.TemplateAttributeValues)
-                .Include(ta => ta.Sites)
+            var query = _dbContext.TemplateAttribute
+                .Include(ta => ta.TemplateAttributeValue)
+                .Include(ta => ta.Site)
                 .AsNoTracking();
 
             // Apply filters
@@ -30,12 +30,12 @@ namespace George.Data
             {
                 if (filter.SiteId.HasValue)
                 {
-                    query = query.Where(ta => ta.Sites.Any(s => s.Id == filter.SiteId.Value) || !ta.Sites.Any());
+                    query = query.Where(ta => ta.Site.Any(s => s.Id == filter.SiteId.Value) || !ta.Site.Any());
                 }
 
                 if (filter.SiteIds != null && filter.SiteIds.Any())
                 {
-                    query = query.Where(ta => ta.Sites.Any(s => filter.SiteIds.Contains(s.Id)) || !ta.Sites.Any());
+                    query = query.Where(ta => ta.Site.Any(s => filter.SiteIds.Contains(s.Id)) || !ta.Site.Any());
                 }
 
                 if (filter.Search?.SearchTerm.HasValue() == true)
@@ -62,9 +62,9 @@ namespace George.Data
 
         public async Task<TemplateAttribute?> GetTemplateAttributeAsync(int templateAttributeId, CancellationToken cancelToken)
         {
-            return await _dbContext.TemplateAttributes
-                .Include(ta => ta.TemplateAttributeValues)
-                .Include(ta => ta.Sites)
+            return await _dbContext.TemplateAttribute
+                .Include(ta => ta.TemplateAttributeValue)
+                .Include(ta => ta.Site)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(ta => ta.Id == templateAttributeId && !ta.IsDeleted, cancelToken);
         }
@@ -75,7 +75,7 @@ namespace George.Data
             List<int>? siteIds,
             CancellationToken cancelToken)
         {
-            _dbContext.TemplateAttributes.Add(templateAttribute);
+            _dbContext.TemplateAttribute.Add(templateAttribute);
             await _dbContext.SaveChangesAsync(cancelToken);
 
             // Add values if provided
@@ -83,7 +83,7 @@ namespace George.Data
             {
                 foreach (var value in values)
                 {
-                    _dbContext.TemplateAttributeValues.Add(new TemplateAttributeValue
+                    _dbContext.TemplateAttributeValue.Add(new TemplateAttributeValue
                     {
                         TemplateAttributeId = templateAttribute.Id,
                         Value = value
@@ -95,13 +95,13 @@ namespace George.Data
             // Add sites if provided
             if (siteIds != null && siteIds.Any())
             {
-                var sites = await _dbContext.Sites
+                var sites = await _dbContext.Site
                     .Where(s => siteIds.Contains(s.Id))
                     .ToListAsync(cancelToken);
                 
                 foreach (var site in sites)
                 {
-                    templateAttribute.Sites.Add(site);
+                    templateAttribute.Site.Add(site);
                 }
                 await _dbContext.SaveChangesAsync(cancelToken);
             }
@@ -115,9 +115,9 @@ namespace George.Data
             List<int>? siteIds,
             CancellationToken cancelToken)
         {
-            var dbTemplateAttribute = await _dbContext.TemplateAttributes
-                .Include(ta => ta.TemplateAttributeValues)
-                .Include(ta => ta.Sites)
+            var dbTemplateAttribute = await _dbContext.TemplateAttribute
+                .Include(ta => ta.TemplateAttributeValue)
+                .Include(ta => ta.Site)
                 .FirstOrDefaultAsync(ta => ta.Id == updated.Id && !ta.IsDeleted, cancelToken);
 
             if (dbTemplateAttribute == null) return null;
@@ -131,14 +131,14 @@ namespace George.Data
             if (values != null)
             {
                 // Remove existing values
-                _dbContext.TemplateAttributeValues.RemoveRange(dbTemplateAttribute.TemplateAttributeValues);
+                _dbContext.TemplateAttributeValue.RemoveRange(dbTemplateAttribute.TemplateAttributeValue);
                 
                 // Add new values
                 if (values.Any())
                 {
                     foreach (var value in values)
                     {
-                        _dbContext.TemplateAttributeValues.Add(new TemplateAttributeValue
+                        _dbContext.TemplateAttributeValue.Add(new TemplateAttributeValue
                         {
                             TemplateAttributeId = dbTemplateAttribute.Id,
                             Value = value
@@ -150,16 +150,16 @@ namespace George.Data
             // Update sites
             if (siteIds != null)
             {
-                dbTemplateAttribute.Sites.Clear();
+                dbTemplateAttribute.Site.Clear();
                 if (siteIds.Any())
                 {
-                    var sites = await _dbContext.Sites
+                    var sites = await _dbContext.Site
                         .Where(s => siteIds.Contains(s.Id))
                         .ToListAsync(cancelToken);
                     
                     foreach (var site in sites)
                     {
-                        dbTemplateAttribute.Sites.Add(site);
+                        dbTemplateAttribute.Site.Add(site);
                     }
                 }
             }
@@ -170,7 +170,7 @@ namespace George.Data
 
         public async Task<bool> DeleteTemplateAttributeAsync(int templateAttributeId, CancellationToken cancelToken)
         {
-            var templateAttribute = await _dbContext.TemplateAttributes
+            var templateAttribute = await _dbContext.TemplateAttribute
                 .FirstOrDefaultAsync(ta => ta.Id == templateAttributeId && !ta.IsDeleted, cancelToken);
 
             if (templateAttribute == null) return false;

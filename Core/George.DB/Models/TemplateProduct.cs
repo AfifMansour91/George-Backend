@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("TemplateProduct")]
 public partial class TemplateProduct
 {
     [Key]
@@ -91,76 +90,85 @@ public partial class TemplateProduct
     [StringLength(100)]
     public string? SourceProductId { get; set; }
 
-    /// <summary>Display order for listing (lower = first). Null = use CreationTime.</summary>
     public int? DisplayOrder { get; set; }
 
     [ForeignKey("BrandId")]
-    [InverseProperty("TemplateProducts")]
+    [InverseProperty("TemplateProduct")]
     public virtual Brand? Brand { get; set; }
 
     [ForeignKey("CreationUserId")]
-    [InverseProperty("TemplateProductCreationUsers")]
+    [InverseProperty("TemplateProductCreationUser")]
     public virtual User? CreationUser { get; set; }
 
     [ForeignKey("SetupTypeId")]
-    [InverseProperty("TemplateProducts")]
+    [InverseProperty("TemplateProduct")]
     public virtual SetupType? SetupType { get; set; }
 
     [ForeignKey("ShippingClassId")]
-    [InverseProperty("TemplateProducts")]
+    [InverseProperty("TemplateProduct")]
     public virtual ShippingClass? ShippingClass { get; set; }
 
     [ForeignKey("StatusId")]
-    [InverseProperty("TemplateProducts")]
+    [InverseProperty("TemplateProduct")]
     public virtual ProductStatus? Status { get; set; }
 
     [ForeignKey("StockManagementTypeId")]
-    [InverseProperty("TemplateProducts")]
+    [InverseProperty("TemplateProduct")]
     public virtual StockManagementType? StockManagementType { get; set; }
 
     [ForeignKey("StockStatusId")]
-    [InverseProperty("TemplateProducts")]
+    [InverseProperty("TemplateProduct")]
     public virtual StockStatus? StockStatus { get; set; }
 
     [ForeignKey("SupplierId")]
-    [InverseProperty("TemplateProducts")]
+    [InverseProperty("TemplateProduct")]
     public virtual Supplier? Supplier { get; set; }
 
     [InverseProperty("TemplateProduct")]
-    public virtual ICollection<TemplateProductCategory> TemplateProductCategories { get; set; } = new List<TemplateProductCategory>();
+    public virtual ICollection<TemplateProductCategory> TemplateProductCategory { get; set; } = new List<TemplateProductCategory>();
 
     [InverseProperty("TemplateProduct")]
-    public virtual ICollection<TemplateProductImage> TemplateProductImages { get; set; } = new List<TemplateProductImage>();
+    public virtual ICollection<TemplateProductImage> TemplateProductImage { get; set; } = new List<TemplateProductImage>();
 
     [InverseProperty("TemplateProduct")]
-    public virtual ICollection<TemplateProductOption> TemplateProductOptions { get; set; } = new List<TemplateProductOption>();
+    public virtual ICollection<TemplateProductOption> TemplateProductOption { get; set; } = new List<TemplateProductOption>();
 
     [InverseProperty("TemplateProduct")]
-    public virtual ICollection<TemplateProductVariant> TemplateProductVariants { get; set; } = new List<TemplateProductVariant>();
+    public virtual ICollection<TemplateProductVariant> TemplateProductVariant { get; set; } = new List<TemplateProductVariant>();
 
     [ForeignKey("UpdateUserId")]
-    [InverseProperty("TemplateProductUpdateUsers")]
+    [InverseProperty("TemplateProductUpdateUser")]
     public virtual User? UpdateUser { get; set; }
 
     [ForeignKey("VisibilityId")]
-    [InverseProperty("TemplateProducts")]
+    [InverseProperty("TemplateProduct")]
     public virtual Visibility? Visibility { get; set; }
 
     [ForeignKey("WeightConfigId")]
-    [InverseProperty("TemplateProducts")]
+    [InverseProperty("TemplateProduct")]
     public virtual WeightConfig? WeightConfig { get; set; }
 
     [ForeignKey("TemplateProductId")]
-    [InverseProperty("TemplateProducts")]
-    public virtual ICollection<Site> Sites { get; set; } = new List<Site>();
+    [InverseProperty("TemplateProductNavigation")]
+    public virtual ICollection<TemplateProduct> ComplementaryTemplateProduct { get; set; } = new List<TemplateProduct>();
 
     [ForeignKey("TemplateProductId")]
-    [InverseProperty("TemplateProducts")]
-    public virtual ICollection<Tag> Tags { get; set; } = new List<Tag>();
+    [InverseProperty("TemplateProduct1")]
+    public virtual ICollection<TemplateProduct> RelatedTemplateProduct { get; set; } = new List<TemplateProduct>();
 
-    /// <summary>Related/accessory template product IDs (נלווים).</summary>
-    public virtual ICollection<TemplateProduct> RelatedProducts { get; set; } = new List<TemplateProduct>();
+    [ForeignKey("TemplateProductId")]
+    [InverseProperty("TemplateProduct")]
+    public virtual ICollection<Site> Site { get; set; } = new List<Site>();
 
-    /// <summary>Complementary template product IDs (מוצרים משלימים).</summary>
-    public virtual ICollection<TemplateProduct> ComplementaryProducts { get; set; } = new List<TemplateProduct>();
+    [ForeignKey("TemplateProductId")]
+    [InverseProperty("TemplateProduct")]
+    public virtual ICollection<Tag> Tag { get; set; } = new List<Tag>();
+
+    [ForeignKey("RelatedTemplateProductId")]
+    [InverseProperty("RelatedTemplateProduct")]
+    public virtual ICollection<TemplateProduct> TemplateProduct1 { get; set; } = new List<TemplateProduct>();
+
+    [ForeignKey("ComplementaryTemplateProductId")]
+    [InverseProperty("ComplementaryTemplateProduct")]
+    public virtual ICollection<TemplateProduct> TemplateProductNavigation { get; set; } = new List<TemplateProduct>();
 }

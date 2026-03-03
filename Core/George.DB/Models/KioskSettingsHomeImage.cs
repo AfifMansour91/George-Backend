@@ -1,12 +1,13 @@
+﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("KioskSettingsHomeImage")]
-[Index(nameof(AccountId), Name = "IX_KioskSettingsHomeImage_AccountId")]
-[Index(nameof(MediaId), Name = "IX_KioskSettingsHomeImage_MediaId")]
+[Index("AccountId", Name = "IX_KioskSettingsHomeImage_AccountId")]
+[Index("MediaId", Name = "IX_KioskSettingsHomeImage_MediaId")]
 public partial class KioskSettingsHomeImage
 {
     [Key]
@@ -18,11 +19,11 @@ public partial class KioskSettingsHomeImage
 
     public int SortOrder { get; set; }
 
-    [ForeignKey(nameof(AccountId))]
-    [InverseProperty("KioskSettingsHomeImages")]
+    [ForeignKey("AccountId")]
+    [InverseProperty("KioskSettingsHomeImage")]
     public virtual Account Account { get; set; } = null!;
 
-    [ForeignKey(nameof(MediaId))]
-    [InverseProperty("KioskSettingsHomeImages")]
-    public virtual Medium Media { get; set; } = null!;
+    [ForeignKey("MediaId")]
+    [InverseProperty("KioskSettingsHomeImage")]
+    public virtual Media Media { get; set; } = null!;
 }

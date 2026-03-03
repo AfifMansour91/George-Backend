@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("Visibility")]
 [Index("Name", Name = "UQ__Visibili__737584F6DC094AF4", IsUnique = true)]
 public partial class Visibility
 {
@@ -19,8 +18,8 @@ public partial class Visibility
     public bool IsDeleted { get; set; }
 
     [InverseProperty("Visibility")]
-    public virtual ICollection<Product> Products { get; set; } = new List<Product>();
+    public virtual ICollection<Product> Product { get; set; } = new List<Product>();
 
     [InverseProperty("Visibility")]
-    public virtual ICollection<TemplateProduct> TemplateProducts { get; set; } = new List<TemplateProduct>();
+    public virtual ICollection<TemplateProduct> TemplateProduct { get; set; } = new List<TemplateProduct>();
 }

@@ -8,13 +8,15 @@ namespace George.Services.Response
         public int? CreationUserId { get; set; }
         public string Url { get; set; } = null!;
         public string Name { get; set; } = null!;
-        public string? Type { get; set; } // "image" | "video" | "document"
+        public string? Type { get; set; }
         public int? BusinessTypeId { get; set; }
         public List<int> CategoryIds { get; set; } = new();
         public List<int> SubcategoryIds { get; set; } = new();
         public List<string> Tags { get; set; } = new();
         public long? FileSize { get; set; }
         public int? UsageCount { get; set; }
+        /// <summary>True when this media belongs to the global library (not linked to any account).</summary>
+        public bool IsGlobal { get; set; }
     }
 
     /// <summary>Result of downloading external media and saving to our storage.</summary>

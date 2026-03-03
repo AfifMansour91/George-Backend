@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("Unit")]
 [Index("Name", Name = "UQ__Unit__737584F662FEB2B6", IsUnique = true)]
 public partial class Unit
 {
@@ -19,5 +18,5 @@ public partial class Unit
     public bool IsDeleted { get; set; }
 
     [InverseProperty("Unit")]
-    public virtual ICollection<WeightConfig> WeightConfigs { get; set; } = new List<WeightConfig>();
+    public virtual ICollection<WeightConfig> WeightConfig { get; set; } = new List<WeightConfig>();
 }

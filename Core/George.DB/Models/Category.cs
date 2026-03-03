@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("Category")]
 [Index("AccountId", Name = "IX_Category_AccountId")]
 [Index("SourceGlobalCategoryId", Name = "IX_Category_SourceGlobalCategoryId")]
 public partial class Category
@@ -60,11 +59,11 @@ public partial class Category
     public string? IconUrl { get; set; }
 
     [ForeignKey("AccountId")]
-    [InverseProperty("Categories")]
+    [InverseProperty("Category")]
     public virtual Account? Account { get; set; }
 
     [ForeignKey("CreationUserId")]
-    [InverseProperty("CategoryCreationUsers")]
+    [InverseProperty("CategoryCreationUser")]
     public virtual User? CreationUser { get; set; }
 
     [InverseProperty("ParentCategory")]
@@ -75,21 +74,21 @@ public partial class Category
     public virtual Category? ParentCategory { get; set; }
 
     [InverseProperty("Category")]
-    public virtual ICollection<ProductCategory> ProductCategories { get; set; } = new List<ProductCategory>();
+    public virtual ICollection<ProductCategory> ProductCategory { get; set; } = new List<ProductCategory>();
 
     [ForeignKey("SourceGlobalCategoryId")]
-    [InverseProperty("Categories")]
+    [InverseProperty("Category")]
     public virtual GlobalCategory? SourceGlobalCategory { get; set; }
 
     [ForeignKey("UpdateUserId")]
-    [InverseProperty("CategoryUpdateUsers")]
+    [InverseProperty("CategoryUpdateUser")]
     public virtual User? UpdateUser { get; set; }
 
     [ForeignKey("CategoryId")]
-    [InverseProperty("Categories")]
-    public virtual ICollection<Medium> Media { get; set; } = new List<Medium>();
+    [InverseProperty("Category")]
+    public virtual ICollection<Media> Media { get; set; } = new List<Media>();
 
     [ForeignKey("CategoryId")]
-    [InverseProperty("Categories")]
-    public virtual ICollection<Site> Sites { get; set; } = new List<Site>();
+    [InverseProperty("Category")]
+    public virtual ICollection<Site> Site { get; set; } = new List<Site>();
 }

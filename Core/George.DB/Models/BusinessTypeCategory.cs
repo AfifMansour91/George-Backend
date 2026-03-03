@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("BusinessTypeCategory")]
 public partial class BusinessTypeCategory
 {
     [Key]
@@ -20,6 +19,6 @@ public partial class BusinessTypeCategory
     public string Name { get; set; } = null!;
 
     [ForeignKey("BusinessTypeId")]
-    [InverseProperty("BusinessTypeCategories")]
+    [InverseProperty("BusinessTypeCategory")]
     public virtual BusinessType BusinessType { get; set; } = null!;
 }

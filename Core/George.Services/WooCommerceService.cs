@@ -548,7 +548,7 @@ namespace George.Services
 
         private async Task SyncAttributeTermsAsync(string baseUrl, int wooAttrId, Attribute attribute, HttpClient httpClient, CancellationToken cancelToken)
         {
-            var values = attribute.AttributeValues?.Select(av => av.Value).Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? new List<string>();
+            var values = attribute.AttributeValue?.Select(av => av.Value).Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? new List<string>();
             foreach (var value in values)
             {
                 var termUrl = $"{baseUrl}/products/attributes/{wooAttrId}/terms";
@@ -833,7 +833,7 @@ namespace George.Services
                 var loadTasks = distinctIds.Select(id => _productStorage.GetProductAsync(id, cancelToken));
                 var loaded = await Task.WhenAll(loadTasks);
                 productsToSync = loaded
-                    .Where(p => p != null && p!.Sites.Any(s => s.Id == siteId))
+                    .Where(p => p != null && p!.Site.Any(s => s.Id == siteId))
                     .Cast<Product>()
                     .ToList();
             }
@@ -845,7 +845,7 @@ namespace George.Services
                     filter,
                     new PagingExDto { Skip = 0, Take = 10000, IncludeTotal = false },
                     cancelToken);
-                productsToSync = products.Items.Where(p => p.Sites.Any(s => s.Id == siteId)).ToList();
+                productsToSync = products.Items.Where(p => p.Site.Any(s => s.Id == siteId)).ToList();
             }
 
             // Deduplicate by product Id so we don't count the same product twice
@@ -937,7 +937,7 @@ namespace George.Services
                     shippingClass = "fragile";
 
                 // Map categories
-                var allCategoryIds = product.ProductCategories?
+                var allCategoryIds = product.ProductCategory?
                     .Select(pc => pc.CategoryId)
                     .Where(id => categoryMap.ContainsKey(id))
                     .Select(id => new { id = categoryMap[id] })
@@ -955,7 +955,7 @@ namespace George.Services
 
                 // Map images: when updating, use existing WooCommerce image id when URL matches to avoid duplicating in media library.
                 // Use the image name from the system (Media.Name) so WooCommerce gets a friendly filename instead of the long URL.
-                var ourProductImages = product.ProductImages?
+                var ourProductImages = product.ProductImage?
                     .OrderBy(pi => pi.SortOrder)
                     .Where(pi => IsPublicImageUrl(pi.Url))
                     .ToList() ?? new List<ProductImage>();
@@ -994,7 +994,7 @@ namespace George.Services
                 }
 
                 // Map tags
-                var tags = product.Tags?
+                var tags = product.Tag?
                     .Select(t => new { name = t.Name })
                     .Cast<object>()
                     .ToList() ?? new List<object>();
@@ -1063,7 +1063,7 @@ namespace George.Services
                 var wooProduct = new Dictionary<string, object>
                 {
                     ["name"] = product.Name,
-                    ["type"] = (product.ProductVariants != null && product.ProductVariants.Any(v => !v.IsDeleted)) ? "variable" : "simple",
+                    ["type"] = (product.ProductVariant != null && product.ProductVariant.Any(v => !v.IsDeleted)) ? "variable" : "simple",
                     ["description"] = product.LongDescription ?? "",
                     ["short_description"] = product.ShortDescription ?? "",
                     ["sku"] = product.Sku ?? "",
@@ -1083,7 +1083,7 @@ namespace George.Services
                 var attributeSlugMap = new Dictionary<string, string>(); // attribute name -> WooCommerce taxonomy slug (e.g. pa_xxx)
 
                 // For simple products, add pricing and stock and clear attributes (so WooCommerce removes variation attributes when product was variable before)
-                if (product.ProductVariants == null || !product.ProductVariants.Any(v => !v.IsDeleted))
+                if (product.ProductVariant == null || !product.ProductVariant.Any(v => !v.IsDeleted))
                 {
                     wooProduct["attributes"] = new List<object>();
                     wooProduct["regular_price"] = product.Price?.ToString() ?? "0";
@@ -1100,11 +1100,11 @@ namespace George.Services
                 {
                     // For variable products, ensure global attributes exist and use their IDs
                     
-                    if (product.ProductOptions != null)
+                    if (product.ProductOption != null)
                     {
-                        foreach (var option in product.ProductOptions.Where(po => !po.IsDeleted))
+                        foreach (var option in product.ProductOption.Where(po => !po.IsDeleted))
                         {
-                            var attributeValues = option.ProductOptionValues?
+                            var attributeValues = option.ProductOptionValue?
                                 .Select(pov => pov.Value)
                                 .Where(v => !string.IsNullOrWhiteSpace(v))
                                 .ToList() ?? new List<string>();
@@ -1133,7 +1133,7 @@ namespace George.Services
 
                     // Build attributes array using global attribute IDs. Include "name" (taxonomy slug) so WooCommerce
                     // reliably relates attributes to the product; options remain display names for the dropdown.
-                    var attributes = product.ProductOptions?
+                    var attributes = product.ProductOption?
                         .Where(po => !po.IsDeleted && attributeMap.ContainsKey(NormalizeOptionKey(po.Name)))
                         .Select((option, index) =>
                         {
@@ -1146,7 +1146,7 @@ namespace George.Services
                                 ["position"] = index,
                                 ["visible"] = true,
                                 ["variation"] = true,
-                                ["options"] = option.ProductOptionValues?
+                                ["options"] = option.ProductOptionValue?
                                     .Select(pov => pov.Value)
                                     .Where(v => !string.IsNullOrWhiteSpace(v))
                                     .Select(v => v.Trim())
@@ -1233,7 +1233,7 @@ namespace George.Services
                 }
 
                 // Sync variations for variable products
-                if (wooCommerceId.HasValue && product.ProductVariants != null && product.ProductVariants.Any(v => !v.IsDeleted))
+                if (wooCommerceId.HasValue && product.ProductVariant != null && product.ProductVariant.Any(v => !v.IsDeleted))
                 {
                     await SyncProductVariantsAsync(baseUrl, wooCommerceId.Value, product, attributeMap, attributeSlugMap, httpClient, cancelToken);
                 }
@@ -1319,7 +1319,7 @@ namespace George.Services
             HttpClient httpClient,
             CancellationToken cancelToken)
         {
-            var variants = product.ProductVariants?.Where(v => !v.IsDeleted).ToList() ?? new List<ProductVariant>();
+            var variants = product.ProductVariant?.Where(v => !v.IsDeleted).ToList() ?? new List<ProductVariant>();
 
             // Fetch existing WooCommerce variations so we can match by attributes (avoid duplicates) and delete removed ones
             var existingWoo = await GetExistingWooCommerceVariationsAsync(baseUrl, wooProductId, httpClient, cancelToken);
@@ -1347,7 +1347,7 @@ namespace George.Services
                         ? ((variant.StockQuantity ?? 0) > 0 ? "instock" : "outofstock")
                         : productStockStatus;
 
-                    var variantOptionValues = variant.ProductVariantOptionValues?
+                    var variantOptionValues = variant.ProductVariantOptionValue?
                         .Where(x => !string.IsNullOrWhiteSpace(x.OptionName))
                         .ToDictionary(
                             x => NormalizeOptionKey(x.OptionName),

@@ -1,12 +1,13 @@
-using System;
+﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-/// <summary>Sprint 2: Date when order reception is closed for a site (Delivery or Pickup). Used for פתיחה/סגירת קבלת הזמנות.</summary>
-[Table("SiteOrderReceptionClosed")]
+[Index("SiteId", Name = "IX_SiteOrderReceptionClosed_SiteId")]
+[Index("SiteId", "ClosedDate", "Type", Name = "UX_SiteOrderReceptionClosed_SiteId_ClosedDate_Type", IsUnique = true)]
 public partial class SiteOrderReceptionClosed
 {
     [Key]
@@ -14,11 +15,8 @@ public partial class SiteOrderReceptionClosed
 
     public int SiteId { get; set; }
 
-    /// <summary>Date only (no time) when reception is closed.</summary>
-    [Column(TypeName = "date")]
-    public DateTime ClosedDate { get; set; }
+    public DateTime  ClosedDate { get; set; }
 
-    /// <summary>Delivery | Pickup</summary>
     [StringLength(20)]
     public string Type { get; set; } = null!;
 

@@ -7,7 +7,6 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [PrimaryKey("TemplateAttributeId", "Value")]
-[Table("TemplateAttributeValue")]
 public partial class TemplateAttributeValue
 {
     [Key]
@@ -18,6 +17,6 @@ public partial class TemplateAttributeValue
     public string Value { get; set; } = null!;
 
     [ForeignKey("TemplateAttributeId")]
-    [InverseProperty("TemplateAttributeValues")]
+    [InverseProperty("TemplateAttributeValue")]
     public virtual TemplateAttribute TemplateAttribute { get; set; } = null!;
 }

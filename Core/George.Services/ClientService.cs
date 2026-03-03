@@ -208,9 +208,9 @@ namespace George.Services
             res.Status = MapStatusIdToStatus(user.StatusId);
 
             // Map sites
-            if (user.Sites != null && user.Sites.Any())
+            if (user.Site != null && user.Site.Any())
             {
-                res.SiteIds = user.Sites.Select(s => s.Id).ToList();
+                res.SiteIds = user.Site.Select(s => s.Id).ToList();
             }
 
             return res;

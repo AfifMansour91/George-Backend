@@ -19,9 +19,9 @@ namespace George.Data
             CancellationToken cancelToken)
         {
             var res = new DataListResult<Order>();
-            var query = _dbContext.Orders
+            var query = _dbContext.Order
                 .Where(o => !o.IsDeleted)
-                .Include(o => o.OrderItems.OrderBy(i => i.SortOrder))
+                .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
                 .AsNoTracking();
 
             if (filter?.SiteId.HasValue == true)
@@ -70,8 +70,8 @@ namespace George.Data
 
         public async Task<Order?> GetOrderByIdAsync(int orderId, CancellationToken cancelToken)
         {
-            return await _dbContext.Orders
-                .Include(o => o.OrderItems.OrderBy(i => i.SortOrder))
+            return await _dbContext.Order
+                .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
                 .AsNoTracking()
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
         }
@@ -79,7 +79,7 @@ namespace George.Data
         /// <summary>Returns next order number for the site (e.g. 1001, 1002). Caller can assign to new order.</summary>
         public async Task<string> GetNextOrderNumberForSiteAsync(int siteId, CancellationToken cancelToken)
         {
-            var maxNum = await _dbContext.Orders
+            var maxNum = await _dbContext.Order
                 .Where(o => o.SiteId == siteId && !o.IsDeleted)
                 .Select(o => o.OrderNumber)
                 .ToListAsync(cancelToken);
@@ -98,11 +98,11 @@ namespace George.Data
             if (string.IsNullOrWhiteSpace(order.OrderNumber))
                 order.OrderNumber = await GetNextOrderNumberForSiteAsync(order.SiteId, cancelToken).ConfigureAwait(false);
 
-            _dbContext.Orders.Add(order);
+            _dbContext.Order.Add(order);
             foreach (var item in items)
             {
                 item.OrderId = 0;
-                order.OrderItems.Add(item);
+                order.OrderItem.Add(item);
             }
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
             return order;
@@ -110,8 +110,8 @@ namespace George.Data
 
         public async Task<Order?> UpdateOrderAsync(int orderId, Action<Order> apply, CancellationToken cancelToken)
         {
-            var db = await _dbContext.Orders
-                .Include(o => o.OrderItems)
+            var db = await _dbContext.Order
+                .Include(o => o.OrderItem)
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
             if (db == null) return null;
             apply(db);
@@ -124,17 +124,17 @@ namespace George.Data
         public async Task<Order?> AddOrderItemsAsync(int orderId, List<OrderItem> newItems, CancellationToken cancelToken)
         {
             if (newItems == null || newItems.Count == 0) return null;
-            var db = await _dbContext.Orders
-                .Include(o => o.OrderItems)
+            var db = await _dbContext.Order
+                .Include(o => o.OrderItem)
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
             if (db == null) return null;
-            var maxSort = (db.OrderItems?.Count ?? 0) > 0 ? db.OrderItems!.Max(i => i.SortOrder) : -1;
+            var maxSort = (db.OrderItem?.Count ?? 0) > 0 ? db.OrderItem!.Max(i => i.SortOrder) : -1;
             for (var i = 0; i < newItems.Count; i++)
             {
                 var item = newItems[i];
                 item.OrderId = orderId;
                 item.SortOrder = maxSort + 1 + i;
-                db.OrderItems.Add(item);
+                db.OrderItem.Add(item);
             }
             db.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
@@ -145,11 +145,11 @@ namespace George.Data
         public async Task<Order?> UpdatePickingAsync(int orderId, List<(int OrderItemId, decimal? PickedQuantity, decimal? TotalPrice)> updates, CancellationToken cancelToken)
         {
             if (updates == null || updates.Count == 0) return null;
-            var db = await _dbContext.Orders
-                .Include(o => o.OrderItems)
+            var db = await _dbContext.Order
+                .Include(o => o.OrderItem)
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
             if (db == null) return null;
-            var itemMap = db.OrderItems?.ToDictionary(i => i.Id) ?? new Dictionary<int, OrderItem>();
+            var itemMap = db.OrderItem?.ToDictionary(i => i.Id) ?? new Dictionary<int, OrderItem>();
             foreach (var (orderItemId, pickedQty, totalPrice) in updates)
             {
                 if (!itemMap.TryGetValue(orderItemId, out var item)) continue;
@@ -164,7 +164,7 @@ namespace George.Data
         /// <summary>Set status to Cancelled and optionally set IsDeleted.</summary>
         public async Task<Order?> CancelOrderAsync(int orderId, int? updateUserId, bool softDelete, CancellationToken cancelToken)
         {
-            var db = await _dbContext.Orders
+            var db = await _dbContext.Order
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
             if (db == null) return null;
             db.Status = "Cancelled";
@@ -193,7 +193,7 @@ namespace George.Data
             if (normalized.Length < 4)
                 return result;
 
-            var siteOrders = await _dbContext.Orders
+            var siteOrders = await _dbContext.Order
                 .AsNoTracking()
                 .Where(o => !o.IsDeleted && o.SiteId == siteId && o.CustomerPhone != null)
                 .OrderByDescending(o => o.CreationTime)
@@ -227,7 +227,7 @@ namespace George.Data
             var normalized = NormalizePhone(phone);
             if (normalized.Length < 4) return null;
 
-            var siteOrders = await _dbContext.Orders
+            var siteOrders = await _dbContext.Order
                 .AsNoTracking()
                 .Where(o => !o.IsDeleted && o.SiteId == siteId && o.CustomerPhone != null)
                 .OrderByDescending(o => o.CreationTime)
@@ -237,8 +237,8 @@ namespace George.Data
             var lastOrderId = siteOrders.FirstOrDefault(o => NormalizePhone(o.CustomerPhone) == normalized)?.Id;
             if (lastOrderId == null) return null;
 
-            return await _dbContext.Orders
-                .Include(o => o.OrderItems.OrderBy(i => i.SortOrder))
+            return await _dbContext.Order
+                .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
                 .AsNoTracking()
                 .FirstOrDefaultAsync(o => o.Id == lastOrderId.Value && !o.IsDeleted, cancelToken).ConfigureAwait(false);
         }

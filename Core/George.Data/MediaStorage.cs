@@ -13,18 +13,18 @@ namespace George.Data
         {
         }
 
-        public async Task<DataListResult<Medium>> GetMediaAsync(
+        public async Task<DataListResult<Media>> GetMediaAsync(
             MediaFilter? filter,
             PagingExDto paging,
             CancellationToken cancelToken)
         {
-            var res = new DataListResult<Medium>();
+            var res = new DataListResult<Media>();
 
             var query = _dbContext.Media
                 .Include(m => m.BusinessType)
                 .Include(m => m.Type)
-                .Include(m => m.Categories)
-                .Include(m => m.Tags)
+                .Include(m => m.Category)
+                .Include(m => m.Tag)
                 .AsNoTracking();
 
             // Apply filters
@@ -32,21 +32,20 @@ namespace George.Data
             {
                 if (filter.GlobalOnly == true)
                 {
-                    // Global media: only media not used by any account (super-admin pool). Exclude all account media.
-                    var usedMediaIds = await _dbContext.AccountMedia
-                        .Select(am => am.MediaId)
-                        .Distinct()
-                        .ToListAsync(cancelToken)
-                        .ConfigureAwait(false);
-                    if (usedMediaIds.Count > 0)
-                        query = query.Where(m => !usedMediaIds.Contains(m.Id));
+                    // Global media: only rows explicitly marked as global (IsGlobal = true).
+                    query = query.Where(m => EF.Property<bool>(m, "IsGlobal"));
                 }
                 else if (filter.AccountId.HasValue)
                 {
                     var aid = filter.AccountId.Value;
-                    // Media this account uses (AccountMedia only; Media has no AccountId)
-                    query = query.Where(m =>
-                        _dbContext.AccountMedia.Any(am => am.AccountId == aid && am.MediaId == m.Id));
+                    var sid = filter.SiteId;
+                    // Media this account (and optionally this site) uses
+                    if (sid.HasValue)
+                        query = query.Where(m =>
+                            _dbContext.AccountMedia.Any(am => am.AccountId == aid && am.SiteId == sid.Value && am.MediaId == m.Id));
+                    else
+                        query = query.Where(m =>
+                            _dbContext.AccountMedia.Any(am => am.AccountId == aid && am.MediaId == m.Id));
                 }
 
                 if (filter.BusinessTypeId.HasValue)
@@ -56,7 +55,7 @@ namespace George.Data
 
                 if (filter.CategoryId.HasValue)
                 {
-                    query = query.Where(m => m.Categories.Any(c => c.Id == filter.CategoryId.Value));
+                    query = query.Where(m => m.Category.Any(c => c.Id == filter.CategoryId.Value));
                 }
 
                 if (filter.Type.HasValue())
@@ -86,36 +85,48 @@ namespace George.Data
             return res;
         }
 
-        public async Task<Medium?> GetMediaAsync(int mediaId, CancellationToken cancelToken)
+        public async Task<Media?> GetMediaAsync(int mediaId, CancellationToken cancelToken)
         {
             return await _dbContext.Media
                 .Include(m => m.BusinessType)
                 .Include(m => m.Type)
-                .Include(m => m.Categories)
-                .Include(m => m.Tags)
+                .Include(m => m.Category)
+                .Include(m => m.Tag)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(m => m.Id == mediaId && !m.IsDeleted, cancelToken);
         }
 
-        public async Task<Medium> CreateMediaAsync(
-            Medium media,
+        /// <summary>Returns whether the media is marked as global (shadow property IsGlobal).</summary>
+        public async Task<bool> GetMediaIsGlobalAsync(int mediaId, CancellationToken cancelToken)
+        {
+            return await _dbContext.Media
+                .AsNoTracking()
+                .Where(m => m.Id == mediaId && !m.IsDeleted)
+                .Select(m => EF.Property<bool>(m, "IsGlobal"))
+                .FirstOrDefaultAsync(cancelToken);
+        }
+
+        public async Task<Media> CreateMediaAsync(
+            Media media,
             List<int>? categoryIds,
             List<string>? tags,
             int? accountIdForTags,
-            CancellationToken cancelToken)
+            CancellationToken cancelToken,
+            bool? isGlobal = null)
         {
             _dbContext.Media.Add(media);
+            _dbContext.Entry(media).Property("IsGlobal").CurrentValue = isGlobal ?? !accountIdForTags.HasValue;
 
             // Add categories if provided
             if (categoryIds != null && categoryIds.Any())
             {
-                var categories = await _dbContext.Categories
+                var categories = await _dbContext.Category
                     .Where(c => categoryIds.Contains(c.Id))
                     .ToListAsync(cancelToken);
                 
                 foreach (var category in categories)
                 {
-                    media.Categories.Add(category);
+                    media.Category.Add(category);
                 }
             }
 
@@ -124,7 +135,7 @@ namespace George.Data
             {
                 foreach (var tagName in tags)
                 {
-                    var tag = await _dbContext.Tags
+                    var tag = await _dbContext.Tag
                         .FirstOrDefaultAsync(t => t.Name == tagName && t.AccountId == accountIdForTags.Value, cancelToken);
                     
                     if (tag == null)
@@ -135,9 +146,9 @@ namespace George.Data
                             AccountId = accountIdForTags.Value,
                             CreationTime = DateTime.UtcNow
                         };
-                        _dbContext.Tags.Add(tag);
+                        _dbContext.Tag.Add(tag);
                     }
-                    media.Tags.Add(tag);
+                    media.Tag.Add(tag);
                 }
             }
 
@@ -145,19 +156,23 @@ namespace George.Data
             return media;
         }
 
-        public async Task<Medium?> UpdateMediaAsync(
-            Medium updated,
+        public async Task<Media?> UpdateMediaAsync(
+            Media updated,
             List<int>? categoryIds,
             List<string>? tags,
             int? accountIdForTags,
-            CancellationToken cancelToken)
+            CancellationToken cancelToken,
+            bool? isGlobal = null)
         {
             var dbMedia = await _dbContext.Media
-                .Include(m => m.Categories)
-                .Include(m => m.Tags)
+                .Include(m => m.Category)
+                .Include(m => m.Tag)
                 .FirstOrDefaultAsync(m => m.Id == updated.Id && !m.IsDeleted, cancelToken);
 
             if (dbMedia == null) return null;
+
+            if (isGlobal.HasValue)
+                _dbContext.Entry(dbMedia).Property("IsGlobal").CurrentValue = isGlobal.Value;
 
             // Update basic properties (no AccountId on Media)
             dbMedia.Url = updated.Url;
@@ -172,16 +187,16 @@ namespace George.Data
             // Update categories
             if (categoryIds != null)
             {
-                dbMedia.Categories.Clear();
+                dbMedia.Category.Clear();
                 if (categoryIds.Any())
                 {
-                    var categories = await _dbContext.Categories
+                    var categories = await _dbContext.Category
                         .Where(c => categoryIds.Contains(c.Id))
                         .ToListAsync(cancelToken);
                     
                     foreach (var category in categories)
                     {
-                        dbMedia.Categories.Add(category);
+                        dbMedia.Category.Add(category);
                     }
                 }
             }
@@ -189,12 +204,12 @@ namespace George.Data
             // Update tags (use accountIdForTags for per-account tag lookup)
             if (tags != null)
             {
-                dbMedia.Tags.Clear();
+                dbMedia.Tag.Clear();
                 if (tags.Any() && accountIdForTags.HasValue)
                 {
                     foreach (var tagName in tags)
                     {
-                        var tag = await _dbContext.Tags
+                        var tag = await _dbContext.Tag
                             .FirstOrDefaultAsync(t => t.Name == tagName && t.AccountId == accountIdForTags.Value, cancelToken);
                         
                         if (tag == null)
@@ -205,9 +220,9 @@ namespace George.Data
                                 AccountId = accountIdForTags.Value,
                                 CreationTime = DateTime.UtcNow
                             };
-                            _dbContext.Tags.Add(tag);
+                            _dbContext.Tag.Add(tag);
                         }
-                        dbMedia.Tags.Add(tag);
+                        dbMedia.Tag.Add(tag);
                     }
                 }
             }
@@ -228,13 +243,13 @@ namespace George.Data
             media.UpdateUserId = updateUserId;
 
             // Update ProductImage and TemplateProductImage URLs in place (Id is PK so Url can be updated)
-            var productImages = await _dbContext.ProductImages
+            var productImages = await _dbContext.ProductImage
                 .Where(pi => pi.MediaId == mediaId)
                 .ToListAsync(cancelToken);
             foreach (var pi in productImages)
                 pi.Url = url;
 
-            var templateProductImages = await _dbContext.TemplateProductImages
+            var templateProductImages = await _dbContext.TemplateProductImage
                 .Where(tpi => tpi.MediaId == mediaId)
                 .ToListAsync(cancelToken);
             foreach (var tpi in templateProductImages)
@@ -246,10 +261,11 @@ namespace George.Data
 
         /// <summary>
         /// Delete media from the library. When accountId is set (account admin deleting from account library),
-        /// only removes the image from that account's products (ProductImage). When accountId is null (global delete),
-        /// only removes from template products (TemplateProductImage) and soft-deletes the media.
+        /// only removes the image from that account's products (ProductImage) and unlink from AccountMedia.
+        /// When siteId is also set, only that site's AccountMedia link is removed (other sites keep the media).
+        /// When accountId is null (global delete), only removes from template products and soft-deletes the media.
         /// </summary>
-        public async Task<bool> DeleteMediaAsync(int mediaId, int? accountId, CancellationToken cancelToken)
+        public async Task<bool> DeleteMediaAsync(int mediaId, int? accountId, int? siteId, CancellationToken cancelToken)
         {
             var media = await _dbContext.Media
                 .FirstOrDefaultAsync(m => m.Id == mediaId && !m.IsDeleted, cancelToken);
@@ -258,30 +274,37 @@ namespace George.Data
 
             if (accountId.HasValue)
             {
-                // Account admin delete: remove image from this account's products only (ProductImage), and unlink from account library (AccountMedia)
-                var accountProductIds = await _dbContext.Products
+                // Account admin delete: remove image from this account's products (optionally scoped to site via ProductSite)
+                var accountProductIds = await _dbContext.Product
                     .Where(p => p.AccountId == accountId.Value)
                     .Select(p => p.Id)
                     .ToListAsync(cancelToken);
-                var productImagesToRemove = await _dbContext.ProductImages
+                var productImagesToRemove = await _dbContext.ProductImage
                     .Where(pi => pi.MediaId == mediaId && accountProductIds.Contains(pi.ProductId))
                     .ToListAsync(cancelToken);
-                _dbContext.ProductImages.RemoveRange(productImagesToRemove);
+                _dbContext.ProductImage.RemoveRange(productImagesToRemove);
 
-                var accountMedia = await _dbContext.AccountMedia
-                    .FirstOrDefaultAsync(am => am.AccountId == accountId.Value && am.MediaId == mediaId, cancelToken);
-                if (accountMedia != null)
-                    _dbContext.AccountMedia.Remove(accountMedia);
+                // When siteId is provided, remove only that site's link; otherwise remove all links for this account+media
+                var accountMediaQuery = _dbContext.AccountMedia
+                    .Where(am => am.AccountId == accountId.Value && am.MediaId == mediaId);
+                if (siteId.HasValue)
+                    accountMediaQuery = accountMediaQuery.Where(am => am.SiteId == siteId.Value);
+                var toRemove = await accountMediaQuery.ToListAsync(cancelToken);
+                if (toRemove.Count > 0)
+                    _dbContext.AccountMedia.RemoveRange(toRemove);
 
-                // Do not set Media.IsDeleted - media may still be used globally or by other accounts
+                // Do not set Media.IsDeleted - media may still be used globally or by other accounts/sites
             }
             else
             {
-                // Global delete: remove from template products (TemplateProductImage) and soft-delete the media
-                var templateProductImagesToRemove = await _dbContext.TemplateProductImages
+                // Global delete: only soft-delete if media is marked global (IsGlobal = true)
+                var isGlobal = await GetMediaIsGlobalAsync(mediaId, cancelToken);
+                if (!isGlobal) return false;
+
+                var templateProductImagesToRemove = await _dbContext.TemplateProductImage
                     .Where(tpi => tpi.MediaId == mediaId)
                     .ToListAsync(cancelToken);
-                _dbContext.TemplateProductImages.RemoveRange(templateProductImagesToRemove);
+                _dbContext.TemplateProductImage.RemoveRange(templateProductImagesToRemove);
 
                 media.IsDeleted = true;
                 media.UpdatedDate = DateTime.UtcNow;
@@ -291,25 +314,36 @@ namespace George.Data
             return true;
         }
 
-        /// <summary>Record that an account uses a media item. Idempotent.</summary>
-        public async Task AddAccountMediaUsageAsync(int accountId, int mediaId, CancellationToken cancelToken)
+        /// <summary>Returns the first (min Id) site for the account, or null if account has no sites.</summary>
+        public async Task<int?> GetFirstSiteIdForAccountAsync(int accountId, CancellationToken cancelToken)
+        {
+            return await _dbContext.Site
+                .Where(s => s.AccountId == accountId && !s.IsDeleted)
+                .OrderBy(s => s.Id)
+                .Select(s => (int?)s.Id)
+                .FirstOrDefaultAsync(cancelToken);
+        }
+
+        /// <summary>Record that an account/site uses a media item. Idempotent.</summary>
+        public async Task AddAccountMediaUsageAsync(int accountId, int siteId, int mediaId, CancellationToken cancelToken)
         {
             var exists = await _dbContext.AccountMedia
-                .AnyAsync(am => am.AccountId == accountId && am.MediaId == mediaId, cancelToken)
+                .AnyAsync(am => am.AccountId == accountId && am.SiteId == siteId && am.MediaId == mediaId, cancelToken)
                 .ConfigureAwait(false);
             if (exists) return;
 
             _dbContext.AccountMedia.Add(new AccountMedia
             {
                 AccountId = accountId,
+                SiteId = siteId,
                 MediaId = mediaId,
                 CreationTime = DateTime.UtcNow
             });
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
         }
 
-        /// <summary>Returns URL -> MediaId for media that belong to the account (via AccountMedia) and have one of the given URLs. Used when linking product images to existing account media.</summary>
-        public async Task<Dictionary<string, int>> GetMediaIdsByUrlsForAccountAsync(int accountId, List<string> urls, CancellationToken cancelToken)
+        /// <summary>Returns URL -> MediaId for media that belong to the account/site (via AccountMedia) and have one of the given URLs. When multiple Media rows share the same URL (e.g. duplicate uploads), returns the one with the smallest Id so resolution is deterministic and stays within the requested site.</summary>
+        public async Task<Dictionary<string, int>> GetMediaIdsByUrlsForAccountAsync(int accountId, List<string> urls, int? siteId, CancellationToken cancelToken)
         {
             if (urls == null || !urls.Any()) return new Dictionary<string, int>();
 
@@ -318,11 +352,13 @@ namespace George.Data
 
             var list = await _dbContext.Media
                 .Where(m => !m.IsDeleted && normalized.Contains(m.Url)
-                    && _dbContext.AccountMedia.Any(am => am.AccountId == accountId && am.MediaId == m.Id))
+                    && _dbContext.AccountMedia.Any(am => am.AccountId == accountId && am.MediaId == m.Id
+                        && (!siteId.HasValue || am.SiteId == siteId.Value)))
                 .Select(m => new { m.Url, m.Id })
                 .ToListAsync(cancelToken);
 
-            return list.ToDictionary(x => x.Url, x => x.Id);
+            // When multiple Media have the same URL (e.g. same image in different sites), pick one per URL deterministically (min Id)
+            return list.GroupBy(x => x.Url).ToDictionary(g => g.Key, g => g.Min(x => x.Id));
         }
 
         /// <summary>Returns MediaId for the given URL in the global media pool: existing Media with that URL, or a new Media record (no AccountMedia). Used when importing global/template products with external image URLs.</summary>
@@ -339,7 +375,7 @@ namespace George.Data
 
             var typeId = await GetOrCreateMediaTypeAsync("image", cancelToken);
             var name = GetFileNameFromUrl(trimmed) ?? "image";
-            var media = new Medium
+            var media = new Media
             {
                 Url = trimmed,
                 Name = name,
@@ -349,22 +385,23 @@ namespace George.Data
                 IsDeleted = false
             };
             _dbContext.Media.Add(media);
+            _dbContext.Entry(media).Property("IsGlobal").CurrentValue = true;
             await _dbContext.SaveChangesAsync(cancelToken);
             return media.Id;
         }
 
-        /// <summary>Returns MediaId for the given URL in this account: existing account media with that URL, or a new Media record (and AccountMedia) for external URLs. Used when importing products with external image URLs.</summary>
-        public async Task<int?> GetOrCreateMediaByUrlForAccountAsync(int accountId, string url, int? creationUserId, CancellationToken cancelToken)
+        /// <summary>Returns MediaId for the given URL in this account/site: existing account media with that URL, or a new Media record (and AccountMedia) for external URLs.</summary>
+        public async Task<int?> GetOrCreateMediaByUrlForAccountAsync(int accountId, int siteId, string url, int? creationUserId, CancellationToken cancelToken)
         {
             if (string.IsNullOrWhiteSpace(url)) return null;
             var trimmed = url.Trim();
 
-            var existing = await GetMediaIdsByUrlsForAccountAsync(accountId, new List<string> { trimmed }, cancelToken);
+            var existing = await GetMediaIdsByUrlsForAccountAsync(accountId, new List<string> { trimmed }, siteId, cancelToken);
             if (existing.TryGetValue(trimmed, out var existingId)) return existingId;
 
             var typeId = await GetOrCreateMediaTypeAsync("image", cancelToken);
             var name = GetFileNameFromUrl(trimmed) ?? "image";
-            var media = new Medium
+            var media = new Media
             {
                 Url = trimmed,
                 Name = name,
@@ -374,8 +411,9 @@ namespace George.Data
                 IsDeleted = false
             };
             _dbContext.Media.Add(media);
+            _dbContext.Entry(media).Property("IsGlobal").CurrentValue = false;
             await _dbContext.SaveChangesAsync(cancelToken);
-            await AddAccountMediaUsageAsync(accountId, media.Id, cancelToken);
+            await AddAccountMediaUsageAsync(accountId, siteId, media.Id, cancelToken);
             return media.Id;
         }
 
@@ -400,7 +438,7 @@ namespace George.Data
         {
             if (string.IsNullOrWhiteSpace(typeName)) return null;
 
-            var mediaType = await _dbContext.MediaTypes
+            var mediaType = await _dbContext.MediaType
                 .FirstOrDefaultAsync(mt => mt.Name == typeName && !mt.IsDeleted, cancelToken);
 
             if (mediaType == null)
@@ -410,7 +448,7 @@ namespace George.Data
                     Name = typeName,
                     IsDeleted = false
                 };
-                _dbContext.MediaTypes.Add(mediaType);
+                _dbContext.MediaType.Add(mediaType);
                 await _dbContext.SaveChangesAsync(cancelToken);
             }
 

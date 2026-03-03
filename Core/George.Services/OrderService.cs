@@ -105,7 +105,7 @@ namespace George.Services
             if (string.IsNullOrWhiteSpace(order.CustomerPhone))
                 return;
             var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken).ConfigureAwait(false);
-            var settings = account?.NotificationSettings;
+            var settings = account?.AccountNotificationSettings;
             if (settings == null)
                 return;
 
@@ -113,15 +113,15 @@ namespace George.Services
             var source = (order.Source ?? "").Trim();
             if (string.Equals(source, "Kiosk", StringComparison.OrdinalIgnoreCase))
             {
-                if (!string.Equals(settings.NewOrder_CustomerChannel, "sms", StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(settings.NewOrderCustomerChannel, "sms", StringComparison.OrdinalIgnoreCase))
                     return;
-                template = settings.NewOrder_CustomerMessageKiosk;
+                template = settings.NewOrderCustomerMessageKiosk;
             }
             else if (string.Equals(source, "Phone", StringComparison.OrdinalIgnoreCase))
             {
-                if (!settings.NewOrder_CustomerSmsOnPhoneOrderEnabled)
+                if (!settings.NewOrderCustomerSmsOnPhoneOrderEnabled)
                     return;
-                template = settings.NewOrder_CustomerMessagePhoneOrder;
+                template = settings.NewOrderCustomerMessagePhoneOrder;
             }
             else
                 return;
@@ -222,8 +222,8 @@ namespace George.Services
             if (siteId <= 0)
                 return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required.");
             var order = await _orderStorage.GetLastOrderByCustomerPhoneAsync(siteId, phone, cancelToken).ConfigureAwait(false);
-            if (order?.OrderItems != null)
-                response.Data = order.OrderItems.Select(i => _mapper.Map<OrderItemRes>(i)).ToList();
+            if (order?.OrderItem != null)
+                response.Data = order.OrderItem.Select(i => _mapper.Map<OrderItemRes>(i)).ToList();
             return response;
         }
 

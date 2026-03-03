@@ -7,7 +7,6 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [PrimaryKey("ProductId", "CategoryId")]
-[Table("ProductCategory")]
 [Index("CategoryId", Name = "IX_ProductCategory_CategoryId")]
 public partial class ProductCategory
 {
@@ -20,10 +19,10 @@ public partial class ProductCategory
     public bool IsPrimary { get; set; }
 
     [ForeignKey("CategoryId")]
-    [InverseProperty("ProductCategories")]
+    [InverseProperty("ProductCategory")]
     public virtual Category Category { get; set; } = null!;
 
     [ForeignKey("ProductId")]
-    [InverseProperty("ProductCategories")]
+    [InverseProperty("ProductCategory")]
     public virtual Product Product { get; set; } = null!;
 }

@@ -7,7 +7,6 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [PrimaryKey("AttributeId", "Value")]
-[Table("AttributeValue")]
 public partial class AttributeValue
 {
     [Key]
@@ -18,6 +17,6 @@ public partial class AttributeValue
     public string Value { get; set; } = null!;
 
     [ForeignKey("AttributeId")]
-    [InverseProperty("AttributeValues")]
+    [InverseProperty("AttributeValue")]
     public virtual Attribute Attribute { get; set; } = null!;
 }

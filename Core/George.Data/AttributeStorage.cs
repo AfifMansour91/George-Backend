@@ -23,9 +23,9 @@ namespace George.Data
             DataListResult<Attribute> res = new DataListResult<Attribute>();
 
             // Build the query.
-            var query = _dbContext.Attributes
+            var query = _dbContext.Attribute
                 .Include(a => a.Site)
-                .Include(a => a.AttributeValues)
+                .Include(a => a.AttributeValue)
                 .AsNoTracking();
 
             // Filter.
@@ -63,16 +63,16 @@ namespace George.Data
 
         public async Task<Attribute?> GetAttributeAsync(int attributeId, CancellationToken cancelToken)
         {
-            return await _dbContext.Attributes
+            return await _dbContext.Attribute
                 .Include(a => a.Site)
-                .Include(a => a.AttributeValues)
+                .Include(a => a.AttributeValue)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(a => a.Id == attributeId, cancelToken);
         }
 
         public async Task<Attribute> CreateAttributeAsync(Attribute attribute, List<string>? values, CancellationToken cancelToken)
         {
-            _dbContext.Attributes.Add(attribute);
+            _dbContext.Attribute.Add(attribute);
             await _dbContext.SaveChangesAsync(cancelToken);
 
             // Add attribute values if provided
@@ -80,7 +80,7 @@ namespace George.Data
             {
                 foreach (var value in values)
                 {
-                    _dbContext.AttributeValues.Add(new AttributeValue
+                    _dbContext.AttributeValue.Add(new AttributeValue
                     {
                         AttributeId = attribute.Id,
                         Value = value
@@ -94,8 +94,8 @@ namespace George.Data
 
         public async Task<Attribute?> UpdateAttributeAsync(Attribute updated, List<string>? values, CancellationToken cancelToken)
         {
-            var dbAttr = await _dbContext.Attributes
-                .Include(a => a.AttributeValues)
+            var dbAttr = await _dbContext.Attribute
+                .Include(a => a.AttributeValue)
                 .FirstOrDefaultAsync(a => a.Id == updated.Id, cancelToken);
 
             if (dbAttr == null) return null;
@@ -109,14 +109,14 @@ namespace George.Data
             if (values != null)
             {
                 // Remove existing values
-                _dbContext.AttributeValues.RemoveRange(dbAttr.AttributeValues);
+                _dbContext.AttributeValue.RemoveRange(dbAttr.AttributeValue);
                 
                 // Add new values
                 if (values.Any())
                 {
                     foreach (var value in values)
                     {
-                        _dbContext.AttributeValues.Add(new AttributeValue
+                        _dbContext.AttributeValue.Add(new AttributeValue
                         {
                             AttributeId = dbAttr.Id,
                             Value = value
@@ -131,7 +131,7 @@ namespace George.Data
 
         public async Task<bool> UpdateAttributeWooCommerceIdAsync(int attributeId, int? wooCommerceId, CancellationToken cancelToken)
         {
-            var attribute = await _dbContext.Attributes
+            var attribute = await _dbContext.Attribute
                 .FirstOrDefaultAsync(a => a.Id == attributeId, cancelToken);
 
             if (attribute == null) return false;
@@ -144,7 +144,7 @@ namespace George.Data
 
         public async Task<bool> DeleteAttributeAsync(int id, CancellationToken cancelToken = default)
         {
-            var dbModel = await _dbContext.Attributes
+            var dbModel = await _dbContext.Attribute
                 .FirstOrDefaultAsync(a => a.Id == id, cancelToken);
 
             if (dbModel == null) return false;

@@ -7,7 +7,6 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 [Keyless]
-[Table("SystemConfiguration")]
 public partial class SystemConfiguration
 {
     [StringLength(100)]

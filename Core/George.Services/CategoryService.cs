@@ -79,9 +79,9 @@ namespace George.Services
                 response.Data = MapCategoryToRes(model);
 
                 // Sync to WooCommerce if enabled for any linked sites
-                if (model.Sites != null && model.Sites.Any())
+                if (model.Site != null && model.Site.Any())
                 {
-                    await SyncCategoryToWooCommerceForEnabledSitesAsync(model.Id, model.Sites, cancelToken);
+                    await SyncCategoryToWooCommerceForEnabledSitesAsync(model.Id, model.Site, cancelToken);
                 }
             }
 
@@ -111,9 +111,9 @@ namespace George.Services
                 response.Data = MapCategoryToRes(model);
 
                 // Sync to WooCommerce if enabled for any linked sites
-                if (model.Sites != null && model.Sites.Any())
+                if (model.Site != null && model.Site.Any())
                 {
-                    await SyncCategoryToWooCommerceForEnabledSitesAsync(model.Id, model.Sites, cancelToken);
+                    await SyncCategoryToWooCommerceForEnabledSitesAsync(model.Id, model.Site, cancelToken);
                 }
             }
 
@@ -129,9 +129,9 @@ namespace George.Services
             {
                 // Remove category from this site only; do not remove from other sites
                 var category = await _categoryStorage.GetCategoryAsync(categoryId, cancelToken);
-                if (category != null && category.WooCommerceId.HasValue && category.Sites != null)
+                if (category != null && category.WooCommerceId.HasValue && category.Site != null)
                 {
-                    var site = category.Sites.FirstOrDefault(s => s.Id == siteId.Value && s.WooCommerceEnabled == true);
+                    var site = category.Site.FirstOrDefault(s => s.Id == siteId.Value && s.WooCommerceEnabled == true);
                     if (site != null)
                     {
                         try
@@ -153,9 +153,9 @@ namespace George.Services
 
             // Full delete: soft-delete category and remove from WooCommerce for all linked sites
             var categoryForDelete = await _categoryStorage.GetCategoryAsync(categoryId, cancelToken);
-            if (categoryForDelete != null && categoryForDelete.WooCommerceId.HasValue && categoryForDelete.Sites != null && categoryForDelete.Sites.Any())
+            if (categoryForDelete != null && categoryForDelete.WooCommerceId.HasValue && categoryForDelete.Site != null && categoryForDelete.Site.Any())
             {
-                foreach (var site in categoryForDelete.Sites.Where(s => s.WooCommerceEnabled == true))
+                foreach (var site in categoryForDelete.Site.Where(s => s.WooCommerceEnabled == true))
                 {
                     try
                     {
@@ -197,9 +197,9 @@ namespace George.Services
             };
 
             // Map sites
-            if (category.Sites != null && category.Sites.Any())
+            if (category.Site != null && category.Site.Any())
             {
-                res.SiteIds = category.Sites.Select(s => s.Id).ToList();
+                res.SiteIds = category.Site.Select(s => s.Id).ToList();
             }
 
             return res;

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("WeightConfig")]
 public partial class WeightConfig
 {
     [Key]
@@ -39,16 +38,16 @@ public partial class WeightConfig
     public bool? ShowUnitPrice { get; set; }
 
     [InverseProperty("WeightConfig")]
-    public virtual ICollection<Product> Products { get; set; } = new List<Product>();
+    public virtual ICollection<Product> Product { get; set; } = new List<Product>();
 
     [InverseProperty("WeightConfig")]
-    public virtual ICollection<TemplateProduct> TemplateProducts { get; set; } = new List<TemplateProduct>();
+    public virtual ICollection<TemplateProduct> TemplateProduct { get; set; } = new List<TemplateProduct>();
 
     [ForeignKey("UnitId")]
-    [InverseProperty("WeightConfigs")]
+    [InverseProperty("WeightConfig")]
     public virtual Unit? Unit { get; set; }
 
     [ForeignKey("UnitWeightModeId")]
-    [InverseProperty("WeightConfigs")]
+    [InverseProperty("WeightConfig")]
     public virtual UnitWeightMode? UnitWeightMode { get; set; }
 }

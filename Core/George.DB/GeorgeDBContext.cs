@@ -216,9 +216,9 @@ namespace George.DB
 			{
 				entity.HasKey(e => e.UserId);
 				entity.Property(e => e.PreferencesJson).HasMaxLength(-1); // nvarchar(max)
-				entity.HasOne<User>()
-					.WithMany()
-					.HasForeignKey(e => e.UserId)
+				entity.HasOne(d => d.User)
+					.WithOne(p => p.UserPreference)
+					.HasForeignKey<UserPreference>(d => d.UserId)
 					.OnDelete(DeleteBehavior.Cascade)
 					.HasConstraintName("FK_UserPreference_User");
 			});
@@ -242,6 +242,7 @@ namespace George.DB
             modelBuilder.Entity<Product>().HasQueryFilter(a => a.IsDeleted == false);
             modelBuilder.Entity<TemplateProduct>().HasQueryFilter(a => a.IsDeleted == false);
             modelBuilder.Entity<GlobalCategory>().HasQueryFilter(a => a.IsDeleted == false);
+            modelBuilder.Entity<Media>().HasQueryFilter(a => a.IsDeleted == false);
             //modelBuilder.Entity<Account>().HasQueryFilter(ent => EF.Property<bool>(ent, PROP_IS_DELETED) == false);
 
         }

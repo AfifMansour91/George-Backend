@@ -1,18 +1,17 @@
+﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-/// <summary>Sprint 2: Notification settings (התראות) per account. One row per account, no JSON.</summary>
-[Table("AccountNotificationSettings")]
+[Index("AccountId", Name = "UQ_AccountNotificationSettings_AccountId", IsUnique = true)]
 public partial class AccountNotificationSettings
 {
     [Key]
-    [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
     public int Id { get; set; }
 
-    [ForeignKey(nameof(Account))]
     public int AccountId { get; set; }
 
     public bool IsDeleted { get; set; }
@@ -27,55 +26,117 @@ public partial class AccountNotificationSettings
 
     public int? UpdateUserId { get; set; }
 
-    // ----- New order -----
-    public bool NewOrder_ManagerSoundEnabled { get; set; } = true;
+    [Column("NewOrder_ManagerSoundEnabled")]
+    public bool NewOrderManagerSoundEnabled { get; set; }
+
+    [Column("NewOrder_ManagerSoundKey")]
     [StringLength(20)]
-    public string? NewOrder_ManagerSoundKey { get; set; }
-    public bool NewOrder_ManagerSoundTriggerWebsite { get; set; } = true;
-    public bool NewOrder_ManagerSoundTriggerKiosk { get; set; } = true;
-    public bool NewOrder_ManagerSoundTriggerWhatsapp { get; set; }
-    public bool NewOrder_ManagerSoundTriggerPhone { get; set; }
+    public string? NewOrderManagerSoundKey { get; set; }
+
+    [Column("NewOrder_ManagerSoundTriggerWebsite")]
+    public bool NewOrderManagerSoundTriggerWebsite { get; set; }
+
+    [Column("NewOrder_ManagerSoundTriggerKiosk")]
+    public bool NewOrderManagerSoundTriggerKiosk { get; set; }
+
+    [Column("NewOrder_ManagerSoundTriggerWhatsapp")]
+    public bool NewOrderManagerSoundTriggerWhatsapp { get; set; }
+
+    [Column("NewOrder_ManagerSoundTriggerPhone")]
+    public bool NewOrderManagerSoundTriggerPhone { get; set; }
+
+    [Column("NewOrder_ManagerMessageChannel")]
     [StringLength(20)]
-    public string? NewOrder_ManagerMessageChannel { get; set; }
+    public string? NewOrderManagerMessageChannel { get; set; }
+
+    [Column("NewOrder_ManagerPhoneNumbers")]
     [StringLength(500)]
-    public string? NewOrder_ManagerPhoneNumbers { get; set; }
-    public string? NewOrder_ManagerMessageTemplate { get; set; }
-    public bool NewOrder_ManagerReminderBeforeDeliveryEnabled { get; set; }
-    public int NewOrder_ManagerReminderBeforeDeliveryMinutes { get; set; } = 60;
-    public bool NewOrder_ManagerReminderNoTreatmentEnabled { get; set; }
-    public int NewOrder_ManagerReminderNoTreatmentMinutes { get; set; } = 15;
-    [StringLength(20)]
-    public string? NewOrder_ManagerReminderNoTreatmentSoundKey { get; set; }
-    [StringLength(20)]
-    public string? NewOrder_CustomerChannel { get; set; }
-    public string? NewOrder_CustomerMessageShipping { get; set; }
-    public string? NewOrder_CustomerMessagePickup { get; set; }
-    public string? NewOrder_CustomerMessageKiosk { get; set; }
-    public bool NewOrder_CustomerSmsOnPhoneOrderEnabled { get; set; }
-    public string? NewOrder_CustomerMessagePhoneOrder { get; set; }
+    public string? NewOrderManagerPhoneNumbers { get; set; }
 
-    // ----- Order ready -----
-    public bool OrderReady_ManagerNotifyEnabled { get; set; }
-    [StringLength(20)]
-    public string? OrderReady_CustomerChannel { get; set; }
-    public string? OrderReady_CustomerMessageShipping { get; set; }
-    public string? OrderReady_CustomerMessagePickup { get; set; }
-    public string? OrderReady_CustomerMessageKiosk { get; set; }
+    [Column("NewOrder_ManagerMessageTemplate")]
+    public string? NewOrderManagerMessageTemplate { get; set; }
 
-    // ----- Order not picked up -----
-    public bool OrderNotPickedUp_ManagerNotifyEnabled { get; set; }
-    public bool OrderNotPickedUp_AutoReminderEnabled { get; set; }
-    public int OrderNotPickedUp_MinutesAfterScheduledPickup { get; set; } = 30;
-    public string? OrderNotPickedUp_CustomerMessageTemplate { get; set; }
+    [Column("NewOrder_ManagerReminderBeforeDeliveryEnabled")]
+    public bool NewOrderManagerReminderBeforeDeliveryEnabled { get; set; }
 
-    // ----- After delivery -----
-    public bool AfterDelivery_Enabled { get; set; }
-    [StringLength(20)]
-    public string? AfterDelivery_TriggerType { get; set; }
-    public int AfterDelivery_TriggerAfterValue { get; set; } = 1;
-    [StringLength(20)]
-    public string? AfterDelivery_TriggerAfterUnit { get; set; }
-    public string? AfterDelivery_CustomerMessageTemplate { get; set; }
+    [Column("NewOrder_ManagerReminderBeforeDeliveryMinutes")]
+    public int NewOrderManagerReminderBeforeDeliveryMinutes { get; set; }
 
+    [Column("NewOrder_ManagerReminderNoTreatmentEnabled")]
+    public bool NewOrderManagerReminderNoTreatmentEnabled { get; set; }
+
+    [Column("NewOrder_ManagerReminderNoTreatmentMinutes")]
+    public int NewOrderManagerReminderNoTreatmentMinutes { get; set; }
+
+    [Column("NewOrder_ManagerReminderNoTreatmentSoundKey")]
+    [StringLength(20)]
+    public string? NewOrderManagerReminderNoTreatmentSoundKey { get; set; }
+
+    [Column("NewOrder_CustomerChannel")]
+    [StringLength(20)]
+    public string? NewOrderCustomerChannel { get; set; }
+
+    [Column("NewOrder_CustomerMessageShipping")]
+    public string? NewOrderCustomerMessageShipping { get; set; }
+
+    [Column("NewOrder_CustomerMessagePickup")]
+    public string? NewOrderCustomerMessagePickup { get; set; }
+
+    [Column("NewOrder_CustomerMessageKiosk")]
+    public string? NewOrderCustomerMessageKiosk { get; set; }
+
+    [Column("OrderReady_ManagerNotifyEnabled")]
+    public bool OrderReadyManagerNotifyEnabled { get; set; }
+
+    [Column("OrderReady_CustomerChannel")]
+    [StringLength(20)]
+    public string? OrderReadyCustomerChannel { get; set; }
+
+    [Column("OrderReady_CustomerMessageShipping")]
+    public string? OrderReadyCustomerMessageShipping { get; set; }
+
+    [Column("OrderReady_CustomerMessagePickup")]
+    public string? OrderReadyCustomerMessagePickup { get; set; }
+
+    [Column("OrderReady_CustomerMessageKiosk")]
+    public string? OrderReadyCustomerMessageKiosk { get; set; }
+
+    [Column("OrderNotPickedUp_ManagerNotifyEnabled")]
+    public bool OrderNotPickedUpManagerNotifyEnabled { get; set; }
+
+    [Column("OrderNotPickedUp_AutoReminderEnabled")]
+    public bool OrderNotPickedUpAutoReminderEnabled { get; set; }
+
+    [Column("OrderNotPickedUp_MinutesAfterScheduledPickup")]
+    public int OrderNotPickedUpMinutesAfterScheduledPickup { get; set; }
+
+    [Column("OrderNotPickedUp_CustomerMessageTemplate")]
+    public string? OrderNotPickedUpCustomerMessageTemplate { get; set; }
+
+    [Column("AfterDelivery_Enabled")]
+    public bool AfterDeliveryEnabled { get; set; }
+
+    [Column("AfterDelivery_TriggerType")]
+    [StringLength(20)]
+    public string? AfterDeliveryTriggerType { get; set; }
+
+    [Column("AfterDelivery_TriggerAfterValue")]
+    public int AfterDeliveryTriggerAfterValue { get; set; }
+
+    [Column("AfterDelivery_TriggerAfterUnit")]
+    [StringLength(20)]
+    public string? AfterDeliveryTriggerAfterUnit { get; set; }
+
+    [Column("AfterDelivery_CustomerMessageTemplate")]
+    public string? AfterDeliveryCustomerMessageTemplate { get; set; }
+
+    [Column("NewOrder_CustomerSmsOnPhoneOrderEnabled")]
+    public bool NewOrderCustomerSmsOnPhoneOrderEnabled { get; set; }
+
+    [Column("NewOrder_CustomerMessagePhoneOrder")]
+    public string? NewOrderCustomerMessagePhoneOrder { get; set; }
+
+    [ForeignKey("AccountId")]
+    [InverseProperty("AccountNotificationSettings")]
     public virtual Account Account { get; set; } = null!;
 }

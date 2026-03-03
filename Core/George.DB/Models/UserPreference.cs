@@ -1,20 +1,19 @@
+﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-/// <summary>
-/// Stores per-user UI preferences (e.g. product list view/filters) as JSON.
-/// One row per user.
-/// </summary>
-[Table("UserPreference")]
-public class UserPreference
+public partial class UserPreference
 {
-	[Key]
-	public int UserId { get; set; }
+    [Key]
+    public int UserId { get; set; }
 
-	/// <summary>
-	/// JSON object: keys like "myProducts_viewPrefs", "globalCatalog_viewPrefs", values are the preference objects.
-	/// </summary>
-	public string? PreferencesJson { get; set; }
+    public string? PreferencesJson { get; set; }
+
+    [ForeignKey("UserId")]
+    [InverseProperty("UserPreference")]
+    public virtual User User { get; set; } = null!;
 }

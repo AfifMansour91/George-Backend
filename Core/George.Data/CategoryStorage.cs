@@ -19,10 +19,10 @@ namespace George.Data
         {
             var res = new DataListResult<Category>();
 
-            var query = _dbContext.Categories
+            var query = _dbContext.Category
                 .Include(c => c.Account)
                 .Include(c => c.ParentCategory)
-                .Include(c => c.Sites)
+                .Include(c => c.Site)
                 .AsNoTracking();
 
             // Apply filters
@@ -35,7 +35,7 @@ namespace George.Data
 
                 if (filter.SiteId.HasValue)
                 {
-                    query = query.Where(c => c.Sites.Any(s => s.Id == filter.SiteId.Value));
+                    query = query.Where(c => c.Site.Any(s => s.Id == filter.SiteId.Value));
                 }
 
                 // 0 means root categories (no parent); otherwise filter by that parent id
@@ -77,28 +77,28 @@ namespace George.Data
 
         public async Task<Category?> GetCategoryAsync(int categoryId, CancellationToken cancelToken)
         {
-            return await _dbContext.Categories
+            return await _dbContext.Category
                 .Include(c => c.Account)
                 .Include(c => c.ParentCategory)
-                .Include(c => c.Sites)
+                .Include(c => c.Site)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(c => c.Id == categoryId, cancelToken);
         }
 
         public async Task<Category> CreateCategoryAsync(Category category, List<int>? siteIds, CancellationToken cancelToken)
         {
-            _dbContext.Categories.Add(category);
+            _dbContext.Category.Add(category);
 
             // Add sites if provided
             if (siteIds != null && siteIds.Any())
             {
-                var sites = await _dbContext.Sites
+                var sites = await _dbContext.Site
                     .Where(s => siteIds.Contains(s.Id))
                     .ToListAsync(cancelToken);
 
                 foreach (var site in sites)
                 {
-                    category.Sites.Add(site);
+                    category.Site.Add(site);
                 }
             }
 
@@ -108,8 +108,8 @@ namespace George.Data
 
         public async Task<Category?> UpdateCategoryAsync(Category updated, List<int>? siteIds, CancellationToken cancelToken)
         {
-            var dbCategory = await _dbContext.Categories
-                .Include(c => c.Sites)
+            var dbCategory = await _dbContext.Category
+                .Include(c => c.Site)
                 .FirstOrDefaultAsync(c => c.Id == updated.Id, cancelToken);
 
             if (dbCategory == null) return null;
@@ -131,16 +131,16 @@ namespace George.Data
             // Update sites
             if (siteIds != null)
             {
-                dbCategory.Sites.Clear();
+                dbCategory.Site.Clear();
                 if (siteIds.Any())
                 {
-                    var sites = await _dbContext.Sites
+                    var sites = await _dbContext.Site
                         .Where(s => siteIds.Contains(s.Id))
                         .ToListAsync(cancelToken);
 
                     foreach (var site in sites)
                     {
-                        dbCategory.Sites.Add(site);
+                        dbCategory.Site.Add(site);
                     }
                 }
             }
@@ -155,21 +155,21 @@ namespace George.Data
         /// </summary>
         public async Task<bool> RemoveCategoryFromSiteAsync(int categoryId, int siteId, CancellationToken cancelToken)
         {
-            var category = await _dbContext.Categories
-                .Include(c => c.Sites)
+            var category = await _dbContext.Category
+                .Include(c => c.Site)
                 .FirstOrDefaultAsync(c => c.Id == categoryId, cancelToken);
 
             if (category == null) return false;
 
-            var siteToRemove = category.Sites.FirstOrDefault(s => s.Id == siteId);
+            var siteToRemove = category.Site.FirstOrDefault(s => s.Id == siteId);
             if (siteToRemove == null) return true; // already not on this site
 
-            category.Sites.Remove(siteToRemove);
+            category.Site.Remove(siteToRemove);
             category.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken);
 
             // If that was the last site, soft-delete the category
-            if (!category.Sites.Any())
+            if (!category.Site.Any())
             {
                 category.IsDeleted = true;
                 await _dbContext.SaveChangesAsync(cancelToken);
@@ -180,7 +180,7 @@ namespace George.Data
 
         public async Task<bool> DeleteCategoryAsync(int categoryId, CancellationToken cancelToken)
         {
-            var category = await _dbContext.Categories
+            var category = await _dbContext.Category
                 .FirstOrDefaultAsync(c => c.Id == categoryId, cancelToken);
 
             if (category == null) return false;
@@ -193,7 +193,7 @@ namespace George.Data
 
         public async Task<bool> UpdateCategoryWooCommerceIdAsync(int categoryId, int? wooCommerceId, CancellationToken cancelToken)
         {
-            var category = await _dbContext.Categories
+            var category = await _dbContext.Category
                 .FirstOrDefaultAsync(c => c.Id == categoryId, cancelToken);
 
             if (category == null) return false;
@@ -216,7 +216,7 @@ namespace George.Data
         {
             if (string.IsNullOrWhiteSpace(name)) return null;
 
-            var query = _dbContext.Categories
+            var query = _dbContext.Category
                 .Where(c => !c.IsDeleted && c.Name.ToLower().Trim() == name.ToLower().Trim());
 
             if (parentCategoryId.HasValue)
@@ -235,7 +235,7 @@ namespace George.Data
 
             if (siteIds != null && siteIds.Any())
             {
-                query = query.Where(c => c.Sites.Any(s => siteIds.Contains(s.Id)) || !c.Sites.Any());
+                query = query.Where(c => c.Site.Any(s => siteIds.Contains(s.Id)) || !c.Site.Any());
             }
 
             return await query
@@ -250,22 +250,22 @@ namespace George.Data
         {
             if (siteIds == null || !siteIds.Any()) return;
 
-            var dbCategory = await _dbContext.Categories
-                .Include(c => c.Sites)
+            var dbCategory = await _dbContext.Category
+                .Include(c => c.Site)
                 .FirstOrDefaultAsync(c => c.Id == categoryId, cancelToken);
 
             if (dbCategory == null) return;
 
-            var existingSiteIds = dbCategory.Sites.Select(s => s.Id).ToHashSet();
+            var existingSiteIds = dbCategory.Site.Select(s => s.Id).ToHashSet();
             var toAdd = siteIds.Where(id => !existingSiteIds.Contains(id)).ToList();
             if (toAdd.Count == 0) return;
 
-            var sites = await _dbContext.Sites
+            var sites = await _dbContext.Site
                 .Where(s => toAdd.Contains(s.Id))
                 .ToListAsync(cancelToken);
             foreach (var site in sites)
             {
-                dbCategory.Sites.Add(site);
+                dbCategory.Site.Add(site);
             }
             await _dbContext.SaveChangesAsync(cancelToken);
         }

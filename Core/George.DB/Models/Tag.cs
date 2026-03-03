@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("Tag")]
 [Index("AccountId", Name = "IX_Tag_AccountId")]
 public partial class Tag
 {
@@ -31,26 +30,26 @@ public partial class Tag
     public int? AccountId { get; set; }
 
     [ForeignKey("AccountId")]
-    [InverseProperty("Tags")]
+    [InverseProperty("Tag")]
     public virtual Account? Account { get; set; }
 
     [ForeignKey("CreationUserId")]
-    [InverseProperty("TagCreationUsers")]
+    [InverseProperty("TagCreationUser")]
     public virtual User? CreationUser { get; set; }
 
     [ForeignKey("UpdateUserId")]
-    [InverseProperty("TagUpdateUsers")]
+    [InverseProperty("TagUpdateUser")]
     public virtual User? UpdateUser { get; set; }
 
     [ForeignKey("TagId")]
-    [InverseProperty("Tags")]
-    public virtual ICollection<Medium> Media { get; set; } = new List<Medium>();
+    [InverseProperty("Tag")]
+    public virtual ICollection<Media> Media { get; set; } = new List<Media>();
 
     [ForeignKey("TagId")]
-    [InverseProperty("Tags")]
-    public virtual ICollection<Product> Products { get; set; } = new List<Product>();
+    [InverseProperty("Tag")]
+    public virtual ICollection<Product> Product { get; set; } = new List<Product>();
 
     [ForeignKey("TagId")]
-    [InverseProperty("Tags")]
-    public virtual ICollection<TemplateProduct> TemplateProducts { get; set; } = new List<TemplateProduct>();
+    [InverseProperty("Tag")]
+    public virtual ICollection<TemplateProduct> TemplateProduct { get; set; } = new List<TemplateProduct>();
 }

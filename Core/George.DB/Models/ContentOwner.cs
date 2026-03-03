@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("ContentOwner")]
 [Index("Name", Name = "UQ__ContentO__737584F6AA024CD0", IsUnique = true)]
 public partial class ContentOwner
 {
@@ -19,5 +18,5 @@ public partial class ContentOwner
     public bool IsDeleted { get; set; }
 
     [InverseProperty("ContentOwner")]
-    public virtual ICollection<Account> Accounts { get; set; } = new List<Account>();
+    public virtual ICollection<Account> Account { get; set; } = new List<Account>();
 }

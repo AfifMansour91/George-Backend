@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("Account")]
 public partial class Account
 {
     [Key]
@@ -68,9 +67,6 @@ public partial class Account
     [StringLength(1000)]
     public string? LogoUrl { get; set; }
 
-    [StringLength(500)]
-    public string? Website { get; set; }
-
     [StringLength(20)]
     public string Status { get; set; } = null!;
 
@@ -80,66 +76,75 @@ public partial class Account
 
     public bool AllowWeighted { get; set; }
 
+    [StringLength(500)]
+    public string? Website { get; set; }
+
     public bool KioskEnabled { get; set; }
-
-    [InverseProperty("Account")]
-    public virtual KioskSettings? KioskSettings { get; set; }
-
-    [InverseProperty("Account")]
-    public virtual AccountNotificationSettings? NotificationSettings { get; set; }
-
-    [InverseProperty("Account")]
-    public virtual ICollection<KioskSettingsHomeImage> KioskSettingsHomeImages { get; set; } = new List<KioskSettingsHomeImage>();
-
-    [InverseProperty("Account")]
-    public virtual ICollection<Brand> Brands { get; set; } = new List<Brand>();
-
-    [InverseProperty("Account")]
-    public virtual ICollection<Category> Categories { get; set; } = new List<Category>();
-
-    [ForeignKey("ContentOwnerId")]
-    [InverseProperty("Accounts")]
-    public virtual ContentOwner? ContentOwner { get; set; }
-
-    [ForeignKey("CreationUserId")]
-    [InverseProperty("AccountCreationUsers")]
-    public virtual User? CreationUser { get; set; }
-
-    [ForeignKey("ManagerId")]
-    [InverseProperty("AccountManagers")]
-    public virtual User? Manager { get; set; }
 
     [InverseProperty("Account")]
     public virtual ICollection<AccountMedia> AccountMedia { get; set; } = new List<AccountMedia>();
 
     [InverseProperty("Account")]
-    public virtual ICollection<Order> Orders { get; set; } = new List<Order>();
+    public virtual AccountNotificationSettings? AccountNotificationSettings { get; set; }
 
     [InverseProperty("Account")]
-    public virtual ICollection<Site> Sites { get; set; } = new List<Site>();
+    public virtual ICollection<AccountWizardStepData> AccountWizardStepData { get; set; } = new List<AccountWizardStepData>();
+
+    [InverseProperty("Account")]
+    public virtual ICollection<Brand> Brand { get; set; } = new List<Brand>();
+
+    [InverseProperty("Account")]
+    public virtual ICollection<Category> Category { get; set; } = new List<Category>();
+
+    [ForeignKey("ContentOwnerId")]
+    [InverseProperty("Account")]
+    public virtual ContentOwner? ContentOwner { get; set; }
+
+    [ForeignKey("CreationUserId")]
+    [InverseProperty("AccountCreationUser")]
+    public virtual User? CreationUser { get; set; }
+
+    [InverseProperty("Account")]
+    public virtual KioskSettings? KioskSettings { get; set; }
+
+    [InverseProperty("Account")]
+    public virtual ICollection<KioskSettingsHomeImage> KioskSettingsHomeImage { get; set; } = new List<KioskSettingsHomeImage>();
+
+    [ForeignKey("ManagerId")]
+    [InverseProperty("AccountManager")]
+    public virtual User? Manager { get; set; }
+
+    [InverseProperty("Account")]
+    public virtual ICollection<Media> Media { get; set; } = new List<Media>();
+
+    [InverseProperty("Account")]
+    public virtual ICollection<Order> Order { get; set; } = new List<Order>();
+
+    [InverseProperty("Account")]
+    public virtual ICollection<Site> Site { get; set; } = new List<Site>();
 
     [ForeignKey("StatusId")]
-    [InverseProperty("Accounts")]
+    [InverseProperty("Account")]
     public virtual AccountStatus? StatusNavigation { get; set; }
 
     [InverseProperty("Account")]
-    public virtual ICollection<Supplier> Suppliers { get; set; } = new List<Supplier>();
+    public virtual ICollection<Supplier> Supplier { get; set; } = new List<Supplier>();
 
     [InverseProperty("Account")]
-    public virtual ICollection<Tag> Tags { get; set; } = new List<Tag>();
+    public virtual ICollection<Tag> Tag { get; set; } = new List<Tag>();
 
     [ForeignKey("UpdateUserId")]
-    [InverseProperty("AccountUpdateUsers")]
+    [InverseProperty("AccountUpdateUser")]
     public virtual User? UpdateUser { get; set; }
 
     [InverseProperty("Account")]
-    public virtual ICollection<User> Users { get; set; } = new List<User>();
+    public virtual ICollection<User> User { get; set; } = new List<User>();
 
     [ForeignKey("WizardStatusId")]
-    [InverseProperty("Accounts")]
+    [InverseProperty("Account")]
     public virtual WizardStatus? WizardStatus { get; set; }
 
     [ForeignKey("WizardTypeId")]
-    [InverseProperty("Accounts")]
+    [InverseProperty("Account")]
     public virtual WizardType? WizardType { get; set; }
 }

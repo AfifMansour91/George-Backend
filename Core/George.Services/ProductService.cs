@@ -99,10 +99,11 @@ namespace George.Services
 
             if (product != null)
             {
-                // Create images (link to existing account media when URL matches; do not create new media)
+                // Create images (link to existing account media when URL matches; resolve in the product's site context so the same URL picks media for that site only)
                 if (req.ImageUrls != null && req.ImageUrls.Any())
                 {
-                    var imageList = await ResolveImageUrlsToMediaAsync(product.AccountId, req.ImageUrls, createMediaIfMissing: true, cancelToken);
+                    var resolutionSiteId = req.SiteIds != null && req.SiteIds.Any() ? (int?)req.SiteIds.First() : null;
+                    var imageList = await ResolveImageUrlsToMediaAsync(product.AccountId, req.ImageUrls, createMediaIfMissing: true, siteId: resolutionSiteId, cancelToken);
                     await _productStorage.CreateProductImagesAsync(product.Id, imageList, cancelToken);
                 }
 
@@ -187,10 +188,13 @@ namespace George.Services
 
             if (product != null)
             {
-                // Update images (link to existing account media when URL matches; do not create new media)
+                // Update images (link to existing account media when URL matches; resolve in the product's site context so the same URL picks media for that site only)
                 if (req.ImageUrls != null)
                 {
-                    var imageList = await ResolveImageUrlsToMediaAsync(existingProduct.AccountId, req.ImageUrls, createMediaIfMissing: true, cancelToken);
+                    var resolutionSiteId = req.SiteIds != null && req.SiteIds.Any()
+                        ? (int?)req.SiteIds.First()
+                        : existingProduct.Site?.OrderBy(s => s.Id).Select(s => s.Id).FirstOrDefault();
+                    var imageList = await ResolveImageUrlsToMediaAsync(existingProduct.AccountId, req.ImageUrls, createMediaIfMissing: true, siteId: resolutionSiteId, cancelToken);
                     await _productStorage.CreateProductImagesAsync(productId, imageList, cancelToken);
                 }
 
@@ -503,7 +507,7 @@ namespace George.Services
                         if (targetSiteIds != null && targetSiteIds.Any())
                         {
                             var existingWithSites = await _productStorage.GetProductAsync(existingProduct.Id, cancelToken);
-                            var existingSiteIds = existingWithSites?.Sites?.Select(s => s.Id).ToList() ?? new List<int>();
+                            var existingSiteIds = existingWithSites?.Site?.Select(s => s.Id).ToList() ?? new List<int>();
                             var onTargetSite = existingSiteIds.Any(id => targetSiteIds.Contains(id));
                             if (!onTargetSite && existingSiteIds.Any())
                             {
@@ -523,11 +527,12 @@ namespace George.Services
 
                         if (product != null)
                         {
-                            // Update images (link to existing account media; do not create new media)
+                            // Update images (resolve in product's site context so same URL picks media for that site only)
                             if (productReq.ImageUrls != null)
                             {
                                 var accountIdForImages = product.AccountId ?? userAccountId;
-                                var imageList = await ResolveImageUrlsToMediaAsync(accountIdForImages, productReq.ImageUrls, createMediaIfMissing: true, cancelToken);
+                                var resolutionSiteId = productReq.SiteIds != null && productReq.SiteIds.Any() ? (int?)productReq.SiteIds.First() : targetSiteIds?.FirstOrDefault();
+                                var imageList = await ResolveImageUrlsToMediaAsync(accountIdForImages, productReq.ImageUrls, createMediaIfMissing: true, siteId: resolutionSiteId, cancelToken);
                                 await _productStorage.CreateProductImagesAsync(product.Id, imageList, cancelToken);
                             }
 
@@ -587,11 +592,12 @@ namespace George.Services
 
                         if (product != null)
                         {
-                            // Create images (link to existing account media; do not create new media)
+                            // Create images (resolve in product's site context so same URL picks media for that site only)
                             if (productReq.ImageUrls != null && productReq.ImageUrls.Any())
                             {
                                 var accountIdForImages = product.AccountId ?? userAccountId;
-                                var imageList = await ResolveImageUrlsToMediaAsync(accountIdForImages, productReq.ImageUrls, createMediaIfMissing: true, cancelToken);
+                                var resolutionSiteId = productReq.SiteIds != null && productReq.SiteIds.Any() ? (int?)productReq.SiteIds.First() : targetSiteIds?.FirstOrDefault();
+                                var imageList = await ResolveImageUrlsToMediaAsync(accountIdForImages, productReq.ImageUrls, createMediaIfMissing: true, siteId: resolutionSiteId, cancelToken);
                                 await _productStorage.CreateProductImagesAsync(product.Id, imageList, cancelToken);
                             }
 
@@ -645,12 +651,13 @@ namespace George.Services
             return response;
         }
 
-        /// <summary>Resolve image URLs to (Url, MediaId). Uses existing account media when URL matches; when createMediaIfMissing is true (e.g. import), creates Media + AccountMedia for external URLs.</summary>
-        private async Task<List<(string Url, int? MediaId)>> ResolveImageUrlsToMediaAsync(int? accountId, List<string>? imageUrls, bool createMediaIfMissing, CancellationToken cancelToken)
+        /// <summary>Resolve image URLs to (Url, MediaId). Uses existing account/site media when URL matches; when createMediaIfMissing is true, creates Media + AccountMedia for external URLs. When siteId is null, first site of account is used.</summary>
+        private async Task<List<(string Url, int? MediaId)>> ResolveImageUrlsToMediaAsync(int? accountId, List<string>? imageUrls, bool createMediaIfMissing, int? siteId, CancellationToken cancelToken)
         {
             if (imageUrls == null || !imageUrls.Any()) return new List<(string, int?)>();
             if (!accountId.HasValue) return imageUrls.Select(u => (u, (int?)null)).ToList();
-            var urlToMediaId = await _mediaStorage.GetMediaIdsByUrlsForAccountAsync(accountId.Value, imageUrls, cancelToken);
+            var effectiveSiteId = siteId ?? (await _mediaStorage.GetFirstSiteIdForAccountAsync(accountId.Value, cancelToken));
+            var urlToMediaId = await _mediaStorage.GetMediaIdsByUrlsForAccountAsync(accountId.Value, imageUrls, effectiveSiteId, cancelToken);
             var result = new List<(string Url, int? MediaId)>();
             foreach (var u in imageUrls)
             {
@@ -661,9 +668,9 @@ namespace George.Services
                     result.Add((u!, id));
                     continue;
                 }
-                if (createMediaIfMissing)
+                if (createMediaIfMissing && effectiveSiteId.HasValue)
                 {
-                    var newId = await _mediaStorage.GetOrCreateMediaByUrlForAccountAsync(accountId.Value, trimmed, AuthUser?.Id, cancelToken);
+                    var newId = await _mediaStorage.GetOrCreateMediaByUrlForAccountAsync(accountId.Value, effectiveSiteId.Value, trimmed, AuthUser?.Id, cancelToken);
                     result.Add((u!, newId));
                 }
                 else
@@ -791,22 +798,22 @@ namespace George.Services
             };
 
             // Map images
-            if (product.ProductImages != null && product.ProductImages.Any())
+            if (product.ProductImage != null && product.ProductImage.Any())
             {
-                var ordered = product.ProductImages.OrderBy(pi => pi.SortOrder).ToList();
+                var ordered = product.ProductImage.OrderBy(pi => pi.SortOrder).ToList();
                 res.ImageUrls = ordered.Select(pi => pi.Url).ToList();
                 res.ImageNames = ordered.Select(pi => pi.Media?.Name ?? string.Empty).ToList();
             }
 
             // Map categories
-            if (product.ProductCategories != null && product.ProductCategories.Any())
+            if (product.ProductCategory != null && product.ProductCategory.Any())
             {
-                var mainCategories = product.ProductCategories
+                var mainCategories = product.ProductCategory
                     .Where(pc => pc.Category?.ParentCategoryId == null)
                     .Select(pc => pc.CategoryId)
                     .ToList();
-                var subCategories = product.ProductCategories
-                    .Where(pc => pc.Category?.ParentCategoryId != null)
+                var subCategories = product.ProductCategory
+                    .Where(pc => pc.Category?.ProductCategory != null)
                     .Select(pc => pc.CategoryId)
                     .ToList();
                 
@@ -815,27 +822,27 @@ namespace George.Services
             }
 
             // Map tags
-            if (product.Tags != null && product.Tags.Any())
+            if (product.Tag != null && product.Tag.Any())
             {
-                res.Tags = product.Tags.Select(t => t.Name).ToList();
+                res.Tags = product.Tag.Select(t => t.Name).ToList();
             }
 
             // Map sites
-            if (product.Sites != null && product.Sites.Any())
+            if (product.Site != null && product.Site.Any())
             {
-                res.SiteIds = product.Sites.Select(s => s.Id).ToList();
+                res.SiteIds = product.Site.Select(s => s.Id).ToList();
             }
 
             // Map related products (נלווים)
-            if (product.RelatedProducts != null && product.RelatedProducts.Any())
+            if (product.RelatedProduct != null && product.RelatedProduct.Any())
             {
-                res.RelatedProductIds = product.RelatedProducts.Select(p => p.Id).ToList();
+                res.RelatedProductIds = product.RelatedProduct.Select(p => p.Id).ToList();
             }
 
             // Map complementary products (מוצרים משלימים)
-            if (product.ComplementaryProducts != null && product.ComplementaryProducts.Any())
+            if (product.ComplementaryProduct != null && product.ComplementaryProduct.Any())
             {
-                res.ComplementaryProductIds = product.ComplementaryProducts.Select(p => p.Id).ToList();
+                res.ComplementaryProductIds = product.ComplementaryProduct.Select(p => p.Id).ToList();
             }
 
             // Map lookups
@@ -849,22 +856,22 @@ namespace George.Services
             res.Supplier = product.Supplier?.Name;
 
             // Map options
-            if (product.ProductOptions != null && product.ProductOptions.Any())
+            if (product.ProductOption != null && product.ProductOption.Any())
             {
-                res.ProductOptions = product.ProductOptions
+                res.ProductOptions = product.ProductOption
                     .Where(po => !po.IsDeleted)
                     .Select(po => new ProductOptionRes
                     {
                         Name = po.Name,
-                        Values = po.ProductOptionValues?.Select(pov => pov.Value).ToList() ?? new List<string>()
+                        Values = po.ProductOptionValue?.Select(pov => pov.Value).ToList() ?? new List<string>()
                     })
                     .ToList();
             }
 
             // Map variants
-            if (product.ProductVariants != null && product.ProductVariants.Any())
+            if (product.ProductVariant != null && product.ProductVariant.Any())
             {
-                res.Variants = product.ProductVariants
+                res.Variants = product.ProductVariant
                     .Where(pv => !pv.IsDeleted)
                     .Select(pv => new ProductVariantRes
                     {
@@ -875,7 +882,7 @@ namespace George.Services
                         StockQuantity = pv.StockQuantity,
                         Sku = pv.Sku,
                         Weight = pv.Weight,
-                        OptionValues = pv.ProductVariantOptionValues?
+                        OptionValues = pv.ProductVariantOptionValue?
                             .ToDictionary(pvov => pvov.OptionName ?? "", 
                                          pvov => pvov.OptionValue ?? "")
                     })

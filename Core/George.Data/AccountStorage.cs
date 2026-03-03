@@ -19,13 +19,13 @@ namespace George.Data
             var res = new DataListResult<Account>();
 
             // Base accounts query (exclude soft-deleted)
-            var query = _dbContext.Accounts
+            var query = _dbContext.Account
                 .Where(a => !a.IsDeleted)
-                .Include(a => a.Users)
+                .Include(a => a.User)
                 .Include(a => a.Manager)
                 .Include(a => a.KioskSettings!).ThenInclude(s => s.HomeVideoMedia)
-                .Include(a => a.KioskSettingsHomeImages).ThenInclude(i => i.Media)
-                .Include(a => a.NotificationSettings)
+                .Include(a => a.KioskSettingsHomeImage).ThenInclude(i => i.Media)
+                .Include(a => a.AccountNotificationSettings)
                 //.Include(a => a.Status)
                 .Include(a => a.WizardStatus)
                 .Include(a => a.WizardType)
@@ -40,7 +40,7 @@ namespace George.Data
                 query =
                     from a in query
                     where a.Name.Contains(term)
-                       || _dbContext.Users
+                       || _dbContext.User
                             .Where(au => au.AccountId == a.Id && !au.IsDeleted && au.RoleId == (int)UserRole.AccountAdmin)
                             .Select(u => u)
                             .Any(u => (u.Email ?? "").Contains(term)
@@ -81,13 +81,13 @@ namespace George.Data
 
         public async Task<Account?> GetAccountAsync(long accountId, CancellationToken cancelToken)
         {
-            return await _dbContext.Accounts
+            return await _dbContext.Account
                 .Where(a => a.Id == accountId && !a.IsDeleted)
-                .Include(a => a.Users)
+                .Include(a => a.User)
                 .Include(a => a.Manager)
                 .Include(a => a.KioskSettings!).ThenInclude(s => s.HomeVideoMedia)
-                .Include(a => a.KioskSettingsHomeImages).ThenInclude(i => i.Media)
-                .Include(a => a.NotificationSettings)
+                .Include(a => a.KioskSettingsHomeImage).ThenInclude(i => i.Media)
+                .Include(a => a.AccountNotificationSettings)
                 //.Include(a => a.Status)
                 .Include(a => a.WizardStatus)
                 .Include(a => a.WizardType)
@@ -98,14 +98,14 @@ namespace George.Data
 
         public async Task<Account> CreateAccountAsync(Account account, CancellationToken cancelToken)
         {
-            _dbContext.Accounts.Add(account);
+            _dbContext.Account.Add(account);
             await _dbContext.SaveChangesAsync(cancelToken);
             return account;
         }
 
         public async Task<Account?> UpdateAccountAsync(Account updated, CancellationToken cancelToken)
         {
-            var dbAcc = await _dbContext.Accounts
+            var dbAcc = await _dbContext.Account
                 .FirstOrDefaultAsync(a => a.Id == updated.Id, cancelToken);
 
             if (dbAcc == null) return null;
@@ -173,13 +173,13 @@ namespace George.Data
 
             if (homeImageMediaIds != null)
             {
-                var existingImages = await _dbContext.KioskSettingsHomeImages
+                var existingImages = await _dbContext.KioskSettingsHomeImage
                     .Where(i => i.AccountId == accountId)
                     .ToListAsync(cancelToken);
-                _dbContext.KioskSettingsHomeImages.RemoveRange(existingImages);
+                _dbContext.KioskSettingsHomeImage.RemoveRange(existingImages);
                 for (var i = 0; i < homeImageMediaIds.Count; i++)
                 {
-                    _dbContext.KioskSettingsHomeImages.Add(new George.DB.KioskSettingsHomeImage
+                    _dbContext.KioskSettingsHomeImage.Add(new George.DB.KioskSettingsHomeImage
                     {
                         AccountId = accountId,
                         MediaId = homeImageMediaIds[i],
@@ -196,40 +196,40 @@ namespace George.Data
                 .FirstOrDefaultAsync(s => s.AccountId == accountId, cancelToken);
             if (existing != null)
             {
-                existing.NewOrder_ManagerSoundEnabled = settings.NewOrder_ManagerSoundEnabled;
-                existing.NewOrder_ManagerSoundKey = settings.NewOrder_ManagerSoundKey;
-                existing.NewOrder_ManagerSoundTriggerWebsite = settings.NewOrder_ManagerSoundTriggerWebsite;
-                existing.NewOrder_ManagerSoundTriggerKiosk = settings.NewOrder_ManagerSoundTriggerKiosk;
-                existing.NewOrder_ManagerSoundTriggerWhatsapp = settings.NewOrder_ManagerSoundTriggerWhatsapp;
-                existing.NewOrder_ManagerSoundTriggerPhone = settings.NewOrder_ManagerSoundTriggerPhone;
-                existing.NewOrder_ManagerMessageChannel = settings.NewOrder_ManagerMessageChannel;
-                existing.NewOrder_ManagerPhoneNumbers = settings.NewOrder_ManagerPhoneNumbers;
-                existing.NewOrder_ManagerMessageTemplate = settings.NewOrder_ManagerMessageTemplate;
-                existing.NewOrder_ManagerReminderBeforeDeliveryEnabled = settings.NewOrder_ManagerReminderBeforeDeliveryEnabled;
-                existing.NewOrder_ManagerReminderBeforeDeliveryMinutes = settings.NewOrder_ManagerReminderBeforeDeliveryMinutes;
-                existing.NewOrder_ManagerReminderNoTreatmentEnabled = settings.NewOrder_ManagerReminderNoTreatmentEnabled;
-                existing.NewOrder_ManagerReminderNoTreatmentMinutes = settings.NewOrder_ManagerReminderNoTreatmentMinutes;
-                existing.NewOrder_ManagerReminderNoTreatmentSoundKey = settings.NewOrder_ManagerReminderNoTreatmentSoundKey;
-                existing.NewOrder_CustomerChannel = settings.NewOrder_CustomerChannel;
-                existing.NewOrder_CustomerMessageShipping = settings.NewOrder_CustomerMessageShipping;
-                existing.NewOrder_CustomerMessagePickup = settings.NewOrder_CustomerMessagePickup;
-                existing.NewOrder_CustomerMessageKiosk = settings.NewOrder_CustomerMessageKiosk;
-                existing.NewOrder_CustomerSmsOnPhoneOrderEnabled = settings.NewOrder_CustomerSmsOnPhoneOrderEnabled;
-                existing.NewOrder_CustomerMessagePhoneOrder = settings.NewOrder_CustomerMessagePhoneOrder;
-                existing.OrderReady_ManagerNotifyEnabled = settings.OrderReady_ManagerNotifyEnabled;
-                existing.OrderReady_CustomerChannel = settings.OrderReady_CustomerChannel;
-                existing.OrderReady_CustomerMessageShipping = settings.OrderReady_CustomerMessageShipping;
-                existing.OrderReady_CustomerMessagePickup = settings.OrderReady_CustomerMessagePickup;
-                existing.OrderReady_CustomerMessageKiosk = settings.OrderReady_CustomerMessageKiosk;
-                existing.OrderNotPickedUp_ManagerNotifyEnabled = settings.OrderNotPickedUp_ManagerNotifyEnabled;
-                existing.OrderNotPickedUp_AutoReminderEnabled = settings.OrderNotPickedUp_AutoReminderEnabled;
-                existing.OrderNotPickedUp_MinutesAfterScheduledPickup = settings.OrderNotPickedUp_MinutesAfterScheduledPickup;
-                existing.OrderNotPickedUp_CustomerMessageTemplate = settings.OrderNotPickedUp_CustomerMessageTemplate;
-                existing.AfterDelivery_Enabled = settings.AfterDelivery_Enabled;
-                existing.AfterDelivery_TriggerType = settings.AfterDelivery_TriggerType;
-                existing.AfterDelivery_TriggerAfterValue = settings.AfterDelivery_TriggerAfterValue;
-                existing.AfterDelivery_TriggerAfterUnit = settings.AfterDelivery_TriggerAfterUnit;
-                existing.AfterDelivery_CustomerMessageTemplate = settings.AfterDelivery_CustomerMessageTemplate;
+                existing.NewOrderManagerSoundEnabled = settings.NewOrderManagerSoundEnabled;
+                existing.NewOrderManagerSoundKey = settings.NewOrderManagerSoundKey;
+                existing.NewOrderManagerSoundTriggerWebsite = settings.NewOrderManagerSoundTriggerWebsite;
+                existing.NewOrderManagerSoundTriggerKiosk = settings.NewOrderManagerSoundTriggerKiosk;
+                existing.NewOrderManagerSoundTriggerWhatsapp = settings.NewOrderManagerSoundTriggerWhatsapp;
+                existing.NewOrderManagerSoundTriggerPhone = settings.NewOrderManagerSoundTriggerPhone;
+                existing.NewOrderManagerMessageChannel = settings.NewOrderManagerMessageChannel;
+                existing.NewOrderManagerPhoneNumbers = settings.NewOrderManagerPhoneNumbers;
+                existing.NewOrderManagerMessageTemplate = settings.NewOrderManagerMessageTemplate;
+                existing.NewOrderManagerReminderBeforeDeliveryEnabled = settings.NewOrderManagerReminderBeforeDeliveryEnabled;
+                existing.NewOrderManagerReminderBeforeDeliveryMinutes = settings.NewOrderManagerReminderBeforeDeliveryMinutes;
+                existing.NewOrderManagerReminderNoTreatmentEnabled = settings.NewOrderManagerReminderNoTreatmentEnabled;
+                existing.NewOrderManagerReminderNoTreatmentMinutes = settings.NewOrderManagerReminderNoTreatmentMinutes;
+                existing.NewOrderManagerReminderNoTreatmentSoundKey = settings.NewOrderManagerReminderNoTreatmentSoundKey;
+                existing.NewOrderCustomerChannel = settings.NewOrderCustomerChannel;
+                existing.NewOrderCustomerMessageShipping = settings.NewOrderCustomerMessageShipping;
+                existing.NewOrderCustomerMessagePickup = settings.NewOrderCustomerMessagePickup;
+                existing.NewOrderCustomerMessageKiosk = settings.NewOrderCustomerMessageKiosk;
+                existing.NewOrderCustomerSmsOnPhoneOrderEnabled = settings.NewOrderCustomerSmsOnPhoneOrderEnabled;
+                existing.NewOrderCustomerMessagePhoneOrder = settings.NewOrderCustomerMessagePhoneOrder;
+                existing.OrderReadyManagerNotifyEnabled = settings.OrderReadyManagerNotifyEnabled;
+                existing.OrderReadyCustomerChannel = settings.OrderReadyCustomerChannel;
+                existing.OrderReadyCustomerMessageShipping = settings.OrderReadyCustomerMessageShipping;
+                existing.OrderReadyCustomerMessagePickup = settings.OrderReadyCustomerMessagePickup;
+                existing.OrderReadyCustomerMessageKiosk = settings.OrderReadyCustomerMessageKiosk;
+                existing.OrderNotPickedUpManagerNotifyEnabled = settings.OrderNotPickedUpManagerNotifyEnabled;
+                existing.OrderNotPickedUpAutoReminderEnabled = settings.OrderNotPickedUpAutoReminderEnabled;
+                existing.OrderNotPickedUpMinutesAfterScheduledPickup = settings.OrderNotPickedUpMinutesAfterScheduledPickup;
+                existing.OrderNotPickedUpCustomerMessageTemplate = settings.OrderNotPickedUpCustomerMessageTemplate;
+                existing.AfterDeliveryEnabled = settings.AfterDeliveryEnabled;
+                existing.AfterDeliveryTriggerType = settings.AfterDeliveryTriggerType;
+                existing.AfterDeliveryTriggerAfterValue = settings.AfterDeliveryTriggerAfterValue;
+                existing.AfterDeliveryTriggerAfterUnit = settings.AfterDeliveryTriggerAfterUnit;
+                existing.AfterDeliveryCustomerMessageTemplate = settings.AfterDeliveryCustomerMessageTemplate;
                 existing.UpdatedDate = DateTime.UtcNow;
             }
             else
@@ -242,7 +242,7 @@ namespace George.Data
 
         public async Task<Account?> DeleteAccountAsync(int id, CancellationToken cancelToken = default)
         {
-            var dbModel = await _dbContext.Accounts
+            var dbModel = await _dbContext.Account
                 .Where(a => a.Id == id)
                 .FirstOrDefaultAsync(cancelToken)
                 .ConfigureAwait(false);
@@ -253,7 +253,7 @@ namespace George.Data
             dbModel.IsDeleted = true;
             dbModel.UpdatedDate = DateTime.UtcNow;
 
-            var sites = await _dbContext.Sites
+            var sites = await _dbContext.Site
                 .Where(s => s.AccountId == id)
                 .ToListAsync(cancelToken)
                 .ConfigureAwait(false);
@@ -270,7 +270,7 @@ namespace George.Data
         public async Task<Account?> ActivateAccountAsync(int id, CancellationToken cancelToken = default)
         {
             // Get the data from the DB.
-            var dbModel = await _dbContext.Accounts
+            var dbModel = await _dbContext.Account
                                 .Where(a => a.Id == id)
                                 .FirstOrDefaultAsync(cancelToken)
                                 .ConfigureAwait(false);

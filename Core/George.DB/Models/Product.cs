@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("Product")]
 [Index("AccountId", Name = "IX_Product_AccountId")]
 public partial class Product
 {
@@ -96,78 +95,87 @@ public partial class Product
 
     public int? AccountId { get; set; }
 
-    /// <summary>Display order for listing (lower = first). Null = use CreationTime.</summary>
-    public int? DisplayOrder { get; set; }
-
     public int? WooCommerceId { get; set; }
 
+    public int? DisplayOrder { get; set; }
+
     [ForeignKey("BrandId")]
-    [InverseProperty("Products")]
+    [InverseProperty("Product")]
     public virtual Brand? Brand { get; set; }
 
     [ForeignKey("CreationUserId")]
-    [InverseProperty("ProductCreationUsers")]
+    [InverseProperty("ProductCreationUser")]
     public virtual User? CreationUser { get; set; }
 
     [InverseProperty("Product")]
-    public virtual ICollection<ProductCategory> ProductCategories { get; set; } = new List<ProductCategory>();
+    public virtual ICollection<ProductCategory> ProductCategory { get; set; } = new List<ProductCategory>();
 
     [InverseProperty("Product")]
-    public virtual ICollection<ProductImage> ProductImages { get; set; } = new List<ProductImage>();
+    public virtual ICollection<ProductImage> ProductImage { get; set; } = new List<ProductImage>();
 
     [InverseProperty("Product")]
-    public virtual ICollection<ProductOption> ProductOptions { get; set; } = new List<ProductOption>();
+    public virtual ICollection<ProductOption> ProductOption { get; set; } = new List<ProductOption>();
 
     [InverseProperty("Product")]
-    public virtual ICollection<ProductVariant> ProductVariants { get; set; } = new List<ProductVariant>();
+    public virtual ICollection<ProductVariant> ProductVariant { get; set; } = new List<ProductVariant>();
 
     [ForeignKey("SetupTypeId")]
-    [InverseProperty("Products")]
+    [InverseProperty("Product")]
     public virtual SetupType? SetupType { get; set; }
 
     [ForeignKey("ShippingClassId")]
-    [InverseProperty("Products")]
+    [InverseProperty("Product")]
     public virtual ShippingClass? ShippingClass { get; set; }
 
     [ForeignKey("StatusId")]
-    [InverseProperty("Products")]
+    [InverseProperty("Product")]
     public virtual ProductStatus? Status { get; set; }
 
     [ForeignKey("StockManagementTypeId")]
-    [InverseProperty("Products")]
+    [InverseProperty("Product")]
     public virtual StockManagementType? StockManagementType { get; set; }
 
     [ForeignKey("StockStatusId")]
-    [InverseProperty("Products")]
+    [InverseProperty("Product")]
     public virtual StockStatus? StockStatus { get; set; }
 
     [ForeignKey("SupplierId")]
-    [InverseProperty("Products")]
+    [InverseProperty("Product")]
     public virtual Supplier? Supplier { get; set; }
 
     [ForeignKey("UpdateUserId")]
-    [InverseProperty("ProductUpdateUsers")]
+    [InverseProperty("ProductUpdateUser")]
     public virtual User? UpdateUser { get; set; }
 
     [ForeignKey("VisibilityId")]
-    [InverseProperty("Products")]
+    [InverseProperty("Product")]
     public virtual Visibility? Visibility { get; set; }
 
     [ForeignKey("WeightConfigId")]
-    [InverseProperty("Products")]
+    [InverseProperty("Product")]
     public virtual WeightConfig? WeightConfig { get; set; }
 
     [ForeignKey("ProductId")]
-    [InverseProperty("Products")]
-    public virtual ICollection<Site> Sites { get; set; } = new List<Site>();
+    [InverseProperty("ProductNavigation")]
+    public virtual ICollection<Product> ComplementaryProduct { get; set; } = new List<Product>();
+
+    [ForeignKey("RelatedProductId")]
+    [InverseProperty("RelatedProduct")]
+    public virtual ICollection<Product> Product1 { get; set; } = new List<Product>();
+
+    [ForeignKey("ComplementaryProductId")]
+    [InverseProperty("ComplementaryProduct")]
+    public virtual ICollection<Product> ProductNavigation { get; set; } = new List<Product>();
 
     [ForeignKey("ProductId")]
-    [InverseProperty("Products")]
-    public virtual ICollection<Tag> Tags { get; set; } = new List<Tag>();
+    [InverseProperty("Product1")]
+    public virtual ICollection<Product> RelatedProduct { get; set; } = new List<Product>();
 
-    /// <summary>Related/accessory product IDs (נלווים).</summary>
-    public virtual ICollection<Product> RelatedProducts { get; set; } = new List<Product>();
+    [ForeignKey("ProductId")]
+    [InverseProperty("Product")]
+    public virtual ICollection<Site> Site { get; set; } = new List<Site>();
 
-    /// <summary>Complementary product IDs (מוצרים משלימים).</summary>
-    public virtual ICollection<Product> ComplementaryProducts { get; set; } = new List<Product>();
+    [ForeignKey("ProductId")]
+    [InverseProperty("Product")]
+    public virtual ICollection<Tag> Tag { get; set; } = new List<Tag>();
 }

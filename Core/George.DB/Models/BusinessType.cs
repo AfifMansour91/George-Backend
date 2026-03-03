@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Table("BusinessType")]
 public partial class BusinessType
 {
     [Key]
@@ -36,24 +35,24 @@ public partial class BusinessType
     public string? Icon { get; set; }
 
     [InverseProperty("BusinessType")]
-    public virtual ICollection<BusinessTypeCategory> BusinessTypeCategories { get; set; } = new List<BusinessTypeCategory>();
+    public virtual ICollection<BusinessTypeCategory> BusinessTypeCategory { get; set; } = new List<BusinessTypeCategory>();
 
     [ForeignKey("CreationUserId")]
-    [InverseProperty("BusinessTypeCreationUsers")]
+    [InverseProperty("BusinessTypeCreationUser")]
     public virtual User? CreationUser { get; set; }
 
     [InverseProperty("BusinessType")]
-    public virtual ICollection<Medium> Media { get; set; } = new List<Medium>();
+    public virtual ICollection<Media> Media { get; set; } = new List<Media>();
 
     [ForeignKey("UpdateUserId")]
-    [InverseProperty("BusinessTypeUpdateUsers")]
+    [InverseProperty("BusinessTypeUpdateUser")]
     public virtual User? UpdateUser { get; set; }
 
     [ForeignKey("BusinessTypeId")]
-    [InverseProperty("BusinessTypes")]
-    public virtual ICollection<GlobalCategory> GlobalCategories { get; set; } = new List<GlobalCategory>();
+    [InverseProperty("BusinessType")]
+    public virtual ICollection<GlobalCategory> GlobalCategory { get; set; } = new List<GlobalCategory>();
 
     [ForeignKey("BusinessTypeId")]
-    [InverseProperty("BusinessTypes")]
-    public virtual ICollection<Site> Sites { get; set; } = new List<Site>();
+    [InverseProperty("BusinessType")]
+    public virtual ICollection<Site> Site { get; set; } = new List<Site>();
 }
