@@ -1264,6 +1264,35 @@ namespace George.Services
         }
 
         /// <summary>
+        /// Updates a WooCommerce order's status (e.g. to "completed" when our order is set to Ready). Does not throw; logs errors.
+        /// </summary>
+        public async Task UpdateOrderStatusAsync(int siteId, string wooOrderId, string status, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(wooOrderId)) return;
+            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+            if (site == null || site.WooCommerceEnabled != true ||
+                string.IsNullOrEmpty(site.WooCommerceUrl) ||
+                string.IsNullOrEmpty(site.WooCommerceKey) ||
+                string.IsNullOrEmpty(site.WooCommerceSecret))
+                return;
+            var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
+            var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
+            using var httpClient = _httpClientFactory.CreateClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(30);
+            httpClient.DefaultRequestHeaders.Clear();
+            httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+            var url = $"{baseUrl}/orders/{wooOrderId.Trim()}";
+            var body = JsonSerializer.Serialize(new { status });
+            using var content = new StringContent(body, Encoding.UTF8, "application/json");
+            var response = await httpClient.PutAsync(url, content, cancelToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                var err = await response.Content.ReadAsStringAsync(cancelToken);
+                _logger.LogWarning("WooCommerce order status update failed for site {SiteId}, order {WooOrderId}: {Status} {Error}", siteId, wooOrderId, (int)response.StatusCode, err);
+            }
+        }
+
+        /// <summary>
         /// Syncs only menu_order to WooCommerce for the given ordered product IDs (e.g. after reorder). Much faster than full product sync.
         /// </summary>
         public async Task SyncMenuOrderOnlyAsync(int siteId, List<int> orderedProductIds, CancellationToken cancelToken)

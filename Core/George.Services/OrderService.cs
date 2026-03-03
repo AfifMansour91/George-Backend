@@ -15,6 +15,7 @@ namespace George.Services
         private readonly SiteStorage _siteStorage;
         private readonly AccountStorage _accountStorage;
         private readonly SmsProvider _smsProvider;
+        private readonly WooCommerceService _wooCommerceService;
 
         public OrderService(
             ILogger<OrderService> logger,
@@ -23,13 +24,15 @@ namespace George.Services
             OrderStorage orderStorage,
             SiteStorage siteStorage,
             AccountStorage accountStorage,
-            SmsProvider smsProvider)
+            SmsProvider smsProvider,
+            WooCommerceService wooCommerceService)
             : base(logger, mapper, cache)
         {
             _orderStorage = orderStorage;
             _siteStorage = siteStorage;
             _accountStorage = accountStorage;
             _smsProvider = smsProvider;
+            _wooCommerceService = wooCommerceService;
         }
 
         public async Task<IApiResponse<ApiListResponse<OrderRes>>> GetOrdersAsync(
@@ -182,6 +185,25 @@ namespace George.Services
             }, cancelToken);
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
+            if (req.Status == "Ready" && !string.IsNullOrWhiteSpace(updated.ExternalOrderId) &&
+                string.Equals(updated.Source, "Website", StringComparison.OrdinalIgnoreCase))
+            {
+                var site = await _siteStorage.GetSiteAsync(updated.SiteId, cancelToken);
+                if (site?.WooCommerceEnabled == true)
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await _wooCommerceService.UpdateOrderStatusAsync(updated.SiteId, updated.ExternalOrderId!, "completed", CancellationToken.None);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "WooCommerce order status sync failed for order {OrderId}", orderId);
+                        }
+                    }, CancellationToken.None);
+                }
+            }
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             response.Data = _mapper.Map<OrderRes>(loaded);
             return response;
