@@ -27,8 +27,14 @@ namespace George.Data
             if (filter?.SiteId.HasValue == true)
                 query = query.Where(o => o.SiteId == filter.SiteId!.Value);
 
-            if (filter?.Status.HasValue() == true)
-                query = query.Where(o => o.Status == filter.Status!.Trim());
+            if (filter?.Status != null && filter.Status.Count > 0)
+            {
+                var statuses = filter.Status.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s!.Trim()).ToList();
+                if (statuses.Count == 1)
+                    query = query.Where(o => o.Status == statuses[0]);
+                else if (statuses.Count > 1)
+                    query = query.Where(o => statuses.Contains(o.Status));
+            }
             else
                 query = query.Where(o => o.Status != "Completed" && o.Status != "Cancelled");
 

@@ -149,7 +149,8 @@ namespace George.Common
     public class OrderFilter
     {
         public int? SiteId { get; set; }
-        public string? Status { get; set; }       // New | InTreatment | Ready | Completed | Cancelled
+        /// <summary>One or more statuses; bound from repeated query params (e.g. Filter.Status=Completed&amp;Filter.Status=Cancelled).</summary>
+        public List<string>? Status { get; set; }       // New | InTreatment | Ready | Completed | Cancelled
         public string? Source { get; set; }       // Website | Kiosk | Phone
         public string? DeliveryType { get; set; } // Shipping | Pickup
         public string? PaymentStatus { get; set; } // Unpaid | Paid | Captured
