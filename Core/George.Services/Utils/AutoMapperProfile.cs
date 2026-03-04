@@ -155,7 +155,8 @@ namespace George.Services
 
             ////////////////////////// Order (Sprint 2)
             CreateMap<Order, OrderRes>()
-                .ForMember(dest => dest.Items, opt => opt.MapFrom(src => src.OrderItem ?? new List<OrderItem>()));
+                .ForMember(dest => dest.Items, opt => opt.MapFrom(src => src.OrderItem ?? new List<OrderItem>()))
+                .ForMember(dest => dest.BagsCount, opt => opt.MapFrom(src => src.BagsCount));
             CreateMap<OrderItem, OrderItemRes>();
             CreateMap<CreateOrderReq, Order>();
             CreateMap<CreateOrderItemReq, OrderItem>();

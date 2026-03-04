@@ -78,4 +78,6 @@ public class UpdateOrderReq
     public string? PickupTime { get; set; }
     public string? DeliveryAddress { get; set; }
     public string? PaymentStatus { get; set; }
+    /// <summary>Number of bags/cartons packed (set at end of picking).</summary>
+    public int? BagsCount { get; set; }
 }

@@ -29,6 +29,8 @@ namespace George.Data
 
             if (filter?.Status.HasValue() == true)
                 query = query.Where(o => o.Status == filter.Status!.Trim());
+            else
+                query = query.Where(o => o.Status != "Completed" && o.Status != "Cancelled");
 
             if (filter?.Source.HasValue() == true)
                 query = query.Where(o => o.Source == filter.Source!.Trim());
@@ -153,8 +155,8 @@ namespace George.Data
             foreach (var (orderItemId, pickedQty, totalPrice) in updates)
             {
                 if (!itemMap.TryGetValue(orderItemId, out var item)) continue;
-                if (pickedQty.HasValue) item.PickedQuantity = pickedQty.Value;
-                if (totalPrice.HasValue) item.TotalPrice = totalPrice.Value;
+                item.PickedQuantity = pickedQty;
+                item.TotalPrice = totalPrice;
             }
             db.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);

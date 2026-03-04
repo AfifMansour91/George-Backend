@@ -31,5 +31,7 @@ public class OrderRes
     public decimal? ShippingCost { get; set; }
     public decimal? Total { get; set; }
     public string? ExternalOrderId { get; set; }
+    /// <summary>Number of bags/cartons packed (set at end of picking).</summary>
+    public int? BagsCount { get; set; }
     public List<OrderItemRes> Items { get; set; } = new();
 }

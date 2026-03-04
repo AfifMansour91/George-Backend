@@ -88,6 +88,14 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _orderSvc.GetLastOrderItemsByPhoneAsync(siteId, phone, cancelToken));
         }
 
+        /// <summary>Send reminder SMS to customer (שלח תזכורת). Uses OrderReady message template from account notification settings.</summary>
+        [HttpPost("{orderId:int}/SendReminder")]
+        [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> SendReminderAsync([FromRoute] int orderId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _orderSvc.SendReminderAsync(orderId, cancelToken));
+        }
+
         [ApiExplorerSettings(IgnoreApi = true)]
         public void SetAuthUser()
         {

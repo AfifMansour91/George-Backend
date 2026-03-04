@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -85,6 +85,9 @@ public partial class Order
 
     [StringLength(100)]
     public string? ExternalOrderId { get; set; }
+
+    /// <summary>Number of bags/cartons packed (set at end of picking when enabled in store).</summary>
+    public int? BagsCount { get; set; }
 
     [ForeignKey("AccountId")]
     [InverseProperty("Order")]

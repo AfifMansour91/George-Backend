@@ -166,6 +166,55 @@ namespace George.Services
                 .Replace("[pickup_time]", order.PickupTime ?? "");
         }
 
+        /// <summary>Send reminder SMS to customer for a ready order (שלח תזכורת). Uses OrderReady message template from account notification settings.</summary>
+        public async Task<IApiResponse<bool>> SendReminderAsync(int orderId, CancellationToken cancelToken = default)
+        {
+            var response = new ApiResponse<bool> { Data = false };
+            var order = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
+            if (order == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
+            if (string.IsNullOrWhiteSpace(order.CustomerPhone))
+                return CreateResponse(response, StatusCode.InvalidRequest, "Order has no customer phone.");
+            var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken).ConfigureAwait(false);
+            var settings = account?.AccountNotificationSettings;
+            if (settings == null)
+                return CreateResponse(response, StatusCode.InvalidRequest, "Notification settings not found.");
+            if (!string.Equals(settings.OrderReadyCustomerChannel, "sms", StringComparison.OrdinalIgnoreCase))
+                return CreateResponse(response, StatusCode.InvalidRequest, "Order ready customer channel is not SMS.");
+            string? template = null;
+            var deliveryType = (order.DeliveryType ?? "").Trim();
+            var source = (order.Source ?? "").Trim();
+            if (string.Equals(deliveryType, "Shipping", StringComparison.OrdinalIgnoreCase))
+                template = settings.OrderReadyCustomerMessageShipping;
+            else if (string.Equals(deliveryType, "Pickup", StringComparison.OrdinalIgnoreCase))
+                template = settings.OrderReadyCustomerMessagePickup;
+            else if (string.Equals(source, "Kiosk", StringComparison.OrdinalIgnoreCase))
+                template = settings.OrderReadyCustomerMessageKiosk;
+            else
+                template = settings.OrderReadyCustomerMessagePickup ?? settings.OrderReadyCustomerMessageShipping;
+            if (string.IsNullOrWhiteSpace(template))
+                return CreateResponse(response, StatusCode.InvalidRequest, "No reminder message template configured for this order.");
+            var body = ReplaceOrderPlaceholders(template, order);
+            try
+            {
+                if (!SmsProvider.IsInitialized)
+                {
+                    _logger.LogWarning("SMS provider not initialized; cannot send reminder.");
+                    return CreateResponse(response, StatusCode.InvalidRequest, "SMS provider not initialized.");
+                }
+                var sent = await _smsProvider.SendTextAsync(order.CustomerPhone, body, cancelToken).ConfigureAwait(false);
+                response.Data = sent;
+                if (!sent)
+                    _logger.LogWarning("Send reminder SMS returned false for order {OrderId}.", orderId);
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send reminder SMS for order {OrderId}.", orderId);
+                return CreateResponse(response, StatusCode.GeneralError, ex.Message);
+            }
+        }
+
         public async Task<IApiResponse<OrderRes>> UpdateOrderAsync(int orderId, UpdateOrderReq req, CancellationToken cancelToken = default)
         {
             var response = new ApiResponse<OrderRes>();
@@ -181,11 +230,12 @@ namespace George.Services
                 if (req.PickupTime != null) o.PickupTime = req.PickupTime;
                 if (req.DeliveryAddress != null) o.DeliveryAddress = req.DeliveryAddress;
                 if (req.PaymentStatus != null) o.PaymentStatus = req.PaymentStatus;
+                if (req.BagsCount.HasValue) o.BagsCount = req.BagsCount;
                 o.UpdateUserId = AuthUser.Id;
             }, cancelToken);
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
-            if (req.Status == "Ready" && !string.IsNullOrWhiteSpace(updated.ExternalOrderId) &&
+            if ((req.Status == "Ready" || req.Status == "Completed") && !string.IsNullOrWhiteSpace(updated.ExternalOrderId) &&
                 string.Equals(updated.Source, "Website", StringComparison.OrdinalIgnoreCase))
             {
                 var site = await _siteStorage.GetSiteAsync(updated.SiteId, cancelToken);
