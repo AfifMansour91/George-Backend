@@ -127,6 +127,8 @@ namespace George.Data
             if (updated.PrintFutureImmediate.HasValue) dbSite.PrintFutureImmediate = updated.PrintFutureImmediate;
             if (updated.PrintFutureAtTimeEnabled.HasValue) dbSite.PrintFutureAtTimeEnabled = updated.PrintFutureAtTimeEnabled;
             if (updated.PrintFutureAtTime != null) dbSite.PrintFutureAtTime = updated.PrintFutureAtTime;
+            if (updated.VoucherPrinterSilent.HasValue) dbSite.VoucherPrinterSilent = updated.VoucherPrinterSilent;
+            if (updated.VoucherPrinterName != null) dbSite.VoucherPrinterName = updated.VoucherPrinterName;
             dbSite.IsActive = updated.IsActive || dbSite.IsActive;
             dbSite.UpdatedDate = DateTime.UtcNow;
 

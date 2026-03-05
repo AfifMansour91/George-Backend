@@ -35,5 +35,7 @@ namespace George.Services.Response
         public bool? PrintFutureImmediate { get; set; }
         public bool? PrintFutureAtTimeEnabled { get; set; }
         public string? PrintFutureAtTime { get; set; }
+        public bool? VoucherPrinterSilent { get; set; }
+        public string? VoucherPrinterName { get; set; }
     }
 }

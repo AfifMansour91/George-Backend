@@ -36,6 +36,10 @@ namespace George.Services.Request
         public bool? PrintFutureImmediate { get; set; }
         public bool? PrintFutureAtTimeEnabled { get; set; }
         public string? PrintFutureAtTime { get; set; }
+        /// <summary>Voucher printer: print without confirmation (use default printer).</summary>
+        public bool? VoucherPrinterSilent { get; set; }
+        /// <summary>Voucher printer: display name (e.g. WIFI, iPad).</summary>
+        public string? VoucherPrinterName { get; set; }
     }
 
     public class CreateSiteReq : SiteReq

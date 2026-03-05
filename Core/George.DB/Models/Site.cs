@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -92,6 +92,13 @@ public partial class Site
 
     [StringLength(10)]
     public string? PrintFutureAtTime { get; set; }
+
+    /// <summary>Voucher printer: print without showing confirmation (use default printer).</summary>
+    public bool? VoucherPrinterSilent { get; set; }
+
+    /// <summary>Voucher printer: display name / connection label (e.g. WIFI, iPad).</summary>
+    [StringLength(100)]
+    public string? VoucherPrinterName { get; set; }
 
     [ForeignKey("AccountId")]
     [InverseProperty("Site")]
