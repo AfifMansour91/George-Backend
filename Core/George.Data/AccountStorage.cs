@@ -164,6 +164,7 @@ namespace George.Data
                 existing.PosProductsCategoryId = settings.PosProductsCategoryId;
                 existing.CreditEnabled = settings.CreditEnabled;
                 existing.CashAtRegisterEnabled = settings.CashAtRegisterEnabled;
+                existing.ShowDuplicateOrderButton = settings.ShowDuplicateOrderButton;
             }
             else
             {

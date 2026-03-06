@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -34,6 +34,9 @@ public partial class KioskSettings
     public bool CreditEnabled { get; set; }
 
     public bool CashAtRegisterEnabled { get; set; }
+
+    /// <summary>Show "הזמנה חוזרת" (Repeat Order) button in kiosk (default false).</summary>
+    public bool ShowDuplicateOrderButton { get; set; } = false;
 
     public int? HomeVideoMediaId { get; set; }
 

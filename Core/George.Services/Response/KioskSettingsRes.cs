@@ -23,4 +23,6 @@ public class KioskSettingsRes
     public int? PosProductsCategoryId { get; set; }
     public bool CreditEnabled { get; set; }
     public bool CashAtRegisterEnabled { get; set; }
+    /// <summary>Show "הזמנה חוזרת" (Repeat Order) button in kiosk (default false).</summary>
+    public bool ShowDuplicateOrderButton { get; set; } = false;
 }

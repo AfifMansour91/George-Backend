@@ -247,6 +247,7 @@ namespace George.Services
                     PosProductsCategoryId = req.KioskSettings.PosProductsCategoryId,
                     CreditEnabled = req.KioskSettings.CreditEnabled,
                     CashAtRegisterEnabled = req.KioskSettings.CashAtRegisterEnabled,
+                    ShowDuplicateOrderButton = req.KioskSettings.ShowDuplicateOrderButton,
                 };
                 await _accountStorage.UpsertKioskSettingsAsync(accountId, kioskEntity, req.KioskSettings.HomeImageMediaIds, cancelToken);
             }
