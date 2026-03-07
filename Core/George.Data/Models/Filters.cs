@@ -159,4 +159,13 @@ namespace George.Common
         public SearchFilter? Search { get; set; }
     }
 
+    /// <summary>CRM: Filter for customers list (derived from orders by site).</summary>
+    public class CustomerFilter
+    {
+        public int? SiteId { get; set; }
+        public string? Search { get; set; }
+        public string? SortBy { get; set; }   // name | orderCount | totalRevenue
+        public string? SortOrder { get; set; } // asc | desc
+    }
+
 }

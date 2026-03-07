@@ -362,6 +362,7 @@ namespace George.Api.Core
 			services.AddScoped<AttributeStorage>();
 			services.AddScoped<MediaStorage>();
 			services.AddScoped<OrderStorage>();
+			services.AddScoped<CustomerStorage>();
 			services.AddScoped<OrderReceptionStorage>();
 			services.AddScoped<ClientStorage>();
 			services.AddScoped<GlobalCategoryStorage>();
@@ -382,6 +383,7 @@ namespace George.Api.Core
 			services.AddScoped<AttributeService>();
 			services.AddScoped<MediaService>();
 			services.AddScoped<OrderService>();
+			services.AddScoped<CustomerService>();
 			services.AddScoped<OrderReceptionService>();
 			services.AddScoped<ClientService>();
 			services.AddScoped<GlobalCategoryService>();

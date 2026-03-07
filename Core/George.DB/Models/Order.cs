@@ -50,6 +50,10 @@ public partial class Order
 
     public int? CustomerId { get; set; }
 
+    [ForeignKey("CustomerId")]
+    [InverseProperty("Order")]
+    public virtual Customer? Customer { get; set; }
+
     [StringLength(500)]
     public string? DeliveryAddress { get; set; }
 

@@ -12,6 +12,7 @@ namespace George.Services
     public class OrderService : ServiceBase
     {
         private readonly OrderStorage _orderStorage;
+        private readonly CustomerStorage _customerStorage;
         private readonly SiteStorage _siteStorage;
         private readonly AccountStorage _accountStorage;
         private readonly SmsProvider _smsProvider;
@@ -22,6 +23,7 @@ namespace George.Services
             IMapper mapper,
             CacheManager cache,
             OrderStorage orderStorage,
+            CustomerStorage customerStorage,
             SiteStorage siteStorage,
             AccountStorage accountStorage,
             SmsProvider smsProvider,
@@ -29,6 +31,7 @@ namespace George.Services
             : base(logger, mapper, cache)
         {
             _orderStorage = orderStorage;
+            _customerStorage = customerStorage;
             _siteStorage = siteStorage;
             _accountStorage = accountStorage;
             _smsProvider = smsProvider;
@@ -84,7 +87,20 @@ namespace George.Services
                 req.AccountId = site.AccountId;
             }
 
+            // Ensure customer exists for this site (find by SiteId + phone, or create); then link order to that customer.
+            var customer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
+                req.SiteId,
+                req.AccountId,
+                req.CustomerPhone,
+                req.CustomerName!,
+                email: null,
+                city: null,
+                defaultAddress: req.DeliveryAddress,
+                notes: null,
+                cancelToken).ConfigureAwait(false);
+
             var order = _mapper.Map<Order>(req);
+            order.CustomerId = customer.Id; // always set: customer was either found or created above
             order.CreationTime = DateTime.UtcNow;
             order.CreationUserId = AuthUser.Id;
             order.IsDeleted = false;
