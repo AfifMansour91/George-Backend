@@ -90,6 +90,54 @@ namespace George.Data
             return res;
         }
 
+        /// <summary>Get products by site and a list of product IDs (e.g. for kiosk past purchases). Same includes as GetProductsAsync. Excludes deleted.</summary>
+        public async Task<DataListResult<Product>> GetProductsBySiteAndIdsAsync(
+            int siteId,
+            List<int> productIds,
+            PagingExDto paging,
+            CancellationToken cancelToken)
+        {
+            var res = new DataListResult<Product>();
+            if (siteId <= 0 || productIds == null || productIds.Count == 0)
+                return res;
+
+            var query = _dbContext.Product
+                .Include(p => p.Brand)
+                .Include(p => p.Supplier)
+                .Include(p => p.Status)
+                .Include(p => p.Visibility)
+                .Include(p => p.StockManagementType)
+                .Include(p => p.StockStatus)
+                .Include(p => p.ShippingClass)
+                .Include(p => p.SetupType)
+                .Include(p => p.WeightConfig)
+                    .ThenInclude(wc => wc!.Unit)
+                .Include(p => p.WeightConfig)
+                    .ThenInclude(wc => wc!.UnitWeightMode)
+                .Include(p => p.Site)
+                .Include(p => p.Tag)
+                .Include(p => p.ProductCategory)
+                    .ThenInclude(pc => pc.Category)
+                .Include(p => p.ProductImage)
+                    .ThenInclude(pi => pi.Media)
+                .Include(p => p.ProductVariant)
+                    .ThenInclude(pv => pv.ProductVariantOptionValue)
+                .AsNoTracking()
+                .Where(p => !p.IsDeleted && p.Site.Any(s => s.Id == siteId) && productIds.Contains(p.Id));
+
+            if (paging.IncludeTotal)
+                res.Total = await query.CountAsync(cancelToken).ConfigureAwait(false);
+
+            res.Items = await query
+                .OrderBy(p => p.DisplayOrder ?? int.MaxValue)
+                .ThenByDescending(p => p.CreationTime)
+                .Skip(paging.Skip)
+                .Take(paging.Take)
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+
+            return res;
+        }
+
         public async Task<Product?> GetProductAsync(int productId, CancellationToken cancelToken)
         {
             return await _dbContext.Product

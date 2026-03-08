@@ -250,6 +250,39 @@ namespace George.Data
                 .AsNoTracking()
                 .FirstOrDefaultAsync(o => o.Id == lastOrderId.Value && !o.IsDeleted, cancelToken).ConfigureAwait(false);
         }
+
+        /// <summary>Get distinct product IDs that the customer (by phone at site) has ordered in the past. Used for kiosk "past purchases" list.</summary>
+        public async Task<List<int>> GetDistinctProductIdsOrderedByCustomerPhoneAsync(int siteId, string? phone, CancellationToken cancelToken)
+        {
+            if (siteId <= 0 || string.IsNullOrWhiteSpace(phone)) return new List<int>();
+            var normalized = NormalizePhone(phone);
+            if (normalized.Length < 4) return new List<int>();
+
+            var siteOrders = await _dbContext.Order
+                .AsNoTracking()
+                .Where(o => !o.IsDeleted && o.SiteId == siteId && o.CustomerPhone != null)
+                .OrderByDescending(o => o.CreationTime)
+                .Take(500)
+                .Select(o => new { o.Id, o.CustomerPhone })
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+
+            var orderIds = siteOrders
+                .Where(o => NormalizePhone(o.CustomerPhone) == normalized)
+                .Select(o => o.Id)
+                .ToList();
+            if (orderIds.Count == 0) return new List<int>();
+
+            var productIds = await _dbContext.Order
+                .AsNoTracking()
+                .Where(o => orderIds.Contains(o.Id))
+                .SelectMany(o => o.OrderItem)
+                .Where(i => i.ProductId != null && i.ProductId.Value > 0)
+                .Select(i => i.ProductId!.Value)
+                .Distinct()
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+
+            return productIds;
+        }
     }
 
     /// <summary>Internal DTO for customer profile from orders.</summary>

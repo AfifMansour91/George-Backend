@@ -70,6 +70,19 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _productSvc.GetProductsAsync(request, cancelToken));
         }
 
+        /// <summary>Get products the customer has ordered in the past at this site (kiosk "past purchases"). Requires customer phone; use with kiosk customer Bearer token.</summary>
+        [HttpGet("Site/{siteId:int}/PastPurchases")]
+        [ProducesResponseType(typeof(IApiResponse<ApiListResponse<ProductRes>>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetPastPurchasesBySiteAsync(
+            [FromRoute] int siteId,
+            [FromQuery] string? customerPhone,
+            [FromQuery] ApiListReq<ProductFilter> request,
+            CancellationToken cancelToken = default)
+        {
+            if (request.Filter == null) request.Filter = new ProductFilter();
+            return await SafeCallWithErrorCatchingAsync(() => _productSvc.GetPastProductsBySiteAndCustomerPhoneAsync(siteId, customerPhone, request, cancelToken));
+        }
+
         [HttpGet("Account/{accountId:int}")]
         [ProducesResponseType(typeof(IApiResponse<ApiListResponse<ProductRes>>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetProductsByAccountAsync(

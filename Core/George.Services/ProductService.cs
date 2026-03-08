@@ -19,6 +19,7 @@ namespace George.Services
         private readonly MediaStorage _mediaStorage;
         private readonly WooCommerceService _wooCommerceService;
         private readonly IServiceScopeFactory _serviceScopeFactory;
+        private readonly OrderStorage _orderStorage;
 
         public ProductService(
             ILogger<ProductService> logger,
@@ -29,7 +30,8 @@ namespace George.Services
             UserStorage userStorage,
             MediaStorage mediaStorage,
             WooCommerceService wooCommerceService,
-            IServiceScopeFactory serviceScopeFactory
+            IServiceScopeFactory serviceScopeFactory,
+            OrderStorage orderStorage
         ) : base(logger, mapper, cache)
         {
             _productStorage = productStorage;
@@ -38,6 +40,7 @@ namespace George.Services
             _mediaStorage = mediaStorage;
             _wooCommerceService = wooCommerceService;
             _serviceScopeFactory = serviceScopeFactory;
+            _orderStorage = orderStorage;
         }
 
         public async Task<IApiResponse<ApiListResponse<ProductRes>>> GetProductsAsync(
@@ -53,6 +56,44 @@ namespace George.Services
 
             response.Data!.Items = res.Items.ConvertAll(p => MapProductToRes(p));
 
+            response.Data.Skip = request.Skip;
+            response.Data.Limit = request.Take;
+            response.Data.Total = res.Total;
+
+            return response;
+        }
+
+        /// <summary>Get products the customer (by phone at site) has ordered in the past. For kiosk "past purchases". Returns same shape as GetProductsAsync.</summary>
+        public async Task<IApiResponse<ApiListResponse<ProductRes>>> GetPastProductsBySiteAndCustomerPhoneAsync(
+            int siteId,
+            string? customerPhone,
+            ApiListReq<ProductFilter> request,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<ApiListResponse<ProductRes>>
+            {
+                Data = new ApiListResponse<ProductRes>()
+            };
+
+            if (siteId <= 0)
+                return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required.");
+            if (string.IsNullOrWhiteSpace(customerPhone))
+                return CreateResponse(response, StatusCode.InvalidRequest, "Customer phone is required for past purchases.");
+
+            var productIds = await _orderStorage.GetDistinctProductIdsOrderedByCustomerPhoneAsync(siteId, customerPhone, cancelToken).ConfigureAwait(false);
+            if (productIds.Count == 0)
+            {
+                response.Data!.Items = new List<ProductRes>();
+                response.Data.Skip = request.Skip;
+                response.Data.Limit = request.Take;
+                response.Data.Total = 0;
+                return response;
+            }
+
+            var paging = new PagingExDto { Skip = request.Skip, Take = request.Take, IncludeTotal = request.IncludeTotal };
+            var res = await _productStorage.GetProductsBySiteAndIdsAsync(siteId, productIds, paging, cancelToken).ConfigureAwait(false);
+
+            response.Data!.Items = res.Items.ConvertAll(p => MapProductToRes(p));
             response.Data.Skip = request.Skip;
             response.Data.Limit = request.Take;
             response.Data.Total = res.Total;
