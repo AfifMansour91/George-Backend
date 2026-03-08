@@ -22,7 +22,7 @@ public class CustomerStorage : StorageBase
 
     private IQueryable<Customer> CustomerSet => _dbContext.Set<Customer>().Where(c => !c.IsDeleted);
 
-    /// <summary>Find customer for this site by normalized phone, or create if not found. Used when creating an order so every order has a linked customer.</summary>
+    /// <summary>Find customer for this site by normalized phone, or create if not found. Used when creating an order so every order has a linked customer. When marketingSms is provided, it is set on create or update so the customer record reflects consent.</summary>
     public async Task<Customer> GetOrCreateCustomerByPhoneAsync(
         int siteId,
         int accountId,
@@ -32,7 +32,8 @@ public class CustomerStorage : StorageBase
         string? city,
         string? defaultAddress,
         string? notes,
-        CancellationToken cancelToken)
+        bool? marketingSms = null,
+        CancellationToken cancelToken = default)
     {
         var normalized = NormalizePhone(phone);
 
@@ -51,6 +52,7 @@ public class CustomerStorage : StorageBase
                 if (city != null && existing.City != city) { existing.City = city; updated = true; }
                 if (defaultAddress != null && existing.DefaultAddress != defaultAddress) { existing.DefaultAddress = defaultAddress; updated = true; }
                 if (notes != null && existing.Notes != notes) { existing.Notes = notes; updated = true; }
+                if (marketingSms.HasValue && existing.MarketingSms != marketingSms.Value) { existing.MarketingSms = marketingSms.Value; updated = true; }
                 if (updated)
                 {
                     existing.UpdatedDate = DateTime.UtcNow;
@@ -75,7 +77,7 @@ public class CustomerStorage : StorageBase
                 Notes = notes,
                 MarketingApproval = false,
                 MarketingEmail = false,
-                MarketingSms = false,
+                MarketingSms = marketingSms ?? false,
                 IsDeleted = false,
                 CreationTime = DateTime.UtcNow
             };

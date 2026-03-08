@@ -87,7 +87,7 @@ namespace George.Services
                 req.AccountId = site.AccountId;
             }
 
-            // Ensure customer exists for this site (find by SiteId + phone, or create); then link order to that customer.
+            // Ensure customer exists for this site (find by SiteId + phone, or create); then link order to that customer. Pass marketingSms so it is persisted on the customer.
             var customer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
                 req.SiteId,
                 req.AccountId,
@@ -97,6 +97,7 @@ namespace George.Services
                 city: null,
                 defaultAddress: req.DeliveryAddress,
                 notes: null,
+                marketingSms: req.MarketingSms,
                 cancelToken).ConfigureAwait(false);
 
             var order = _mapper.Map<Order>(req);

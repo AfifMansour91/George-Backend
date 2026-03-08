@@ -16,6 +16,8 @@ public class CreateOrderReq
     public string PaymentStatus { get; set; } = "Unpaid";
     public string? CustomerName { get; set; }
     public string? CustomerPhone { get; set; }
+    /// <summary>Kiosk: customer consent for marketing SMS. When set, persisted on the customer record.</summary>
+    public bool? MarketingSms { get; set; }
     public int? CustomerId { get; set; }
     public string? DeliveryAddress { get; set; }
     public DateTime? DeliveryDate { get; set; }
