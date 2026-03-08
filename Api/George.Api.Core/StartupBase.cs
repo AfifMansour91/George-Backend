@@ -3,6 +3,7 @@ using George.Data;
 using George.DB;
 using George.Providers;
 using George.Services;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
@@ -364,6 +365,7 @@ namespace George.Api.Core
 			services.AddScoped<OrderStorage>();
 			services.AddScoped<CustomerStorage>();
 			services.AddScoped<OrderReceptionStorage>();
+			services.AddScoped<PrintJobStorage>();
 			services.AddScoped<ClientStorage>();
 			services.AddScoped<GlobalCategoryStorage>();
 			services.AddScoped<TemplateAttributeStorage>();
@@ -385,6 +387,7 @@ namespace George.Api.Core
 			services.AddScoped<OrderService>();
 			services.AddScoped<CustomerService>();
 			services.AddScoped<OrderReceptionService>();
+			services.AddScoped<PrintJobService>();
 			services.AddScoped<ClientService>();
 			services.AddScoped<GlobalCategoryService>();
 			services.AddScoped<TemplateAttributeService>();
@@ -404,6 +407,7 @@ namespace George.Api.Core
 		{
 			JwtSecurityTokenHandler.DefaultInboundClaimTypeMap.Clear();
 			var key = Encoding.UTF8.GetBytes(Configuration["Auth:Jwt:Key"]);
+			services.Configure<PrintAgentApiKeyOptions>(o => o.ApiKey = Configuration["PrintAgent:ApiKey"]);
 			services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 				.AddJwtBearer(options => 
 				{
@@ -419,7 +423,8 @@ namespace George.Api.Core
 						IssuerSigningKey = new SymmetricSecurityKey(key),
 						ClockSkew = TimeSpan.Zero
 					};
-				});
+				})
+				.AddScheme<AuthenticationSchemeOptions, PrintAgentApiKeyAuthenticationHandler>(PrintAgentApiKeyAuthenticationHandler.SchemeName, _ => { });
 
 			//// Authorization
 			//ServiceProvider sp = services.BuildServiceProvider();

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 
@@ -74,6 +74,8 @@ public partial class GeorgeDBContextBase : DbContext
     public virtual DbSet<Site> Site { get; set; }
 
     public virtual DbSet<SiteOrderReceptionClosed> SiteOrderReceptionClosed { get; set; }
+
+    public virtual DbSet<PrintJob> PrintJob { get; set; }
 
     public virtual DbSet<StockManagementType> StockManagementType { get; set; }
 
@@ -631,6 +633,16 @@ public partial class GeorgeDBContextBase : DbContext
         modelBuilder.Entity<SiteOrderReceptionClosed>(entity =>
         {
             entity.HasOne(d => d.Site).WithMany(p => p.SiteOrderReceptionClosed).HasConstraintName("FK_SiteOrderReceptionClosed_Site");
+        });
+
+        modelBuilder.Entity<PrintJob>(entity =>
+        {
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.JobType).HasMaxLength(50);
+            entity.Property(e => e.Status).HasMaxLength(20);
+            entity.Property(e => e.AgentId).HasMaxLength(100);
+            entity.Property(e => e.ErrorMessage).HasMaxLength(500);
+            entity.HasOne(d => d.Site).WithMany().HasForeignKey(d => d.SiteId).OnDelete(DeleteBehavior.NoAction).HasConstraintName("FK_PrintJob_Site");
         });
 
         modelBuilder.Entity<Supplier>(entity =>
