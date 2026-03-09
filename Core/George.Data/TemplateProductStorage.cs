@@ -497,58 +497,63 @@ namespace George.Data
                     await _dbContext.SaveChangesAsync(cancelToken);
                 }
 
-                // Create/find TemplateAttribute and TemplateAttributeValue for each site
-                foreach (var siteId in siteIds)
+                // "גודל" (Size) is a variation dimension (e.g. weight-by-size), not a reusable template feature — do not create TemplateAttribute for it
+                var isVariationOnlyOption = opt.Name == "גודל" || string.Equals(opt.Name, "Size", StringComparison.OrdinalIgnoreCase);
+                if (!isVariationOnlyOption)
                 {
-                    // Find or create TemplateAttribute
-                    var templateAttribute = await _dbContext.TemplateAttribute
-                        .Include(ta => ta.TemplateAttributeValue)
-                        .Include(ta => ta.Site)
-                        .FirstOrDefaultAsync(ta => ta.Name == opt.Name && !ta.IsDeleted, cancelToken);
-
-                    if (templateAttribute == null)
+                    // Create/find TemplateAttribute and TemplateAttributeValue for each site
+                    foreach (var siteId in siteIds)
                     {
-                        templateAttribute = new TemplateAttribute
-                        {
-                            Name = opt.Name,
-                            CreationTime = DateTime.UtcNow,
-                            IsDeleted = false,
-                            GuidId = Guid.NewGuid()
-                        };
-                        _dbContext.TemplateAttribute.Add(templateAttribute);
-                        await _dbContext.SaveChangesAsync(cancelToken);
-                    }
+                        // Find or create TemplateAttribute
+                        var templateAttribute = await _dbContext.TemplateAttribute
+                            .Include(ta => ta.TemplateAttributeValue)
+                            .Include(ta => ta.Site)
+                            .FirstOrDefaultAsync(ta => ta.Name == opt.Name && !ta.IsDeleted, cancelToken);
 
-                    // Add site to TemplateAttribute if not already added
-                    if (!templateAttribute.Site.Any(s => s.Id == siteId))
-                    {
-                        var site = await _dbContext.Site.FindAsync(new object[] { siteId }, cancelToken);
-                        if (site != null)
+                        if (templateAttribute == null)
                         {
-                            templateAttribute.Site.Add(site);
+                            templateAttribute = new TemplateAttribute
+                            {
+                                Name = opt.Name,
+                                CreationTime = DateTime.UtcNow,
+                                IsDeleted = false,
+                                GuidId = Guid.NewGuid()
+                            };
+                            _dbContext.TemplateAttribute.Add(templateAttribute);
                             await _dbContext.SaveChangesAsync(cancelToken);
                         }
-                    }
 
-                    // Create TemplateAttributeValues for each option value
-                    if (opt.Values != null && opt.Values.Any())
-                    {
-                        foreach (var value in opt.Values)
+                        // Add site to TemplateAttribute if not already added
+                        if (!templateAttribute.Site.Any(s => s.Id == siteId))
                         {
-                            // Check if TemplateAttributeValue already exists
-                            var existingValue = templateAttribute.TemplateAttributeValue
-                                .FirstOrDefault(tav => tav.Value == value);
-
-                            if (existingValue == null)
+                            var site = await _dbContext.Site.FindAsync(new object[] { siteId }, cancelToken);
+                            if (site != null)
                             {
-                                _dbContext.TemplateAttributeValue.Add(new TemplateAttributeValue
-                                {
-                                    TemplateAttributeId = templateAttribute.Id,
-                                    Value = value
-                                });
+                                templateAttribute.Site.Add(site);
+                                await _dbContext.SaveChangesAsync(cancelToken);
                             }
                         }
-                        await _dbContext.SaveChangesAsync(cancelToken);
+
+                        // Create TemplateAttributeValues for each option value
+                        if (opt.Values != null && opt.Values.Any())
+                        {
+                            foreach (var value in opt.Values)
+                            {
+                                // Check if TemplateAttributeValue already exists
+                                var existingValue = templateAttribute.TemplateAttributeValue
+                                    .FirstOrDefault(tav => tav.Value == value);
+
+                                if (existingValue == null)
+                                {
+                                    _dbContext.TemplateAttributeValue.Add(new TemplateAttributeValue
+                                    {
+                                        TemplateAttributeId = templateAttribute.Id,
+                                        Value = value
+                                    });
+                                }
+                            }
+                            await _dbContext.SaveChangesAsync(cancelToken);
+                        }
                     }
                 }
             }

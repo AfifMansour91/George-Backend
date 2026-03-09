@@ -522,52 +522,57 @@ namespace George.Data
                     await _dbContext.SaveChangesAsync(cancelToken);
                 }
 
-                // Create/find Attribute and AttributeValue for each site
-                foreach (var siteId in siteIds)
+                // "גודל" (Size) is a product variation dimension (e.g. weight-by-size), not a reusable feature — do not create a global Attribute for it
+                var isVariationOnlyOption = opt.Name == "גודל" || string.Equals(opt.Name, "Size", StringComparison.OrdinalIgnoreCase);
+                if (!isVariationOnlyOption)
                 {
-                    // Find or create Attribute (use fully qualified name to avoid ambiguity)
-                    var attribute = await _dbContext.Attribute
-                        .Include(a => a.AttributeValue)
-                        .FirstOrDefaultAsync(a => a.Name == opt.Name && a.SiteId == siteId && !a.IsDeleted, cancelToken);
-
-                    if (attribute == null)
+                    // Create/find Attribute and AttributeValue for each site
+                    foreach (var siteId in siteIds)
                     {
-                        attribute = new George.DB.Attribute
-                        {
-                            Name = opt.Name,
-                            SiteId = siteId,
-                            CreationTime = DateTime.UtcNow,
-                            IsDeleted = false,
-                            GuidId = Guid.NewGuid()
-                        };
-                        _dbContext.Attribute.Add(attribute);
-                        await _dbContext.SaveChangesAsync(cancelToken);
-                        
-                        // Reload to get AttributeValues collection
-                        attribute = await _dbContext.Attribute
+                        // Find or create Attribute (use fully qualified name to avoid ambiguity)
+                        var attribute = await _dbContext.Attribute
                             .Include(a => a.AttributeValue)
-                            .FirstOrDefaultAsync(a => a.Id == attribute.Id, cancelToken);
-                    }
+                            .FirstOrDefaultAsync(a => a.Name == opt.Name && a.SiteId == siteId && !a.IsDeleted, cancelToken);
 
-                    // Create AttributeValues for each option value
-                    if (opt.Values != null && opt.Values.Any() && attribute != null)
-                    {
-                        foreach (var value in opt.Values)
+                        if (attribute == null)
                         {
-                            // Check if AttributeValue already exists
-                            var existingValue = attribute.AttributeValue
-                                .FirstOrDefault(av => av.Value == value);
-
-                            if (existingValue == null)
+                            attribute = new George.DB.Attribute
                             {
-                                _dbContext.AttributeValue.Add(new AttributeValue
-                                {
-                                    AttributeId = attribute.Id,
-                                    Value = value
-                                });
-                            }
+                                Name = opt.Name,
+                                SiteId = siteId,
+                                CreationTime = DateTime.UtcNow,
+                                IsDeleted = false,
+                                GuidId = Guid.NewGuid()
+                            };
+                            _dbContext.Attribute.Add(attribute);
+                            await _dbContext.SaveChangesAsync(cancelToken);
+                            
+                            // Reload to get AttributeValues collection
+                            attribute = await _dbContext.Attribute
+                                .Include(a => a.AttributeValue)
+                                .FirstOrDefaultAsync(a => a.Id == attribute.Id, cancelToken);
                         }
-                        await _dbContext.SaveChangesAsync(cancelToken);
+
+                        // Create AttributeValues for each option value
+                        if (opt.Values != null && opt.Values.Any() && attribute != null)
+                        {
+                            foreach (var value in opt.Values)
+                            {
+                                // Check if AttributeValue already exists
+                                var existingValue = attribute.AttributeValue
+                                    .FirstOrDefault(av => av.Value == value);
+
+                                if (existingValue == null)
+                                {
+                                    _dbContext.AttributeValue.Add(new AttributeValue
+                                    {
+                                        AttributeId = attribute.Id,
+                                        Value = value
+                                    });
+                                }
+                            }
+                            await _dbContext.SaveChangesAsync(cancelToken);
+                        }
                     }
                 }
             }
