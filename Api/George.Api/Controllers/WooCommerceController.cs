@@ -1,10 +1,14 @@
 using George.Api.Core;
 using George.Common;
+using George.Data;
 using George.Services;
 using George.Services.Request;
 using George.Services.Response;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Net;
+using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -15,13 +19,33 @@ namespace George.Api.Controllers
     public class WooCommerceController : GeorgeControllerBase, IAuthUserProvider
     {
         private readonly WooCommerceService _wooCommerceService;
+        private readonly OrderService _orderService;
+        private readonly SiteStorage _siteStorage;
         private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
         public WooCommerceController(
             WooCommerceService wooCommerceService,
+            OrderService orderService,
+            SiteStorage siteStorage,
             ILogger<WooCommerceController> logger) : base(logger)
         {
             _wooCommerceService = wooCommerceService;
+            _orderService = orderService;
+            _siteStorage = siteStorage;
+        }
+
+        /// <summary>Generate a new WooCommerce API key for a site. Requires JWT. Returns the key once – copy it into the WooCommerce plugin.</summary>
+        [HttpPost("GenerateSiteApiKey")]
+        [ProducesResponseType(typeof(IApiResponse<object>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GenerateSiteApiKeyAsync([FromQuery] int siteId, CancellationToken cancelToken = default)
+        {
+            var keyBytes = new byte[32];
+            RandomNumberGenerator.Fill(keyBytes);
+            var apiKey = "wc_" + Convert.ToBase64String(keyBytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+            var saved = await _siteStorage.SetInternalApiKeyAsync(siteId, apiKey, cancelToken);
+            if (saved == null)
+                return NotFound();
+            return Ok(new ApiResponse<object> { Data = new { apiKey = saved } });
         }
 
         [HttpPost("Sync")]
@@ -105,6 +129,44 @@ namespace George.Api.Controllers
                     request.AttributeId,
                     request.SiteId,
                     cancelToken));
+        }
+
+        /// <summary>Create or update order from WooCommerce (plugin calls when order is opened/edited). Auth: X-Api-Key or Bearer &lt;key&gt;.</summary>
+        [HttpPost("Order")]
+        [Authorize(AuthenticationSchemes = WooCommerceApiKeyAuthenticationHandler.SchemeName)]
+        [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]
+        [ProducesResponseType((int)HttpStatusCode.Unauthorized)]
+        public async Task<IActionResult> CreateOrUpdateOrderAsync(
+            [FromBody] WooCommerceOrderPayload payload,
+            CancellationToken cancelToken = default)
+        {
+            var siteId = GetWooCommerceSiteId();
+            if (siteId == null)
+                return Unauthorized();
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _orderService.CreateOrUpdateOrderFromWooCommerceAsync(siteId.Value, payload!, cancelToken));
+        }
+
+        /// <summary>Record payment from WooCommerce (invoice, clearance, paid-at). Auth: X-Api-Key or Bearer &lt;key&gt;.</summary>
+        [HttpPost("OrderPayment")]
+        [Authorize(AuthenticationSchemes = WooCommerceApiKeyAuthenticationHandler.SchemeName)]
+        [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]
+        [ProducesResponseType((int)HttpStatusCode.Unauthorized)]
+        public async Task<IActionResult> RecordOrderPaymentAsync(
+            [FromBody] WooCommerceOrderPaymentPayload payload,
+            CancellationToken cancelToken = default)
+        {
+            var siteId = GetWooCommerceSiteId();
+            if (siteId == null)
+                return Unauthorized();
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _orderService.RecordPaymentFromWooCommerceAsync(siteId.Value, payload!, cancelToken));
+        }
+
+        private int? GetWooCommerceSiteId()
+        {
+            var sid = User.FindFirstValue(WooCommerceApiKeyAuthenticationHandler.ClaimSiteId);
+            return int.TryParse(sid, out var id) ? id : null;
         }
 
         [ApiExplorerSettings(IgnoreApi = true)]

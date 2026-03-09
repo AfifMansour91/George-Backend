@@ -63,7 +63,15 @@ public partial class Site
     [StringLength(250)]
     public string? WooCommerceSecret { get; set; }
 
+    /// <summary>Optional. When set, we call this base URL to update order status (e.g. oc-storeos: https://.../wp-json/oc-storeos/v1). We PUT to {base}/orders/{orderId} with status. If empty, use WooCommerceUrl + /wp-json/wc/v3.</summary>
+    [StringLength(500)]
+    public string? WooCommerceOrderUpdateBaseUrl { get; set; }
+
     public bool? WooCommerceEnabled { get; set; }
+
+    /// <summary>API key for WooCommerce to call our APIs (X-Api-Key header). Per-site.</summary>
+    [StringLength(100)]
+    public string? InternalApiKey { get; set; }
 
     public int? WeightTolerancePercent { get; set; }
 

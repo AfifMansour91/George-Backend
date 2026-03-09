@@ -48,6 +48,9 @@ public partial class Order
     [StringLength(50)]
     public string? CustomerPhone { get; set; }
 
+    [StringLength(200)]
+    public string? CustomerEmail { get; set; }
+
     public int? CustomerId { get; set; }
 
     [ForeignKey("CustomerId")]
@@ -92,6 +95,17 @@ public partial class Order
 
     /// <summary>Number of bags/cartons packed (set at end of picking when enabled in store).</summary>
     public int? BagsCount { get; set; }
+
+    /// <summary>Payment reference / clearance number (from WooCommerce or payment provider).</summary>
+    [StringLength(100)]
+    public string? PaymentReference { get; set; }
+
+    /// <summary>Invoice number when order is paid.</summary>
+    [StringLength(100)]
+    public string? InvoiceNumber { get; set; }
+
+    [Precision(0)]
+    public DateTime? PaidAt { get; set; }
 
     [ForeignKey("AccountId")]
     [InverseProperty("Order")]

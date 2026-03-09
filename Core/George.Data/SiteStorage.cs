@@ -58,6 +58,15 @@ namespace George.Data
                 .FirstOrDefaultAsync(a => a.Id == siteId, cancelToken);
         }
 
+        /// <summary>Get site by internal API key (for external integrations auth, e.g. WooCommerce plugin).</summary>
+        public async Task<Site?> GetSiteByInternalApiKeyAsync(string? apiKey, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(apiKey)) return null;
+            return await _dbContext.Site
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => !s.IsDeleted && s.InternalApiKey == apiKey.Trim(), cancelToken);
+        }
+
         public async Task<List<Site>> GetSitesByAccountAsync(int accountId, CancellationToken cancelToken)
         {
             return await _dbContext.Site
@@ -110,9 +119,15 @@ namespace George.Data
             dbSite.WooCommerceUrl = updated.WooCommerceUrl ?? dbSite.WooCommerceUrl;
             dbSite.WooCommerceKey = updated.WooCommerceKey ?? dbSite.WooCommerceKey;
             dbSite.WooCommerceSecret = updated.WooCommerceSecret ?? dbSite.WooCommerceSecret;
+            if (updated.WooCommerceOrderUpdateBaseUrl != null)
+                dbSite.WooCommerceOrderUpdateBaseUrl = updated.WooCommerceOrderUpdateBaseUrl;
             if (updated.WooCommerceEnabled.HasValue)
             {
                 dbSite.WooCommerceEnabled = updated.WooCommerceEnabled;
+            }
+            if (updated.InternalApiKey != null)
+            {
+                dbSite.InternalApiKey = updated.InternalApiKey;
             }
             // Shop settings (Sprint 2)
             if (updated.WeightTolerancePercent.HasValue) dbSite.WeightTolerancePercent = updated.WeightTolerancePercent;
@@ -151,6 +166,17 @@ namespace George.Data
 
             await _dbContext.SaveChangesAsync(cancelToken);
             return dbSite;
+        }
+
+        /// <summary>Set or clear internal API key for a site (e.g. when generating a new key).</summary>
+        public async Task<string?> SetInternalApiKeyAsync(int siteId, string? apiKey, CancellationToken cancelToken)
+        {
+            var dbSite = await _dbContext.Site.FirstOrDefaultAsync(s => s.Id == siteId && !s.IsDeleted, cancelToken);
+            if (dbSite == null) return null;
+            dbSite.InternalApiKey = apiKey;
+            dbSite.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            return dbSite.InternalApiKey;
         }
 
         public async Task<Site?> DeleteSiteAsync(int id, CancellationToken cancelToken = default)

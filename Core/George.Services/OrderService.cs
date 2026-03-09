@@ -93,7 +93,7 @@ namespace George.Services
                 req.AccountId,
                 req.CustomerPhone,
                 req.CustomerName!,
-                email: null,
+                email: req.CustomerEmail,
                 city: null,
                 defaultAddress: req.DeliveryAddress,
                 notes: null,
@@ -252,25 +252,33 @@ namespace George.Services
             }, cancelToken);
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
-            if ((req.Status == "Ready" || req.Status == "Completed") && !string.IsNullOrWhiteSpace(updated.ExternalOrderId) &&
-                string.Equals(updated.Source, "Website", StringComparison.OrdinalIgnoreCase))
-            {
-                var site = await _siteStorage.GetSiteAsync(updated.SiteId, cancelToken);
-                if (site?.WooCommerceEnabled == true)
+            // Sync status to WooCommerce/oc-storeos only for orders that came from WooCommerce (any status change).
+            if (req.Status != null && !string.IsNullOrWhiteSpace(updated.ExternalOrderId) &&
+                string.Equals(updated.Source, "WooCommerce", StringComparison.OrdinalIgnoreCase))
                 {
-                    _ = Task.Run(async () =>
+                    var site = await _siteStorage.GetSiteAsync(updated.SiteId, cancelToken);
+                    if (site?.WooCommerceEnabled == true)
                     {
-                        try
+                        var wcStatus = MapOurStatusToWooCommerce(updated.Status);
+                        if (wcStatus != null)
                         {
-                            await _wooCommerceService.UpdateOrderStatusAsync(updated.SiteId, updated.ExternalOrderId!, "completed", CancellationToken.None);
+                            var orderIdCapture = orderId;
+                            var siteIdCapture = updated.SiteId;
+                            var externalIdCapture = updated.ExternalOrderId!;
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    await _wooCommerceService.UpdateOrderStatusAsync(siteIdCapture, externalIdCapture, wcStatus, CancellationToken.None);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogError(ex, "WooCommerce/oc-storeos order status sync failed for order {OrderId}", orderIdCapture);
+                                }
+                            }, CancellationToken.None);
                         }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "WooCommerce order status sync failed for order {OrderId}", orderId);
-                        }
-                    }, CancellationToken.None);
+                    }
                 }
-            }
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             response.Data = _mapper.Map<OrderRes>(loaded);
             return response;
@@ -282,6 +290,28 @@ namespace George.Services
             var order = await _orderStorage.CancelOrderAsync(orderId, AuthUser.Id, softDelete, cancelToken);
             if (order == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
+            // Sync cancelled status to WooCommerce/oc-storeos only for orders that came from WooCommerce.
+            if (!string.IsNullOrWhiteSpace(order.ExternalOrderId) &&
+                string.Equals(order.Source, "WooCommerce", StringComparison.OrdinalIgnoreCase))
+            {
+                var site = await _siteStorage.GetSiteAsync(order.SiteId, cancelToken);
+                if (site?.WooCommerceEnabled == true)
+                {
+                    var siteIdCapture = order.SiteId;
+                    var externalIdCapture = order.ExternalOrderId!;
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await _wooCommerceService.UpdateOrderStatusAsync(siteIdCapture, externalIdCapture, "cancelled", CancellationToken.None);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "WooCommerce/oc-storeos order cancel sync failed for order {OrderId}", orderId);
+                        }
+                    }, CancellationToken.None);
+                }
+            }
             response.Data = _mapper.Map<OrderRes>(order);
             return response;
         }
@@ -364,6 +394,119 @@ namespace George.Services
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             response.Data = _mapper.Map<OrderRes>(loaded);
             return response;
+        }
+
+        /// <summary>Create or update order from WooCommerce plugin (API key auth). No AuthUser.</summary>
+        public async Task<IApiResponse<OrderRes>> CreateOrUpdateOrderFromWooCommerceAsync(int siteId, WooCommerceOrderPayload payload, CancellationToken cancelToken = default)
+        {
+            var response = new ApiResponse<OrderRes>();
+            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken).ConfigureAwait(false);
+            if (site == null)
+                return CreateResponse(response, StatusCode.ItemNotFound, "Site not found.");
+            var status = MapWooCommerceStatusToOurs(payload.Status);
+            var existing = await _orderStorage.GetOrderBySiteAndExternalIdAsync(siteId, payload.OrderNumber, cancelToken).ConfigureAwait(false);
+            if (existing != null)
+            {
+                var updated = await _orderStorage.UpdateOrderAsync(existing.Id, o =>
+                {
+                    o.Status = status;
+                    if (payload.CustomerNotes != null) o.CustomerNote = payload.CustomerNotes;
+                    o.UpdatedDate = DateTime.UtcNow;
+                }, cancelToken).ConfigureAwait(false);
+                if (updated == null)
+                    return CreateResponse(response, StatusCode.ItemNotFound);
+                var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken).ConfigureAwait(false);
+                response.Data = _mapper.Map<OrderRes>(loaded);
+                return response;
+            }
+            var req = new CreateOrderReq
+            {
+                SiteId = siteId,
+                AccountId = site.AccountId,
+                ExternalOrderId = payload.OrderNumber,
+                Source = "WooCommerce",
+                Status = status,
+                CustomerName = payload.Customer?.Name,
+                CustomerPhone = payload.Customer?.Phone,
+                CustomerEmail = payload.Customer?.Email,
+                DeliveryAddress = payload.ShippingAddress != null
+                    ? string.Join(", ", new[] { payload.ShippingAddress.Street, payload.ShippingAddress.City, payload.ShippingAddress.Zip }.Where(s => !string.IsNullOrWhiteSpace(s)))
+                    : null,
+                CustomerNote = payload.CustomerNotes,
+                ShippingCost = payload.ShippingTotal,
+                Total = payload.OrderTotal,
+                SubTotal = payload.OrderTotal - (payload.ShippingTotal ?? 0),
+                Items = payload.Items?.Select((it, i) => new CreateOrderItemReq
+                {
+                    ProductId = it.ProductId,
+                    Title = it.Name,
+                    Quantity = it.Quantity,
+                    PricePerUnit = it.UnitPrice,
+                    TotalPrice = it.LineTotal,
+                    SortOrder = i
+                }).ToList() ?? new List<CreateOrderItemReq>()
+            };
+            var customer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
+                req.SiteId, req.AccountId, req.CustomerPhone, req.CustomerName ?? "", email: req.CustomerEmail,
+                city: null, defaultAddress: req.DeliveryAddress, notes: null, marketingSms: null, cancelToken).ConfigureAwait(false);
+            var order = _mapper.Map<Order>(req);
+            order.CustomerId = customer.Id;
+            order.CreationTime = DateTime.UtcNow;
+            order.CreationUserId = null;
+            var items = new List<OrderItem>();
+            for (var i = 0; i < req.Items.Count; i++)
+            {
+                var oi = _mapper.Map<OrderItem>(req.Items[i]);
+                oi.SortOrder = i;
+                items.Add(oi);
+            }
+            var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken).ConfigureAwait(false);
+            var loadedOrder = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false);
+            response.Data = _mapper.Map<OrderRes>(loadedOrder!);
+            return response;
+        }
+
+        /// <summary>Record payment from WooCommerce (invoice, clearance, paid-at). API key auth.</summary>
+        public async Task<IApiResponse<OrderRes>> RecordPaymentFromWooCommerceAsync(int siteId, WooCommerceOrderPaymentPayload payment, CancellationToken cancelToken = default)
+        {
+            var response = new ApiResponse<OrderRes>();
+            var order = await _orderStorage.GetOrderBySiteAndExternalIdAsync(siteId, payment.OrderNumber, cancelToken).ConfigureAwait(false);
+            if (order == null)
+                return CreateResponse(response, StatusCode.ItemNotFound, "Order not found.");
+            var updated = await _orderStorage.UpdateOrderAsync(order.Id, o =>
+            {
+                if (payment.InvoiceNumber != null) o.InvoiceNumber = payment.InvoiceNumber;
+                o.PaymentReference = payment.PaymentReference ?? payment.ClearanceNumber;
+                if (payment.PaidAt.HasValue) o.PaidAt = payment.PaidAt;
+                o.PaymentStatus = "Paid";
+                o.UpdatedDate = DateTime.UtcNow;
+            }, cancelToken).ConfigureAwait(false);
+            if (updated == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
+            var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken).ConfigureAwait(false);
+            response.Data = _mapper.Map<OrderRes>(loaded!);
+            return response;
+        }
+
+        private static string MapWooCommerceStatusToOurs(string? wc)
+        {
+            if (string.IsNullOrWhiteSpace(wc)) return "New";
+            var s = wc.Trim();
+            if (string.Equals(s, "completed", StringComparison.OrdinalIgnoreCase)) return "Completed";
+            if (string.Equals(s, "cancelled", StringComparison.OrdinalIgnoreCase) || string.Equals(s, "canceled", StringComparison.OrdinalIgnoreCase)) return "Cancelled";
+            return "New";
+        }
+
+        /// <summary>Maps our order status to WooCommerce/oc-storeos status for sync. Returns null if no mapping (skip sync).</summary>
+        private static string? MapOurStatusToWooCommerce(string? ourStatus)
+        {
+            if (string.IsNullOrWhiteSpace(ourStatus)) return null;
+            var s = ourStatus.Trim();
+            if (string.Equals(s, "New", StringComparison.OrdinalIgnoreCase)) return "on-hold";
+            if (string.Equals(s, "InTreatment", StringComparison.OrdinalIgnoreCase)) return "processing";
+            if (string.Equals(s, "Ready", StringComparison.OrdinalIgnoreCase) || string.Equals(s, "Completed", StringComparison.OrdinalIgnoreCase)) return "completed";
+            if (string.Equals(s, "Cancelled", StringComparison.OrdinalIgnoreCase)) return "cancelled";
+            return null;
         }
     }
 }

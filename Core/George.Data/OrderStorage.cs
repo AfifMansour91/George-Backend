@@ -84,6 +84,15 @@ namespace George.Data
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
         }
 
+        /// <summary>Get order by site and external (e.g. WooCommerce) order id.</summary>
+        public async Task<Order?> GetOrderBySiteAndExternalIdAsync(int siteId, string externalOrderId, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(externalOrderId)) return null;
+            return await _dbContext.Order
+                .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
+                .FirstOrDefaultAsync(o => !o.IsDeleted && o.SiteId == siteId && o.ExternalOrderId == externalOrderId, cancelToken);
+        }
+
         /// <summary>Returns next order number for the site (e.g. 1001, 1002). Caller can assign to new order.</summary>
         public async Task<string> GetNextOrderNumberForSiteAsync(int siteId, CancellationToken cancelToken)
         {

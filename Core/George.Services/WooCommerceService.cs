@@ -1264,18 +1264,23 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Updates a WooCommerce order's status (e.g. to "completed" when our order is set to Ready). Does not throw; logs errors.
+        /// Updates the order status on the store side (WooCommerce or oc-storeos). When we mark an order Ready/Completed we PUT status "completed" so they can run payment (e.g. credit). Uses WooCommerceOrderUpdateBaseUrl when set (e.g. https://.../wp-json/oc-storeos/v1), otherwise WooCommerceUrl + /wp-json/wc/v3. Does not throw; logs errors.
         /// </summary>
         public async Task UpdateOrderStatusAsync(int siteId, string wooOrderId, string status, CancellationToken cancelToken)
         {
             if (string.IsNullOrWhiteSpace(wooOrderId)) return;
             var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
             if (site == null || site.WooCommerceEnabled != true ||
-                string.IsNullOrEmpty(site.WooCommerceUrl) ||
                 string.IsNullOrEmpty(site.WooCommerceKey) ||
                 string.IsNullOrEmpty(site.WooCommerceSecret))
                 return;
-            var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
+            string baseUrl;
+            if (!string.IsNullOrWhiteSpace(site.WooCommerceOrderUpdateBaseUrl))
+                baseUrl = site.WooCommerceOrderUpdateBaseUrl.Trim().TrimEnd('/');
+            else if (!string.IsNullOrWhiteSpace(site.WooCommerceUrl))
+                baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
+            else
+                return;
             var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
             using var httpClient = _httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(30);
@@ -1288,7 +1293,7 @@ namespace George.Services
             if (!response.IsSuccessStatusCode)
             {
                 var err = await response.Content.ReadAsStringAsync(cancelToken);
-                _logger.LogWarning("WooCommerce order status update failed for site {SiteId}, order {WooOrderId}: {Status} {Error}", siteId, wooOrderId, (int)response.StatusCode, err);
+                _logger.LogWarning("WooCommerce/oc-storeos order status update failed for site {SiteId}, order {WooOrderId}: {Status} {Error}", siteId, wooOrderId, (int)response.StatusCode, err);
             }
         }
 

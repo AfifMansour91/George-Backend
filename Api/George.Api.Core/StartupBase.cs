@@ -424,7 +424,8 @@ namespace George.Api.Core
 						ClockSkew = TimeSpan.Zero
 					};
 				})
-				.AddScheme<AuthenticationSchemeOptions, PrintAgentApiKeyAuthenticationHandler>(PrintAgentApiKeyAuthenticationHandler.SchemeName, _ => { });
+				.AddScheme<AuthenticationSchemeOptions, PrintAgentApiKeyAuthenticationHandler>(PrintAgentApiKeyAuthenticationHandler.SchemeName, _ => { })
+				.AddScheme<AuthenticationSchemeOptions, WooCommerceApiKeyAuthenticationHandler>(WooCommerceApiKeyAuthenticationHandler.SchemeName, _ => { });
 
 			//// Authorization
 			//ServiceProvider sp = services.BuildServiceProvider();
