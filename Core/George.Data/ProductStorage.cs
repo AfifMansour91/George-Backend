@@ -21,7 +21,7 @@ namespace George.Data
         {
             var res = new DataListResult<Product>();
 
-            // Lighter includes for list (options, variants, related/complementary loaded only in GetProductAsync)
+            // Lighter includes for list; ProductOption and ProductVariant only when requested (e.g. My Products page needs them for "with variations" filter)
             var query = _dbContext.Product
                 .Include(p => p.Brand)
                 .Include(p => p.Supplier)
@@ -43,6 +43,15 @@ namespace George.Data
                     .ThenInclude(pi => pi.Media)
                 .AsNoTracking()
                 .Where(p => !p.IsDeleted);
+
+            if (filter?.IncludeOptionsAndVariants == true)
+            {
+                query = query
+                    .Include(p => p.ProductOption)
+                        .ThenInclude(po => po.ProductOptionValue)
+                    .Include(p => p.ProductVariant)
+                        .ThenInclude(pv => pv.ProductVariantOptionValue);
+            }
 
             // Apply filters
             if (filter != null)

@@ -25,8 +25,11 @@ namespace George.Api.Controllers
         [ProducesResponseType(typeof(IApiResponse<ApiListResponse<ProductRes>>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetProductsAsync(
             [FromQuery] ApiListReq<ProductFilter> request,
+            [FromQuery] bool? includeOptionsAndVariants,
             CancellationToken cancelToken = default)
         {
+            if (request.Filter == null) request.Filter = new ProductFilter();
+            request.Filter.IncludeOptionsAndVariants = includeOptionsAndVariants;
             return await SafeCallWithErrorCatchingAsync(() => _productSvc.GetProductsAsync(request, cancelToken));
         }
 
@@ -63,10 +66,12 @@ namespace George.Api.Controllers
         public async Task<IActionResult> GetProductsBySiteAsync(
             [FromRoute] int siteId,
             [FromQuery] ApiListReq<ProductFilter> request,
+            [FromQuery] bool? includeOptionsAndVariants,
             CancellationToken cancelToken = default)
         {
             if (request.Filter == null) request.Filter = new ProductFilter();
             request.Filter.SiteId = siteId;
+            request.Filter.IncludeOptionsAndVariants = includeOptionsAndVariants;
             return await SafeCallWithErrorCatchingAsync(() => _productSvc.GetProductsAsync(request, cancelToken));
         }
 
@@ -75,10 +80,12 @@ namespace George.Api.Controllers
         public async Task<IActionResult> GetProductsByAccountAsync(
             [FromRoute] int accountId,
             [FromQuery] ApiListReq<ProductFilter> request,
+            [FromQuery] bool? includeOptionsAndVariants,
             CancellationToken cancelToken = default)
         {
             if (request.Filter == null) request.Filter = new ProductFilter();
             request.Filter.AccountId = accountId;
+            request.Filter.IncludeOptionsAndVariants = includeOptionsAndVariants;
             return await SafeCallWithErrorCatchingAsync(() => _productSvc.GetProductsAsync(request, cancelToken));
         }
 

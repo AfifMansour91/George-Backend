@@ -87,6 +87,8 @@ namespace George.Common
         public int? CategoryId { get; set; }
         public string? Status { get; set; }
         public SearchFilter? Search { get; set; }
+        /// <summary>When true, list response includes ProductOption and ProductVariant (for "with variations" filter and variations column). Use only when needed to avoid heavier payload.</summary>
+        public bool? IncludeOptionsAndVariants { get; set; }
     }
 
     public class CategoryFilter
