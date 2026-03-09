@@ -813,7 +813,7 @@ namespace George.Services
                     .Select(pc => pc.CategoryId)
                     .ToList();
                 var subCategories = product.ProductCategory
-                    .Where(pc => pc.Category?.ProductCategory != null)
+                    .Where(pc => pc.Category?.ParentCategoryId != null)
                     .Select(pc => pc.CategoryId)
                     .ToList();
                 
