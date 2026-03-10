@@ -68,7 +68,7 @@ namespace George.Services
                     LastName = "",
                     Email = req.ManagerEmail,
                     Password = password,//passwordHash,
-                    IsEmailVerified = false,
+                    IsEmailVerified = true, // set when creating user with password
                     StatusId = (int)Common.UserStatus.Active,
                     RoleId = (int)UserRole.AccountAdmin, // or whatever role means client admin
                     LockoutFailCount = 0,

@@ -854,7 +854,7 @@ namespace George.Services
                     .Select(pc => pc.CategoryId)
                     .ToList();
                 var subCategories = product.ProductCategory
-                    .Where(pc => pc.Category?.ProductCategory != null)
+                    .Where(pc => pc.Category?.ParentCategoryId != null)
                     .Select(pc => pc.CategoryId)
                     .ToList();
                 
@@ -981,7 +981,8 @@ namespace George.Services
                     UnitWeightMode = req.WeightConfig.UnitWeightMode,
                     WeightOptions = req.WeightConfig.WeightOptions,
                     WeightByVariant = req.WeightConfig.WeightByVariant,
-                    ShowPricePer100g = req.WeightConfig.ShowPricePer100g
+                    ShowPricePer100g = req.WeightConfig.ShowPricePer100g,
+                    ShowUnitPrice = req.WeightConfig.ShowUnitPrice
                 } : null
             };
         }
