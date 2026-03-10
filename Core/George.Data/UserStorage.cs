@@ -477,6 +477,7 @@ namespace George.Data
 		if (user.Password != null)
 		{
 			dbModel.Password = user.Password;
+			dbModel.IsEmailVerified = true;
 		}
 
 		if (user.AccountId.HasValue)
@@ -531,8 +532,9 @@ namespace George.Data
 			if (dbModel == null)
 				return null;
 
-			// Update password
+			// Update password and set email as verified (user has set/confirmed password)
 			dbModel.Password = passwordHash;
+			dbModel.IsEmailVerified = true;
 			dbModel.UpdatedDate = DateTime.UtcNow;
 
 			// Save to the DB.
