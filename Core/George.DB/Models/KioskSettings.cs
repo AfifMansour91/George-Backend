@@ -45,6 +45,21 @@ public partial class KioskSettings
 
     public int? PosProductsCategoryId { get; set; }
 
+    /// <summary>Enable POS products (upsell) step (default true).</summary>
+    public bool PosProductsEnabled { get; set; } = true;
+
+    [StringLength(200)]
+    public string? ButtonTextToPaymentOrViewOrder { get; set; }
+
+    [StringLength(200)]
+    public string? ButtonTextCartToPayment { get; set; }
+
+    [StringLength(200)]
+    public string? ButtonTextUpsellContinueToPayment { get; set; }
+
+    /// <summary>Seconds before "Are you still there?" popup (default 60).</summary>
+    public int? InactivityPopupSeconds { get; set; }
+
     [ForeignKey("AccountId")]
     [InverseProperty("KioskSettings")]
     public virtual Account Account { get; set; } = null!;

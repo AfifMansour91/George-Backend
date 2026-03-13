@@ -332,6 +332,16 @@ namespace George.Common.Request
         public bool CashAtRegisterEnabled { get; set; }
         /// <summary>Show "הזמנה חוזרת" (Repeat Order) button in kiosk (default false).</summary>
         public bool ShowDuplicateOrderButton { get; set; } = false;
+        /// <summary>Enable POS products (upsell) step; when false, cart goes directly to payment (default true).</summary>
+        public bool PosProductsEnabled { get; set; } = true;
+        /// <summary>Button text: "To payment / View order" (cart header).</summary>
+        public string? ButtonTextToPaymentOrViewOrder { get; set; }
+        /// <summary>Button text: "To payment" (cart footer).</summary>
+        public string? ButtonTextCartToPayment { get; set; }
+        /// <summary>Button text: "Continue to payment" (POS products → checkout).</summary>
+        public string? ButtonTextUpsellContinueToPayment { get; set; }
+        /// <summary>Seconds of inactivity before "Are you still there?" popup (default 60).</summary>
+        public int? InactivityPopupSeconds { get; set; }
     }
 
     public class UpdateWizardSessionReq

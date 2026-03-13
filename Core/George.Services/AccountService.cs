@@ -248,6 +248,11 @@ namespace George.Services
                     CreditEnabled = req.KioskSettings.CreditEnabled,
                     CashAtRegisterEnabled = req.KioskSettings.CashAtRegisterEnabled,
                     ShowDuplicateOrderButton = req.KioskSettings.ShowDuplicateOrderButton,
+                    PosProductsEnabled = req.KioskSettings.PosProductsEnabled,
+                    ButtonTextToPaymentOrViewOrder = string.IsNullOrWhiteSpace(req.KioskSettings.ButtonTextToPaymentOrViewOrder) ? null : req.KioskSettings.ButtonTextToPaymentOrViewOrder,
+                    ButtonTextCartToPayment = string.IsNullOrWhiteSpace(req.KioskSettings.ButtonTextCartToPayment) ? null : req.KioskSettings.ButtonTextCartToPayment,
+                    ButtonTextUpsellContinueToPayment = string.IsNullOrWhiteSpace(req.KioskSettings.ButtonTextUpsellContinueToPayment) ? null : req.KioskSettings.ButtonTextUpsellContinueToPayment,
+                    InactivityPopupSeconds = req.KioskSettings.InactivityPopupSeconds,
                 };
                 await _accountStorage.UpsertKioskSettingsAsync(accountId, kioskEntity, req.KioskSettings.HomeImageMediaIds, cancelToken);
             }

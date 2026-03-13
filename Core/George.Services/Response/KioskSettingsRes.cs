@@ -25,4 +25,14 @@ public class KioskSettingsRes
     public bool CashAtRegisterEnabled { get; set; }
     /// <summary>Show "הזמנה חוזרת" (Repeat Order) button in kiosk (default false).</summary>
     public bool ShowDuplicateOrderButton { get; set; } = false;
+    /// <summary>Enable POS products (upsell) step (default true).</summary>
+    public bool PosProductsEnabled { get; set; } = true;
+    /// <summary>Button text: "To payment / View order".</summary>
+    public string? ButtonTextToPaymentOrViewOrder { get; set; }
+    /// <summary>Button text: "To payment" (cart).</summary>
+    public string? ButtonTextCartToPayment { get; set; }
+    /// <summary>Button text: "Continue to payment" (upsell).</summary>
+    public string? ButtonTextUpsellContinueToPayment { get; set; }
+    /// <summary>Seconds before "Are you still there?" popup (default 60).</summary>
+    public int? InactivityPopupSeconds { get; set; }
 }

@@ -165,6 +165,11 @@ namespace George.Data
                 existing.CreditEnabled = settings.CreditEnabled;
                 existing.CashAtRegisterEnabled = settings.CashAtRegisterEnabled;
                 existing.ShowDuplicateOrderButton = settings.ShowDuplicateOrderButton;
+                existing.PosProductsEnabled = settings.PosProductsEnabled;
+                existing.ButtonTextToPaymentOrViewOrder = settings.ButtonTextToPaymentOrViewOrder;
+                existing.ButtonTextCartToPayment = settings.ButtonTextCartToPayment;
+                existing.ButtonTextUpsellContinueToPayment = settings.ButtonTextUpsellContinueToPayment;
+                existing.InactivityPopupSeconds = settings.InactivityPopupSeconds;
             }
             else
             {
