@@ -253,6 +253,8 @@ namespace George.Services
                     ButtonTextCartToPayment = string.IsNullOrWhiteSpace(req.KioskSettings.ButtonTextCartToPayment) ? null : req.KioskSettings.ButtonTextCartToPayment,
                     ButtonTextUpsellContinueToPayment = string.IsNullOrWhiteSpace(req.KioskSettings.ButtonTextUpsellContinueToPayment) ? null : req.KioskSettings.ButtonTextUpsellContinueToPayment,
                     InactivityPopupSeconds = req.KioskSettings.InactivityPopupSeconds,
+                    PrivacyPolicyCheckboxCheckedByDefault = req.KioskSettings.PrivacyPolicyCheckboxCheckedByDefault,
+                    PrivacyPolicyContent = string.IsNullOrWhiteSpace(req.KioskSettings.PrivacyPolicyContent) ? null : req.KioskSettings.PrivacyPolicyContent,
                 };
                 await _accountStorage.UpsertKioskSettingsAsync(accountId, kioskEntity, req.KioskSettings.HomeImageMediaIds, cancelToken);
             }

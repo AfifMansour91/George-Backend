@@ -30,3 +30,16 @@ BEGIN
     ALTER TABLE dbo.KioskSettings ADD InactivityPopupSeconds INT NULL;
 END
 GO
+
+-- Privacy policy on phone screen: checkbox default + content (panel)
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.KioskSettings') AND name = 'PrivacyPolicyCheckboxCheckedByDefault')
+BEGIN
+    ALTER TABLE dbo.KioskSettings ADD PrivacyPolicyCheckboxCheckedByDefault BIT NOT NULL DEFAULT 0;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.KioskSettings') AND name = 'PrivacyPolicyContent')
+BEGIN
+    ALTER TABLE dbo.KioskSettings ADD PrivacyPolicyContent NVARCHAR(MAX) NULL;
+END
+GO

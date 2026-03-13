@@ -170,6 +170,8 @@ namespace George.Data
                 existing.ButtonTextCartToPayment = settings.ButtonTextCartToPayment;
                 existing.ButtonTextUpsellContinueToPayment = settings.ButtonTextUpsellContinueToPayment;
                 existing.InactivityPopupSeconds = settings.InactivityPopupSeconds;
+                existing.PrivacyPolicyCheckboxCheckedByDefault = settings.PrivacyPolicyCheckboxCheckedByDefault;
+                existing.PrivacyPolicyContent = settings.PrivacyPolicyContent;
             }
             else
             {

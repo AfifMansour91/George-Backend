@@ -35,4 +35,8 @@ public class KioskSettingsRes
     public string? ButtonTextUpsellContinueToPayment { get; set; }
     /// <summary>Seconds before "Are you still there?" popup (default 60).</summary>
     public int? InactivityPopupSeconds { get; set; }
+    /// <summary>When true, privacy policy checkbox on phone screen is checked by default.</summary>
+    public bool PrivacyPolicyCheckboxCheckedByDefault { get; set; } = false;
+    /// <summary>Privacy policy content (HTML or plain text); shown in panel when user clicks the link.</summary>
+    public string? PrivacyPolicyContent { get; set; }
 }
