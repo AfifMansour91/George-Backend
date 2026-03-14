@@ -66,6 +66,10 @@ public partial class KioskSettings
     /// <summary>Privacy policy content (HTML or plain text); shown in a panel when user clicks the link.</summary>
     public string? PrivacyPolicyContent { get; set; }
 
+    /// <summary>Product card image aspect ratio in kiosk: "3:2" or "1:1".</summary>
+    [StringLength(10)]
+    public string? ProductImageAspectRatio { get; set; }
+
     [ForeignKey("AccountId")]
     [InverseProperty("KioskSettings")]
     public virtual Account Account { get; set; } = null!;

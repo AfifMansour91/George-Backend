@@ -39,4 +39,6 @@ public class KioskSettingsRes
     public bool PrivacyPolicyCheckboxCheckedByDefault { get; set; } = false;
     /// <summary>Privacy policy content (HTML or plain text); shown in panel when user clicks the link.</summary>
     public string? PrivacyPolicyContent { get; set; }
+    /// <summary>Product card image aspect ratio: "3:2" or "1:1".</summary>
+    public string? ProductImageAspectRatio { get; set; }
 }

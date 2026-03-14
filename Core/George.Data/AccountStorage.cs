@@ -172,6 +172,7 @@ namespace George.Data
                 existing.InactivityPopupSeconds = settings.InactivityPopupSeconds;
                 existing.PrivacyPolicyCheckboxCheckedByDefault = settings.PrivacyPolicyCheckboxCheckedByDefault;
                 existing.PrivacyPolicyContent = settings.PrivacyPolicyContent;
+                existing.ProductImageAspectRatio = settings.ProductImageAspectRatio;
             }
             else
             {

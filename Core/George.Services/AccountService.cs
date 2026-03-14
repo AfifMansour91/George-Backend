@@ -255,6 +255,7 @@ namespace George.Services
                     InactivityPopupSeconds = req.KioskSettings.InactivityPopupSeconds,
                     PrivacyPolicyCheckboxCheckedByDefault = req.KioskSettings.PrivacyPolicyCheckboxCheckedByDefault,
                     PrivacyPolicyContent = string.IsNullOrWhiteSpace(req.KioskSettings.PrivacyPolicyContent) ? null : req.KioskSettings.PrivacyPolicyContent,
+                    ProductImageAspectRatio = string.IsNullOrWhiteSpace(req.KioskSettings.ProductImageAspectRatio) ? null : req.KioskSettings.ProductImageAspectRatio,
                 };
                 await _accountStorage.UpsertKioskSettingsAsync(accountId, kioskEntity, req.KioskSettings.HomeImageMediaIds, cancelToken);
             }
