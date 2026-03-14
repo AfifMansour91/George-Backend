@@ -29,6 +29,8 @@ namespace George.Services.Request
 
         /// <summary>Kiosk/sidebar: icon URL for category circle.</summary>
         public string? IconUrl { get; set; }
+        /// <summary>When false, category is hidden from kiosk (default true).</summary>
+        public bool? ShowInKiosk { get; set; }
     }
 
     public class CreateCategoryReq : CategoryReq

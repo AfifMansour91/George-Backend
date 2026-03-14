@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -51,6 +51,9 @@ public partial class Category
     public int? SourceGlobalCategoryId { get; set; }
 
     public int? WooCommerceId { get; set; }
+
+    /// <summary>When false, category is hidden from kiosk (default true).</summary>
+    public bool ShowInKiosk { get; set; } = true;
 
     [StringLength(1000)]
     public string? ImageUrl { get; set; }

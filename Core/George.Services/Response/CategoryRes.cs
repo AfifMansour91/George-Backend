@@ -19,5 +19,7 @@ namespace George.Services.Response
         public string? ImageUrl { get; set; }
         /// <summary>Kiosk/sidebar: icon URL (Figma fi_XXX, ~134×134 centered in circle).</summary>
         public string? IconUrl { get; set; }
+        /// <summary>When false, category is hidden from kiosk (default true).</summary>
+        public bool? ShowInKiosk { get; set; }
     }
 }

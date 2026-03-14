@@ -64,10 +64,11 @@ namespace George.Services
 
             // Convert to EF model
             Category? model = _mapper.Map<Category>(req);
-            model.CreationUserId = AuthUser.Id;
+            model!.CreationUserId = AuthUser.Id;
             model.CreationTime = DateTime.UtcNow;
             model.IsActive = true;
             model.IsDeleted = false;
+            model.ShowInKiosk = req.ShowInKiosk ?? true;
 
             // Create the data in the DB.
             model = await _categoryStorage.CreateCategoryAsync(model, req.SiteIds, cancelToken).ConfigureAwait(false);
@@ -193,7 +194,8 @@ namespace George.Services
                 DisplayAsMain = category.DisplayAsMain,
                 AccountId = category.AccountId,
                 ImageUrl = category.ImageUrl,
-                IconUrl = category.IconUrl
+                IconUrl = category.IconUrl,
+                ShowInKiosk = category.ShowInKiosk
             };
 
             // Map sites

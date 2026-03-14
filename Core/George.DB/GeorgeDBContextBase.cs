@@ -253,6 +253,7 @@ public partial class GeorgeDBContextBase : DbContext
             entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.ShowInKiosk).HasDefaultValue(true);
 
             entity.HasOne(d => d.Account).WithMany(p => p.Category).HasConstraintName("FK_Category_Account");
 
