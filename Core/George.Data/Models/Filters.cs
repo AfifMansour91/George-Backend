@@ -89,6 +89,8 @@ namespace George.Common
         public SearchFilter? Search { get; set; }
         /// <summary>When true, list response includes ProductOption and ProductVariant (for "with variations" filter and variations column). Use only when needed to avoid heavier payload.</summary>
         public bool? IncludeOptionsAndVariants { get; set; }
+        /// <summary>When true, list response includes RelatedProduct and ComplementaryProduct (e.g. kiosk catalog for upsell step). Use only when needed.</summary>
+        public bool IncludeRelatedAndComplementaryProducts { get; set; }
     }
 
     public class CategoryFilter

@@ -101,6 +101,47 @@ namespace George.Services
             return response;
         }
 
+        /// <summary>Get products by site and product IDs (same shape as GetProductsBySite). For kiosk upsell page to load only needed products.</summary>
+        public async Task<IApiResponse<ApiListResponse<ProductRes>>> GetProductsBySiteAndIdsAsync(
+            int siteId,
+            List<int> productIds,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<ApiListResponse<ProductRes>>
+            {
+                Data = new ApiListResponse<ProductRes>()
+            };
+            if (siteId <= 0)
+                return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required.");
+            if (productIds == null || productIds.Count == 0)
+            {
+                response.Data!.Items = new List<ProductRes>();
+                response.Data.Total = 0;
+                return response;
+            }
+            var take = Math.Min(productIds.Count, 500);
+            var paging = new PagingExDto { Skip = 0, Take = take, IncludeTotal = false };
+            var res = await _productStorage.GetProductsBySiteAndIdsAsync(siteId, productIds, paging, cancelToken).ConfigureAwait(false);
+            response.Data!.Items = res.Items.ConvertAll(p => MapProductToRes(p));
+            response.Data.Total = res.Items.Count;
+            return response;
+        }
+
+        /// <summary>Get related and complementary product IDs for the given product IDs at the site. Used by kiosk upsell step when pos products type is upsells/combined.</summary>
+        public async Task<IApiResponse<List<int>>> GetUpsellProductIdsAsync(int siteId, List<int> productIds, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<List<int>>();
+            if (siteId <= 0)
+                return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required.");
+            if (productIds == null || productIds.Count == 0)
+            {
+                response.Data = new List<int>();
+                return response;
+            }
+            response.Data = await _productStorage.GetUpsellProductIdsForSiteAsync(siteId, productIds, cancelToken).ConfigureAwait(false);
+            return response;
+        }
+
         public async Task<IApiResponse<ProductRes>> GetProductAsync(int productId, CancellationToken cancelToken)
         {
             var response = new ApiResponse<ProductRes>();

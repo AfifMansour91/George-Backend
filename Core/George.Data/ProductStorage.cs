@@ -55,6 +55,8 @@ namespace George.Data
                         .ThenInclude(pv => pv.ProductVariantOptionValue);
             }
 
+            // Related/complementary are not loaded here; kiosk gets them via GetUpsellProductIdsForSite when needed.
+
             // Apply filters
             if (filter != null)
             {
@@ -95,8 +97,39 @@ namespace George.Data
                 .ThenByDescending(p => p.CreationTime);
 
             res.Items = await query.ToListAsync(cancelToken).ConfigureAwait(false);
-
             return res;
+        }
+
+        /// <summary>Get unique related and complementary product IDs for the given product IDs, restricted to products that belong to the site. For kiosk upsell step. Uses EF only (no raw SQL, no concurrent context use).</summary>
+        public async Task<List<int>> GetUpsellProductIdsForSiteAsync(int siteId, List<int> productIds, CancellationToken cancelToken)
+        {
+            if (siteId <= 0 || productIds == null || productIds.Count == 0)
+                return new List<int>();
+
+            var relatedIds = await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => productIds.Contains(p.Id))
+                .SelectMany(p => p.RelatedProduct.Select(r => r.Id))
+                .Distinct()
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+
+            var complementaryIds = await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => productIds.Contains(p.Id))
+                .SelectMany(p => p.ComplementaryProduct.Select(c => c.Id))
+                .Distinct()
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+
+            var allUpsellIds = relatedIds.Union(complementaryIds).ToHashSet();
+            if (allUpsellIds.Count == 0)
+                return new List<int>();
+
+            var inSite = await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => allUpsellIds.Contains(p.Id) && !p.IsDeleted && p.Site.Any(s => s.Id == siteId))
+                .Select(p => p.Id)
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+            return inSite;
         }
 
         /// <summary>Get products by site and a list of product IDs (e.g. for kiosk past purchases). Same includes as GetProductsAsync. Excludes deleted.</summary>
@@ -909,6 +942,7 @@ namespace George.Data
                 product.WeightConfigId = weightConfig?.Id;
             }
         }
+
     }
 }
 

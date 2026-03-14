@@ -75,6 +75,40 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _productSvc.GetProductsAsync(request, cancelToken));
         }
 
+        /// <summary>Get related and complementary product IDs for the given product IDs at the site. For kiosk upsell step when "מוצרים נלווים" is selected in settings. Query: productIds=1,2,3 (comma-separated).</summary>
+        [HttpGet("Site/{siteId:int}/UpsellProductIds")]
+        [ProducesResponseType(typeof(IApiResponse<List<int>>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetUpsellProductIdsAsync(
+            [FromRoute] int siteId,
+            [FromQuery] string? productIds,
+            CancellationToken cancelToken = default)
+        {
+            var list = ParseCommaSeparatedIds(productIds);
+            return await SafeCallWithErrorCatchingAsync(() => _productSvc.GetUpsellProductIdsAsync(siteId, list, cancelToken));
+        }
+
+        /// <summary>Get products by site and product IDs. Query: productIds=1,2,3 (comma-separated). For kiosk upsell page.</summary>
+        [HttpGet("Site/{siteId:int}/ByIds")]
+        [ProducesResponseType(typeof(IApiResponse<ApiListResponse<ProductRes>>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetProductsBySiteAndIdsAsync(
+            [FromRoute] int siteId,
+            [FromQuery] string? productIds,
+            CancellationToken cancelToken = default)
+        {
+            var list = ParseCommaSeparatedIds(productIds);
+            return await SafeCallWithErrorCatchingAsync(() => _productSvc.GetProductsBySiteAndIdsAsync(siteId, list, cancelToken));
+        }
+
+        private static List<int> ParseCommaSeparatedIds(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return new List<int>();
+            return value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(s => int.TryParse(s, out var id) ? id : (int?)null)
+                .Where(id => id.HasValue)
+                .Select(id => id!.Value)
+                .ToList();
+        }
+
         /// <summary>Get products the customer has ordered in the past at this site (kiosk "past purchases"). Requires customer phone; use with kiosk customer Bearer token.</summary>
         [HttpGet("Site/{siteId:int}/PastPurchases")]
         [ProducesResponseType(typeof(IApiResponse<ApiListResponse<ProductRes>>), (int)HttpStatusCode.OK)]
