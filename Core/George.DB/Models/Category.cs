@@ -55,6 +55,9 @@ public partial class Category
     /// <summary>When false, category is hidden from kiosk (default true).</summary>
     public bool ShowInKiosk { get; set; } = true;
 
+    /// <summary>Display order in kiosk sidebar (lower = first). Null = use default order.</summary>
+    public int? KioskDisplayOrder { get; set; }
+
     [StringLength(1000)]
     public string? ImageUrl { get; set; }
 

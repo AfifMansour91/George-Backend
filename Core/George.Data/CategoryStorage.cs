@@ -126,6 +126,7 @@ namespace George.Data
             dbCategory.ImageUrl = updated.ImageUrl;
             dbCategory.IconUrl = updated.IconUrl;
             dbCategory.ShowInKiosk = updated.ShowInKiosk;
+            dbCategory.KioskDisplayOrder = updated.KioskDisplayOrder;
             dbCategory.UpdatedDate = DateTime.UtcNow;
             dbCategory.UpdateUserId = updated.UpdateUserId;
 

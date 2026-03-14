@@ -195,7 +195,8 @@ namespace George.Services
                 AccountId = category.AccountId,
                 ImageUrl = category.ImageUrl,
                 IconUrl = category.IconUrl,
-                ShowInKiosk = category.ShowInKiosk
+                ShowInKiosk = category.ShowInKiosk,
+                KioskDisplayOrder = category.KioskDisplayOrder
             };
 
             // Map sites

@@ -31,6 +31,9 @@ namespace George.Services.Request
         public string? IconUrl { get; set; }
         /// <summary>When false, category is hidden from kiosk (default true).</summary>
         public bool? ShowInKiosk { get; set; }
+
+        /// <summary>Display order in kiosk sidebar (lower = first). Null = use default.</summary>
+        public int? KioskDisplayOrder { get; set; }
     }
 
     public class CreateCategoryReq : CategoryReq
