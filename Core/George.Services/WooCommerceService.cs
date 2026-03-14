@@ -164,6 +164,96 @@ namespace George.Services
             };
         }
 
+        /// <summary>
+        /// Verifies sync consistency for an account (and optionally a single site): product counts per site,
+        /// duplicate SKUs within a site, and cross-site SKU overlap (same raw SKU in different sites).
+        /// Use this to confirm data syncs without collision between branches.
+        /// </summary>
+        public async Task<IApiResponse<WooCommerceSyncVerificationRes>> VerifySyncAsync(int accountId, int? siteId, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<WooCommerceSyncVerificationRes> { Data = new WooCommerceSyncVerificationRes() };
+            var result = response.Data;
+            List<Site> sites;
+            if (siteId.HasValue)
+            {
+                var site = await _siteStorage.GetSiteAsync(siteId.Value, cancelToken);
+                sites = site != null && site.AccountId == accountId ? new List<Site> { site } : new List<Site>();
+            }
+            else
+            {
+                sites = await _siteStorage.GetSitesByAccountAsync(accountId, cancelToken);
+            }
+
+            if (sites.Count == 0)
+            {
+                result.Message = siteId.HasValue ? "Site not found or does not belong to account." : "No sites found for account.";
+                return response;
+            }
+
+            // Load all products for the account (with Site) to compute per-site stats and cross-site SKU overlap
+            var productsResult = await _productStorage.GetProductsAsync(
+                new ProductFilter { AccountId = accountId },
+                new PagingExDto { Skip = 0, Take = 50000, IncludeTotal = false },
+                cancelToken);
+            var allProducts = productsResult.Items;
+
+            var siteIdsSet = sites.Select(s => s.Id).ToHashSet();
+            var crossSiteSkuToSites = new Dictionary<string, HashSet<int>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var site in sites)
+            {
+                var siteProducts = allProducts.Where(p => p.Site != null && p.Site.Any(s => s.Id == site.Id)).ToList();
+                var withSku = siteProducts.Count(p => !string.IsNullOrWhiteSpace(p.Sku));
+                var withWooId = siteProducts.Count(p => p.WooCommerceId.HasValue);
+                var skuCounts = siteProducts
+                    .Where(p => !string.IsNullOrWhiteSpace(p.Sku))
+                    .GroupBy(p => (p.Sku ?? "").Trim(), StringComparer.OrdinalIgnoreCase)
+                    .Where(g => g.Count() > 1)
+                    .Select(g => g.Key)
+                    .ToList();
+
+                foreach (var p in siteProducts.Where(p => !string.IsNullOrWhiteSpace(p.Sku)))
+                {
+                    var skuNorm = (p.Sku ?? "").Trim();
+                    if (!crossSiteSkuToSites.TryGetValue(skuNorm, out var set))
+                    {
+                        set = new HashSet<int>();
+                        crossSiteSkuToSites[skuNorm] = set;
+                    }
+                    foreach (var s in p.Site ?? Array.Empty<Site>())
+                        if (siteIdsSet.Contains(s.Id))
+                            set.Add(s.Id);
+                }
+
+                result.Sites.Add(new SiteSyncVerificationReport
+                {
+                    SiteId = site.Id,
+                    SiteName = site.SiteName ?? "",
+                    ProductCount = siteProducts.Count,
+                    WithSkuCount = withSku,
+                    WithWooCommerceIdCount = withWooId,
+                    DuplicateSkusInSite = skuCounts,
+                    WooCommerceConfigured = !string.IsNullOrEmpty(site.WooCommerceUrl) &&
+                                          !string.IsNullOrEmpty(site.WooCommerceKey) &&
+                                          !string.IsNullOrEmpty(site.WooCommerceSecret)
+                });
+            }
+
+            result.CrossSiteSkuOverlap = crossSiteSkuToSites
+                .Where(kv => kv.Value.Count > 1)
+                .Select(kv => kv.Key)
+                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            result.AllSitesOk = result.Sites.All(s => s.DuplicateSkusInSite.Count == 0) && result.CrossSiteSkuOverlap.Count == 0;
+            result.Message = result.AllSitesOk
+                ? "All sites OK: no duplicate SKUs within a site and no cross-site SKU overlap (after using site-prefixed SKU in WooCommerce, overlap does not cause collision)."
+                : (result.CrossSiteSkuOverlap.Count > 0
+                    ? $"Found {result.CrossSiteSkuOverlap.Count} SKU(s) used in more than one site. With site-prefixed SKU (S{{siteId}}_) in WooCommerce these do not collide."
+                    : "Found duplicate SKUs within at least one site. Fix duplicates so sync is consistent.");
+            return response;
+        }
+
         private async Task<Dictionary<int, int>> SyncCategoriesAsync(
             string baseUrl,
             int siteId,
@@ -839,8 +929,8 @@ namespace George.Services
             }
             else
             {
-                // Load all products for the site
-                var filter = new ProductFilter { SiteId = siteId };
+                // Load all products for the site; include ProductOption so variable products get attributes and variations synced
+                var filter = new ProductFilter { SiteId = siteId, IncludeOptionsAndVariants = true };
                 var products = await _productStorage.GetProductsAsync(
                     filter,
                     new PagingExDto { Skip = 0, Take = 10000, IncludeTotal = false },
@@ -944,10 +1034,11 @@ namespace George.Services
                     .Cast<object>()
                     .ToList() ?? new List<object>();
 
-                // Resolve WooCommerce product ID for update (so we can fetch existing images and use id to avoid duplicating)
+                // Resolve WooCommerce product ID for update (so we can fetch existing images and use id to avoid duplicating).
+                // Use site-scoped SKU so the same SKU in different branches (sites) does not collide when syncing to one WooCommerce store.
                 int? existingWooId = product.WooCommerceId;
                 if (!existingWooId.HasValue && !string.IsNullOrWhiteSpace(product.Sku))
-                    existingWooId = await FindProductIdBySkuAsync(baseUrl, product.Sku, httpClient, cancelToken);
+                    existingWooId = await FindProductIdBySkuAsync(baseUrl, siteId, product.Sku, httpClient, cancelToken);
 
                 List<(int id, string? src, string? name)>? existingWooImages = null;
                 if (existingWooId.HasValue)
@@ -1060,13 +1151,14 @@ namespace George.Services
                     }
                 }
 
+                var wooSku = GetWooCommerceSku(siteId, product.Sku);
                 var wooProduct = new Dictionary<string, object>
                 {
                     ["name"] = product.Name,
                     ["type"] = (product.ProductVariant != null && product.ProductVariant.Any(v => !v.IsDeleted)) ? "variable" : "simple",
                     ["description"] = product.LongDescription ?? "",
                     ["short_description"] = product.ShortDescription ?? "",
-                    ["sku"] = product.Sku ?? "",
+                    ["sku"] = wooSku,
                     ["catalog_visibility"] = catalogVisibility,
                     ["weight"] = product.Weight?.ToString() ?? "",
                     ["shipping_class"] = shippingClass,
@@ -1235,7 +1327,7 @@ namespace George.Services
                 // Sync variations for variable products
                 if (wooCommerceId.HasValue && product.ProductVariant != null && product.ProductVariant.Any(v => !v.IsDeleted))
                 {
-                    await SyncProductVariantsAsync(baseUrl, wooCommerceId.Value, product, attributeMap, attributeSlugMap, httpClient, cancelToken);
+                    await SyncProductVariantsAsync(baseUrl, siteId, wooCommerceId.Value, product, attributeMap, attributeSlugMap, httpClient, cancelToken);
                 }
 
                 // Only count as success when we actually got a WooCommerce ID (created or updated)
@@ -1346,6 +1438,7 @@ namespace George.Services
 
         private async Task SyncProductVariantsAsync(
             string baseUrl,
+            int siteId,
             int wooProductId,
             Product product,
             Dictionary<string, int?> attributeMap,
@@ -1425,11 +1518,12 @@ namespace George.Services
                         usedWooVariationIds.Add(taken);
                     }
 
+                    var variantWooSku = GetWooCommerceSku(siteId, variant.Sku);
                     var wooVariation = new Dictionary<string, object>
                     {
                         ["regular_price"] = variant.Price?.ToString() ?? product.Price?.ToString() ?? "0",
                         ["sale_price"] = variant.SalePrice?.ToString() ?? "",
-                        ["sku"] = variant.Sku ?? "",
+                        ["sku"] = variantWooSku,
                         ["manage_stock"] = stockManagedPerVariation,
                         ["stock_status"] = variantStockStatus,
                         ["weight"] = variant.Weight?.ToString() ?? "",
@@ -1574,20 +1668,50 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Finds a product in WooCommerce by SKU. Returns its ID if found, so we can update instead of create (avoids product_invalid_sku when product already exists).
+        /// Returns the SKU to use in WooCommerce for a given site and product/variant SKU.
+        /// Prefixing with site id (S{siteId}_) avoids collisions when the same SKU exists in different branches (sites) syncing to one WooCommerce store.
         /// </summary>
-        private static async Task<int?> FindProductIdBySkuAsync(string baseUrl, string sku, HttpClient httpClient, CancellationToken cancelToken)
+        private static string GetWooCommerceSku(int siteId, string? sku)
+        {
+            if (string.IsNullOrWhiteSpace(sku)) return "";
+            return $"S{siteId}_{sku.Trim()}";
+        }
+
+        /// <summary>
+        /// Finds a product in WooCommerce by SKU. Uses site-scoped SKU (S{siteId}_{sku}) first, then falls back to plain SKU for backward compatibility with existing stores.
+        /// Returns its ID if found, so we can update instead of create (avoids product_invalid_sku when product already exists).
+        /// </summary>
+        private static async Task<int?> FindProductIdBySkuAsync(string baseUrl, int siteId, string sku, HttpClient httpClient, CancellationToken cancelToken)
         {
             if (string.IsNullOrWhiteSpace(sku)) return null;
+            var trimmed = sku.Trim();
+            var wooSku = GetWooCommerceSku(siteId, trimmed);
             try
             {
-                var url = $"{baseUrl}/products?sku={Uri.EscapeDataString(sku.Trim())}&per_page=1";
+                // Prefer site-scoped SKU so different branches do not overwrite each other
+                var url = $"{baseUrl}/products?sku={Uri.EscapeDataString(wooSku)}&per_page=1";
                 var response = await httpClient.GetAsync(url, cancelToken);
-                if (!response.IsSuccessStatusCode) return null;
-                var body = await response.Content.ReadAsStringAsync(cancelToken);
-                var list = TryDeserialize<List<WooCommerceProductResponse>>(body);
-                var first = list?.FirstOrDefault();
-                return first?.id;
+                if (response.IsSuccessStatusCode)
+                {
+                    var body = await response.Content.ReadAsStringAsync(cancelToken);
+                    var list = TryDeserialize<List<WooCommerceProductResponse>>(body);
+                    var first = list?.FirstOrDefault();
+                    if (first != null) return first.id;
+                }
+                // Fallback: try plain SKU for stores that were synced before site-scoped SKU was introduced
+                if (wooSku != trimmed)
+                {
+                    url = $"{baseUrl}/products?sku={Uri.EscapeDataString(trimmed)}&per_page=1";
+                    response = await httpClient.GetAsync(url, cancelToken);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var body = await response.Content.ReadAsStringAsync(cancelToken);
+                        var list = TryDeserialize<List<WooCommerceProductResponse>>(body);
+                        var first = list?.FirstOrDefault();
+                        return first?.id;
+                    }
+                }
+                return null;
             }
             catch
             {

@@ -48,6 +48,18 @@ namespace George.Api.Controllers
             return Ok(new ApiResponse<object> { Data = new { apiKey = saved } });
         }
 
+        /// <summary>Verifies sync consistency: product counts per site, duplicate SKUs within a site, cross-site SKU overlap. Use to confirm no collision between branches.</summary>
+        [HttpGet("VerifySync")]
+        [ProducesResponseType(typeof(IApiResponse<WooCommerceSyncVerificationRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> VerifySyncAsync(
+            [FromQuery] int accountId,
+            [FromQuery] int? siteId = null,
+            CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync<WooCommerceSyncVerificationRes>(() =>
+                _wooCommerceService.VerifySyncAsync(accountId, siteId, cancelToken));
+        }
+
         [HttpPost("Sync")]
         [ProducesResponseType(typeof(IApiResponse<WooCommerceSyncRes>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> SyncToWooCommerceAsync(
