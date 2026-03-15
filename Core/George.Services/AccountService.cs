@@ -298,63 +298,53 @@ namespace George.Services
             return response;
         }
 
-        //// 4. Wizard session status (get)
-        //public async Task<IApiResponse<WizardSessionRes>> GetWizardSessionAsync(long accountId, CancellationToken cancelToken)
-        //{
-        //    var response = new ApiResponse<WizardSessionRes>();
+        /// <summary>Get wizard session (stored step data JSON) for an account, optionally scoped by site.</summary>
+        public async Task<IApiResponse<WizardSessionRes>> GetWizardSessionAsync(int accountId, string? siteId, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<WizardSessionRes>();
+            var account = await _accountStorage.GetAccountAsync(accountId, cancelToken);
+            if (account == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
 
-        //    // check access (like above)
+            var dataJson = await _accountStorage.GetWizardSessionJsonAsync(accountId, siteId, cancelToken);
+            response.Data = new WizardSessionRes
+            {
+                Id = 0,
+                AccountId = accountId,
+                Step = account.WizardStep ?? 1,
+                Status = account.WizardStatusId.HasValue ? "In Progress" : "In Progress",
+                ContentOwner = account.ContentOwner != null ? account.ContentOwner.ToString()! : "Client",
+                InviteToken = null,
+                SessionDataJson = dataJson,
+                WizardType = null
+            };
+            return response;
+        }
 
-        //    var ws = await _accountStorage.GetWizardSessionAsync(accountId, cancelToken);
-        //    if (ws == null)
-        //        return CreateResponse(response, StatusCode.ItemNotFound);
+        /// <summary>Update wizard session: persist step, status, and full session JSON so user can resume later.</summary>
+        public async Task<IApiResponse<WizardSessionRes>> UpdateWizardSessionAsync(int accountId, string? siteId, UpdateWizardSessionReq req, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<WizardSessionRes>();
+            var account = await _accountStorage.GetAccountAsync(accountId, cancelToken);
+            if (account == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
 
-        //    response.Data = new WizardSessionRes
-        //    {
-        //        Id = ws.Id,
-        //        AccountId = ws.AccountId,
-        //        Step = ws.Step,
-        //        Status = ws.Status,
-        //        ContentOwner = ws.ContentOwner,
-        //        InviteToken = ws.InviteToken
-        //    };
+            if (req.DataJson != null)
+                await _accountStorage.SaveWizardSessionJsonAsync(accountId, siteId, req.DataJson, cancelToken);
 
-        //    return response;
-        //}
-
-        //// 5. Wizard session status (update step / complete)
-        //public async Task<IApiResponse<WizardSessionRes>> UpdateWizardSessionAsync(long accountId, UpdateWizardSessionReq req, CancellationToken cancelToken)
-        //{
-        //    var response = new ApiResponse<WizardSessionRes>();
-
-        //    // check access
-
-        //    var ws = await _accountStorage.GetWizardSessionAsync(accountId, cancelToken);
-        //    if (ws == null)
-        //        return CreateResponse(response, StatusCode.ItemNotFound);
-
-        //    var updated = await _accountStorage.UpdateWizardSessionAsync(
-        //        ws.Id,
-        //        req.Step,
-        //        req.Status,
-        //        cancelToken
-        //    );
-
-        //    if (updated == null)
-        //        return CreateResponse(response, StatusCode.ItemNotFound);
-
-        //    response.Data = new WizardSessionRes
-        //    {
-        //        Id = updated.Id,
-        //        AccountId = updated.AccountId,
-        //        Step = updated.Step,
-        //        Status = updated.Status,
-        //        ContentOwner = updated.ContentOwner,
-        //        InviteToken = updated.InviteToken
-        //    };
-
-        //    return response;
-        //}
+            var dataJson = await _accountStorage.GetWizardSessionJsonAsync(accountId, siteId, cancelToken);
+            response.Data = new WizardSessionRes
+            {
+                Id = 0,
+                AccountId = accountId,
+                Step = account.WizardStep ?? 1,
+                Status = "In Progress",
+                ContentOwner = account.ContentOwner != null ? account.ContentOwner.ToString()! : "Client",
+                SessionDataJson = dataJson,
+                WizardType = req.WizardType
+            };
+            return response;
+        }
 
         private static AccountNotificationSettings MapNotificationSettingsReqToEntity(int accountId, NotificationSettingsReq req)
         {

@@ -1,4 +1,4 @@
-﻿using George.Api.Core;
+using George.Api.Core;
 using George.Common;
 using George.Common.Request;
 using George.Services;
@@ -58,19 +58,19 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _accountSvc.DeleteAccountAsync(accountId, cancelToken));
         }
 
-        //[HttpGet("{accountId:long}/WizardSession")]
-        //[ProducesResponseType(typeof(IApiResponse<WizardSessionRes>), 200)]
-        //public async Task<IActionResult> GetWizardSessionAsync([FromRoute] long accountId, CancellationToken cancelToken = default)
-        //{
-        //    return await SafeCallWithErrorCatchingAsync(() => _accountSvc.GetWizardSessionAsync(accountId, cancelToken));
-        //}
+        [HttpGet("{accountId:int}/wizard-session")]
+        [ProducesResponseType(typeof(IApiResponse<WizardSessionRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetWizardSessionAsync([FromRoute] int accountId, [FromQuery] string? siteId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _accountSvc.GetWizardSessionAsync(accountId, siteId, cancelToken));
+        }
 
-        //[HttpPut("{accountId:long}/WizardSession")]
-        //[ProducesResponseType(typeof(IApiResponse<WizardSessionRes>), 200)]
-        //public async Task<IActionResult> UpdateWizardSessionAsync([FromRoute] long accountId, [FromBody] UpdateWizardSessionReq req, CancellationToken cancelToken = default)
-        //{
-        //    return await SafeCallWithErrorCatchingAsync(() => _accountSvc.UpdateWizardSessionAsync(accountId, req, cancelToken));
-        //}
+        [HttpPut("{accountId:int}/wizard-session")]
+        [ProducesResponseType(typeof(IApiResponse<WizardSessionRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> UpdateWizardSessionAsync([FromRoute] int accountId, [FromQuery] string? siteId, [FromBody] UpdateWizardSessionReq req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _accountSvc.UpdateWizardSessionAsync(accountId, siteId, req, cancelToken));
+        }
 
         [ApiExplorerSettings(IgnoreApi = true)]
         public void SetAuthUser()

@@ -354,6 +354,10 @@ namespace George.Common.Request
     {
         public int? Step { get; set; }
         public string? Status { get; set; }
+        /// <summary>Wizard type: "all_sites" or "per_site".</summary>
+        public string? WizardType { get; set; }
+        /// <summary>Full wizard session JSON (selectedCategories, selectedProducts, completedProductIds, etc.) so it can be restored when user returns.</summary>
+        public string? DataJson { get; set; }
     }
 
 

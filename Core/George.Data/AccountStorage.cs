@@ -381,6 +381,72 @@ namespace George.Data
         //    // TEMP: in V1 MVP you can keep this empty or do inline clone logic.
         //    // Later you'll EXEC dbo.usp_OnboardAccountFromTemplates.
         //}
+
+        /// <summary>Get stored wizard session JSON for an account (and optional site). Returns null if no row or table missing.</summary>
+        public async Task<string?> GetWizardSessionJsonAsync(int accountId, string? siteId, CancellationToken cancelToken)
+        {
+            const int stepNumber = 0; // full session blob
+            int? siteIdInt = null;
+            if (!string.IsNullOrEmpty(siteId) && int.TryParse(siteId, out var sid))
+                siteIdInt = sid;
+            try
+            {
+                var set = _dbContext.Set<AccountWizardStepData>();
+                var row = await set
+                    .AsNoTracking()
+                    .Where(a => a.AccountId == accountId && a.StepNumber == stepNumber &&
+                        (siteIdInt == null ? a.SiteId == null : a.SiteId == siteIdInt))
+                    .FirstOrDefaultAsync(cancelToken)
+                    .ConfigureAwait(false);
+                return row?.DataJson;
+            }
+            catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 208)
+            {
+                _logger.LogWarning(ex, "AccountWizardStepData table missing for GetWizardSessionJsonAsync. Run Scripts/Create_AccountWizardStepData.sql.");
+                return null;
+            }
+        }
+
+        /// <summary>Save wizard session JSON for an account (and optional site). Creates or updates the row.</summary>
+        public async Task SaveWizardSessionJsonAsync(int accountId, string? siteId, string dataJson, CancellationToken cancelToken)
+        {
+            const int stepNumber = 0;
+            int? siteIdInt = null;
+            if (!string.IsNullOrEmpty(siteId) && int.TryParse(siteId, out var sid))
+                siteIdInt = sid;
+            try
+            {
+                var set = _dbContext.Set<AccountWizardStepData>();
+                var row = await set
+                    .Where(a => a.AccountId == accountId && a.StepNumber == stepNumber &&
+                        (siteIdInt == null ? a.SiteId == null : a.SiteId == siteIdInt))
+                    .FirstOrDefaultAsync(cancelToken)
+                    .ConfigureAwait(false);
+                var now = DateTime.UtcNow;
+                if (row != null)
+                {
+                    row.DataJson = dataJson;
+                    row.UpdatedDate = now;
+                }
+                else
+                {
+                    set.Add(new AccountWizardStepData
+                    {
+                        AccountId = accountId,
+                        SiteId = siteIdInt,
+                        StepNumber = stepNumber,
+                        DataJson = dataJson,
+                        CreationTime = now,
+                        UpdatedDate = now
+                    });
+                }
+                await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            }
+            catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 208)
+            {
+                _logger.LogWarning(ex, "AccountWizardStepData table missing for SaveWizardSessionJsonAsync. Run Scripts/Create_AccountWizardStepData.sql.");
+            }
+        }
     }
 }
 

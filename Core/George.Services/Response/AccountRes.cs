@@ -175,6 +175,9 @@ namespace George.Services.Response
         public string Status { get; set; } = default!;
         public string ContentOwner { get; set; } = default!;
         public string? InviteToken { get; set; }
+        /// <summary>Full wizard session JSON to restore selections and step data when user returns.</summary>
+        public string? SessionDataJson { get; set; }
+        public string? WizardType { get; set; }
     }
 
     public class AccountProductToggleRes
