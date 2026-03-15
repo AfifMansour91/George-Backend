@@ -852,6 +852,7 @@ namespace George.Services
         }
 
 
+        /// <summary>Maps Product entity to API response. Price and SalePrice are always from the Product entity (never from Template Product).</summary>
         private ProductRes MapProductToRes(Product product)
         {
             var res = new ProductRes
