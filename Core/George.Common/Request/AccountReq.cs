@@ -452,6 +452,7 @@ namespace George.Common.Request
 
         public string ManagerName { get; set; } = default!;
         public string ManagerEmail { get; set; } = default!;
+        public string? ManagerPhone { get; set; }
         public string? TempPassword { get; set; }
 
         public string Status { get; set; } = "Active";

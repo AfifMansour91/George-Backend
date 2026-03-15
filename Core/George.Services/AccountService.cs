@@ -67,6 +67,7 @@ namespace George.Services
                     FirstName = req.ManagerName, // later split
                     LastName = "",
                     Email = req.ManagerEmail,
+                    Phone = req.ManagerPhone,
                     Password = password,//passwordHash,
                     IsEmailVerified = true, // set when creating user with password
                     StatusId = (int)Common.UserStatus.Active,
