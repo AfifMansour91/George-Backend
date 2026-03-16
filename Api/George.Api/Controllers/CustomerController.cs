@@ -28,6 +28,7 @@ namespace George.Api.Controllers
             [FromQuery] string? search,
             [FromQuery] string? sortBy,
             [FromQuery] string? sortOrder,
+            [FromQuery] string? phone,
             CancellationToken cancelToken = default)
         {
             var request = new ApiListReq<CustomerFilter>
@@ -37,7 +38,8 @@ namespace George.Api.Controllers
                     SiteId = siteId,
                     Search = search,
                     SortBy = sortBy,
-                    SortOrder = sortOrder
+                    SortOrder = sortOrder,
+                    Phone = phone
                 },
                 Skip = skip ?? 0,
                 Take = take ?? 50,

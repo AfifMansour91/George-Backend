@@ -159,6 +159,15 @@ public class CustomerStorage : StorageBase
                 (r.Customer.DefaultAddress != null && r.Customer.DefaultAddress.Contains(term, StringComparison.OrdinalIgnoreCase))).ToList();
         }
 
+        if (filter?.Phone?.Trim() is { } phoneFilter)
+        {
+            var digits = NormalizePhone(phoneFilter);
+            if (digits.Length > 0)
+            {
+                rows = rows.Where(r => (r.Customer.NormalizedPhone ?? NormalizePhone(r.Customer.Phone)).Contains(digits, StringComparison.Ordinal)).ToList();
+            }
+        }
+
         var sortBy = (filter?.SortBy ?? "").Trim().ToLowerInvariant();
         var sortDesc = string.Equals(filter?.SortOrder ?? "asc", "desc", StringComparison.OrdinalIgnoreCase);
         rows = sortBy switch

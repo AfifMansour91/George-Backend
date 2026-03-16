@@ -168,6 +168,8 @@ namespace George.Common
     {
         public int? SiteId { get; set; }
         public string? Search { get; set; }
+        /// <summary>Filter by phone number (digits matched against customer phone).</summary>
+        public string? Phone { get; set; }
         public string? SortBy { get; set; }   // name | orderCount | totalRevenue
         public string? SortOrder { get; set; } // asc | desc
     }
