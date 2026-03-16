@@ -399,6 +399,7 @@ public partial class GeorgeDBContextBase : DbContext
 
         modelBuilder.Entity<OrderItem>(entity =>
         {
+            entity.HasQueryFilter(e => !e.IsDeleted);
             entity.HasOne(d => d.Order).WithMany(p => p.OrderItem).HasConstraintName("FK_OrderItem_Order");
         });
 

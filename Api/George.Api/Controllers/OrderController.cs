@@ -64,6 +64,14 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _orderSvc.AddItemsAsync(orderId, req?.Items ?? new(), cancelToken));
         }
 
+        /// <summary>Remove a single order item (picking "הסר מוצר"). DELETE /Order/{orderId}/Items/{orderItemId}. Returns updated order.</summary>
+        [HttpDelete("{orderId:int}/Items/{orderItemId:int}")]
+        [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> RemoveOrderItemAsync([FromRoute] int orderId, [FromRoute] int orderItemId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _orderSvc.RemoveOrderItemAsync(orderId, orderItemId, cancelToken));
+        }
+
         /// <summary>Save picking state (שמור וצא). Body: { "items": [ { "orderItemId", "pickedQuantity", "totalPrice" }, ... ] }.</summary>
         [HttpPut("{orderId:int}/Picking")]
         [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]

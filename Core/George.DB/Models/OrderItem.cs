@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -13,6 +13,11 @@ public partial class OrderItem
     public int Id { get; set; }
 
     public int OrderId { get; set; }
+
+    public bool IsDeleted { get; set; }
+
+    [Precision(0)]
+    public DateTime? UpdatedDate { get; set; }
 
     public int? ProductId { get; set; }
 

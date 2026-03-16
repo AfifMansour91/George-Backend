@@ -158,6 +158,25 @@ namespace George.Data
             return db;
         }
 
+        /// <summary>Remove a single order item (e.g. from picking "הסר מוצר"). Soft delete. Returns updated order or null.</summary>
+        public async Task<Order?> RemoveOrderItemAsync(int orderId, int orderItemId, CancellationToken cancelToken)
+        {
+            var item = await _dbContext.OrderItem
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(i => i.Id == orderItemId && i.OrderId == orderId, cancelToken);
+            if (item == null) return null;
+            item.IsDeleted = true;
+            item.UpdatedDate = DateTime.UtcNow;
+            var order = await _dbContext.Order.FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
+            if (order != null)
+                order.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            return await _dbContext.Order
+                .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
+                .AsNoTracking()
+                .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
+        }
+
         /// <summary>Update picked quantity (and optional line total) for order items (שמור וצא).</summary>
         public async Task<Order?> UpdatePickingAsync(int orderId, List<(int OrderItemId, decimal? PickedQuantity, decimal? TotalPrice)> updates, CancellationToken cancelToken)
         {

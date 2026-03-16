@@ -370,6 +370,22 @@ namespace George.Services
             return response;
         }
 
+        /// <summary>Remove a single item from an order (picking "הסר מוצר"). Returns updated order.</summary>
+        public async Task<IApiResponse<OrderRes>> RemoveOrderItemAsync(int orderId, int orderItemId, CancellationToken cancelToken = default)
+        {
+            var response = new ApiResponse<OrderRes>();
+            var order = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
+            if (order == null)
+                return CreateResponse(response, StatusCode.ItemNotFound, "Order not found.");
+            if (string.Equals(order.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+                return CreateResponse(response, StatusCode.InvalidRequest, "Cannot remove items from a cancelled order.");
+            var updated = await _orderStorage.RemoveOrderItemAsync(orderId, orderItemId, cancelToken);
+            if (updated == null)
+                return CreateResponse(response, StatusCode.ItemNotFound, "Order item not found.");
+            response.Data = _mapper.Map<OrderRes>(updated);
+            return response;
+        }
+
         /// <summary>Save picking state (שמור וצא). Body: { "items": [ { "orderItemId", "pickedQuantity", "totalPrice" }, ... ] }.</summary>
         public async Task<IApiResponse<OrderRes>> UpdatePickingAsync(int orderId, UpdatePickingReq? req, CancellationToken cancelToken = default)
         {
