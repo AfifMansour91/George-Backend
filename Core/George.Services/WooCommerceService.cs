@@ -1668,17 +1668,16 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Returns the SKU to use in WooCommerce for a given site and product/variant SKU.
-        /// Prefixing with site id (S{siteId}_) avoids collisions when the same SKU exists in different branches (sites) syncing to one WooCommerce store.
+        /// Returns the SKU to use in WooCommerce. Synced without site prefix so the product SKU in WooCommerce matches the system SKU.
         /// </summary>
         private static string GetWooCommerceSku(int siteId, string? sku)
         {
             if (string.IsNullOrWhiteSpace(sku)) return "";
-            return $"S{siteId}_{sku.Trim()}";
+            return sku.Trim();
         }
 
         /// <summary>
-        /// Finds a product in WooCommerce by SKU. Uses site-scoped SKU (S{siteId}_{sku}) first, then falls back to plain SKU for backward compatibility with existing stores.
+        /// Finds a product in WooCommerce by SKU. Tries plain SKU first, then prefixed (S{siteId}_{sku}) for backward compatibility with products synced when prefix was used.
         /// Returns its ID if found, so we can update instead of create (avoids product_invalid_sku when product already exists).
         /// </summary>
         private static async Task<int?> FindProductIdBySkuAsync(string baseUrl, int siteId, string sku, HttpClient httpClient, CancellationToken cancelToken)
@@ -1688,7 +1687,7 @@ namespace George.Services
             var wooSku = GetWooCommerceSku(siteId, trimmed);
             try
             {
-                // Prefer site-scoped SKU so different branches do not overwrite each other
+                // Try plain SKU first (current sync uses no prefix)
                 var url = $"{baseUrl}/products?sku={Uri.EscapeDataString(wooSku)}&per_page=1";
                 var response = await httpClient.GetAsync(url, cancelToken);
                 if (response.IsSuccessStatusCode)
@@ -1698,10 +1697,11 @@ namespace George.Services
                     var first = list?.FirstOrDefault();
                     if (first != null) return first.id;
                 }
-                // Fallback: try plain SKU for stores that were synced before site-scoped SKU was introduced
-                if (wooSku != trimmed)
+                // Fallback: try prefixed SKU for products synced when site prefix was used
+                var prefixedSku = $"S{siteId}_{trimmed}";
+                if (prefixedSku != wooSku)
                 {
-                    url = $"{baseUrl}/products?sku={Uri.EscapeDataString(trimmed)}&per_page=1";
+                    url = $"{baseUrl}/products?sku={Uri.EscapeDataString(prefixedSku)}&per_page=1";
                     response = await httpClient.GetAsync(url, cancelToken);
                     if (response.IsSuccessStatusCode)
                     {
