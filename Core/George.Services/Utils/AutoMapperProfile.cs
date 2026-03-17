@@ -72,8 +72,8 @@ namespace George.Services
 
                     dest.ContentOwner = src?.ContentOwner?.Name ?? "Company";
 
-                    dest.CreatedDate = src.CreationTime;
-                    dest.UpdatedDate = src.UpdatedDate;
+                    dest.CreatedDate = SpecifyUtc(src.CreationTime);
+                    dest.UpdatedDate = src.UpdatedDate.HasValue ? SpecifyUtc(src.UpdatedDate.Value) : null;
 
                     dest.CreatedById = null;
                     dest.CreatedBy = null;
@@ -154,9 +154,17 @@ namespace George.Services
                 });
 
             ////////////////////////// Order (Sprint 2)
+            // Ensure all date/time values are marked as UTC so JSON serialization emits "Z" and frontend displays correct local time
             CreateMap<Order, OrderRes>()
                 .ForMember(dest => dest.Items, opt => opt.MapFrom(src => src.OrderItem ?? new List<OrderItem>()))
-                .ForMember(dest => dest.BagsCount, opt => opt.MapFrom(src => src.BagsCount));
+                .ForMember(dest => dest.BagsCount, opt => opt.MapFrom(src => src.BagsCount))
+                .AfterMap((src, dest, context) =>
+                {
+                    dest.CreationTime = SpecifyUtc(src.CreationTime);
+                    dest.UpdatedDate = src.UpdatedDate.HasValue ? SpecifyUtc(src.UpdatedDate.Value) : null;
+                    dest.DeliveryDate = src.DeliveryDate.HasValue ? SpecifyUtc(src.DeliveryDate.Value) : null;
+                    dest.PickupDate = src.PickupDate.HasValue ? SpecifyUtc(src.PickupDate.Value) : null;
+                });
             CreateMap<OrderItem, OrderItemRes>();
             CreateMap<CreateOrderReq, Order>();
             CreateMap<CreateOrderItemReq, OrderItem>();
@@ -244,6 +252,13 @@ namespace George.Services
         private static string GetEnumValueDescription(Enum value)
         {
             return value.GetDescription();
+        }
+
+        /// <summary>Ensure DateTime is marked as UTC so JSON serialization emits "Z" and clients display correct local time. Use for any response DTO DateTime (e.g. Order, Account, Customer).</summary>
+        private static DateTime SpecifyUtc(DateTime value)
+        {
+            if (value.Kind == DateTimeKind.Utc) return value;
+            return DateTime.SpecifyKind(value, DateTimeKind.Utc);
         }
 
 

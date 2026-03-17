@@ -22,6 +22,13 @@ public class CustomerService : ServiceBase
         _customerStorage = customerStorage;
     }
 
+    /// <summary>Serialize DateTime as ISO 8601 with Z so clients display correct local time.</summary>
+    private static string ToUtcIsoString(DateTime value)
+    {
+        var utc = value.Kind == DateTimeKind.Utc ? value : DateTime.SpecifyKind(value, DateTimeKind.Utc);
+        return utc.ToString("o");
+    }
+
     private static CustomerRes MapListRowToRes(CustomerStorage.CustomerListRow row)
     {
         var c = row.Customer;
@@ -36,7 +43,7 @@ public class CustomerService : ServiceBase
             OrderCount = row.OrderCountAtSite,
             TotalRevenue = row.TotalRevenueAtSite,
             MarketingApproval = c.MarketingApproval,
-            CreatedAt = c.CreationTime.ToString("o"),
+            CreatedAt = ToUtcIsoString(c.CreationTime),
             IsReturning = row.OrderCountAtSite > 1,
             LastOrderId = row.LastOrderIdAtSite
         };
@@ -55,7 +62,7 @@ public class CustomerService : ServiceBase
             OrderCount = orderCount,
             TotalRevenue = totalRevenue,
             MarketingApproval = c.MarketingApproval,
-            CreatedAt = c.CreationTime.ToString("o"),
+            CreatedAt = ToUtcIsoString(c.CreationTime),
             IsReturning = orderCount > 1,
             LastOrderId = lastOrderId,
             DefaultAddress = c.DefaultAddress,
@@ -126,7 +133,7 @@ public class CustomerService : ServiceBase
             OrderNumber = order.OrderNumber ?? order.Id.ToString(),
             Status = order.Status ?? "",
             PaymentStatus = order.PaymentStatus ?? "",
-            CreatedAt = order.CreationTime.ToString("o"),
+            CreatedAt = ToUtcIsoString(order.CreationTime),
             Total = order.Total ?? 0,
             Source = order.Source,
             FirstItemTitle = firstItem?.Title,
