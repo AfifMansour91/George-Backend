@@ -47,11 +47,21 @@ namespace George.Data
             if (filter?.PaymentStatus.HasValue() == true)
                 query = query.Where(o => o.PaymentStatus == filter.PaymentStatus!.Trim());
 
-            //if (filter?.DeliveryDateFrom.HasValue == true)
-            //    query = query.Where(o => (o.DeliveryDate ?? o.PickupDate) >= filter.DeliveryDateFrom);
+            if (filter?.DeliveryDateFrom.HasValue == true)
+            {
+                var fromDate = filter.DeliveryDateFrom!.Value.Date;
+                query = query.Where(o =>
+                    (o.DeliveryDate ?? o.PickupDate) != null &&
+                    ((o.DeliveryDate ?? o.PickupDate)!.Value.Date >= fromDate));
+            }
 
-            //if (filter?.DeliveryDateTo.HasValue == true)
-            //    query = query.Where(o => (o.DeliveryDate ?? o.PickupDate) <= filter.DeliveryDateTo);
+            if (filter?.DeliveryDateTo.HasValue == true)
+            {
+                var toDate = filter.DeliveryDateTo!.Value.Date;
+                query = query.Where(o =>
+                    (o.DeliveryDate ?? o.PickupDate) != null &&
+                    ((o.DeliveryDate ?? o.PickupDate)!.Value.Date <= toDate));
+            }
 
             if (filter?.Search?.SearchTerm.HasValue() == true)
             {
