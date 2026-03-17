@@ -581,14 +581,17 @@ namespace George.Data
             await _dbContext.SaveChangesAsync(cancelToken);
         }
 
-        public async Task CreateProductOptionsAsync(int productId, List<ProductOptionDto> options, CancellationToken cancelToken)
+        /// <param name="limitAttributeToSiteIds">When set, create attributes only for these site IDs (e.g. import target site). When null, create for all sites the product is on.</param>
+        public async Task CreateProductOptionsAsync(int productId, List<ProductOptionDto> options, List<int>? limitAttributeToSiteIds = null, CancellationToken cancelToken = default)
         {
-            // Get product's sites to create attributes for each site
+            // Get product's sites to create attributes for each site (or only for limitAttributeToSiteIds when provided)
             var product = await _dbContext.Product
                 .Include(p => p.Site)
                 .FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
             
-            var siteIds = product?.Site?.Select(s => s.Id).ToList() ?? new List<int>();
+            var siteIds = limitAttributeToSiteIds != null && limitAttributeToSiteIds.Any()
+                ? limitAttributeToSiteIds
+                : (product?.Site?.Select(s => s.Id).ToList() ?? new List<int>());
 
             foreach (var opt in options)
             {
@@ -670,7 +673,8 @@ namespace George.Data
             }
         }
 
-        public async Task UpdateProductOptionsAsync(int productId, List<ProductOptionDto>? options, CancellationToken cancelToken)
+        /// <param name="limitAttributeToSiteIds">When set, create attributes only for these site IDs (e.g. bulk import target site). When null, create for all sites the product is on.</param>
+        public async Task UpdateProductOptionsAsync(int productId, List<ProductOptionDto>? options, List<int>? limitAttributeToSiteIds = null, CancellationToken cancelToken = default)
         {
             if (options == null) return;
 
@@ -684,7 +688,7 @@ namespace George.Data
             }
             await _dbContext.SaveChangesAsync(cancelToken);
 
-            await CreateProductOptionsAsync(productId, options, cancelToken);
+            await CreateProductOptionsAsync(productId, options, limitAttributeToSiteIds, cancelToken);
         }
 
         public async Task CreateProductVariantsAsync(int productId, List<ProductVariantDto> variants, List<ProductOptionDto>? options, CancellationToken cancelToken)

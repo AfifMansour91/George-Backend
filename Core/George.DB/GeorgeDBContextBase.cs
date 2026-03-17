@@ -405,9 +405,9 @@ public partial class GeorgeDBContextBase : DbContext
 
         modelBuilder.Entity<Product>(entity =>
         {
-            entity.HasIndex(e => new { e.AccountId, e.Sku }, "UX_Product_AccountId_Sku_NotDeleted")
-                .IsUnique()
-                .HasFilter("([IsDeleted]=(0) AND [Sku] IS NOT NULL AND [AccountId] IS NOT NULL)");
+            //entity.HasIndex(e => new { e.AccountId, e.Sku }, "UX_Product_AccountId_Sku_NotDeleted")
+            //    .IsUnique()
+            //    .HasFilter("([IsDeleted]=(0) AND [Sku] IS NOT NULL AND [AccountId] IS NOT NULL)");
 
             entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");

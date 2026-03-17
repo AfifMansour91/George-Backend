@@ -193,7 +193,7 @@ namespace George.Services
                 if (req.ProductOptions != null && req.ProductOptions.Any())
                 {
                     var optionDtos = req.ProductOptions.Select(o => new ProductOptionDto { Name = o.Name, Values = o.Values ?? new List<string>() }).ToList();
-                    await _productStorage.CreateProductOptionsAsync(product.Id, optionDtos, cancelToken);
+                    await _productStorage.CreateProductOptionsAsync(product.Id, optionDtos, cancelToken: cancelToken);
                 }
 
                 if (req.Variants != null && req.Variants.Any())
@@ -284,7 +284,7 @@ namespace George.Services
                 if (req.ProductOptions != null)
                 {
                     var optionDtos = req.ProductOptions.Select(o => new ProductOptionDto { Name = o.Name, Values = o.Values ?? new List<string>() }).ToList();
-                    await _productStorage.UpdateProductOptionsAsync(productId, optionDtos, cancelToken);
+                    await _productStorage.UpdateProductOptionsAsync(productId, optionDtos, cancelToken: cancelToken);
                 }
                 if (req.Variants != null)
                 {
@@ -440,12 +440,11 @@ namespace George.Services
                     var accountIdForLookup = productReq.AccountId ?? userAccountId;
                     var targetSiteIds = req.SiteIds ?? productReq.SiteIds;
 
-                    // Check if product exists on the target site first (create/update per site). If not on target site, we still find by account to add this site and update.
+                    // Only match existing product when it is already on the target site(s). This keeps each site's data isolated: importing for Site2 must not update products that exist only on Site1.
                     if (req.UpdateIfExists)
                     {
                         if (!string.IsNullOrWhiteSpace(productReq.Sku))
                         {
-                            // Prefer product that is already on the target site so we update in place
                             if (targetSiteIds != null && targetSiteIds.Any())
                             {
                                 existingProduct = await _productStorage.GetProductBySkuAndSitesAsync(
@@ -454,7 +453,8 @@ namespace George.Services
                                     targetSiteIds,
                                     cancelToken);
                             }
-                            if (existingProduct == null)
+                            // Do not fall back to account-wide SKU match when we have target sites: a product with same SKU on another site stays separate
+                            else
                             {
                                 existingProduct = await _productStorage.GetProductBySkuAsync(
                                     productReq.Sku!,
@@ -464,7 +464,8 @@ namespace George.Services
                         }
                         if (existingProduct == null && !string.IsNullOrWhiteSpace(productReq.Name))
                         {
-                            var siteIdsForLookup = targetSiteIds;
+                            // Only match by name when product is on one of the target sites
+                            var siteIdsForLookup = (targetSiteIds != null && targetSiteIds.Any()) ? targetSiteIds : null;
                             existingProduct = await _productStorage.GetProductByNameAndAccountAsync(
                                 productReq.Name!,
                                 accountIdForLookup,
@@ -575,7 +576,7 @@ namespace George.Services
 
                     if (existingProduct != null)
                     {
-                        // Update existing product with file data. If product was only on another site, add target site(s) instead of replacing (merge sites).
+                        // Update existing product (only reached when product is already on target site(s); we do not merge from other sites)
                         var product = MapReqToProduct(productReq);
                         product.Id = existingProduct.Id;
                         product.UpdateUserId = AuthUser?.Id;
@@ -585,18 +586,8 @@ namespace George.Services
                         var lookupDto = MapToLookupDto(productReq);
                         await _productStorage.MapLookupsAsync(product, lookupDto, cancelToken);
 
-                        List<int>? siteIdsForUpdate = productReq.SiteIds;
-                        if (targetSiteIds != null && targetSiteIds.Any())
-                        {
-                            var existingWithSites = await _productStorage.GetProductAsync(existingProduct.Id, cancelToken);
-                            var existingSiteIds = existingWithSites?.Site?.Select(s => s.Id).ToList() ?? new List<int>();
-                            var onTargetSite = existingSiteIds.Any(id => targetSiteIds.Contains(id));
-                            if (!onTargetSite && existingSiteIds.Any())
-                            {
-                                // Product exists but only on other site(s): add target site(s) and keep existing (merge)
-                                siteIdsForUpdate = existingSiteIds.Union(targetSiteIds).Distinct().ToList();
-                            }
-                        }
+                        // Keep product on target site(s) only; no merge from other sites so other sites' data stays unchanged
+                        var siteIdsForUpdate = targetSiteIds ?? productReq.SiteIds;
 
                         product = await _productStorage.UpdateProductAsync(
                             product,
@@ -621,7 +612,7 @@ namespace George.Services
                             if (productReq.ProductOptions != null)
                             {
                                 var optionDtos = productReq.ProductOptions.Select(o => new ProductOptionDto { Name = o.Name, Values = o.Values ?? new List<string>() }).ToList();
-                                await _productStorage.UpdateProductOptionsAsync(product.Id, optionDtos, cancelToken);
+                                await _productStorage.UpdateProductOptionsAsync(product.Id, optionDtos, limitAttributeToSiteIds: targetSiteIds, cancelToken);
                             }
 
                             if (productReq.Variants != null)
@@ -665,7 +656,7 @@ namespace George.Services
 
                         product = await _productStorage.CreateProductAsync(
                             product,
-                            productReq.SiteIds,
+                            targetSiteIds,
                             CombineCategoryIds(resolvedCategoryIds, resolvedSubcategoryIds),
                             productReq.Tags,
                             productReq.RelatedProductIds,
@@ -678,7 +669,7 @@ namespace George.Services
                             if (productReq.ImageUrls != null && productReq.ImageUrls.Any())
                             {
                                 var accountIdForImages = product.AccountId ?? userAccountId;
-                                var resolutionSiteId = productReq.SiteIds != null && productReq.SiteIds.Any() ? (int?)productReq.SiteIds.First() : targetSiteIds?.FirstOrDefault();
+                                var resolutionSiteId = targetSiteIds != null && targetSiteIds.Any() ? (int?)targetSiteIds.First() : productReq.SiteIds?.FirstOrDefault();
                                 var imageList = await ResolveImageUrlsToMediaAsync(accountIdForImages, productReq.ImageUrls, createMediaIfMissing: true, siteId: resolutionSiteId, cancelToken);
                                 await _productStorage.CreateProductImagesAsync(product.Id, imageList, cancelToken);
                             }
@@ -686,7 +677,7 @@ namespace George.Services
                             if (productReq.ProductOptions != null && productReq.ProductOptions.Any())
                             {
                                 var optionDtos = productReq.ProductOptions.Select(o => new ProductOptionDto { Name = o.Name, Values = o.Values ?? new List<string>() }).ToList();
-                                await _productStorage.CreateProductOptionsAsync(product.Id, optionDtos, cancelToken);
+                                await _productStorage.CreateProductOptionsAsync(product.Id, optionDtos, limitAttributeToSiteIds: targetSiteIds, cancelToken);
                             }
 
                             if (productReq.Variants != null && productReq.Variants.Any())
