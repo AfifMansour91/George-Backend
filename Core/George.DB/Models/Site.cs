@@ -94,6 +94,9 @@ public partial class Site
 
     public bool? PrintMovedToTreatment { get; set; }
 
+    /// <summary>When true, print voucher automatically when picking is completed (with weights and final price).</summary>
+    public bool? PrintAfterPicking { get; set; }
+
     public bool? PrintFutureImmediate { get; set; }
 
     public bool? PrintFutureAtTimeEnabled { get; set; }

@@ -139,6 +139,7 @@ namespace George.Data
             if (updated.AutoPrintEnabled.HasValue) dbSite.AutoPrintEnabled = updated.AutoPrintEnabled;
             if (updated.PrintNewOrderImmediate.HasValue) dbSite.PrintNewOrderImmediate = updated.PrintNewOrderImmediate;
             if (updated.PrintMovedToTreatment.HasValue) dbSite.PrintMovedToTreatment = updated.PrintMovedToTreatment;
+            if (updated.PrintAfterPicking.HasValue) dbSite.PrintAfterPicking = updated.PrintAfterPicking;
             if (updated.PrintFutureImmediate.HasValue) dbSite.PrintFutureImmediate = updated.PrintFutureImmediate;
             if (updated.PrintFutureAtTimeEnabled.HasValue) dbSite.PrintFutureAtTimeEnabled = updated.PrintFutureAtTimeEnabled;
             if (updated.PrintFutureAtTime != null) dbSite.PrintFutureAtTime = updated.PrintFutureAtTime;
