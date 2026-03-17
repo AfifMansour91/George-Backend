@@ -70,6 +70,20 @@ namespace George.Api.Controllers
                 _wooCommerceService.SyncToWooCommerceAsync(request, cancelToken));
         }
 
+        /// <summary>Syncs categories only and returns product IDs to sync. Client can then call Sync once per product (or batch) to avoid long-lived streams and QUIC errors.</summary>
+        [HttpPost("SyncCategoriesAndGetProductIds")]
+        [ProducesResponseType(typeof(IApiResponse<List<int>>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> SyncCategoriesAndGetProductIdsAsync(
+            [FromBody] WooCommerceSyncReq request,
+            CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync<List<int>>(async () =>
+            {
+                var productIds = await _wooCommerceService.SyncCategoriesAndGetProductIdsAsync(request, cancelToken);
+                return new ApiResponse<List<int>> { Data = productIds };
+            });
+        }
+
         /// <summary>Sync with streaming progress (NDJSON). Response: progress lines then one "done" line with result.</summary>
         [HttpPost("SyncStream")]
         [ProducesResponseType((int)HttpStatusCode.OK)]
@@ -97,6 +111,9 @@ namespace George.Api.Controllers
                     Response.Body.FlushAsync(cancelToken).GetAwaiter().GetResult();
                 }
             }
+
+            // Send first byte immediately to avoid HTTP 524 (Cloudflare/proxy timeout) while categories load and products are fetched
+            WriteLine(new { type = "progress", total = 0, completed = 0, failed = 0 });
 
             try
             {

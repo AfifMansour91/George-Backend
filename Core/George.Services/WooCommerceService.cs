@@ -119,6 +119,30 @@ namespace George.Services
             }
         }
 
+        /// <summary>Syncs categories to WooCommerce and returns the list of product IDs to sync. Client can then sync products one-by-one to avoid long-lived streams (QUIC/proxy errors).</summary>
+        public async Task<List<int>> SyncCategoriesAndGetProductIdsAsync(WooCommerceSyncReq req, CancellationToken cancelToken)
+        {
+            var site = await _siteStorage.GetSiteAsync(req.SiteId, cancelToken);
+            if (site == null)
+                throw new InvalidOperationException("Site not found");
+            if (string.IsNullOrEmpty(site.WooCommerceUrl) || string.IsNullOrEmpty(site.WooCommerceKey) || string.IsNullOrEmpty(site.WooCommerceSecret))
+                throw new InvalidOperationException("WooCommerce integration not configured. Please set up your credentials in Store Settings.");
+
+            var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
+            var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
+
+            using var httpClient = _httpClientFactory.CreateClient();
+            httpClient.Timeout = WooCommerceHttpTimeout;
+            httpClient.DefaultRequestHeaders.Clear();
+            httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+
+            await SyncCategoriesAsync(baseUrl, req.SiteId, httpClient, cancelToken);
+
+            if (req.ProductIds != null && req.ProductIds.Any())
+                return req.ProductIds.Distinct().ToList();
+            return await _productStorage.GetProductIdsForSiteAsync(req.SiteId, cancelToken);
+        }
+
         /// <summary>Syncs to WooCommerce and reports progress. Used by streaming endpoint. Throws on validation failure.</summary>
         public async Task<WooCommerceSyncRes> SyncToWooCommerceWithProgressAsync(
             WooCommerceSyncReq req,
@@ -913,53 +937,31 @@ namespace George.Services
         {
             var results = new List<WooCommerceSyncResult>();
 
-            // Get products to sync - load individually to ensure all relationships are included
-            List<Product> productsToSync;
-
+            // Resolve list of product IDs to sync (no full load here – each product is loaded inside its own scope when syncing)
+            List<int> idsToSync;
             if (productIds != null && productIds.Any())
-            {
-                // Load specific products in parallel to avoid sequential DB round-trips
-                var distinctIds = productIds.Distinct().ToList();
-                var loadTasks = distinctIds.Select(id => _productStorage.GetProductAsync(id, cancelToken));
-                var loaded = await Task.WhenAll(loadTasks);
-                productsToSync = loaded
-                    .Where(p => p != null && p!.Site.Any(s => s.Id == siteId))
-                    .Cast<Product>()
-                    .ToList();
-            }
+                idsToSync = productIds.Distinct().ToList();
             else
-            {
-                // Load all products for the site; include ProductOption so variable products get attributes and variations synced
-                var filter = new ProductFilter { SiteId = siteId, IncludeOptionsAndVariants = true };
-                var products = await _productStorage.GetProductsAsync(
-                    filter,
-                    new PagingExDto { Skip = 0, Take = 10000, IncludeTotal = false },
-                    cancelToken);
-                productsToSync = products.Items.Where(p => p.Site.Any(s => s.Id == siteId)).ToList();
-            }
+                idsToSync = await _productStorage.GetProductIdsForSiteAsync(siteId, cancelToken);
 
-            // Deduplicate by product Id so we don't count the same product twice
-            productsToSync = productsToSync
-                .GroupBy(p => p.Id)
-                .Select(g => g.First())
-                .ToList();
+            progress?.Report(new WooCommerceSyncProgress { Total = idsToSync.Count, Completed = 0, Failed = 0 });
 
-            // Sync products in parallel batches; each product runs in its own scope (own DbContext) to avoid EF Core concurrent-use errors
+            // Each product: load by ID and sync in the same scope so options/variants/weight are always complete (no detached-entity issues)
             const int batchSize = 16;
-            for (int i = 0; i < productsToSync.Count; i += batchSize)
+            for (int i = 0; i < idsToSync.Count; i += batchSize)
             {
-                var batch = productsToSync.Skip(i).Take(batchSize).ToList();
-                var batchTasks = batch.Select(async product =>
+                var batchIds = idsToSync.Skip(i).Take(batchSize).ToList();
+                var batchTasks = batchIds.Select(async productId =>
                 {
                     using var scope = _scopeFactory.CreateScope();
                     var wooService = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
-                    return await wooService.SyncSingleProductAsync(baseUrl, siteId, product, categoryMap, httpClient, cancelToken);
+                    return await wooService.SyncSingleProductByIdAsync(baseUrl, siteId, productId, categoryMap, httpClient, cancelToken);
                 });
                 var batchResults = await Task.WhenAll(batchTasks);
                 results.AddRange(batchResults);
                 progress?.Report(new WooCommerceSyncProgress
                 {
-                    Total = productsToSync.Count,
+                    Total = idsToSync.Count,
                     Completed = results.Count,
                     Failed = results.Count(r => !r.Success)
                 });
@@ -968,9 +970,22 @@ namespace George.Services
             return results;
         }
 
-        /// <summary>
-        /// Syncs a single product to WooCommerce. Public so it can be invoked from a scoped WooCommerceService (each scope has its own DbContext).
-        /// </summary>
+        /// <summary>Loads the product by ID in the current scope (full options/variants/weight) and syncs to WooCommerce. Use this so stream sync always has complete data.</summary>
+        public async Task<WooCommerceSyncResult> SyncSingleProductByIdAsync(
+            string baseUrl,
+            int siteId,
+            int productId,
+            Dictionary<int, int> categoryMap,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            var product = await _productStorage.GetProductAsync(productId, cancelToken);
+            if (product == null || !product.Site.Any(s => s.Id == siteId))
+                return new WooCommerceSyncResult { Success = false, ProductId = productId, ProductName = "", Error = "Product not found or not in site." };
+            return await SyncProductAsync(baseUrl, siteId, product, categoryMap, httpClient, cancelToken);
+        }
+
+        /// <summary>Syncs a single product to WooCommerce. Public so it can be invoked from a scoped WooCommerceService (each scope has its own DbContext).</summary>
         public async Task<WooCommerceSyncResult> SyncSingleProductAsync(
             string baseUrl,
             int siteId,
@@ -1105,7 +1120,10 @@ namespace George.Services
                     metaData.Add(new { key = "_yoast_wpseo_metadesc", value = product.SeoDescription });
 
                 // Weighted product fields - "זה מוצר שקיל". Keys must match WordPress admin POST (post.php): leading _ and no trailing _.
-                var isWeighted = product.IsWeighted == true;
+                // When IsWeighted is null, derive from SetupType (same as frontend edit form).
+                var setupTypeName = product.SetupType?.Name ?? "";
+                var isWeightedBySetup = setupTypeName is "by_weight" or "by_unit" or "by_unit_and_weight";
+                var isWeighted = product.IsWeighted == true || (product.IsWeighted != false && isWeightedBySetup);
                 var weighableValue = isWeighted ? "yes" : "no";
                 metaData.Add(new { key = "_ocwsu_weighable", value = weighableValue });
                 metaData.Add(new { key = "ocwsu_weighable_", value = weighableValue });
@@ -1113,9 +1131,8 @@ namespace George.Services
 
                 if (isWeighted)
                 {
-                    var setupType = product.SetupType?.Name ?? "";
-                    var soldByUnits = (setupType == "by_unit" || setupType == "by_unit_and_weight") ? "yes" : "no";
-                    var soldByWeight = (setupType == "by_weight" || setupType == "by_unit_and_weight") ? "yes" : "no";
+                    var soldByUnits = (setupTypeName == "by_unit" || setupTypeName == "by_unit_and_weight") ? "yes" : "no";
+                    var soldByWeight = (setupTypeName == "by_weight" || setupTypeName == "by_unit_and_weight") ? "yes" : "no";
                     metaData.Add(new { key = "_ocwsu_sold_by_units", value = soldByUnits });
                     metaData.Add(new { key = "ocwsu_sold_by_units_", value = soldByUnits });
                     metaData.Add(new { key = "_ocwsu_sold_by_weight", value = soldByWeight });

@@ -132,6 +132,19 @@ namespace George.Data
             return inSite;
         }
 
+        /// <summary>Get product IDs for a site (lightweight, no includes). Used when syncing all products so each can be loaded with GetProductAsync for full options/variants/weight.</summary>
+        public async Task<List<int>> GetProductIdsForSiteAsync(int siteId, CancellationToken cancelToken)
+        {
+            if (siteId <= 0) return new List<int>();
+            return await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => !p.IsDeleted && p.Site.Any(s => s.Id == siteId))
+                .OrderBy(p => p.DisplayOrder ?? int.MaxValue)
+                .ThenByDescending(p => p.CreationTime)
+                .Select(p => p.Id)
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+        }
+
         /// <summary>Get products by site and a list of product IDs (e.g. for kiosk past purchases). Same includes as GetProductsAsync. Excludes deleted.</summary>
         public async Task<DataListResult<Product>> GetProductsBySiteAndIdsAsync(
             int siteId,
