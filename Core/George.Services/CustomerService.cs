@@ -142,6 +142,17 @@ public class CustomerService : ServiceBase
         return response;
     }
 
+    public async Task<IApiResponse<CustomerDetailRes>> UpdateCustomerAsync(int id, int? siteId, CustomerUpdateReq req, CancellationToken cancelToken = default)
+    {
+        var response = new ApiResponse<CustomerDetailRes>();
+        if (req == null || string.IsNullOrWhiteSpace(req.Name))
+            return CreateResponse(response, StatusCode.InvalidRequest, "Name is required");
+        var updated = await _customerStorage.UpdateCustomerAsync(id, siteId, req.Name.Trim(), cancelToken).ConfigureAwait(false);
+        if (updated == null)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+        return await GetCustomerAsync(id, siteId, cancelToken).ConfigureAwait(false);
+    }
+
     public async Task<IApiResponse<bool>> DeleteCustomerAsync(int id, int? siteId, CancellationToken cancelToken = default)
     {
         var response = new ApiResponse<bool> { Data = true };

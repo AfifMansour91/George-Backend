@@ -249,6 +249,20 @@ public class CustomerStorage : StorageBase
             .FirstOrDefaultAsync(o => o.Id == lastOrderId && !o.IsDeleted, cancelToken).ConfigureAwait(false);
     }
 
+    /// <summary>Update customer name. If siteId is provided, only updates when customer belongs to that site. Returns updated customer or null if not found.</summary>
+    public async Task<Customer?> UpdateCustomerAsync(int customerId, int? siteId, string name, CancellationToken cancelToken)
+    {
+        var query = _dbContext.Set<Customer>().Where(x => x.Id == customerId && !x.IsDeleted);
+        if (siteId.HasValue && siteId.Value > 0)
+            query = query.Where(x => x.SiteId == siteId.Value);
+        var c = await query.FirstOrDefaultAsync(cancelToken).ConfigureAwait(false);
+        if (c == null) return null;
+        c.Name = string.IsNullOrWhiteSpace(name) ? "" : name.Trim();
+        c.UpdatedDate = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+        return c;
+    }
+
     /// <summary>Soft-delete customer (removes from that site only). If siteId is provided, only deletes when customer belongs to that site.</summary>
     public async Task<bool> DeleteCustomerAsync(int customerId, int? siteId, CancellationToken cancelToken)
     {
