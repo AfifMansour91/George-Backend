@@ -65,6 +65,7 @@ namespace George.Services
 
             try
             {
+                cancelToken.ThrowIfCancellationRequested();
                 // Get site with WooCommerce credentials
                 var site = await _siteStorage.GetSiteAsync(req.SiteId, cancelToken);
                 if (site == null)
@@ -90,8 +91,11 @@ namespace George.Services
                 httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
                 // Note: Content-Type is set on HttpContent objects (StringContent), not on DefaultRequestHeaders
 
+                _logger.LogInformation("WooCommerce sync started for site {SiteId} (product filter: {Filter})", req.SiteId, req.ProductIds != null ? string.Join(",", req.ProductIds) : "all");
+
                 // Sync categories first
                 var categoryMap = await SyncCategoriesAsync(baseUrl, req.SiteId, httpClient, cancelToken);
+                _logger.LogInformation("WooCommerce sync: categories completed for site {SiteId}, {Count} categories mapped", req.SiteId, categoryMap.Count);
 
                 // Sync products
                 var syncResults = await SyncProductsAsync(
@@ -106,9 +110,19 @@ namespace George.Services
                 response.Data.Success = syncResults.Where(r => r.Success).ToList();
                 response.Data.Failed = syncResults.Where(r => !r.Success).ToList();
                 var totalAttempted = syncResults.Count;
+                var failedCount = response.Data.Failed.Count;
                 response.Data.Message = totalAttempted == 0
                     ? "No products to sync."
-                    : $"Attempted {totalAttempted} products: {response.Data.Success.Count} succeeded, {response.Data.Failed.Count} failed.";
+                    : $"Attempted {totalAttempted} products: {response.Data.Success.Count} succeeded, {failedCount} failed.";
+
+                if (failedCount > 0)
+                {
+                    _logger.LogWarning("WooCommerce sync completed for site {SiteId} with {Failed} failure(s). Succeeded: {Success}, Failed: {Failed}", req.SiteId, failedCount, response.Data.Success.Count, failedCount);
+                    foreach (var f in response.Data.Failed)
+                        _logger.LogWarning("WooCommerce sync failed: ProductId={ProductId}, Name={ProductName}, Error={Error}", f.ProductId, f.ProductName ?? "", f.Error ?? "");
+                }
+                else
+                    _logger.LogInformation("WooCommerce sync completed for site {SiteId}: {Count} products synced successfully", req.SiteId, response.Data.Success.Count);
 
                 return response;
             }
@@ -163,7 +177,11 @@ namespace George.Services
             httpClient.DefaultRequestHeaders.Clear();
             httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
 
+            _logger.LogInformation("WooCommerce sync (with progress) started for site {SiteId}", req.SiteId);
+
             var categoryMap = await SyncCategoriesAsync(baseUrl, req.SiteId, httpClient, cancelToken);
+            _logger.LogInformation("WooCommerce sync: categories completed for site {SiteId}, {Count} categories mapped", req.SiteId, categoryMap.Count);
+
             var syncResults = await SyncProductsAsync(
                 baseUrl,
                 req.SiteId,
@@ -179,6 +197,15 @@ namespace George.Services
             var message = totalAttempted == 0
                 ? "No products to sync."
                 : $"Attempted {totalAttempted} products: {successList.Count} succeeded, {failedList.Count} failed.";
+
+            if (failedList.Count > 0)
+            {
+                _logger.LogWarning("WooCommerce sync (with progress) completed for site {SiteId} with {Failed} failure(s). Succeeded: {Success}, Failed: {Failed}", req.SiteId, failedList.Count, successList.Count, failedList.Count);
+                foreach (var f in failedList)
+                    _logger.LogWarning("WooCommerce sync failed: ProductId={ProductId}, Name={ProductName}, Error={Error}", f.ProductId, f.ProductName ?? "", f.Error ?? "");
+            }
+            else
+                _logger.LogInformation("WooCommerce sync (with progress) completed for site {SiteId}: {Count} products synced successfully", req.SiteId, successList.Count);
 
             return new WooCommerceSyncRes
             {
@@ -292,6 +319,7 @@ namespace George.Services
                 new PagingExDto { Skip = 0, Take = 10000, IncludeTotal = false },
                 cancelToken);
 
+            cancelToken.ThrowIfCancellationRequested();
             // Filter out deleted and inactive categories
             var categories = categoriesResult.Items
                 .Where(c => !c.IsDeleted && c.IsActive)
@@ -307,6 +335,7 @@ namespace George.Services
 
             foreach (var category in mainCategories)
             {
+                cancelToken.ThrowIfCancellationRequested();
                 try
                 {
                     var wooCatId = await SyncCategoryAsync(baseUrl, category, null, httpClient, cancelToken);
@@ -329,6 +358,7 @@ namespace George.Services
 
             foreach (var category in subCategories)
             {
+                cancelToken.ThrowIfCancellationRequested();
                 try
                 {
                     var parentWooId = categoryMap[category.ParentCategoryId!.Value];
@@ -345,6 +375,8 @@ namespace George.Services
                 }
             }
 
+            if (categoryMap.Count < categories.Count)
+                _logger.LogWarning("WooCommerce sync categories: site {SiteId}, {Mapped} of {Total} categories mapped (some failed)", siteId, categoryMap.Count, categories.Count);
             return categoryMap;
         }
 
@@ -424,13 +456,14 @@ namespace George.Services
                 {
                     response.Data.Success = false;
                     response.Data.Message = "Failed to sync category to WooCommerce";
+                    _logger.LogWarning("WooCommerce sync category failed: CategoryId={CategoryId}, site {SiteId}, no WooCommerce ID returned", categoryId, siteId);
                 }
 
                 return response;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error syncing category {CategoryId} to WooCommerce for site {SiteId}", categoryId, siteId);
+                _logger.LogError(ex, "WooCommerce sync category failed: CategoryId={CategoryId}, site {SiteId}, Error={Error}", categoryId, siteId, ex.Message);
                 return CreateResponse(response, StatusCode.UnknownError, ex.Message);
             }
         }
@@ -498,13 +531,14 @@ namespace George.Services
                 {
                     response.Data.Success = false;
                     response.Data.Message = "Failed to sync attribute to WooCommerce";
+                    _logger.LogWarning("WooCommerce sync attribute failed: AttributeId={AttributeId}, site {SiteId}, no WooCommerce ID returned", attributeId, siteId);
                 }
 
                 return response;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error syncing attribute {AttributeId} to WooCommerce for site {SiteId}", attributeId, siteId);
+                _logger.LogError(ex, "WooCommerce sync attribute failed: AttributeId={AttributeId}, site {SiteId}, Error={Error}", attributeId, siteId, ex.Message);
                 return CreateResponse(response, StatusCode.UnknownError, ex.Message);
             }
         }
@@ -660,24 +694,56 @@ namespace George.Services
             return updated != null ? (updated.id, updated.slug) : (null, null);
         }
 
+        /// <summary>Per-request timeout for attribute term POST so a single slow/hanging request doesn't block sync (default HttpClient timeout is 30 min).</summary>
+        private static readonly TimeSpan AttributeTermRequestTimeout = TimeSpan.FromSeconds(220);
+
         private async Task SyncAttributeTermsAsync(string baseUrl, int wooAttrId, Attribute attribute, HttpClient httpClient, CancellationToken cancelToken)
         {
             var values = attribute.AttributeValue?.Select(av => av.Value).Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? new List<string>();
             foreach (var value in values)
             {
+                var name = value?.Trim();
+                if (string.IsNullOrWhiteSpace(name))
+                    continue;
+
                 var termUrl = $"{baseUrl}/products/attributes/{wooAttrId}/terms";
-                var termBody = JsonSerializer.Serialize(new { name = value.Trim() });
+                var termPayload = new WooCommerceAttributeTermPayload { name = name };
+                var opts = new JsonSerializerOptions { PropertyNamingPolicy = null };
+                var termBody = JsonSerializer.Serialize(termPayload, opts);
+                _logger.LogInformation("WooCommerce attribute term POST body: {Body}", termBody);
                 using var termContent = new StringContent(termBody, Encoding.UTF8, "application/json");
-                var termRes = await httpClient.PostAsync(termUrl, termContent, cancelToken);
-                if (!termRes.IsSuccessStatusCode)
+
+                HttpResponseMessage? termRes = null;
+                try
                 {
-                    var err = await termRes.Content.ReadAsStringAsync(cancelToken);
-                    var wooErr = TryDeserialize<WooErrorResponse>(err);
+                    using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancelToken);
+                    cts.CancelAfter(AttributeTermRequestTimeout);
+                    termRes = await httpClient.PostAsync(termUrl, termContent, cts.Token);
+                }
+                catch (OperationCanceledException) when (!cancelToken.IsCancellationRequested)
+                {
+                    _logger.LogWarning("Attribute term request timed out after {Seconds}s, skipping remaining terms for this attribute.", AttributeTermRequestTimeout.TotalSeconds);
+                    break;
+                }
 
-                    if (wooErr?.code == "term_exists")
-                        continue; // OK
+                if (termRes == null)
+                    continue;
 
-                    _logger.LogWarning("Failed to create attribute term ... {Error}", err);
+                using (termRes)
+                {
+                    var err = termRes.IsSuccessStatusCode ? null : await termRes.Content.ReadAsStringAsync(cancelToken);
+                    if (!termRes.IsSuccessStatusCode)
+                    {
+                        var wooErr = TryDeserialize<WooErrorResponse>(err ?? "{}");
+
+                        if (wooErr?.code == "term_exists")
+                            continue; // OK
+
+                        _logger.LogWarning("Failed to create attribute term. Request body was: {Body}. WooCommerce error: {Error}", termBody, err);
+
+                        if (wooErr?.code == "rest_missing_callback_param")
+                            break;
+                    }
                 }
             }
         }
@@ -944,12 +1010,14 @@ namespace George.Services
             else
                 idsToSync = await _productStorage.GetProductIdsForSiteAsync(siteId, cancelToken);
 
+            _logger.LogInformation("WooCommerce sync: products sync started for site {SiteId}, {Count} products", siteId, idsToSync.Count);
             progress?.Report(new WooCommerceSyncProgress { Total = idsToSync.Count, Completed = 0, Failed = 0 });
 
             // Each product: load by ID and sync in the same scope so options/variants/weight are always complete (no detached-entity issues)
             const int batchSize = 16;
             for (int i = 0; i < idsToSync.Count; i += batchSize)
             {
+                cancelToken.ThrowIfCancellationRequested();
                 var batchIds = idsToSync.Skip(i).Take(batchSize).ToList();
                 var batchTasks = batchIds.Select(async productId =>
                 {
@@ -967,6 +1035,11 @@ namespace George.Services
                 });
             }
 
+            var failed = results.Count(r => !r.Success);
+            if (failed > 0)
+                _logger.LogWarning("WooCommerce sync: products batch completed for site {SiteId}, {Success} succeeded, {Failed} failed", siteId, results.Count - failed, failed);
+            else
+                _logger.LogInformation("WooCommerce sync: products batch completed for site {SiteId}, all {Count} succeeded", siteId, results.Count);
             return results;
         }
 
@@ -1169,6 +1242,8 @@ namespace George.Services
                 }
 
                 var wooSku = GetWooCommerceSku(siteId, product.Sku);
+                // Send product weight to WooCommerce only when product is weighable; otherwise leave empty so previous value is not applied.
+                var productWeightForWoo = isWeighted ? (product.Weight?.ToString() ?? "") : "";
                 var wooProduct = new Dictionary<string, object>
                 {
                     ["name"] = product.Name,
@@ -1177,7 +1252,7 @@ namespace George.Services
                     ["short_description"] = product.ShortDescription ?? "",
                     ["sku"] = wooSku,
                     ["catalog_visibility"] = catalogVisibility,
-                    ["weight"] = product.Weight?.ToString() ?? "",
+                    ["weight"] = productWeightForWoo,
                     ["shipping_class"] = shippingClass,
                     ["menu_order"] = product.DisplayOrder ?? 0,
                     ["images"] = images,
@@ -1349,6 +1424,8 @@ namespace George.Services
 
                 // Only count as success when we actually got a WooCommerce ID (created or updated)
                 var isSuccess = wooCommerceId.HasValue;
+                if (!isSuccess)
+                    _logger.LogWarning("WooCommerce sync product failed: ProductId={ProductId}, Name={ProductName}, no WooCommerce ID returned (create/update may have failed)", product.Id, product.Name ?? "");
                 return new WooCommerceSyncResult
                 {
                     Success = isSuccess,
@@ -1361,7 +1438,7 @@ namespace George.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to sync product {ProductId}", product.Id);
+                _logger.LogError(ex, "Failed to sync product {ProductId}, Name={ProductName}, Error={Error}", product.Id, product.Name ?? "", ex.Message);
                 return new WooCommerceSyncResult
                 {
                     Success = false,
@@ -1536,6 +1613,8 @@ namespace George.Services
                     }
 
                     var variantWooSku = GetWooCommerceSku(siteId, variant.Sku);
+                    // Variation weight only when product is weighable (same as product-level weight).
+                    var variationWeightForWoo = isWeighted ? (variant.Weight?.ToString() ?? "") : "";
                     var wooVariation = new Dictionary<string, object>
                     {
                         ["regular_price"] = variant.Price?.ToString() ?? product.Price?.ToString() ?? "0",
@@ -1543,7 +1622,7 @@ namespace George.Services
                         ["sku"] = variantWooSku,
                         ["manage_stock"] = stockManagedPerVariation,
                         ["stock_status"] = variantStockStatus,
-                        ["weight"] = variant.Weight?.ToString() ?? "",
+                        ["weight"] = variationWeightForWoo,
                         ["attributes"] = variationAttributesList
                     };
                     if (stockManagedPerVariation)
@@ -1782,6 +1861,12 @@ namespace George.Services
             public int id { get; set; }
             public string? name { get; set; }
             public string? slug { get; set; }
+        }
+
+        /// <summary>POST body for WooCommerce attribute term creation. "name" is required by the API.</summary>
+        private class WooCommerceAttributeTermPayload
+        {
+            public string name { get; set; } = "";
         }
 
         private class WooCommerceProductResponse
