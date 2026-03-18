@@ -49,7 +49,7 @@ public class CustomerService : ServiceBase
         };
     }
 
-    private static CustomerDetailRes MapCustomerToDetailRes(Customer c, int orderCount, decimal totalRevenue, int? lastOrderId, DateTime? lastOrderAt)
+    private static CustomerDetailRes MapCustomerToDetailRes(Customer c, int orderCount, decimal totalRevenue, int? lastOrderId, DateTime? lastOrderAt, int averageReturnDays)
     {
         return new CustomerDetailRes
         {
@@ -70,6 +70,7 @@ public class CustomerService : ServiceBase
             MarketingEmail = c.MarketingEmail,
             MarketingSms = c.MarketingSms,
             LastOrderDate = lastOrderAt?.ToString("dd/MM/yyyy"),
+            AverageReturnDays = averageReturnDays,
             Activity = new List<CustomerActivityItem>()
         };
     }
@@ -116,8 +117,8 @@ public class CustomerService : ServiceBase
         var customer = await _customerStorage.GetCustomerByIdAsync(id, siteId, cancelToken).ConfigureAwait(false);
         if (customer == null)
             return CreateResponse(response, StatusCode.ItemNotFound);
-        var (orderCount, totalRevenue, lastOrderId, lastOrderAt) = await _customerStorage.GetCustomerGlobalStatsAsync(id, cancelToken).ConfigureAwait(false);
-        response.Data = MapCustomerToDetailRes(customer, orderCount, totalRevenue, lastOrderId, lastOrderAt);
+        var (orderCount, totalRevenue, lastOrderId, lastOrderAt, averageReturnDays) = await _customerStorage.GetCustomerGlobalStatsAsync(id, cancelToken).ConfigureAwait(false);
+        response.Data = MapCustomerToDetailRes(customer, orderCount, totalRevenue, lastOrderId, lastOrderAt, averageReturnDays);
         return response;
     }
 

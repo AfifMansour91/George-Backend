@@ -11,6 +11,8 @@ public class CustomerDetailRes : CustomerRes
     public List<string>? Tags { get; set; }
     public string? LastEditedNoteAt { get; set; }
     public string? LastOrderDate { get; set; }
+    /// <summary>Average days between consecutive (non-cancelled) orders for this customer.</summary>
+    public int AverageReturnDays { get; set; }
     public List<CustomerActivityItem>? Activity { get; set; }
 }
 

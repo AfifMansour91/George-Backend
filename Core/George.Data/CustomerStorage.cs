@@ -123,7 +123,7 @@ public class CustomerStorage : StorageBase
 
         var ordersAtSite = await _dbContext.Order
             .AsNoTracking()
-            .Where(o => !o.IsDeleted && o.SiteId == siteId && o.CustomerId != null && customerIds.Contains(o.CustomerId.Value))
+            .Where(o => !o.IsDeleted && o.Status != "Cancelled" && o.SiteId == siteId && o.CustomerId != null && customerIds.Contains(o.CustomerId.Value))
             .Select(o => new { o.CustomerId!.Value, o.Total, o.CreationTime, o.Id })
             .ToListAsync(cancelToken).ConfigureAwait(false);
 
@@ -192,18 +192,23 @@ public class CustomerStorage : StorageBase
         return await query.FirstOrDefaultAsync(cancelToken).ConfigureAwait(false);
     }
 
-    /// <summary>Global order stats for a customer (all sites).</summary>
-    public async Task<(int OrderCount, decimal TotalRevenue, int? LastOrderId, DateTime? LastOrderAt)> GetCustomerGlobalStatsAsync(int customerId, CancellationToken cancelToken)
+    /// <summary>Global order stats for a customer (all sites). Excludes cancelled orders. Returns (orderCount, totalRevenue, lastOrderId, lastOrderAt, averageReturnDays).</summary>
+    public async Task<(int OrderCount, decimal TotalRevenue, int? LastOrderId, DateTime? LastOrderAt, int AverageReturnDays)> GetCustomerGlobalStatsAsync(int customerId, CancellationToken cancelToken)
     {
         var orders = await _dbContext.Order
             .AsNoTracking()
-            .Where(o => !o.IsDeleted && o.CustomerId == customerId)
+            .Where(o => !o.IsDeleted && o.Status != "Cancelled" && o.CustomerId == customerId)
             .Select(o => new { o.Id, o.Total, o.CreationTime })
+            .OrderBy(o => o.CreationTime)
             .ToListAsync(cancelToken).ConfigureAwait(false);
-        if (orders.Count == 0) return (0, 0, null, null);
-        var last = orders.OrderByDescending(o => o.CreationTime).First();
+        if (orders.Count == 0) return (0, 0, null, null, 0);
+        var last = orders[orders.Count - 1];
         var totalRevenue = orders.Where(o => o.Total.HasValue).Sum(o => o.Total!.Value);
-        return (orders.Count, totalRevenue, last.Id, last.CreationTime);
+        var returnDays = new List<int>();
+        for (var i = 1; i < orders.Count; i++)
+            returnDays.Add((int)(orders[i].CreationTime - orders[i - 1].CreationTime).TotalDays);
+        var averageReturnDays = returnDays.Count > 0 ? (int)Math.Round(returnDays.Average()) : 0;
+        return (orders.Count, totalRevenue, last.Id, last.CreationTime, averageReturnDays);
     }
 
     public async Task<CustomerStatsDto> GetCustomerStatsAsync(int? siteId, CancellationToken cancelToken)
@@ -216,7 +221,7 @@ public class CustomerStorage : StorageBase
 
         var ordersAtSite = await _dbContext.Order
             .AsNoTracking()
-            .Where(o => !o.IsDeleted && o.SiteId == sid && o.CustomerId != null)
+            .Where(o => !o.IsDeleted && o.Status != "Cancelled" && o.SiteId == sid && o.CustomerId != null)
             .Select(o => new { o.CustomerId!.Value, o.CreationTime })
             .ToListAsync(cancelToken).ConfigureAwait(false);
 
@@ -238,7 +243,7 @@ public class CustomerStorage : StorageBase
     public async Task<Order?> GetLastOrderByCustomerIdAsync(int customerId, int? siteId, CancellationToken cancelToken)
     {
         var query = _dbContext.Order
-            .Where(o => !o.IsDeleted && o.CustomerId == customerId);
+            .Where(o => !o.IsDeleted && o.Status != "Cancelled" && o.CustomerId == customerId);
         if (siteId.HasValue && siteId.Value > 0)
             query = query.Where(o => o.SiteId == siteId.Value);
         var lastOrderId = await query.OrderByDescending(o => o.CreationTime).Select(o => o.Id).FirstOrDefaultAsync(cancelToken).ConfigureAwait(false);
