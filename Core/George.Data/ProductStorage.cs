@@ -775,9 +775,10 @@ namespace George.Data
 
         /// <summary>
         /// Finds a product by SKU, account and site(s). The product must be assigned to at least one of the given site IDs.
-        /// Used during bulk import so we only update a product that already exists on the target site; if it exists only on another site, the caller can merge sites.
+        /// When exclusiveSitesOnly is true, the product must not be assigned to any site outside the given list (each site has its own products; no shared product across sites).
+        /// Used during bulk import so we only update a product that belongs exclusively to the target site(s); otherwise we would change data (e.g. images) for other sites.
         /// </summary>
-        public async Task<Product?> GetProductBySkuAndSitesAsync(string sku, int? accountId, List<int>? siteIds, CancellationToken cancelToken)
+        public async Task<Product?> GetProductBySkuAndSitesAsync(string sku, int? accountId, List<int>? siteIds, bool exclusiveSitesOnly = false, CancellationToken cancelToken = default)
         {
             if (string.IsNullOrWhiteSpace(sku)) return null;
             if (siteIds == null || !siteIds.Any()) return null;
@@ -792,6 +793,12 @@ namespace George.Data
 
             query = query.Where(p => p.Site.Any(s => siteIds.Contains(s.Id)));
 
+            if (exclusiveSitesOnly)
+            {
+                // Product must not be on any site outside the target list (no shared product across sites)
+                query = query.Where(p => !p.Site.Any(s => !siteIds.Contains(s.Id)));
+            }
+
             return await query
                 .AsNoTracking()
                 .FirstOrDefaultAsync(cancelToken);
@@ -800,9 +807,10 @@ namespace George.Data
         /// <summary>
         /// Finds a product by name, account and optionally site(s) (case-insensitive name). Used as fallback when re-importing and SKU is empty.
         /// When siteIds is provided and has items, the product must be assigned to at least one of those sites.
+        /// When exclusiveSitesOnly is true, the product must not be on any site outside the given list (each site has its own products).
         /// Returns the first match (by Id) when multiple products share the same name in the account.
         /// </summary>
-        public async Task<Product?> GetProductByNameAndAccountAsync(string name, int? accountId, List<int>? siteIds, CancellationToken cancelToken)
+        public async Task<Product?> GetProductByNameAndAccountAsync(string name, int? accountId, List<int>? siteIds, bool exclusiveSitesOnly = false, CancellationToken cancelToken = default)
         {
             if (string.IsNullOrWhiteSpace(name)) return null;
 
@@ -817,6 +825,10 @@ namespace George.Data
             if (siteIds != null && siteIds.Any())
             {
                 query = query.Where(p => p.Site.Any(s => siteIds.Contains(s.Id)));
+                if (exclusiveSitesOnly)
+                {
+                    query = query.Where(p => !p.Site.Any(s => !siteIds.Contains(s.Id)));
+                }
             }
 
             return await query

@@ -441,6 +441,7 @@ namespace George.Services
                     var targetSiteIds = req.SiteIds ?? productReq.SiteIds;
 
                     // Only match existing product when it is already on the target site(s). This keeps each site's data isolated: importing for Site2 must not update products that exist only on Site1.
+                    // When we have target sites, require the product to be exclusively on those sites (exclusiveSitesOnly). Otherwise a product shared across Site1 and Site2 would get its images/data updated for both sites when importing to Site2; each site has its own media/products.
                     if (req.UpdateIfExists)
                     {
                         if (!string.IsNullOrWhiteSpace(productReq.Sku))
@@ -451,6 +452,7 @@ namespace George.Services
                                     productReq.Sku!,
                                     accountIdForLookup,
                                     targetSiteIds,
+                                    exclusiveSitesOnly: true,
                                     cancelToken);
                             }
                             // Do not fall back to account-wide SKU match when we have target sites: a product with same SKU on another site stays separate
@@ -464,12 +466,13 @@ namespace George.Services
                         }
                         if (existingProduct == null && !string.IsNullOrWhiteSpace(productReq.Name))
                         {
-                            // Only match by name when product is on one of the target sites
+                            // Only match by name when product is exclusively on one of the target sites (no shared product across sites)
                             var siteIdsForLookup = (targetSiteIds != null && targetSiteIds.Any()) ? targetSiteIds : null;
                             existingProduct = await _productStorage.GetProductByNameAndAccountAsync(
                                 productReq.Name!,
                                 accountIdForLookup,
                                 siteIdsForLookup,
+                                exclusiveSitesOnly: siteIdsForLookup != null && siteIdsForLookup.Any(),
                                 cancelToken);
                         }
                     }
@@ -585,6 +588,7 @@ namespace George.Services
 
                         var lookupDto = MapToLookupDto(productReq);
                         await _productStorage.MapLookupsAsync(product, lookupDto, cancelToken);
+                        ApplyIsWeightedFromSetupType(product, productReq.SetupType);
 
                         // Keep product on target site(s) only; no merge from other sites so other sites' data stays unchanged
                         var siteIdsForUpdate = targetSiteIds ?? productReq.SiteIds;
@@ -639,7 +643,7 @@ namespace George.Services
                     }
                     else
                     {
-                        // Create new product
+                        // Create new product. When we have target sites and no product was found that is exclusive to those sites (product exists only on another site or is shared across sites), we intentionally create a new product for the target site(s) only. Result: two separate products per site, each with its own media/data (no shared product across sites).
                         var product = MapReqToProduct(productReq);
                         product.CreationUserId = AuthUser?.Id;
                         product.CreationTime = DateTime.UtcNow;
@@ -653,6 +657,7 @@ namespace George.Services
 
                         var lookupDto = MapToLookupDto(productReq);
                         await _productStorage.MapLookupsAsync(product, lookupDto, cancelToken);
+                        ApplyIsWeightedFromSetupType(product, productReq.SetupType);
 
                         product = await _productStorage.CreateProductAsync(
                             product,
@@ -780,6 +785,19 @@ namespace George.Services
         }
 
         // Helper methods
+
+        /// <summary>
+        /// Apply IsWeighted from SetupType when not explicitly set (same logic as WooCommerce sync and frontend edit form).
+        /// by_weight, by_unit, by_unit_and_weight => treat as weighted when IsWeighted is not false.
+        /// </summary>
+        private static void ApplyIsWeightedFromSetupType(Product product, string? setupTypeName)
+        {
+            var name = setupTypeName ?? "";
+            var isWeightedBySetup = name is "by_weight" or "by_unit" or "by_unit_and_weight";
+            var isWeighted = product.IsWeighted == true || (product.IsWeighted != false && isWeightedBySetup);
+            product.IsWeighted = isWeighted;
+        }
+
         private Product MapReqToProduct(ProductReq req)
         {
             return new Product
