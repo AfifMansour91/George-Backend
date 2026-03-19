@@ -1614,7 +1614,7 @@ namespace George.Services
 
                     var variantWooSku = GetWooCommerceSku(siteId, variant.Sku);
                     // Variation weight only when product is weighable (same as product-level weight).
-                    var variationWeightForWoo = isWeighted ? (variant.Weight?.ToString() ?? "") : "";
+                    //var variationWeightForWoo = isWeighted ? (variant.Weight?.ToString() ?? "") : "";
                     var wooVariation = new Dictionary<string, object>
                     {
                         ["regular_price"] = variant.Price?.ToString() ?? product.Price?.ToString() ?? "0",
@@ -1622,7 +1622,8 @@ namespace George.Services
                         ["sku"] = variantWooSku,
                         ["manage_stock"] = stockManagedPerVariation,
                         ["stock_status"] = variantStockStatus,
-                        ["weight"] = variationWeightForWoo,
+                        //["weight"] = variationWeightForWoo,
+                        ["weight"] = variant.Weight?.ToString() ?? "",
                         ["attributes"] = variationAttributesList
                     };
                     if (stockManagedPerVariation)
