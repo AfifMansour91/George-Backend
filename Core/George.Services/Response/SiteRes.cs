@@ -39,5 +39,8 @@ namespace George.Services.Response
         public string? PrintFutureAtTime { get; set; }
         public bool? VoucherPrinterSilent { get; set; }
         public string? VoucherPrinterName { get; set; }
+
+        /// <summary>When the site's account has kiosk enabled, contains the account kiosk settings (including showOutOfStockProducts, showOutOfStockAtBottom).</summary>
+        public KioskSettingsRes? KioskSettings { get; set; }
     }
 }

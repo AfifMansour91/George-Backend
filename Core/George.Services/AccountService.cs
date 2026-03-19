@@ -249,6 +249,8 @@ namespace George.Services
                     CreditEnabled = req.KioskSettings.CreditEnabled,
                     CashAtRegisterEnabled = req.KioskSettings.CashAtRegisterEnabled,
                     ShowDuplicateOrderButton = req.KioskSettings.ShowDuplicateOrderButton,
+                    ShowOutOfStockProducts = req.KioskSettings.ShowOutOfStockProducts,
+                    ShowOutOfStockAtBottom = req.KioskSettings.ShowOutOfStockAtBottom,
                     PosProductsEnabled = req.KioskSettings.PosProductsEnabled,
                     ButtonTextToPaymentOrViewOrder = string.IsNullOrWhiteSpace(req.KioskSettings.ButtonTextToPaymentOrViewOrder) ? null : req.KioskSettings.ButtonTextToPaymentOrViewOrder,
                     ButtonTextCartToPayment = string.IsNullOrWhiteSpace(req.KioskSettings.ButtonTextCartToPayment) ? null : req.KioskSettings.ButtonTextCartToPayment,

@@ -25,6 +25,10 @@ public class KioskSettingsRes
     public bool CashAtRegisterEnabled { get; set; }
     /// <summary>Show "הזמנה חוזרת" (Repeat Order) button in kiosk (default false).</summary>
     public bool ShowDuplicateOrderButton { get; set; } = false;
+    /// <summary>Show products that are out of stock in kiosk categories/search (default false).</summary>
+    public bool ShowOutOfStockProducts { get; set; } = false;
+    /// <summary>When showing out-of-stock products, place them at the bottom of category/search lists (default false).</summary>
+    public bool ShowOutOfStockAtBottom { get; set; } = false;
     /// <summary>Enable POS products (upsell) step (default true).</summary>
     public bool PosProductsEnabled { get; set; } = true;
     /// <summary>Button text: "To payment / View order".</summary>

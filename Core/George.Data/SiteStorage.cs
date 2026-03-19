@@ -52,7 +52,12 @@ namespace George.Data
         public async Task<Site?> GetSiteAsync(int siteId, CancellationToken cancelToken)
         {
             return await _dbContext.Site
-                .Include(a => a.Account)
+                .Include(s => s.Account)
+                    .ThenInclude(a => a.KioskSettings)
+                    .ThenInclude(ks => ks!.HomeVideoMedia)
+                .Include(s => s.Account)
+                    .ThenInclude(a => a.KioskSettingsHomeImage)
+                    .ThenInclude(i => i.Media)
                 .Include(s => s.BusinessType)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(a => a.Id == siteId, cancelToken);

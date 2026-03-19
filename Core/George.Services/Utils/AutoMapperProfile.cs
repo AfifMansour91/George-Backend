@@ -120,6 +120,7 @@ namespace George.Services
 
             /////////////////////////// Site
             CreateMap<Site, SiteRes>()
+                .ForMember(dest => dest.KioskSettings, opt => opt.Ignore())
                 .AfterMap((src, dest, context) =>
                 {
                     dest.Id = src.Id;
@@ -141,6 +142,23 @@ namespace George.Services
                     
                     // Explicitly map WooCommerceEnabled to ensure it's included
                     dest.WooCommerceEnabled = src.WooCommerceEnabled;
+
+                    // When account has kiosk enabled, include account kiosk settings (so GET Site/{id} returns showOutOfStockProducts, showOutOfStockAtBottom, etc.)
+                    if (src.Account != null && src.Account.KioskEnabled && src.Account.KioskSettings != null)
+                    {
+                        dest.KioskSettings = context.Mapper.Map<KioskSettingsRes>(src.Account.KioskSettings);
+                        dest.KioskSettings.HomeVideoMediaId = src.Account.KioskSettings.HomeVideoMediaId;
+                        dest.KioskSettings.HomeVideoUrl = src.Account.KioskSettings.HomeVideoMedia?.Url;
+                        dest.KioskSettings.PosProductsType = src.Account.KioskSettings.PosProductsType;
+                        dest.KioskSettings.PosProductsCategoryId = src.Account.KioskSettings.PosProductsCategoryId;
+                        var orderedImages = src.Account.KioskSettingsHomeImage?.OrderBy(i => i.SortOrder).ToList() ?? new List<George.DB.KioskSettingsHomeImage>();
+                        dest.KioskSettings.HomeImageMediaIds = orderedImages.Select(x => x.MediaId).ToList();
+                        dest.KioskSettings.HomeImageUrls = orderedImages.Select(x => x.Media?.Url).Where(u => !string.IsNullOrEmpty(u)).Cast<string>().ToList();
+                    }
+                    else
+                    {
+                        dest.KioskSettings = null;
+                    }
                 });
             CreateMap<CreateSiteReq, Site>()
                 .AfterMap((src, dest, context) =>
