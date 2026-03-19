@@ -160,8 +160,9 @@ namespace George.Api.Controllers
                     cancelToken));
         }
 
-        /// <summary>Create or update order from WooCommerce (plugin calls when order is opened/edited). Auth: X-Api-Key or Bearer &lt;key&gt;.</summary>
+        /// <summary>Create or update order from WooCommerce (plugin calls when order is opened/edited). Auth: X-Api-Key or Bearer &lt;key&gt;. TEST: AllowAnonymous + payload.SiteId fallback enabled for Swagger; remove for production.</summary>
         [HttpPost("Order")]
+        [AllowAnonymous] // TEST ONLY: remove when done testing so only API key auth is allowed
         [Authorize(AuthenticationSchemes = WooCommerceApiKeyAuthenticationHandler.SchemeName)]
         [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]
         [ProducesResponseType((int)HttpStatusCode.Unauthorized)]
@@ -170,6 +171,16 @@ namespace George.Api.Controllers
             CancellationToken cancelToken = default)
         {
             var siteId = GetWooCommerceSiteId();
+
+            ///////TEST ONLY
+            // For testing without API key: use payload.SiteId when not authenticated
+            if (siteId == null && payload?.SiteId != null && int.TryParse(payload.SiteId.Trim(), out var parsedSiteId) && parsedSiteId > 0)
+            {
+                var site = await _siteStorage.GetSiteAsync(parsedSiteId, cancelToken);
+                if (site != null)
+                    siteId = parsedSiteId;
+            }
+            ///////END TEST ONLY
             if (siteId == null)
                 return Unauthorized();
             return await SafeCallWithErrorCatchingAsync(() =>

@@ -104,6 +104,16 @@ public class WooCommerceShippingAddressPayload
     public string? Zip { get; set; }
 }
 
+/// <summary>One selected option in a variant (e.g. cutting shape or size). Id = WooCommerce attribute/value id, Name = display text.</summary>
+public class WooCommerceVariantOptionPayload
+{
+    [JsonPropertyName("id")]
+    public int? Id { get; set; }
+
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+}
+
 public class WooCommerceOrderItemPayload
 {
     [JsonPropertyName("productId")]
@@ -114,6 +124,18 @@ public class WooCommerceOrderItemPayload
 
     [JsonPropertyName("sku")]
     public string? Sku { get; set; }
+
+    /// <summary>WooCommerce variation ID (optional). For variable products.</summary>
+    [JsonPropertyName("variationId")]
+    public int? VariationId { get; set; }
+
+    /// <summary>Array of selected variant options. Each has id (WooCommerce option/value id) and name (display text). For display we join names with " | ".</summary>
+    [JsonPropertyName("variants")]
+    public List<WooCommerceVariantOptionPayload>? Variants { get; set; }
+
+    /// <summary>Customer note for this line item (הערת לקוח לפריט).</summary>
+    [JsonPropertyName("note")]
+    public string? Note { get; set; }
 
     [JsonPropertyName("quantity")]
     public decimal Quantity { get; set; }

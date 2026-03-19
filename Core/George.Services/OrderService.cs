@@ -506,6 +506,100 @@ namespace George.Services
             return null;
         }
 
+        /// <summary>Build VariantTitle from payload: join variants[].name with " | ". Returns null if no variants.</summary>
+        private static string? GetVariantTitleFromPayload(WooCommerceOrderItemPayload it)
+        {
+            if (it.Variants == null || it.Variants.Count == 0)
+                return null;
+            var names = it.Variants
+                .Select(v => v?.Name?.Trim())
+                .Where(n => !string.IsNullOrEmpty(n))
+                .ToList();
+            return names.Count > 0 ? string.Join(" | ", names) : null;
+        }
+
+        /// <summary>Resolve WooCommerce order item to our ProductVariant for this product (site product already resolved). First by variationId (WooCommerceVariationId), then by variant names joined with " | ". Used only when processing WooCommerce orders.</summary>
+        private static ProductVariant? GetVariantFromPayloadItem(WooCommerceOrderItemPayload it, Product? product)
+        {
+            if (product?.ProductVariant == null || !product.ProductVariant.Any(v => !v.IsDeleted))
+                return null;
+
+            // 1) Match by WooCommerce variation ID when sent
+            if (it.VariationId.HasValue && it.VariationId.Value > 0)
+            {
+                var byId = product.ProductVariant
+                    .FirstOrDefault(v => !v.IsDeleted && v.WooCommerceVariationId == it.VariationId.Value);
+                if (byId != null) return byId;
+            }
+
+            // 2) Fallback: match by name (payload variants[].name joined " | " vs our variant option values joined " | ")
+            var payloadTitle = GetVariantTitleFromPayload(it);
+            if (string.IsNullOrWhiteSpace(payloadTitle)) return null;
+
+            var payloadNorm = payloadTitle.Trim();
+            foreach (var v in product.ProductVariant.Where(v => !v.IsDeleted))
+            {
+                var optionValues = (v.ProductVariantOptionValue?
+                    .OrderBy(ov => ov.OptionName)
+                    .Select(ov => ov.OptionValue?.Trim())
+                    .Where(s => !string.IsNullOrEmpty(s))
+                    .ToList() ?? new List<string?>()).Cast<string>().ToList();
+                var ourTitle = optionValues.Count > 0 ? string.Join(" | ", optionValues) : null;
+                if (!string.IsNullOrWhiteSpace(ourTitle) && string.Equals(ourTitle.Trim(), payloadNorm, StringComparison.OrdinalIgnoreCase))
+                    return v;
+            }
+            return null;
+        }
+
+        /// <summary>For WooCommerce order items: compute quantity, unitWeightGrams and optional variantTitle from product setup so display matches Kiosk/manual (regular=units, by_weight=kg/g, by_unit=units+weight per unit).</summary>
+        private static (decimal quantity, decimal? unitWeightGrams, string? variantTitle) GetWooCommerceItemQuantityAndUnitWeight(WooCommerceOrderItemPayload it, Product? product)
+        {
+            if (product == null)
+                return (it.Quantity, null, null);
+
+            var setupTypeName = product.SetupType?.Name ?? "";
+            var isWeightedBySetup = setupTypeName is "by_weight" or "by_unit" or "by_unit_and_weight";
+            var isWeighted = product.IsWeighted == true || (product.IsWeighted != false && isWeightedBySetup);
+
+            if (!isWeighted || setupTypeName == "standard")
+                return (it.Quantity, null, null);
+
+            // Sold by weight (ק"ג or גרם): WC quantity is weight in kg. Store so display shows weight (e.g. 1.5 ק"ג, 700 גרם).
+            if (setupTypeName == "by_weight")
+            {
+                // Always store weight in kg; frontend shows kg or converts to grams from product unit.
+                return (it.Quantity, 1000m, null);
+            }
+
+            // by_unit or by_unit_and_weight
+            var wc = product.WeightConfig;
+            if (wc?.WeightByVariant == true)
+            {
+                // משקל לפי גודל: use variant weight. Resolve variant by variationId (when sent) or by name (fallback for this site's WooCommerce orders).
+                decimal? unitWeightGrams = null;
+                var matchedVariant = GetVariantFromPayloadItem(it, product);
+                var variantToUse = matchedVariant ?? product.ProductVariant?.FirstOrDefault(v => !v.IsDeleted && v.Weight.HasValue);
+                if (variantToUse?.Weight.HasValue == true)
+                    unitWeightGrams = (decimal)(variantToUse.Weight!.Value * 1000);
+                return (it.Quantity, unitWeightGrams, null);
+            }
+
+            if (!string.IsNullOrWhiteSpace(wc?.UnitWeight) && decimal.TryParse(wc.UnitWeight, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+            {
+                // מכירה לפי יחידה / בחירת משקל ליחידה: quantity = units, unitWeightGrams = weight per unit in grams.
+                var unitWeightGrams = string.Equals(wc.Unit?.Name, "g", StringComparison.OrdinalIgnoreCase)
+                    ? parsed
+                    : parsed * 1000m;
+                return (it.Quantity, unitWeightGrams, null);
+            }
+
+            // by_unit_and_weight with no unit weight: treat WC quantity as weight in kg (e.g. 1.4 kg).
+            if (setupTypeName == "by_unit_and_weight")
+                return (it.Quantity, 1000m, null);
+
+            return (it.Quantity, null, null);
+        }
+
         /// <summary>Create or update order from WooCommerce plugin (API key auth). No AuthUser.</summary>
         public async Task<IApiResponse<OrderRes>> CreateOrUpdateOrderFromWooCommerceAsync(int siteId, WooCommerceOrderPayload payload, CancellationToken cancelToken = default)
         {
@@ -551,14 +645,19 @@ namespace George.Services
                     {
                         var it = payload.Items[i];
                         var ourProductId = await ResolveWooCommerceItemProductIdAsync(siteId, site.AccountId, it.ProductId, it.Sku, cancelToken).ConfigureAwait(false);
+                        Product? product = ourProductId.HasValue ? await _productStorage.GetProductAsync(ourProductId.Value, cancelToken).ConfigureAwait(false) : null;
+                        var (qty, unitWeightGrams, variantTitle) = GetWooCommerceItemQuantityAndUnitWeight(it, product);
                         updateItems.Add(new OrderItem
                         {
                             OrderId = existing.Id,
                             ProductId = ourProductId ?? it.ProductId,
                             Title = it.Name,
-                            Quantity = it.Quantity,
+                            VariantTitle = GetVariantTitleFromPayload(it) ?? variantTitle,
+                            Quantity = qty,
+                            UnitWeightGrams = unitWeightGrams,
                             PricePerUnit = it.UnitPrice,
                             TotalPrice = it.LineTotal,
+                            Notes = it.Note,
                             SortOrder = i
                         });
                     }
@@ -575,13 +674,18 @@ namespace George.Services
                 {
                     var it = payload.Items[i];
                     var ourProductId = await ResolveWooCommerceItemProductIdAsync(siteId, site.AccountId, it.ProductId, it.Sku, cancelToken).ConfigureAwait(false);
+                    Product? product = ourProductId.HasValue ? await _productStorage.GetProductAsync(ourProductId.Value, cancelToken).ConfigureAwait(false) : null;
+                    var (qty, unitWeightGrams, variantTitle) = GetWooCommerceItemQuantityAndUnitWeight(it, product);
                     createItems.Add(new CreateOrderItemReq
                     {
                         ProductId = ourProductId ?? it.ProductId,
                         Title = it.Name,
-                        Quantity = it.Quantity,
+                        VariantTitle = GetVariantTitleFromPayload(it) ?? variantTitle,
+                        Quantity = qty,
+                        UnitWeightGrams = unitWeightGrams,
                         PricePerUnit = it.UnitPrice,
                         TotalPrice = it.LineTotal,
+                        Notes = it.Note,
                         SortOrder = i
                     });
                 }
