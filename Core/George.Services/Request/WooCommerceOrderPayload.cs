@@ -3,12 +3,16 @@ using System.Text.Json.Serialization;
 
 namespace George.Services.Request;
 
-/// <summary>Payload from WooCommerce plugin when order is opened/edited. Matches their JSON (camelCase).</summary>
+/// <summary>Payload from WooCommerce plugin when order is opened/edited. Matches their JSON (camelCase and snake_case for new fields).</summary>
 public class WooCommerceOrderPayload
 {
     [Required]
     [JsonPropertyName("orderNumber")]
     public string OrderNumber { get; set; } = null!;
+
+    /// <summary>WooCommerce order ID; may be sent as number. Used as external reference (we also use orderNumber).</summary>
+    [JsonPropertyName("externalOrderId")]
+    public object? ExternalOrderId { get; set; }
 
     [JsonPropertyName("source")]
     public string Source { get; set; } = "WooCommerce";
@@ -41,6 +45,39 @@ public class WooCommerceOrderPayload
 
     [JsonPropertyName("customerNotes")]
     public string? CustomerNotes { get; set; }
+
+    /// <summary>Shipping method label (e.g. "איסוף עצמי").</summary>
+    [JsonPropertyName("shipping_label")]
+    public string? ShippingLabel { get; set; }
+
+    /// <summary>Payment method label (e.g. "תשלום לשליח").</summary>
+    [JsonPropertyName("payment_label")]
+    public string? PaymentLabel { get; set; }
+
+    /// <summary>Delivery/pickup slot and type (type, date DD/MM/YYYY, slotStart, slotEnd, pickupAffiliateId, pickupAffiliateName).</summary>
+    [JsonPropertyName("shippingInfo")]
+    public WooCommerceShippingInfoPayload? ShippingInfo { get; set; }
+}
+
+public class WooCommerceShippingInfoPayload
+{
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+
+    [JsonPropertyName("date")]
+    public string? Date { get; set; }
+
+    [JsonPropertyName("slotStart")]
+    public string? SlotStart { get; set; }
+
+    [JsonPropertyName("slotEnd")]
+    public string? SlotEnd { get; set; }
+
+    [JsonPropertyName("pickupAffiliateId")]
+    public string? PickupAffiliateId { get; set; }
+
+    [JsonPropertyName("pickupAffiliateName")]
+    public string? PickupAffiliateName { get; set; }
 }
 
 public class WooCommerceCustomerPayload

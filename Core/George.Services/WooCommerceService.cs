@@ -31,6 +31,7 @@ namespace George.Services
         private readonly CategoryStorage _categoryStorage;
         private readonly ProductStorage _productStorage;
         private readonly AttributeStorage _attributeStorage;
+        private readonly OrderStorage _orderStorage;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IServiceScopeFactory _scopeFactory;
 
@@ -42,6 +43,7 @@ namespace George.Services
             CategoryStorage categoryStorage,
             ProductStorage productStorage,
             AttributeStorage attributeStorage,
+            OrderStorage orderStorage,
             IHttpClientFactory httpClientFactory,
             IServiceScopeFactory scopeFactory
         ) : base(logger, mapper, cache)
@@ -50,6 +52,7 @@ namespace George.Services
             _categoryStorage = categoryStorage;
             _productStorage = productStorage;
             _attributeStorage = attributeStorage;
+            _orderStorage = orderStorage;
             _httpClientFactory = httpClientFactory;
             _scopeFactory = scopeFactory;
         }
@@ -1450,23 +1453,27 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Updates the order status on the store side (WooCommerce or oc-storeos). When we mark an order Ready/Completed we PUT status "completed" so they can run payment (e.g. credit). Uses WooCommerceOrderUpdateBaseUrl when set (e.g. https://.../wp-json/oc-storeos/v1), otherwise WooCommerceUrl + /wp-json/wc/v3. Does not throw; logs errors.
+        /// Updates the order status on the store side (WooCommerce or oc-storeos). When base URL is oc-storeos, POSTs full order to their API (order_id + status + customer + items etc.). Otherwise PUTs status to WooCommerce REST API. Does not throw; logs errors.
         /// </summary>
         public async Task UpdateOrderStatusAsync(int siteId, string wooOrderId, string status, CancellationToken cancelToken)
         {
             if (string.IsNullOrWhiteSpace(wooOrderId)) return;
             var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
-            if (site == null || site.WooCommerceEnabled != true ||
-                string.IsNullOrEmpty(site.WooCommerceKey) ||
-                string.IsNullOrEmpty(site.WooCommerceSecret))
+            if (site == null || site.WooCommerceEnabled != true) return;
+            var baseUrl = !string.IsNullOrWhiteSpace(site.WooCommerceOrderUpdateBaseUrl)
+                ? site.WooCommerceOrderUpdateBaseUrl.Trim().TrimEnd('/')
+                : null;
+            var isOcStoreos = !string.IsNullOrEmpty(baseUrl) && baseUrl.Contains("oc-storeos", StringComparison.OrdinalIgnoreCase);
+            if (isOcStoreos)
+            {
+                var order = await _orderStorage.GetOrderBySiteAndExternalIdAsync(siteId, wooOrderId.Trim(), cancelToken);
+                if (order != null)
+                    await SyncOrderToOcStoreosAsync(siteId, order.Id, cancelToken);
                 return;
-            string baseUrl;
-            if (!string.IsNullOrWhiteSpace(site.WooCommerceOrderUpdateBaseUrl))
-                baseUrl = site.WooCommerceOrderUpdateBaseUrl.Trim().TrimEnd('/');
-            else if (!string.IsNullOrWhiteSpace(site.WooCommerceUrl))
-                baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
-            else
-                return;
+            }
+            if (string.IsNullOrEmpty(site.WooCommerceKey) || string.IsNullOrEmpty(site.WooCommerceSecret)) return;
+            if (string.IsNullOrEmpty(site.WooCommerceUrl)) return;
+            baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
             var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
             using var httpClient = _httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(30);
@@ -1479,8 +1486,103 @@ namespace George.Services
             if (!response.IsSuccessStatusCode)
             {
                 var err = await response.Content.ReadAsStringAsync(cancelToken);
-                _logger.LogWarning("WooCommerce/oc-storeos order status update failed for site {SiteId}, order {WooOrderId}: {Status} {Error}", siteId, wooOrderId, (int)response.StatusCode, err);
+                _logger.LogWarning("WooCommerce order status update failed for site {SiteId}, order {WooOrderId}: {Status} {Error}", siteId, wooOrderId, (int)response.StatusCode, err);
             }
+        }
+
+        /// <summary>
+        /// Syncs full order to oc-storeos API (POST .../orders). Used when completing/updating/cancelling orders that came from WooCommerce. Payload: orderId, status, externalOrderId, customer, shippingAddress, shippingInfo, items (sku/quantity), shippingTotal, customerNotes. Does not throw; logs errors.
+        /// </summary>
+        public async Task SyncOrderToOcStoreosAsync(int siteId, int orderId, CancellationToken cancelToken)
+        {
+            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+            if (site == null || string.IsNullOrWhiteSpace(site.WooCommerceOrderUpdateBaseUrl)) return;
+            var baseUrl = site.WooCommerceOrderUpdateBaseUrl.Trim().TrimEnd('/');
+            if (!baseUrl.Contains("oc-storeos", StringComparison.OrdinalIgnoreCase)) return;
+            var order = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
+            if (order == null || string.IsNullOrWhiteSpace(order.ExternalOrderId)) return;
+            var wcStatus = MapOurStatusToWooCommerceForOcStoreos(order.Status);
+            var productIds = (order.OrderItem ?? new List<OrderItem>()).Where(i => i.ProductId.HasValue).Select(i => i.ProductId!.Value).Distinct().ToList();
+            var productSkuAndWoo = new Dictionary<int, (string? Sku, int? WooCommerceId)>();
+            if (productIds.Count > 0)
+            {
+                var paging = new PagingExDto { Skip = 0, Take = productIds.Count + 10, IncludeTotal = false };
+                var productsRes = await _productStorage.GetProductsBySiteAndIdsAsync(siteId, productIds, paging, cancelToken);
+                foreach (var p in productsRes.Items ?? Enumerable.Empty<Product>())
+                    productSkuAndWoo[p.Id] = (p.Sku, p.WooCommerceId);
+            }
+            var items = new List<object>();
+            foreach (var line in order.OrderItem?.OrderBy(i => i.SortOrder) ?? Enumerable.Empty<OrderItem>())
+            {
+                var qty = (decimal)(line.Quantity > 0 ? line.Quantity : 1);
+                if (line.ProductId.HasValue && productSkuAndWoo.TryGetValue(line.ProductId.Value, out var skuWoo))
+                {
+                    if (!string.IsNullOrWhiteSpace(skuWoo.Sku))
+                        items.Add(new { sku = skuWoo.Sku.Trim(), quantity = qty });
+                    else if (skuWoo.WooCommerceId.HasValue)
+                        items.Add(new { productId = skuWoo.WooCommerceId.Value, quantity = qty });
+                    else
+                        items.Add(new { quantity = qty });
+                }
+                else
+                    items.Add(new { quantity = qty });
+            }
+            var deliveryDate = order.DeliveryDate ?? order.PickupDate;
+            var deliveryTime = order.DeliveryTime ?? order.PickupTime;
+            var slotStart = string.IsNullOrWhiteSpace(deliveryTime) ? (string?)null : deliveryTime.Trim();
+            var deliveryType = (order.DeliveryType ?? "").Trim();
+            var shippingType = string.Equals(deliveryType, "Pickup", StringComparison.OrdinalIgnoreCase) ? "pickup" : "delivery";
+            var payload = new Dictionary<string, object?>
+            {
+                ["orderId"] = int.TryParse(order.ExternalOrderId, out var oid) ? oid : (object)order.ExternalOrderId,
+                ["status"] = wcStatus ?? "on-hold",
+                ["externalOrderId"] = order.OrderNumber ?? order.ExternalOrderId,
+                ["customer"] = new Dictionary<string, string?>
+                {
+                    ["name"] = order.CustomerName,
+                    ["email"] = order.CustomerEmail ?? "",
+                    ["phone"] = order.CustomerPhone ?? ""
+                },
+                ["shippingAddress"] = new Dictionary<string, string?>
+                {
+                    ["street"] = order.DeliveryAddress,
+                    ["city"] = "",
+                    ["zip"] = ""
+                },
+                ["shippingInfo"] = new Dictionary<string, object?>
+                {
+                    ["type"] = shippingType,
+                    ["date"] = deliveryDate.HasValue ? deliveryDate.Value.ToString("yyyy-MM-dd") : null,
+                    ["slotStart"] = slotStart,
+                    ["slotEnd"] = slotStart
+                },
+                ["items"] = items,
+                ["shippingTotal"] = order.ShippingCost ?? 0,
+                ["customerNotes"] = order.CustomerNote ?? ""
+            };
+            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = false };
+            var body = JsonSerializer.Serialize(payload, jsonOptions);
+            using var httpClient = _httpClientFactory.CreateClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(30);
+            using var content = new StringContent(body, Encoding.UTF8, "application/json");
+            var url = $"{baseUrl}/orders";
+            var response = await httpClient.PostAsync(url, content, cancelToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                var err = await response.Content.ReadAsStringAsync(cancelToken);
+                _logger.LogWarning("oc-storeos order sync failed for site {SiteId}, order {OrderId}: {Status} {Error}", siteId, orderId, (int)response.StatusCode, err);
+            }
+        }
+
+        private static string MapOurStatusToWooCommerceForOcStoreos(string? ourStatus)
+        {
+            if (string.IsNullOrWhiteSpace(ourStatus)) return "on-hold";
+            var s = ourStatus.Trim();
+            if (string.Equals(s, "New", StringComparison.OrdinalIgnoreCase)) return "on-hold";
+            if (string.Equals(s, "InTreatment", StringComparison.OrdinalIgnoreCase)) return "processing";
+            if (string.Equals(s, "Ready", StringComparison.OrdinalIgnoreCase) || string.Equals(s, "Completed", StringComparison.OrdinalIgnoreCase)) return "completed";
+            if (string.Equals(s, "Cancelled", StringComparison.OrdinalIgnoreCase)) return "cancelled";
+            return "on-hold";
         }
 
         /// <summary>

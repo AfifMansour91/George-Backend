@@ -258,33 +258,30 @@ namespace George.Services
             }, cancelToken);
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
-            // Sync status to WooCommerce/oc-storeos only for orders that came from WooCommerce (any status change).
-            if (req.Status != null && !string.IsNullOrWhiteSpace(updated.ExternalOrderId) &&
+            // Sync to WooCommerce/oc-storeos when order came from WooCommerce: on any update (status, delivery, notes, etc.). oc-storeos gets full order POST; standard WC gets status PUT.
+            if (!string.IsNullOrWhiteSpace(updated.ExternalOrderId) &&
                 string.Equals(updated.Source, "WooCommerce", StringComparison.OrdinalIgnoreCase))
+            {
+                var site = await _siteStorage.GetSiteAsync(updated.SiteId, cancelToken);
+                if (site?.WooCommerceEnabled == true)
                 {
-                    var site = await _siteStorage.GetSiteAsync(updated.SiteId, cancelToken);
-                    if (site?.WooCommerceEnabled == true)
+                    var wcStatus = MapOurStatusToWooCommerce(updated.Status) ?? "on-hold";
+                    var orderIdCapture = orderId;
+                    var siteIdCapture = updated.SiteId;
+                    var externalIdCapture = updated.ExternalOrderId!;
+                    _ = Task.Run(async () =>
                     {
-                        var wcStatus = MapOurStatusToWooCommerce(updated.Status);
-                        if (wcStatus != null)
+                        try
                         {
-                            var orderIdCapture = orderId;
-                            var siteIdCapture = updated.SiteId;
-                            var externalIdCapture = updated.ExternalOrderId!;
-                            _ = Task.Run(async () =>
-                            {
-                                try
-                                {
-                                    await _wooCommerceService.UpdateOrderStatusAsync(siteIdCapture, externalIdCapture, wcStatus, CancellationToken.None);
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogError(ex, "WooCommerce/oc-storeos order status sync failed for order {OrderId}", orderIdCapture);
-                                }
-                            }, CancellationToken.None);
+                            await _wooCommerceService.UpdateOrderStatusAsync(siteIdCapture, externalIdCapture, wcStatus, CancellationToken.None);
                         }
-                    }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "WooCommerce/oc-storeos order sync failed for order {OrderId}", orderIdCapture);
+                        }
+                    }, CancellationToken.None);
                 }
+            }
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             response.Data = _mapper.Map<OrderRes>(loaded);
             return response;
@@ -418,6 +415,81 @@ namespace George.Services
             return response;
         }
 
+        /// <summary>Parse shippingInfo and shipping_label into delivery type, date, time and optional note. Date may be "DD/MM/YYYY" or "YYYY-MM-DD".</summary>
+        private static void ApplyShippingInfoToOrder(Order order, WooCommerceShippingInfoPayload? shippingInfo, string? shippingLabel)
+        {
+            var isPickup = false;
+            if (shippingInfo?.Type != null)
+            {
+                var t = shippingInfo.Type.Trim();
+                isPickup = string.Equals(t, "pickup", StringComparison.OrdinalIgnoreCase);
+                order.DeliveryType = isPickup ? "Pickup" : "Shipping";
+            }
+            else if (!string.IsNullOrWhiteSpace(shippingLabel))
+            {
+                var label = shippingLabel.Trim();
+                isPickup = label.Contains("איסוף", StringComparison.Ordinal) || label.Contains("pickup", StringComparison.OrdinalIgnoreCase);
+                order.DeliveryType = isPickup ? "Pickup" : "Shipping";
+            }
+            if (shippingInfo != null)
+            {
+                if (!string.IsNullOrWhiteSpace(shippingInfo.Date))
+                {
+                    var parsed = ParseWooCommerceDate(shippingInfo.Date);
+                    if (parsed.HasValue)
+                    {
+                        if (isPickup) order.PickupDate = parsed.Value;
+                        else order.DeliveryDate = parsed.Value;
+                    }
+                }
+                var slot = string.IsNullOrWhiteSpace(shippingInfo.SlotStart) ? shippingInfo.SlotEnd : shippingInfo.SlotStart;
+                if (!string.IsNullOrWhiteSpace(shippingInfo.SlotEnd) && shippingInfo.SlotEnd != slot)
+                    slot = $"{slot?.Trim()} - {shippingInfo.SlotEnd.Trim()}";
+                if (!string.IsNullOrWhiteSpace(slot))
+                {
+                    if (isPickup) order.PickupTime = slot.Trim();
+                    else order.DeliveryTime = slot.Trim();
+                }
+                if (!string.IsNullOrWhiteSpace(shippingInfo.PickupAffiliateName))
+                    order.DeliveryNote = shippingInfo.PickupAffiliateName.Trim();
+            }
+        }
+
+        private static DateTime? ParseWooCommerceDate(string dateStr)
+        {
+            if (string.IsNullOrWhiteSpace(dateStr)) return null;
+            var s = dateStr.Trim();
+            var parts = s.Split('/', '-', '.');
+            if (parts.Length == 3 && int.TryParse(parts[0], out var n1) && int.TryParse(parts[1], out var n2) && int.TryParse(parts[2], out var y) && y >= 2000 && y <= 2100)
+            {
+                int day, month;
+                if (n1 > 12 && n2 >= 1 && n2 <= 12)
+                {
+                    day = n1;
+                    month = n2;
+                }
+                else if (n2 > 12 && n1 >= 1 && n1 <= 12)
+                {
+                    day = n2;
+                    month = n1;
+                }
+                else if (n1 >= 1 && n1 <= 31 && n2 >= 1 && n2 <= 12)
+                {
+                    day = n1;
+                    month = n2;
+                }
+                else
+                {
+                    if (DateTime.TryParse(s, out var dt)) return dt;
+                    return null;
+                }
+                if (day >= 1 && day <= DateTime.DaysInMonth(y, month))
+                    return new DateTime(y, month, day);
+            }
+            if (DateTime.TryParse(s, out var parsed)) return parsed;
+            return null;
+        }
+
         /// <summary>Resolves WooCommerce order item to our Product.Id: first by WooCommerce product ID (Product.WooCommerceId + site), then by SKU on the site. Returns null if not found (caller may keep payload ProductId as fallback).</summary>
         private async Task<int?> ResolveWooCommerceItemProductIdAsync(int siteId, int accountId, int? wooCommerceProductId, string? sku, CancellationToken cancelToken)
         {
@@ -442,7 +514,8 @@ namespace George.Services
             if (site == null)
                 return CreateResponse(response, StatusCode.ItemNotFound, "Site not found.");
             var status = MapWooCommerceStatusToOurs(payload.Status);
-            var existing = await _orderStorage.GetOrderBySiteAndExternalIdAsync(siteId, payload.OrderNumber, cancelToken).ConfigureAwait(false);
+            var externalId = !string.IsNullOrWhiteSpace(payload.OrderNumber) ? payload.OrderNumber : payload.ExternalOrderId?.ToString() ?? "";
+            var existing = await _orderStorage.GetOrderBySiteAndExternalIdAsync(siteId, externalId, cancelToken).ConfigureAwait(false);
             var todayUtc = DateTime.UtcNow.Date;
             if (existing != null)
             {
@@ -465,6 +538,7 @@ namespace George.Services
                     o.Total = payload.OrderTotal ?? o.Total;
                     o.SubTotal = (payload.OrderTotal ?? o.SubTotal) - (payload.ShippingTotal ?? 0);
                     o.UpdatedDate = DateTime.UtcNow;
+                    ApplyShippingInfoToOrder(o, payload.ShippingInfo, payload.ShippingLabel);
                     if (!o.DeliveryDate.HasValue) o.DeliveryDate = todayUtc;
                     if (!o.PickupDate.HasValue) o.PickupDate = todayUtc;
                 }, cancelToken).ConfigureAwait(false);
@@ -516,7 +590,7 @@ namespace George.Services
             {
                 SiteId = siteId,
                 AccountId = site.AccountId,
-                ExternalOrderId = payload.OrderNumber,
+                ExternalOrderId = externalId,
                 Source = "WooCommerce",
                 Status = status,
                 CustomerName = payload.Customer?.Name,
@@ -541,6 +615,7 @@ namespace George.Services
                 ? (payload.OrderDate.Value.Kind == DateTimeKind.Utc ? payload.OrderDate.Value : payload.OrderDate.Value.ToUniversalTime())
                 : DateTime.UtcNow;
             order.CreationUserId = null;
+            ApplyShippingInfoToOrder(order, payload.ShippingInfo, payload.ShippingLabel);
             // Default delivery/pickup date to today when not provided (like manual order)
             if (!order.DeliveryDate.HasValue) order.DeliveryDate = todayUtc;
             if (!order.PickupDate.HasValue) order.PickupDate = todayUtc;
