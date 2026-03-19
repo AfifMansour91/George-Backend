@@ -525,6 +525,18 @@ namespace George.Data
             return pairs.GroupBy(x => x.SiteId).ToDictionary(g => g.Key, g => g.Select(x => x.ProductId).ToList());
         }
 
+        /// <summary>Resolves WooCommerce product ID to our Product.Id for the given site. Used when receiving orders from WooCommerce so order items link to the correct site product. Returns null if no product is found for that site with the given WooCommerceId.</summary>
+        public async Task<int?> GetProductIdByWooCommerceIdAndSiteAsync(int siteId, int wooCommerceProductId, CancellationToken cancelToken = default)
+        {
+            if (siteId <= 0) return null;
+            var product = await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => !p.IsDeleted && p.WooCommerceId == wooCommerceProductId && p.Site.Any(s => s.Id == siteId))
+                .Select(p => new { p.Id })
+                .FirstOrDefaultAsync(cancelToken);
+            return product?.Id;
+        }
+
         /// <summary>Returns (WooCommerceId, DisplayOrder) for products in orderedProductIds that belong to the site and have a WooCommerceId. DisplayOrder = index in orderedProductIds. Used for menu-order-only sync.</summary>
         public async Task<List<(int WooCommerceId, int DisplayOrder)>> GetWooCommerceIdAndDisplayOrderForSiteAsync(List<int> orderedProductIds, int siteId, CancellationToken cancelToken)
         {

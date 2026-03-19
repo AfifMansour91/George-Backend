@@ -15,6 +15,7 @@ namespace George.Services
         private readonly CustomerStorage _customerStorage;
         private readonly SiteStorage _siteStorage;
         private readonly AccountStorage _accountStorage;
+        private readonly ProductStorage _productStorage;
         private readonly SmsProvider _smsProvider;
         private readonly WooCommerceService _wooCommerceService;
 
@@ -26,6 +27,7 @@ namespace George.Services
             CustomerStorage customerStorage,
             SiteStorage siteStorage,
             AccountStorage accountStorage,
+            ProductStorage productStorage,
             SmsProvider smsProvider,
             WooCommerceService wooCommerceService)
             : base(logger, mapper, cache)
@@ -34,6 +36,7 @@ namespace George.Services
             _customerStorage = customerStorage;
             _siteStorage = siteStorage;
             _accountStorage = accountStorage;
+            _productStorage = productStorage;
             _smsProvider = smsProvider;
             _wooCommerceService = wooCommerceService;
         }
@@ -105,6 +108,9 @@ namespace George.Services
             order.CreationTime = DateTime.UtcNow;
             order.CreationUserId = AuthUser.Id;
             order.IsDeleted = false;
+            var todayUtc = DateTime.UtcNow.Date;
+            if (!order.DeliveryDate.HasValue) order.DeliveryDate = todayUtc;
+            if (!order.PickupDate.HasValue) order.PickupDate = todayUtc;
             var items = new List<OrderItem>();
             for (var i = 0; i < req.Items.Count; i++)
             {
@@ -412,6 +418,22 @@ namespace George.Services
             return response;
         }
 
+        /// <summary>Resolves WooCommerce order item to our Product.Id: first by WooCommerce product ID (Product.WooCommerceId + site), then by SKU on the site. Returns null if not found (caller may keep payload ProductId as fallback).</summary>
+        private async Task<int?> ResolveWooCommerceItemProductIdAsync(int siteId, int accountId, int? wooCommerceProductId, string? sku, CancellationToken cancelToken)
+        {
+            if (wooCommerceProductId.HasValue && wooCommerceProductId.Value > 0)
+            {
+                var byWooId = await _productStorage.GetProductIdByWooCommerceIdAndSiteAsync(siteId, wooCommerceProductId.Value, cancelToken).ConfigureAwait(false);
+                if (byWooId.HasValue) return byWooId.Value;
+            }
+            if (!string.IsNullOrWhiteSpace(sku))
+            {
+                var bySku = await _productStorage.GetProductBySkuAndSitesAsync(sku.Trim(), accountId, new List<int> { siteId }, false, cancelToken).ConfigureAwait(false);
+                if (bySku != null) return bySku.Id;
+            }
+            return null;
+        }
+
         /// <summary>Create or update order from WooCommerce plugin (API key auth). No AuthUser.</summary>
         public async Task<IApiResponse<OrderRes>> CreateOrUpdateOrderFromWooCommerceAsync(int siteId, WooCommerceOrderPayload payload, CancellationToken cancelToken = default)
         {
@@ -421,19 +443,74 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.ItemNotFound, "Site not found.");
             var status = MapWooCommerceStatusToOurs(payload.Status);
             var existing = await _orderStorage.GetOrderBySiteAndExternalIdAsync(siteId, payload.OrderNumber, cancelToken).ConfigureAwait(false);
+            var todayUtc = DateTime.UtcNow.Date;
             if (existing != null)
             {
+                var deliveryAddress = payload.ShippingAddress != null
+                    ? string.Join(", ", new[] { payload.ShippingAddress.Street, payload.ShippingAddress.City, payload.ShippingAddress.Zip }.Where(s => !string.IsNullOrWhiteSpace(s)))
+                    : null;
+                var updateCustomer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
+                    siteId, site.AccountId, payload.Customer?.Phone ?? "", payload.Customer?.Name ?? "", email: payload.Customer?.Email,
+                    city: null, defaultAddress: deliveryAddress, notes: null, marketingSms: null, cancelToken).ConfigureAwait(false);
                 var updated = await _orderStorage.UpdateOrderAsync(existing.Id, o =>
                 {
                     o.Status = status;
-                    if (payload.CustomerNotes != null) o.CustomerNote = payload.CustomerNotes;
+                    o.CustomerName = payload.Customer?.Name;
+                    o.CustomerPhone = payload.Customer?.Phone;
+                    o.CustomerEmail = payload.Customer?.Email;
+                    o.CustomerId = updateCustomer.Id;
+                    o.DeliveryAddress = deliveryAddress;
+                    o.CustomerNote = payload.CustomerNotes ?? o.CustomerNote;
+                    o.ShippingCost = payload.ShippingTotal;
+                    o.Total = payload.OrderTotal ?? o.Total;
+                    o.SubTotal = (payload.OrderTotal ?? o.SubTotal) - (payload.ShippingTotal ?? 0);
                     o.UpdatedDate = DateTime.UtcNow;
+                    if (!o.DeliveryDate.HasValue) o.DeliveryDate = todayUtc;
+                    if (!o.PickupDate.HasValue) o.PickupDate = todayUtc;
                 }, cancelToken).ConfigureAwait(false);
                 if (updated == null)
                     return CreateResponse(response, StatusCode.ItemNotFound);
-                var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken).ConfigureAwait(false);
-                response.Data = _mapper.Map<OrderRes>(loaded);
+                var updateItems = new List<OrderItem>();
+                if (payload.Items != null)
+                {
+                    for (var i = 0; i < payload.Items.Count; i++)
+                    {
+                        var it = payload.Items[i];
+                        var ourProductId = await ResolveWooCommerceItemProductIdAsync(siteId, site.AccountId, it.ProductId, it.Sku, cancelToken).ConfigureAwait(false);
+                        updateItems.Add(new OrderItem
+                        {
+                            OrderId = existing.Id,
+                            ProductId = ourProductId ?? it.ProductId,
+                            Title = it.Name,
+                            Quantity = it.Quantity,
+                            PricePerUnit = it.UnitPrice,
+                            TotalPrice = it.LineTotal,
+                            SortOrder = i
+                        });
+                    }
+                }
+                await _orderStorage.ReplaceOrderItemsAsync(existing.Id, updateItems, cancelToken).ConfigureAwait(false);
+                var loaded = await _orderStorage.GetOrderByIdAsync(existing.Id, cancelToken).ConfigureAwait(false);
+                response.Data = _mapper.Map<OrderRes>(loaded!);
                 return response;
+            }
+            var createItems = new List<CreateOrderItemReq>();
+            if (payload.Items != null)
+            {
+                for (var i = 0; i < payload.Items.Count; i++)
+                {
+                    var it = payload.Items[i];
+                    var ourProductId = await ResolveWooCommerceItemProductIdAsync(siteId, site.AccountId, it.ProductId, it.Sku, cancelToken).ConfigureAwait(false);
+                    createItems.Add(new CreateOrderItemReq
+                    {
+                        ProductId = ourProductId ?? it.ProductId,
+                        Title = it.Name,
+                        Quantity = it.Quantity,
+                        PricePerUnit = it.UnitPrice,
+                        TotalPrice = it.LineTotal,
+                        SortOrder = i
+                    });
+                }
             }
             var req = new CreateOrderReq
             {
@@ -452,23 +529,21 @@ namespace George.Services
                 ShippingCost = payload.ShippingTotal,
                 Total = payload.OrderTotal,
                 SubTotal = payload.OrderTotal - (payload.ShippingTotal ?? 0),
-                Items = payload.Items?.Select((it, i) => new CreateOrderItemReq
-                {
-                    ProductId = it.ProductId,
-                    Title = it.Name,
-                    Quantity = it.Quantity,
-                    PricePerUnit = it.UnitPrice,
-                    TotalPrice = it.LineTotal,
-                    SortOrder = i
-                }).ToList() ?? new List<CreateOrderItemReq>()
+                Items = createItems
             };
             var customer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
                 req.SiteId, req.AccountId, req.CustomerPhone, req.CustomerName ?? "", email: req.CustomerEmail,
                 city: null, defaultAddress: req.DeliveryAddress, notes: null, marketingSms: null, cancelToken).ConfigureAwait(false);
             var order = _mapper.Map<Order>(req);
             order.CustomerId = customer.Id;
-            order.CreationTime = DateTime.UtcNow;
+            // Use the date when the order was placed in WooCommerce, not when our API received the webhook
+            order.CreationTime = payload.OrderDate.HasValue
+                ? (payload.OrderDate.Value.Kind == DateTimeKind.Utc ? payload.OrderDate.Value : payload.OrderDate.Value.ToUniversalTime())
+                : DateTime.UtcNow;
             order.CreationUserId = null;
+            // Default delivery/pickup date to today when not provided (like manual order)
+            if (!order.DeliveryDate.HasValue) order.DeliveryDate = todayUtc;
+            if (!order.PickupDate.HasValue) order.PickupDate = todayUtc;
             var items = new List<OrderItem>();
             for (var i = 0; i < req.Items.Count; i++)
             {

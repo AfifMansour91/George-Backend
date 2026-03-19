@@ -168,6 +168,26 @@ namespace George.Data
             return db;
         }
 
+        /// <summary>Replace all line items of an order (e.g. WooCommerce sync update). Removes existing items and adds the new list.</summary>
+        public async Task<Order?> ReplaceOrderItemsAsync(int orderId, List<OrderItem> newItems, CancellationToken cancelToken)
+        {
+            var db = await _dbContext.Order
+                .Include(o => o.OrderItem)
+                .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
+            if (db == null) return null;
+            db.OrderItem.Clear();
+            for (var i = 0; i < newItems.Count; i++)
+            {
+                var item = newItems[i];
+                item.OrderId = orderId;
+                item.SortOrder = i;
+                db.OrderItem.Add(item);
+            }
+            db.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            return db;
+        }
+
         /// <summary>Remove a single order item (e.g. from picking "הסר מוצר"). Soft delete. Returns updated order or null.</summary>
         public async Task<Order?> RemoveOrderItemAsync(int orderId, int orderItemId, CancellationToken cancelToken)
         {
