@@ -16,6 +16,14 @@ public class OrderRes
     public string Status { get; set; } = "New";
     public string? DeliveryType { get; set; }
     public string PaymentStatus { get; set; } = "Unpaid";
+    public string? PaymentMethod { get; set; }
+    public string? PaymentMethodTitle { get; set; }
+    public string? PaymentLabel { get; set; }
+    public string? ShippingLabel { get; set; }
+    public string? BillingNotes { get; set; }
+    public string? InternalOrderNotes { get; set; }
+    public string? WooCommerceSiteId { get; set; }
+    public string? WooCommercePickupAffiliateId { get; set; }
     public string? CustomerName { get; set; }
     public string? CustomerPhone { get; set; }
     public int? CustomerId { get; set; }

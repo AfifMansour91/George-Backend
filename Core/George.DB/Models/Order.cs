@@ -42,6 +42,42 @@ public partial class Order
     [StringLength(20)]
     public string PaymentStatus { get; set; } = null!;
 
+    /// <summary>How the customer pays (e.g. Cash, SavedCard, cod→Cash from WooCommerce).</summary>
+    [StringLength(50)]
+    public string? PaymentMethod { get; set; }
+
+    /// <summary>WooCommerce gateway title (e.g. "תשלום בעת מסירה").</summary>
+    [StringLength(200)]
+    public string? PaymentMethodTitle { get; set; }
+
+    /// <summary>WooCommerce <c>payment_label</c> (e.g. "לשליח").</summary>
+    [StringLength(150)]
+    public string? PaymentLabel { get; set; }
+
+    /// <summary>WooCommerce <c>shipping_label</c> (e.g. "איסוף עצמי").</summary>
+    [StringLength(150)]
+    public string? ShippingLabel { get; set; }
+
+    /// <summary>WooCommerce <c>billing_notes</c> (קופה).</summary>
+    [StringLength(2000)]
+    public string? BillingNotes { get; set; }
+
+    /// <summary>WooCommerce / plugin internal notes (status history, sync).</summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? InternalOrderNotes { get; set; }
+
+    /// <summary>Echo of WooCommerce payload <c>siteId</c> when sent.</summary>
+    [StringLength(50)]
+    public string? WooCommerceSiteId { get; set; }
+
+    /// <summary>WooCommerce <c>shippingInfo.pickupAffiliateId</c>.</summary>
+    [StringLength(50)]
+    public string? WooCommercePickupAffiliateId { get; set; }
+
+    /// <summary>Last JSON body from WooCommerce <c>POST /WooCommerce/Order</c> (audit/support; not used by the app).</summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? WooCommerceRequestJson { get; set; }
+
     [StringLength(200)]
     public string? CustomerName { get; set; }
 

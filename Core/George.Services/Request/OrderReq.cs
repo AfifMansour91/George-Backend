@@ -14,6 +14,8 @@ public class CreateOrderReq
     public string Status { get; set; } = "New";
     public string? DeliveryType { get; set; }
     public string PaymentStatus { get; set; } = "Unpaid";
+    /// <summary>Phone manual: Cash, SavedCard, etc. WooCommerce: mapped from gateway (e.g. cod → Cash).</summary>
+    public string? PaymentMethod { get; set; }
     public string? CustomerName { get; set; }
     public string? CustomerPhone { get; set; }
     public string? CustomerEmail { get; set; }
@@ -32,6 +34,16 @@ public class CreateOrderReq
     public decimal? ShippingCost { get; set; }
     public decimal? Total { get; set; }
     public string? ExternalOrderId { get; set; }
+
+    /// <summary>WooCommerce ingest: raw gateway title, labels, notes (optional for manual).</summary>
+    public string? PaymentMethodTitle { get; set; }
+    public string? PaymentLabel { get; set; }
+    public string? ShippingLabel { get; set; }
+    public string? BillingNotes { get; set; }
+    public string? InternalOrderNotes { get; set; }
+    public string? WooCommerceSiteId { get; set; }
+    public string? WooCommercePickupAffiliateId { get; set; }
+
     public List<CreateOrderItemReq> Items { get; set; } = new();
 }
 
@@ -46,6 +58,11 @@ public class CreateOrderItemReq
     public decimal? PricePerUnit { get; set; }
     public decimal? TotalPrice { get; set; }
     public string? Notes { get; set; }
+    /// <summary>WooCommerce line snapshot.</summary>
+    public string? SaleUnits { get; set; }
+    public string? SaleTotalWeight { get; set; }
+    public int? WooCommerceProductId { get; set; }
+    public int? WooCommerceVariationId { get; set; }
     public int SortOrder { get; set; }
 }
 
@@ -81,6 +98,7 @@ public class UpdateOrderReq
     public string? PickupTime { get; set; }
     public string? DeliveryAddress { get; set; }
     public string? PaymentStatus { get; set; }
+    public string? PaymentMethod { get; set; }
     /// <summary>Number of bags/cartons packed (set at end of picking).</summary>
     public int? BagsCount { get; set; }
 }

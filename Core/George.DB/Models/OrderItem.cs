@@ -44,6 +44,20 @@ public partial class OrderItem
     [StringLength(500)]
     public string? Notes { get; set; }
 
+    /// <summary>WooCommerce line: <c>saleUnits</c> as sent (e.g. "1 יח'").</summary>
+    [StringLength(100)]
+    public string? SaleUnits { get; set; }
+
+    /// <summary>WooCommerce line: <c>saleTotalWeight</c> as sent (e.g. "0.8 ").</summary>
+    [StringLength(100)]
+    public string? SaleTotalWeight { get; set; }
+
+    /// <summary>WooCommerce product id for this line (for support / sync).</summary>
+    public int? WooCommerceProductId { get; set; }
+
+    /// <summary>WooCommerce variation id when applicable.</summary>
+    public int? WooCommerceVariationId { get; set; }
+
     public int SortOrder { get; set; }
 
     [Column(TypeName = "decimal(18, 4)")]

@@ -14,10 +14,11 @@ public class WooCommerceOrderPayload
     [JsonPropertyName("externalOrderId")]
     public object? ExternalOrderId { get; set; }
 
+    /// <summary>Echo from plugin; not read when creating orders (we always set Source = WooCommerce).</summary>
     [JsonPropertyName("source")]
     public string Source { get; set; } = "WooCommerce";
 
-    /// <summary>Optional external site identifier; API key already identifies our SiteId.</summary>
+    /// <summary>Optional external site id string; site is resolved from API key. Only used if you re-enable anonymous + SiteId fallback in the controller.</summary>
     [JsonPropertyName("siteId")]
     public string? SiteId { get; set; }
 
@@ -45,6 +46,22 @@ public class WooCommerceOrderPayload
 
     [JsonPropertyName("customerNotes")]
     public string? CustomerNotes { get; set; }
+
+    /// <summary>Cashier / checkout notes from WooCommerce (snake_case in JSON).</summary>
+    [JsonPropertyName("billing_notes")]
+    public string? BillingNotes { get; set; }
+
+    /// <summary>Internal WooCommerce / plugin order notes (status history, sync messages).</summary>
+    [JsonPropertyName("internalOrderNotes")]
+    public string? InternalOrderNotes { get; set; }
+
+    /// <summary>WooCommerce payment method code (e.g. cod, bacs).</summary>
+    [JsonPropertyName("paymentMethod")]
+    public string? PaymentMethod { get; set; }
+
+    /// <summary>Human-readable payment method title.</summary>
+    [JsonPropertyName("paymentMethodTitle")]
+    public string? PaymentMethodTitle { get; set; }
 
     /// <summary>Shipping method label (e.g. "איסוף עצמי").</summary>
     [JsonPropertyName("shipping_label")]
@@ -102,9 +119,18 @@ public class WooCommerceShippingAddressPayload
 
     [JsonPropertyName("zip")]
     public string? Zip { get; set; }
+
+    [JsonPropertyName("apartment")]
+    public string? Apartment { get; set; }
+
+    [JsonPropertyName("floor")]
+    public string? Floor { get; set; }
+
+    [JsonPropertyName("entranceCode")]
+    public string? EntranceCode { get; set; }
 }
 
-/// <summary>One selected option in a variant (e.g. cutting shape or size). Id = WooCommerce attribute/value id, Name = display text.</summary>
+/// <summary>One selected option in a variant (e.g. cutting shape or size). <see cref="Name"/> is used for display; <see cref="Id"/> is accepted from JSON but not used for matching (we use variationId / names).</summary>
 public class WooCommerceVariantOptionPayload
 {
     [JsonPropertyName("id")]
@@ -165,4 +191,12 @@ public class WooCommerceOrderItemPayload
 
     [JsonPropertyName("lineTotal")]
     public decimal? LineTotal { get; set; }
+
+    /// <summary>Display string for units sold (e.g. "1 יח'"). Parsed for quantity when present.</summary>
+    [JsonPropertyName("saleUnits")]
+    public string? SaleUnits { get; set; }
+
+    /// <summary>Total ordered weight as string (typically kg, e.g. "0.8 "). Parsed when present.</summary>
+    [JsonPropertyName("saleTotalWeight")]
+    public string? SaleTotalWeight { get; set; }
 }

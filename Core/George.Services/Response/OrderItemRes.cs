@@ -16,5 +16,9 @@ public class OrderItemRes
     /// <summary>Picked quantity/weight from picking flow; null when not yet picked.</summary>
     public decimal? PickedQuantity { get; set; }
     public string? Notes { get; set; }
+    public string? SaleUnits { get; set; }
+    public string? SaleTotalWeight { get; set; }
+    public int? WooCommerceProductId { get; set; }
+    public int? WooCommerceVariationId { get; set; }
     public int SortOrder { get; set; }
 }

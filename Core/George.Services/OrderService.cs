@@ -1,3 +1,7 @@
+using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using AutoMapper;
 using George.Common;
 using George.Data;
@@ -125,7 +129,8 @@ namespace George.Services
             return response;
         }
 
-        /// <summary>Sprint 2: Send customer SMS for new order (Kiosk or Phone) using notification settings. Does not fail the request on SMS errors.</summary>
+        /// <summary>Send customer SMS for new orders (Kiosk, Phone, Website, WooCommerce, …) using notification settings. Does not fail the request on SMS errors.</summary>
+        /// <remarks>WooCommerce uses the same branch as Website: account notification "customer channel" must be SMS, then Pickup vs Shipping templates by order DeliveryType.</remarks>
         private async Task TrySendNewOrderCustomerSmsAsync(Order order, CancellationToken cancelToken)
         {
             if (string.IsNullOrWhiteSpace(order.CustomerPhone))
@@ -311,6 +316,7 @@ namespace George.Services
                 if (req.PickupTime != null) o.PickupTime = req.PickupTime;
                 if (req.DeliveryAddress != null) o.DeliveryAddress = req.DeliveryAddress;
                 if (req.PaymentStatus != null) o.PaymentStatus = req.PaymentStatus;
+                if (req.PaymentMethod != null) o.PaymentMethod = req.PaymentMethod;
                 if (req.BagsCount.HasValue) o.BagsCount = req.BagsCount;
                 o.UpdateUserId = AuthUser.Id;
             }, cancelToken);
@@ -516,6 +522,8 @@ namespace George.Services
                 }
                 if (!string.IsNullOrWhiteSpace(shippingInfo.PickupAffiliateName))
                     order.DeliveryNote = shippingInfo.PickupAffiliateName.Trim();
+                else if (!string.IsNullOrWhiteSpace(shippingInfo.PickupAffiliateId))
+                    order.DeliveryNote = shippingInfo.PickupAffiliateId.Trim();
             }
         }
 
@@ -552,6 +560,80 @@ namespace George.Services
             }
             if (DateTime.TryParse(s, out var parsed)) return parsed;
             return null;
+        }
+
+        /// <summary>Parse plugin <c>saleTotalWeight</c> (usually kg).</summary>
+        private static decimal? TryParseSaleTotalWeightKg(string? s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            var t = s.Trim().Replace(',', '.');
+            if (decimal.TryParse(t, NumberStyles.Any, CultureInfo.InvariantCulture, out var d) && d > 0)
+                return d;
+            return null;
+        }
+
+        /// <summary>Leading number in strings like "1 יח'" or "2.5 יחידות".</summary>
+        private static decimal? TryParseSaleUnitsCount(string? s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            var m = Regex.Match(s.Trim(), @"^\s*(\d+(?:\.\d+)?)");
+            if (!m.Success) return null;
+            if (decimal.TryParse(m.Groups[1].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var d) && d > 0)
+                return d;
+            return null;
+        }
+
+        /// <summary>Same order as manual phone order: street, city, apartment, floor, entrance, zip.</summary>
+        private static string? FormatWooCommerceDeliveryAddress(WooCommerceShippingAddressPayload? a)
+        {
+            if (a == null) return null;
+            var parts = new[] { a.Street, a.City, a.Apartment, a.Floor, a.EntranceCode, a.Zip }
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x!.Trim());
+            var joined = string.Join(", ", parts);
+            return string.IsNullOrWhiteSpace(joined) ? null : joined;
+        }
+
+        /// <summary>Map Woo payment code/title to internal payment method (e.g. Cash for cod).</summary>
+        private static string? MapWooCommercePaymentMethodToInternal(string? code, string? title)
+        {
+            if (string.IsNullOrWhiteSpace(code) && string.IsNullOrWhiteSpace(title)) return null;
+            var c = (code ?? "").Trim().ToLowerInvariant();
+            if (c == "cod") return "Cash";
+            if (!string.IsNullOrWhiteSpace(title)) return title.Trim();
+            return string.IsNullOrWhiteSpace(code) ? null : code.Trim();
+        }
+
+        /// <summary>Persist WooCommerce-only order fields (labels, billing/internal notes, site/affiliate echo).</summary>
+        private static void ApplyWooCommerceStoredMetadata(Order o, WooCommerceOrderPayload p)
+        {
+            o.BillingNotes = p.BillingNotes;
+            o.InternalOrderNotes = p.InternalOrderNotes;
+            o.PaymentMethodTitle = p.PaymentMethodTitle;
+            o.PaymentLabel = p.PaymentLabel;
+            o.ShippingLabel = p.ShippingLabel;
+            o.WooCommerceSiteId = p.SiteId;
+            o.WooCommercePickupAffiliateId = p.ShippingInfo?.PickupAffiliateId;
+        }
+
+        private static readonly JsonSerializerOptions WooCommerceOrderRequestJsonOptions = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = false,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        };
+
+        /// <summary>JSON snapshot of the deserialized payload for <see cref="Order.WooCommerceRequestJson"/> (audit; not byte-identical to raw HTTP).</summary>
+        private static string? SerializeWooCommerceOrderPayloadForStorage(WooCommerceOrderPayload p)
+        {
+            try
+            {
+                return JsonSerializer.Serialize(p, WooCommerceOrderRequestJsonOptions);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         /// <summary>Resolves WooCommerce order item to our Product.Id: first by WooCommerce product ID (Product.WooCommerceId + site), then by SKU on the site. Returns null if not found (caller may keep payload ProductId as fallback).</summary>
@@ -643,38 +725,62 @@ namespace George.Services
             return null;
         }
 
-        /// <summary>For WooCommerce order items: compute quantity, unitWeightGrams and optional variantTitle from product setup so display matches Kiosk/manual (regular=units, by_weight=kg/g, by_unit=units+weight per unit).</summary>
+        /// <summary>For WooCommerce order items: compute quantity, unitWeightGrams and optional variantTitle from product setup so display matches Kiosk/manual. Uses <see cref="WooCommerceOrderItemPayload.SaleUnits"/> / <see cref="WooCommerceOrderItemPayload.SaleTotalWeight"/> when sent (same intent as manual cart: units + total kg).</summary>
         private static (decimal quantity, decimal? unitWeightGrams, string? variantTitle) GetWooCommerceItemQuantityAndUnitWeight(WooCommerceOrderItemPayload it, Product? product)
         {
+            var saleWeightKg = TryParseSaleTotalWeightKg(it.SaleTotalWeight);
+            var saleUnits = TryParseSaleUnitsCount(it.SaleUnits);
+
             if (product == null)
-                return (it.Quantity, null, null);
+                return (saleUnits ?? it.Quantity, null, null);
 
             var setupTypeName = product.SetupType?.Name ?? "";
             var isWeightedBySetup = setupTypeName is "by_weight" or "by_unit" or "by_unit_and_weight";
             var isWeighted = product.IsWeighted == true || (product.IsWeighted != false && isWeightedBySetup);
 
             if (!isWeighted || setupTypeName == "standard")
-                return (it.Quantity, null, null);
+                return (saleUnits ?? it.Quantity, null, null);
 
-            // Sold by weight (ק"ג or גרם): WC quantity is weight in kg. Store so display shows weight (e.g. 1.5 ק"ג, 700 גרם).
+            // Sold by weight (ק"ג or גרם): quantity stored as kg with unitWeightGrams=1000 (display = quantity × 1000 g).
             if (setupTypeName == "by_weight")
             {
-                // Always store weight in kg; frontend shows kg or converts to grams from product unit.
-                return (it.Quantity, 1000m, null);
+                var weightKg = saleWeightKg ?? it.Quantity;
+                return (weightKg, 1000m, null);
             }
 
             // by_unit or by_unit_and_weight
             var wc = product.WeightConfig;
             if (wc?.WeightByVariant == true)
             {
-                // משקל לפי גודל: use variant weight. Resolve variant by variationId (when sent) or by name (fallback for this site's WooCommerce orders).
-                // Woo may send quantity as ordered weight (e.g. 1.6 kg) for by_unit+weightByVariant products.
-                // For fractional quantities, convert ordered weight -> units so UI matches kiosk/manual.
                 decimal? unitWeightGrams = null;
                 var matchedVariant = GetVariantFromPayloadItem(it, product);
                 var variantToUse = matchedVariant ?? product.ProductVariant?.FirstOrDefault(v => !v.IsDeleted && v.Weight.HasValue);
                 if (variantToUse?.Weight.HasValue == true)
                     unitWeightGrams = (decimal)(variantToUse.Weight!.Value * 1000);
+
+                // Plugin sends explicit units + total kg (e.g. 1 יח' + 0.8 kg) — align with manual order (whole units + per-unit grams).
+                if (saleUnits.HasValue && saleWeightKg.HasValue && saleUnits.Value > 0)
+                {
+                    var qty = decimal.Round(saleUnits.Value, 3, MidpointRounding.AwayFromZero);
+                    var gramsPerUnitFromSale = saleWeightKg.Value * 1000m / saleUnits.Value;
+                    if (unitWeightGrams.HasValue && unitWeightGrams.Value > 0)
+                    {
+                        var ratio = Math.Abs(gramsPerUnitFromSale - unitWeightGrams.Value) / unitWeightGrams.Value;
+                        if (ratio <= 0.2m)
+                            return (qty, unitWeightGrams, null);
+                    }
+                    return (qty, decimal.Round(gramsPerUnitFromSale, 3, MidpointRounding.AwayFromZero), null);
+                }
+
+                if (saleUnits.HasValue && saleUnits.Value > 0 && unitWeightGrams.HasValue)
+                    return (decimal.Round(saleUnits.Value, 3, MidpointRounding.AwayFromZero), unitWeightGrams, null);
+
+                if (saleWeightKg.HasValue && unitWeightGrams.HasValue && unitWeightGrams.Value > 0)
+                {
+                    var qty = decimal.Round(saleWeightKg.Value * 1000m / unitWeightGrams.Value, 3, MidpointRounding.AwayFromZero);
+                    return (qty, unitWeightGrams, null);
+                }
+
                 var quantity = it.Quantity;
                 var isFractionalQuantity = quantity != decimal.Truncate(quantity);
                 if (isFractionalQuantity && unitWeightGrams.HasValue && unitWeightGrams.Value > 0)
@@ -687,14 +793,34 @@ namespace George.Services
                 return (quantity, unitWeightGrams, null);
             }
 
-            if (!string.IsNullOrWhiteSpace(wc?.UnitWeight) && decimal.TryParse(wc.UnitWeight, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+            if (!string.IsNullOrWhiteSpace(wc?.UnitWeight) && decimal.TryParse(wc.UnitWeight, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed))
             {
-                // מכירה לפי יחידה / בחירת משקל ליחידה:
-                // Woo may send quantity as ordered weight (e.g. 0.2 kg) for by_unit products.
-                // For fractional quantities, convert ordered weight -> units so UI matches kiosk/manual.
                 var unitWeightGrams = string.Equals(wc.Unit?.Name, "g", StringComparison.OrdinalIgnoreCase)
                     ? parsed
                     : parsed * 1000m;
+
+                if (saleUnits.HasValue && saleWeightKg.HasValue && saleUnits.Value > 0)
+                {
+                    var qty = decimal.Round(saleUnits.Value, 3, MidpointRounding.AwayFromZero);
+                    var gramsPerUnitFromSale = saleWeightKg.Value * 1000m / saleUnits.Value;
+                    if (unitWeightGrams > 0)
+                    {
+                        var ratio = Math.Abs(gramsPerUnitFromSale - unitWeightGrams) / unitWeightGrams;
+                        if (ratio <= 0.2m)
+                            return (qty, unitWeightGrams, null);
+                    }
+                    return (qty, decimal.Round(gramsPerUnitFromSale, 3, MidpointRounding.AwayFromZero), null);
+                }
+
+                if (saleUnits.HasValue && saleUnits.Value > 0)
+                    return (decimal.Round(saleUnits.Value, 3, MidpointRounding.AwayFromZero), unitWeightGrams, null);
+
+                if (saleWeightKg.HasValue && unitWeightGrams > 0)
+                {
+                    var qty = decimal.Round(saleWeightKg.Value * 1000m / unitWeightGrams, 3, MidpointRounding.AwayFromZero);
+                    return (qty, unitWeightGrams, null);
+                }
+
                 var quantity = it.Quantity;
                 var isFractionalQuantity = quantity != decimal.Truncate(quantity);
                 if (isFractionalQuantity && unitWeightGrams > 0)
@@ -707,11 +833,14 @@ namespace George.Services
                 return (quantity, unitWeightGrams, null);
             }
 
-            // by_unit_and_weight with no unit weight: treat WC quantity as weight in kg (e.g. 1.4 kg).
+            // by_unit_and_weight with no unit weight: treat WC quantity / saleTotalWeight as weight in kg.
             if (setupTypeName == "by_unit_and_weight")
-                return (it.Quantity, 1000m, null);
+            {
+                var w = saleWeightKg ?? it.Quantity;
+                return (w, 1000m, null);
+            }
 
-            return (it.Quantity, null, null);
+            return (saleUnits ?? it.Quantity, null, null);
         }
 
         /// <summary>Create or update order from WooCommerce plugin (API key auth). No AuthUser.</summary>
@@ -725,11 +854,10 @@ namespace George.Services
             var externalId = !string.IsNullOrWhiteSpace(payload.OrderNumber) ? payload.OrderNumber : payload.ExternalOrderId?.ToString() ?? "";
             var existing = await _orderStorage.GetOrderBySiteAndExternalIdAsync(siteId, externalId, cancelToken).ConfigureAwait(false);
             var todayUtc = DateTime.UtcNow.Date;
+            var wcRequestJson = SerializeWooCommerceOrderPayloadForStorage(payload);
             if (existing != null)
             {
-                var deliveryAddress = payload.ShippingAddress != null
-                    ? string.Join(", ", new[] { payload.ShippingAddress.Street, payload.ShippingAddress.City, payload.ShippingAddress.Zip }.Where(s => !string.IsNullOrWhiteSpace(s)))
-                    : null;
+                var deliveryAddress = FormatWooCommerceDeliveryAddress(payload.ShippingAddress);
                 var updateCustomer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
                     siteId, site.AccountId, payload.Customer?.Phone ?? "", payload.Customer?.Name ?? "", email: payload.Customer?.Email,
                     city: null, defaultAddress: deliveryAddress, notes: null, marketingSms: null, cancelToken).ConfigureAwait(false);
@@ -741,7 +869,12 @@ namespace George.Services
                     o.CustomerEmail = payload.Customer?.Email;
                     o.CustomerId = updateCustomer.Id;
                     o.DeliveryAddress = deliveryAddress;
-                    o.CustomerNote = payload.CustomerNotes ?? o.CustomerNote;
+                    o.CustomerNote = string.IsNullOrWhiteSpace(payload.BillingNotes) ? null : payload.BillingNotes.Trim();
+                    o.ManagerNote = null;
+                    var pay = MapWooCommercePaymentMethodToInternal(payload.PaymentMethod, payload.PaymentMethodTitle);
+                    if (pay != null) o.PaymentMethod = pay;
+                    ApplyWooCommerceStoredMetadata(o, payload);
+                    o.WooCommerceRequestJson = wcRequestJson;
                     o.ShippingCost = payload.ShippingTotal;
                     o.Total = payload.OrderTotal ?? o.Total;
                     o.SubTotal = (payload.OrderTotal ?? o.SubTotal) - (payload.ShippingTotal ?? 0);
@@ -772,6 +905,10 @@ namespace George.Services
                             PricePerUnit = it.UnitPrice,
                             TotalPrice = it.LineTotal,
                             Notes = !string.IsNullOrWhiteSpace(it.Note) ? it.Note : it.ProductNote,
+                            SaleUnits = it.SaleUnits,
+                            SaleTotalWeight = it.SaleTotalWeight,
+                            WooCommerceProductId = it.ProductId,
+                            WooCommerceVariationId = GetEffectiveVariationId(it),
                             SortOrder = i
                         });
                     }
@@ -800,6 +937,10 @@ namespace George.Services
                         PricePerUnit = it.UnitPrice,
                         TotalPrice = it.LineTotal,
                         Notes = !string.IsNullOrWhiteSpace(it.Note) ? it.Note : it.ProductNote,
+                        SaleUnits = it.SaleUnits,
+                        SaleTotalWeight = it.SaleTotalWeight,
+                        WooCommerceProductId = it.ProductId,
+                        WooCommerceVariationId = GetEffectiveVariationId(it),
                         SortOrder = i
                     });
                 }
@@ -814,10 +955,17 @@ namespace George.Services
                 CustomerName = payload.Customer?.Name,
                 CustomerPhone = payload.Customer?.Phone,
                 CustomerEmail = payload.Customer?.Email,
-                DeliveryAddress = payload.ShippingAddress != null
-                    ? string.Join(", ", new[] { payload.ShippingAddress.Street, payload.ShippingAddress.City, payload.ShippingAddress.Zip }.Where(s => !string.IsNullOrWhiteSpace(s)))
-                    : null,
-                CustomerNote = payload.CustomerNotes,
+                DeliveryAddress = FormatWooCommerceDeliveryAddress(payload.ShippingAddress),
+                CustomerNote = string.IsNullOrWhiteSpace(payload.BillingNotes) ? null : payload.BillingNotes.Trim(),
+                ManagerNote = null,
+                PaymentMethod = MapWooCommercePaymentMethodToInternal(payload.PaymentMethod, payload.PaymentMethodTitle),
+                PaymentMethodTitle = payload.PaymentMethodTitle,
+                PaymentLabel = payload.PaymentLabel,
+                ShippingLabel = payload.ShippingLabel,
+                BillingNotes = payload.BillingNotes,
+                InternalOrderNotes = payload.InternalOrderNotes,
+                WooCommerceSiteId = payload.SiteId,
+                WooCommercePickupAffiliateId = payload.ShippingInfo?.PickupAffiliateId,
                 ShippingCost = payload.ShippingTotal,
                 Total = payload.OrderTotal,
                 SubTotal = payload.OrderTotal - (payload.ShippingTotal ?? 0),
@@ -828,11 +976,13 @@ namespace George.Services
                 city: null, defaultAddress: req.DeliveryAddress, notes: null, marketingSms: null, cancelToken).ConfigureAwait(false);
             var order = _mapper.Map<Order>(req);
             order.CustomerId = customer.Id;
+            order.ManagerNote = null;
             // Use the date when the order was placed in WooCommerce, not when our API received the webhook
             order.CreationTime = payload.OrderDate.HasValue
                 ? (payload.OrderDate.Value.Kind == DateTimeKind.Utc ? payload.OrderDate.Value : payload.OrderDate.Value.ToUniversalTime())
                 : DateTime.UtcNow;
             order.CreationUserId = null;
+            order.WooCommerceRequestJson = wcRequestJson;
             ApplyShippingInfoToOrder(order, payload.ShippingInfo, payload.ShippingLabel);
             // Default delivery/pickup date to today when not provided (like manual order)
             if (!order.DeliveryDate.HasValue) order.DeliveryDate = todayUtc;
@@ -846,6 +996,7 @@ namespace George.Services
             }
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken).ConfigureAwait(false);
             var loadedOrder = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false);
+            await TrySendNewOrderCustomerSmsAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(loadedOrder!);
             return response;
         }
