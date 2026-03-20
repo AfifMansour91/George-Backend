@@ -162,7 +162,7 @@ namespace George.Api.Controllers
 
         /// <summary>Create or update order from WooCommerce (plugin calls when order is opened/edited). Auth: X-Api-Key or Bearer &lt;key&gt;. TEST: AllowAnonymous + payload.SiteId fallback enabled for Swagger; remove for production.</summary>
         [HttpPost("Order")]
-        [AllowAnonymous] // TEST ONLY: remove when done testing so only API key auth is allowed
+        //[AllowAnonymous] // TEST ONLY: remove when done testing so only API key auth is allowed
         [Authorize(AuthenticationSchemes = WooCommerceApiKeyAuthenticationHandler.SchemeName)]
         [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]
         [ProducesResponseType((int)HttpStatusCode.Unauthorized)]
@@ -174,17 +174,45 @@ namespace George.Api.Controllers
 
             ///////TEST ONLY
             // For testing without API key: use payload.SiteId when not authenticated
-            if (siteId == null && payload?.SiteId != null && int.TryParse(payload.SiteId.Trim(), out var parsedSiteId) && parsedSiteId > 0)
-            {
-                var site = await _siteStorage.GetSiteAsync(parsedSiteId, cancelToken);
-                if (site != null)
-                    siteId = parsedSiteId;
-            }
+            //if (siteId == null && payload?.SiteId != null && int.TryParse(payload.SiteId.Trim(), out var parsedSiteId) && parsedSiteId > 0)
+            //{
+            //    var site = await _siteStorage.GetSiteAsync(parsedSiteId, cancelToken);
+            //    if (site != null)
+            //        siteId = parsedSiteId;
+            //}
             ///////END TEST ONLY
             if (siteId == null)
                 return Unauthorized();
-            return await SafeCallWithErrorCatchingAsync(() =>
-                _orderService.CreateOrUpdateOrderFromWooCommerceAsync(siteId.Value, payload!, cancelToken));
+            return await SafeCallWithErrorCatchingAsync(async () =>
+            {
+                _logger.LogInformation(
+                    "WooCommerce Order request received. siteId={SiteId}, orderNumber={OrderNumber}, headers={Headers}, payload={Payload}",
+                    siteId.Value,
+                    payload?.OrderNumber,
+                    SerializeForLog(GetRequestHeadersForLog()),
+                    SerializeForLog(payload));
+                try
+                {
+                    var response = await _orderService.CreateOrUpdateOrderFromWooCommerceAsync(siteId.Value, payload!, cancelToken).ConfigureAwait(false);
+                    _logger.LogInformation(
+                        "WooCommerce Order response. siteId={SiteId}, orderNumber={OrderNumber}, response={Response}",
+                        siteId.Value,
+                        payload?.OrderNumber,
+                        SerializeForLog(response));
+                    return response;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(
+                        ex,
+                        "WooCommerce Order failed. siteId={SiteId}, orderNumber={OrderNumber}, headers={Headers}, payload={Payload}",
+                        siteId.Value,
+                        payload?.OrderNumber,
+                        SerializeForLog(GetRequestHeadersForLog()),
+                        SerializeForLog(payload));
+                    throw;
+                }
+            });
         }
 
         /// <summary>Record payment from WooCommerce (invoice, clearance, paid-at). Auth: X-Api-Key or Bearer &lt;key&gt;.</summary>
@@ -207,6 +235,44 @@ namespace George.Api.Controllers
         {
             var sid = User.FindFirstValue(WooCommerceApiKeyAuthenticationHandler.ClaimSiteId);
             return int.TryParse(sid, out var id) ? id : null;
+        }
+
+        private Dictionary<string, string> GetRequestHeadersForLog()
+        {
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var h in Request.Headers)
+            {
+                var key = h.Key;
+                var value = h.Value.ToString();
+                if (key.Equals("X-Api-Key", StringComparison.OrdinalIgnoreCase) ||
+                    key.Equals("Authorization", StringComparison.OrdinalIgnoreCase))
+                {
+                    value = MaskSecret(value);
+                }
+                headers[key] = value;
+            }
+            return headers;
+        }
+
+        private static string MaskSecret(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+            var v = value.Trim();
+            if (v.Length <= 12) return "****";
+            return $"{v.Substring(0, 6)}****{v.Substring(v.Length - 4)}";
+        }
+
+        private static string SerializeForLog(object? data)
+        {
+            if (data == null) return "null";
+            try
+            {
+                return JsonSerializer.Serialize(data, JsonOptions);
+            }
+            catch
+            {
+                return data.ToString() ?? "null";
+            }
         }
 
         [ApiExplorerSettings(IgnoreApi = true)]

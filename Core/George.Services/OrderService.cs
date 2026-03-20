@@ -150,7 +150,18 @@ namespace George.Services
                 template = settings.NewOrderCustomerMessagePhoneOrder;
             }
             else
-                return;
+            {
+                // Website/other sources: honor customer channel + delivery type templates.
+                if (!string.Equals(settings.NewOrderCustomerChannel, "sms", StringComparison.OrdinalIgnoreCase))
+                    return;
+                var deliveryType = (order.DeliveryType ?? "").Trim();
+                if (string.Equals(deliveryType, "Shipping", StringComparison.OrdinalIgnoreCase))
+                    template = settings.NewOrderCustomerMessageShipping;
+                else if (string.Equals(deliveryType, "Pickup", StringComparison.OrdinalIgnoreCase))
+                    template = settings.NewOrderCustomerMessagePickup;
+                else
+                    template = settings.NewOrderCustomerMessagePickup ?? settings.NewOrderCustomerMessageShipping;
+            }
 
             if (string.IsNullOrWhiteSpace(template))
                 return;
@@ -170,6 +181,51 @@ namespace George.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to send new-order customer SMS for order {OrderId}; order creation succeeded.", order.Id);
+            }
+        }
+
+        /// <summary>Auto-send customer SMS when order transitions to Ready, according to OrderReady notification settings.</summary>
+        private async Task TrySendOrderReadyCustomerSmsAsync(Order order, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(order.CustomerPhone))
+                return;
+            var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken).ConfigureAwait(false);
+            var settings = account?.AccountNotificationSettings;
+            if (settings == null)
+                return;
+            if (!string.Equals(settings.OrderReadyCustomerChannel, "sms", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            string? template = null;
+            var deliveryType = (order.DeliveryType ?? "").Trim();
+            var source = (order.Source ?? "").Trim();
+            if (string.Equals(deliveryType, "Shipping", StringComparison.OrdinalIgnoreCase))
+                template = settings.OrderReadyCustomerMessageShipping;
+            else if (string.Equals(deliveryType, "Pickup", StringComparison.OrdinalIgnoreCase))
+                template = settings.OrderReadyCustomerMessagePickup;
+            else if (string.Equals(source, "Kiosk", StringComparison.OrdinalIgnoreCase))
+                template = settings.OrderReadyCustomerMessageKiosk;
+            else
+                template = settings.OrderReadyCustomerMessagePickup ?? settings.OrderReadyCustomerMessageShipping;
+
+            if (string.IsNullOrWhiteSpace(template))
+                return;
+
+            var body = ReplaceOrderPlaceholders(template, order);
+            try
+            {
+                if (!SmsProvider.IsInitialized)
+                {
+                    _logger.LogWarning("SMS provider not initialized; skipping ready-order customer SMS.");
+                    return;
+                }
+                var sent = await _smsProvider.SendTextAsync(order.CustomerPhone, body, cancelToken).ConfigureAwait(false);
+                if (!sent)
+                    _logger.LogWarning("Ready-order customer SMS returned false for order {OrderId}.", order.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send ready-order customer SMS for order {OrderId}; order update succeeded.", order.Id);
             }
         }
 
@@ -241,6 +297,8 @@ namespace George.Services
         public async Task<IApiResponse<OrderRes>> UpdateOrderAsync(int orderId, UpdateOrderReq req, CancellationToken cancelToken = default)
         {
             var response = new ApiResponse<OrderRes>();
+            var beforeUpdate = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
+            var previousStatus = beforeUpdate?.Status;
             var updated = await _orderStorage.UpdateOrderAsync(orderId, o =>
             {
                 if (req.Status != null) o.Status = req.Status;
@@ -283,6 +341,12 @@ namespace George.Services
                 }
             }
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
+            if (loaded != null &&
+                !string.Equals(previousStatus, "Ready", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(loaded.Status, "Ready", StringComparison.OrdinalIgnoreCase))
+            {
+                await TrySendOrderReadyCustomerSmsAsync(loaded, cancelToken).ConfigureAwait(false);
+            }
             response.Data = _mapper.Map<OrderRes>(loaded);
             return response;
         }
@@ -506,16 +570,43 @@ namespace George.Services
             return null;
         }
 
-        /// <summary>Build VariantTitle from payload: join variants[].name with " | ". Returns null if no variants.</summary>
+        /// <summary>Build VariantTitle from payload: variants[].name joined " | ", or variation.attributes/meta values joined " | " when plugin sends variation object.</summary>
         private static string? GetVariantTitleFromPayload(WooCommerceOrderItemPayload it)
         {
-            if (it.Variants == null || it.Variants.Count == 0)
-                return null;
-            var names = it.Variants
-                .Select(v => v?.Name?.Trim())
-                .Where(n => !string.IsNullOrEmpty(n))
-                .ToList();
-            return names.Count > 0 ? string.Join(" | ", names) : null;
+            if (it.Variants != null && it.Variants.Count > 0)
+            {
+                var names = it.Variants
+                    .Select(v => v?.Name?.Trim())
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .ToList();
+                if (names.Count > 0) return string.Join(" | ", names);
+            }
+            if (it.Variation?.Attributes != null && it.Variation.Attributes.Count > 0)
+            {
+                var values = it.Variation.Attributes
+                    .OrderBy(kv => kv.Key)
+                    .Select(kv => kv.Value?.Trim())
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .ToList();
+                if (values.Count > 0) return string.Join(" | ", values);
+            }
+            if (it.Variation?.Meta != null && it.Variation.Meta.Count > 0)
+            {
+                var values = it.Variation.Meta
+                    .OrderBy(kv => kv.Key)
+                    .Select(kv => kv.Value?.Trim())
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .ToList();
+                if (values.Count > 0) return string.Join(" | ", values);
+            }
+            return null;
+        }
+
+        private static int? GetEffectiveVariationId(WooCommerceOrderItemPayload it)
+        {
+            if (it.VariationId.HasValue && it.VariationId.Value > 0) return it.VariationId.Value;
+            if (it.Variation?.VariationId.HasValue == true && it.Variation.VariationId!.Value > 0) return it.Variation.VariationId.Value;
+            return null;
         }
 
         /// <summary>Resolve WooCommerce order item to our ProductVariant for this product (site product already resolved). First by variationId (WooCommerceVariationId), then by variant names joined with " | ". Used only when processing WooCommerce orders.</summary>
@@ -524,11 +615,12 @@ namespace George.Services
             if (product?.ProductVariant == null || !product.ProductVariant.Any(v => !v.IsDeleted))
                 return null;
 
-            // 1) Match by WooCommerce variation ID when sent
-            if (it.VariationId.HasValue && it.VariationId.Value > 0)
+            // 1) Match by WooCommerce variation ID when sent (item level or inside variation object)
+            var effectiveVariationId = GetEffectiveVariationId(it);
+            if (effectiveVariationId.HasValue)
             {
                 var byId = product.ProductVariant
-                    .FirstOrDefault(v => !v.IsDeleted && v.WooCommerceVariationId == it.VariationId.Value);
+                    .FirstOrDefault(v => !v.IsDeleted && v.WooCommerceVariationId == effectiveVariationId.Value);
                 if (byId != null) return byId;
             }
 
@@ -576,21 +668,43 @@ namespace George.Services
             if (wc?.WeightByVariant == true)
             {
                 // משקל לפי גודל: use variant weight. Resolve variant by variationId (when sent) or by name (fallback for this site's WooCommerce orders).
+                // Woo may send quantity as ordered weight (e.g. 1.6 kg) for by_unit+weightByVariant products.
+                // For fractional quantities, convert ordered weight -> units so UI matches kiosk/manual.
                 decimal? unitWeightGrams = null;
                 var matchedVariant = GetVariantFromPayloadItem(it, product);
                 var variantToUse = matchedVariant ?? product.ProductVariant?.FirstOrDefault(v => !v.IsDeleted && v.Weight.HasValue);
                 if (variantToUse?.Weight.HasValue == true)
                     unitWeightGrams = (decimal)(variantToUse.Weight!.Value * 1000);
-                return (it.Quantity, unitWeightGrams, null);
+                var quantity = it.Quantity;
+                var isFractionalQuantity = quantity != decimal.Truncate(quantity);
+                if (isFractionalQuantity && unitWeightGrams.HasValue && unitWeightGrams.Value > 0)
+                {
+                    var orderedWeightGrams = string.Equals(wc.Unit?.Name, "g", StringComparison.OrdinalIgnoreCase)
+                        ? quantity
+                        : quantity * 1000m;
+                    quantity = decimal.Round(orderedWeightGrams / unitWeightGrams.Value, 3, MidpointRounding.AwayFromZero);
+                }
+                return (quantity, unitWeightGrams, null);
             }
 
             if (!string.IsNullOrWhiteSpace(wc?.UnitWeight) && decimal.TryParse(wc.UnitWeight, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
             {
-                // מכירה לפי יחידה / בחירת משקל ליחידה: quantity = units, unitWeightGrams = weight per unit in grams.
+                // מכירה לפי יחידה / בחירת משקל ליחידה:
+                // Woo may send quantity as ordered weight (e.g. 0.2 kg) for by_unit products.
+                // For fractional quantities, convert ordered weight -> units so UI matches kiosk/manual.
                 var unitWeightGrams = string.Equals(wc.Unit?.Name, "g", StringComparison.OrdinalIgnoreCase)
                     ? parsed
                     : parsed * 1000m;
-                return (it.Quantity, unitWeightGrams, null);
+                var quantity = it.Quantity;
+                var isFractionalQuantity = quantity != decimal.Truncate(quantity);
+                if (isFractionalQuantity && unitWeightGrams > 0)
+                {
+                    var orderedWeightGrams = string.Equals(wc.Unit?.Name, "g", StringComparison.OrdinalIgnoreCase)
+                        ? quantity
+                        : quantity * 1000m;
+                    quantity = decimal.Round(orderedWeightGrams / unitWeightGrams, 3, MidpointRounding.AwayFromZero);
+                }
+                return (quantity, unitWeightGrams, null);
             }
 
             // by_unit_and_weight with no unit weight: treat WC quantity as weight in kg (e.g. 1.4 kg).
@@ -657,7 +771,7 @@ namespace George.Services
                             UnitWeightGrams = unitWeightGrams,
                             PricePerUnit = it.UnitPrice,
                             TotalPrice = it.LineTotal,
-                            Notes = it.Note,
+                            Notes = !string.IsNullOrWhiteSpace(it.Note) ? it.Note : it.ProductNote,
                             SortOrder = i
                         });
                     }
@@ -685,7 +799,7 @@ namespace George.Services
                         UnitWeightGrams = unitWeightGrams,
                         PricePerUnit = it.UnitPrice,
                         TotalPrice = it.LineTotal,
-                        Notes = it.Note,
+                        Notes = !string.IsNullOrWhiteSpace(it.Note) ? it.Note : it.ProductNote,
                         SortOrder = i
                     });
                 }

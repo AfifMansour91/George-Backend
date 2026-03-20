@@ -114,6 +114,19 @@ public class WooCommerceVariantOptionPayload
     public string? Name { get; set; }
 }
 
+/// <summary>Alternative variant format from plugin: variationId + attributes/meta (option name → value). We map this to VariationId and variant title.</summary>
+public class WooCommerceVariationPayload
+{
+    [JsonPropertyName("variationId")]
+    public int? VariationId { get; set; }
+
+    [JsonPropertyName("attributes")]
+    public Dictionary<string, string?>? Attributes { get; set; }
+
+    [JsonPropertyName("meta")]
+    public Dictionary<string, string?>? Meta { get; set; }
+}
+
 public class WooCommerceOrderItemPayload
 {
     [JsonPropertyName("productId")]
@@ -125,17 +138,24 @@ public class WooCommerceOrderItemPayload
     [JsonPropertyName("sku")]
     public string? Sku { get; set; }
 
-    /// <summary>WooCommerce variation ID (optional). For variable products.</summary>
+    /// <summary>WooCommerce variation ID (optional). For variable products. Also set from variation.variationId when plugin sends variation object.</summary>
     [JsonPropertyName("variationId")]
     public int? VariationId { get; set; }
 
-    /// <summary>Array of selected variant options. Each has id (WooCommerce option/value id) and name (display text). For display we join names with " | ".</summary>
+    /// <summary>Array of selected variant options (id + name). Plugin may instead send variation (object with variationId, attributes, meta).</summary>
     [JsonPropertyName("variants")]
     public List<WooCommerceVariantOptionPayload>? Variants { get; set; }
 
-    /// <summary>Customer note for this line item (הערת לקוח לפריט).</summary>
+    /// <summary>Variant as object (plugin format). If present we use variationId and attributes/meta for display title.</summary>
+    [JsonPropertyName("variation")]
+    public WooCommerceVariationPayload? Variation { get; set; }
+
+    /// <summary>Customer note for this line item. We also accept productNote from the plugin.</summary>
     [JsonPropertyName("note")]
     public string? Note { get; set; }
+
+    [JsonPropertyName("productNote")]
+    public string? ProductNote { get; set; }
 
     [JsonPropertyName("quantity")]
     public decimal Quantity { get; set; }
