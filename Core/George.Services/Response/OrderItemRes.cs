@@ -21,4 +21,11 @@ public class OrderItemRes
     public int? WooCommerceProductId { get; set; }
     public int? WooCommerceVariationId { get; set; }
     public int SortOrder { get; set; }
+    /// <summary>total_weight | per_unit | units_only — for order line display without loading the catalog product.</summary>
+    public string? WeightDisplayMode { get; set; }
+
+    public string? OrderLineQuantityMode { get; set; }
+    public string? OrderLinePerUnitWeightLabel { get; set; }
+    public string? OrderLineSizeLabel { get; set; }
+    public string? OrderLineCuttingLabel { get; set; }
 }

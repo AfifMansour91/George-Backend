@@ -64,6 +64,12 @@ public class CreateOrderItemReq
     public int? WooCommerceProductId { get; set; }
     public int? WooCommerceVariationId { get; set; }
     public int SortOrder { get; set; }
+
+    /// <summary>Shop: <c>units</c> | <c>weight</c> for quantity badge (camelCase JSON).</summary>
+    public string? OrderLineQuantityMode { get; set; }
+    public string? OrderLinePerUnitWeightLabel { get; set; }
+    public string? OrderLineSizeLabel { get; set; }
+    public string? OrderLineCuttingLabel { get; set; }
 }
 
 /// <summary>Sprint 2: Add items to existing order (picking "הוסף פריט"). POST Order/{orderId}/Items.</summary>

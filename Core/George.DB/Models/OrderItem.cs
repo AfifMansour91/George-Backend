@@ -60,6 +60,29 @@ public partial class OrderItem
 
     public int SortOrder { get; set; }
 
+    /// <summary>
+    /// How UI should render quantity: <c>total_weight</c> (line weight), <c>per_unit</c> (units + per-unit grams), <c>units_only</c>.
+    /// Set from client (manual/kiosk) or computed for WooCommerce ingest. Matches shop-manager <c>weightDisplayMode</c> JSON.
+    /// </summary>
+    [StringLength(32)]
+    public string? WeightDisplayMode { get; set; }
+
+    /// <summary>Shop UI: <c>units</c> (יח׳) vs <c>weight</c> (משקל). CamelCase JSON from API.</summary>
+    [StringLength(16)]
+    public string? OrderLineQuantityMode { get; set; }
+
+    /// <summary>Preformatted Hebrew label e.g. <c>600 גרם ליח'</c>.</summary>
+    [StringLength(120)]
+    public string? OrderLinePerUnitWeightLabel { get; set; }
+
+    /// <summary>Size + approximate weight e.g. <c>גדול (כ 0.8 ק"ג)</c>.</summary>
+    [StringLength(200)]
+    public string? OrderLineSizeLabel { get; set; }
+
+    /// <summary>Cutting option value only.</summary>
+    [StringLength(200)]
+    public string? OrderLineCuttingLabel { get; set; }
+
     [Column(TypeName = "decimal(18, 4)")]
     public decimal? PickedQuantity { get; set; }
 

@@ -116,10 +116,21 @@ namespace George.Services
             if (!order.DeliveryDate.HasValue) order.DeliveryDate = todayUtc;
             if (!order.PickupDate.HasValue) order.PickupDate = todayUtc;
             var items = new List<OrderItem>();
+            var productCache = new Dictionary<int, Product?>();
             for (var i = 0; i < req.Items.Count; i++)
             {
-                var oi = _mapper.Map<OrderItem>(req.Items[i]);
+                var lineReq = req.Items[i];
+                var oi = _mapper.Map<OrderItem>(lineReq);
                 oi.SortOrder = i;
+                if (lineReq.ProductId is > 0)
+                {
+                    if (!productCache.TryGetValue(lineReq.ProductId.Value, out var product))
+                    {
+                        product = await _productStorage.GetProductAsync(lineReq.ProductId.Value, cancelToken).ConfigureAwait(false);
+                        productCache[lineReq.ProductId.Value] = product;
+                    }
+                    OrderLineDisplayFieldsBuilder.MergeComputedDisplayFields(oi, lineReq, product);
+                }
                 items.Add(oi);
             }
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken);
@@ -434,7 +445,22 @@ namespace George.Services
             if (string.Equals(order.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
                 return CreateResponse(response, StatusCode.InvalidRequest, "Cannot add items to a cancelled order.");
 
-            var newOrderItems = items.Select(req => _mapper.Map<OrderItem>(req)).ToList();
+            var productCache = new Dictionary<int, Product?>();
+            var newOrderItems = new List<OrderItem>();
+            foreach (var lineReq in items)
+            {
+                var oi = _mapper.Map<OrderItem>(lineReq);
+                if (lineReq.ProductId is > 0)
+                {
+                    if (!productCache.TryGetValue(lineReq.ProductId.Value, out var product))
+                    {
+                        product = await _productStorage.GetProductAsync(lineReq.ProductId.Value, cancelToken).ConfigureAwait(false);
+                        productCache[lineReq.ProductId.Value] = product;
+                    }
+                    OrderLineDisplayFieldsBuilder.MergeComputedDisplayFields(oi, lineReq, product);
+                }
+                newOrderItems.Add(oi);
+            }
             var updated = await _orderStorage.AddOrderItemsAsync(orderId, newOrderItems, cancelToken);
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
@@ -893,11 +919,13 @@ namespace George.Services
                         var it = payload.Items[i];
                         var ourProductId = await ResolveWooCommerceItemProductIdAsync(siteId, site.AccountId, it.ProductId, it.Sku, cancelToken).ConfigureAwait(false);
                         Product? product = ourProductId.HasValue ? await _productStorage.GetProductAsync(ourProductId.Value, cancelToken).ConfigureAwait(false) : null;
+                        var matchedVariant = GetVariantFromPayloadItem(it, product);
                         var (qty, unitWeightGrams, variantTitle) = GetWooCommerceItemQuantityAndUnitWeight(it, product);
-                        updateItems.Add(new OrderItem
+                        var oi = new OrderItem
                         {
                             OrderId = existing.Id,
                             ProductId = ourProductId ?? it.ProductId,
+                            ProductVariantId = matchedVariant?.Id,
                             Title = it.Name,
                             VariantTitle = GetVariantTitleFromPayload(it) ?? variantTitle,
                             Quantity = qty,
@@ -910,7 +938,18 @@ namespace George.Services
                             WooCommerceProductId = it.ProductId,
                             WooCommerceVariationId = GetEffectiveVariationId(it),
                             SortOrder = i
-                        });
+                        };
+                        var mergeReq = new CreateOrderItemReq
+                        {
+                            ProductId = ourProductId ?? it.ProductId,
+                            ProductVariantId = matchedVariant?.Id,
+                            Quantity = qty,
+                            UnitWeightGrams = unitWeightGrams,
+                            SaleUnits = it.SaleUnits,
+                            SaleTotalWeight = it.SaleTotalWeight,
+                        };
+                        OrderLineDisplayFieldsBuilder.MergeComputedDisplayFields(oi, mergeReq, product);
+                        updateItems.Add(oi);
                     }
                 }
                 await _orderStorage.ReplaceOrderItemsAsync(existing.Id, updateItems, cancelToken).ConfigureAwait(false);
@@ -926,10 +965,12 @@ namespace George.Services
                     var it = payload.Items[i];
                     var ourProductId = await ResolveWooCommerceItemProductIdAsync(siteId, site.AccountId, it.ProductId, it.Sku, cancelToken).ConfigureAwait(false);
                     Product? product = ourProductId.HasValue ? await _productStorage.GetProductAsync(ourProductId.Value, cancelToken).ConfigureAwait(false) : null;
+                    var matchedVariant = GetVariantFromPayloadItem(it, product);
                     var (qty, unitWeightGrams, variantTitle) = GetWooCommerceItemQuantityAndUnitWeight(it, product);
                     createItems.Add(new CreateOrderItemReq
                     {
                         ProductId = ourProductId ?? it.ProductId,
+                        ProductVariantId = matchedVariant?.Id,
                         Title = it.Name,
                         VariantTitle = GetVariantTitleFromPayload(it) ?? variantTitle,
                         Quantity = qty,
@@ -988,10 +1029,21 @@ namespace George.Services
             if (!order.DeliveryDate.HasValue) order.DeliveryDate = todayUtc;
             if (!order.PickupDate.HasValue) order.PickupDate = todayUtc;
             var items = new List<OrderItem>();
+            var wooProductCache = new Dictionary<int, Product?>();
             for (var i = 0; i < req.Items.Count; i++)
             {
-                var oi = _mapper.Map<OrderItem>(req.Items[i]);
+                var lineReq = req.Items[i];
+                var oi = _mapper.Map<OrderItem>(lineReq);
                 oi.SortOrder = i;
+                if (lineReq.ProductId is > 0)
+                {
+                    if (!wooProductCache.TryGetValue(lineReq.ProductId.Value, out var p))
+                    {
+                        p = await _productStorage.GetProductAsync(lineReq.ProductId.Value, cancelToken).ConfigureAwait(false);
+                        wooProductCache[lineReq.ProductId.Value] = p;
+                    }
+                    OrderLineDisplayFieldsBuilder.MergeComputedDisplayFields(oi, lineReq, p);
+                }
                 items.Add(oi);
             }
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken).ConfigureAwait(false);
