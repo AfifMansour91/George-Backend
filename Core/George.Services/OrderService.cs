@@ -662,13 +662,20 @@ namespace George.Services
             }
         }
 
-        /// <summary>Resolves WooCommerce order item to our Product.Id: first by WooCommerce product ID (Product.WooCommerceId + site), then by SKU on the site. Returns null if not found (caller may keep payload ProductId as fallback).</summary>
-        private async Task<int?> ResolveWooCommerceItemProductIdAsync(int siteId, int accountId, int? wooCommerceProductId, string? sku, CancellationToken cancelToken)
+        /// <summary>Resolves WooCommerce order item to our Product.Id: parent <see cref="Product.WooCommerceId"/>, then variation <see cref="ProductVariant.WooCommerceVariationId"/> (WC often sends variation id as product_id), then SKU. Returns null if not found (caller may keep payload ProductId as fallback).</summary>
+        private async Task<int?> ResolveWooCommerceItemProductIdAsync(int siteId, int accountId, int? wooCommerceProductId, string? sku, int? wooCommerceVariationId, CancellationToken cancelToken)
         {
             if (wooCommerceProductId.HasValue && wooCommerceProductId.Value > 0)
             {
                 var byWooId = await _productStorage.GetProductIdByWooCommerceIdAndSiteAsync(siteId, wooCommerceProductId.Value, cancelToken).ConfigureAwait(false);
                 if (byWooId.HasValue) return byWooId.Value;
+                var byPidAsVariation = await _productStorage.GetProductIdByWooCommerceVariationIdAndSiteAsync(siteId, wooCommerceProductId.Value, cancelToken).ConfigureAwait(false);
+                if (byPidAsVariation.HasValue) return byPidAsVariation.Value;
+            }
+            if (wooCommerceVariationId.HasValue && wooCommerceVariationId.Value > 0)
+            {
+                var byVar = await _productStorage.GetProductIdByWooCommerceVariationIdAndSiteAsync(siteId, wooCommerceVariationId.Value, cancelToken).ConfigureAwait(false);
+                if (byVar.HasValue) return byVar.Value;
             }
             if (!string.IsNullOrWhiteSpace(sku))
             {
@@ -917,7 +924,7 @@ namespace George.Services
                     for (var i = 0; i < payload.Items.Count; i++)
                     {
                         var it = payload.Items[i];
-                        var ourProductId = await ResolveWooCommerceItemProductIdAsync(siteId, site.AccountId, it.ProductId, it.Sku, cancelToken).ConfigureAwait(false);
+                        var ourProductId = await ResolveWooCommerceItemProductIdAsync(siteId, site.AccountId, it.ProductId, it.Sku, GetEffectiveVariationId(it), cancelToken).ConfigureAwait(false);
                         Product? product = ourProductId.HasValue ? await _productStorage.GetProductAsync(ourProductId.Value, cancelToken).ConfigureAwait(false) : null;
                         var matchedVariant = GetVariantFromPayloadItem(it, product);
                         var (qty, unitWeightGrams, variantTitle) = GetWooCommerceItemQuantityAndUnitWeight(it, product);
@@ -963,7 +970,7 @@ namespace George.Services
                 for (var i = 0; i < payload.Items.Count; i++)
                 {
                     var it = payload.Items[i];
-                    var ourProductId = await ResolveWooCommerceItemProductIdAsync(siteId, site.AccountId, it.ProductId, it.Sku, cancelToken).ConfigureAwait(false);
+                    var ourProductId = await ResolveWooCommerceItemProductIdAsync(siteId, site.AccountId, it.ProductId, it.Sku, GetEffectiveVariationId(it), cancelToken).ConfigureAwait(false);
                     Product? product = ourProductId.HasValue ? await _productStorage.GetProductAsync(ourProductId.Value, cancelToken).ConfigureAwait(false) : null;
                     var matchedVariant = GetVariantFromPayloadItem(it, product);
                     var (qty, unitWeightGrams, variantTitle) = GetWooCommerceItemQuantityAndUnitWeight(it, product);

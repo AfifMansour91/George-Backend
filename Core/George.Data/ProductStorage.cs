@@ -537,6 +537,22 @@ namespace George.Data
             return product?.Id;
         }
 
+        /// <summary>
+        /// When Woo sends a <b>variation</b> id as <c>productId</c> (or in <c>variationId</c>), parent <see cref="Product.WooCommerceId"/> lookup fails.
+        /// Resolve to our <see cref="Product.Id"/> via <see cref="ProductVariant.WooCommerceVariationId"/> so order lines link and display snapshots can run.
+        /// </summary>
+        public async Task<int?> GetProductIdByWooCommerceVariationIdAndSiteAsync(int siteId, int wooVariationId, CancellationToken cancelToken = default)
+        {
+            if (siteId <= 0 || wooVariationId <= 0) return null;
+            var productId = await _dbContext.ProductVariant
+                .AsNoTracking()
+                .Where(v => !v.IsDeleted && v.WooCommerceVariationId == wooVariationId)
+                .Where(v => !v.Product.IsDeleted && v.Product.Site.Any(s => s.Id == siteId))
+                .Select(v => (int?)v.ProductId)
+                .FirstOrDefaultAsync(cancelToken);
+            return productId;
+        }
+
         /// <summary>Returns (WooCommerceId, DisplayOrder) for products in orderedProductIds that belong to the site and have a WooCommerceId. DisplayOrder = index in orderedProductIds. Used for menu-order-only sync.</summary>
         public async Task<List<(int WooCommerceId, int DisplayOrder)>> GetWooCommerceIdAndDisplayOrderForSiteAsync(List<int> orderedProductIds, int siteId, CancellationToken cancelToken)
         {

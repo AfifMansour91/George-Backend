@@ -17,7 +17,13 @@ public static class OrderLineDisplayFieldsBuilder
 
     public static void MergeComputedDisplayFields(OrderItem item, CreateOrderItemReq req, Product? product)
     {
-        if (product == null || req.ProductId is null or <= 0) return;
+        if (req.ProductId is null or <= 0) return;
+
+        if (product == null)
+        {
+            ApplyHeuristicOrderLineDisplayWhenCatalogMissing(item, req);
+            return;
+        }
 
         var variantIndex = GetVariantIndex(product, req.ProductVariantId);
         var purchaseAsKgLine = InferPurchaseAsKgLine(product, req);
@@ -50,6 +56,36 @@ public static class OrderLineDisplayFieldsBuilder
         if (snap.ClearSaleTotalWeight && string.IsNullOrWhiteSpace(req.SaleTotalWeight)
             && string.IsNullOrWhiteSpace(req.OrderLineQuantityMode))
             item.SaleTotalWeight = null;
+    }
+
+    /// <summary>
+    /// When the catalog product cannot be loaded (e.g. <c>ProductId</c> still Woo id, or sync gap), still set
+    /// <see cref="OrderItem.OrderLineQuantityMode"/> so the shop UI is not stuck in legacy-only inference.
+    /// </summary>
+    private static void ApplyHeuristicOrderLineDisplayWhenCatalogMissing(OrderItem item, CreateOrderItemReq req)
+    {
+        if (!string.IsNullOrWhiteSpace(item.OrderLineQuantityMode)) return;
+
+        if (req.UnitWeightGrams == 1000m)
+        {
+            item.OrderLineQuantityMode = "weight";
+            return;
+        }
+
+        var su = req.SaleUnits;
+        if (!string.IsNullOrWhiteSpace(su) && su.Contains("יח", StringComparison.Ordinal))
+        {
+            item.OrderLineQuantityMode = "units";
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(req.SaleTotalWeight))
+        {
+            item.OrderLineQuantityMode = "weight";
+            return;
+        }
+
+        item.OrderLineQuantityMode = "units";
     }
 
     private static bool InferPurchaseAsKgLine(Product product, CreateOrderItemReq req)
