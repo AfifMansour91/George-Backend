@@ -14,6 +14,27 @@ namespace George.Data
         {
         }
 
+        /// <summary>
+        /// ProductOptionValue is keyed by (ProductOptionId, Value); duplicate strings in the request must not create multiple rows.
+        /// </summary>
+        private static List<string> DistinctOptionValuesPreserveOrder(List<string>? values)
+        {
+            if (values == null || values.Count == 0)
+                return new List<string>();
+
+            var seen = new HashSet<string>();
+            var result = new List<string>();
+            foreach (var v in values)
+            {
+                if (string.IsNullOrWhiteSpace(v))
+                    continue;
+                if (seen.Add(v))
+                    result.Add(v);
+            }
+
+            return result;
+        }
+
         public async Task<DataListResult<Product>> GetProductsAsync(
             ProductFilter? filter,
             PagingExDto paging,
@@ -636,6 +657,8 @@ namespace George.Data
 
             foreach (var opt in options)
             {
+                var distinctValues = DistinctOptionValuesPreserveOrder(opt.Values);
+
                 var productOption = new ProductOption
                 {
                     ProductId = productId,
@@ -645,9 +668,9 @@ namespace George.Data
                 _dbContext.ProductOption.Add(productOption);
                 await _dbContext.SaveChangesAsync(cancelToken);
 
-                if (opt.Values != null && opt.Values.Any())
+                if (distinctValues.Count > 0)
                 {
-                    foreach (var value in opt.Values)
+                    foreach (var value in distinctValues)
                     {
                         _dbContext.ProductOptionValue.Add(new ProductOptionValue
                         {
@@ -690,9 +713,9 @@ namespace George.Data
                         }
 
                         // Create AttributeValues for each option value
-                        if (opt.Values != null && opt.Values.Any() && attribute != null)
+                        if (distinctValues.Count > 0 && attribute != null)
                         {
-                            foreach (var value in opt.Values)
+                            foreach (var value in distinctValues)
                             {
                                 // Check if AttributeValue already exists
                                 var existingValue = attribute.AttributeValue
