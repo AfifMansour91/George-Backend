@@ -136,14 +136,9 @@ public static class OrderLineDisplayFieldsBuilder
 
     private static decimal? GetVariantWeightKg(Product product, int variantIndex, CreateOrderItemReq req)
     {
+        // UnitWeightGrams on the wire is always grams (kiosk / Woo / API); do not treat as kg when catalog unit is kg.
         if (req.UnitWeightGrams is { } g && g > 0 && g != 1000m)
-        {
-            var wc = product.WeightConfig;
-            var unitRaw = GetUnitRaw(wc);
-            if (string.Equals(unitRaw, "g", StringComparison.OrdinalIgnoreCase))
-                return g / 1000m;
-            return g;
-        }
+            return g / 1000m;
 
         var v = GetOrderedVariants(product).ElementAtOrDefault(variantIndex);
         return v?.Weight;
