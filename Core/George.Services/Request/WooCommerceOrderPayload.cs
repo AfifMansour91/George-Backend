@@ -51,6 +51,19 @@ public class WooCommerceOrderPayload
     [JsonPropertyName("billing_notes")]
     public string? BillingNotes { get; set; }
 
+    /// <summary>Same as <see cref="BillingNotes"/>; some plugins send camelCase only.</summary>
+    [JsonPropertyName("billingNotes")]
+    public string? BillingNotesCamel { get; set; }
+
+    /// <summary>First non-empty of snake_case or camelCase billing note.</summary>
+    public string? GetResolvedBillingNotes()
+    {
+        var a = BillingNotes?.Trim();
+        if (!string.IsNullOrWhiteSpace(a)) return a;
+        var b = BillingNotesCamel?.Trim();
+        return string.IsNullOrWhiteSpace(b) ? null : b;
+    }
+
     /// <summary>Internal WooCommerce / plugin order notes (status history, sync messages).</summary>
     [JsonPropertyName("internalOrderNotes")]
     public string? InternalOrderNotes { get; set; }

@@ -630,10 +630,25 @@ namespace George.Services
             return string.IsNullOrWhiteSpace(code) ? null : code.Trim();
         }
 
+        /// <summary>
+        /// Woo billing note → <see cref="Order.BillingNotes"/> (canonical) and <see cref="Order.CustomerNote"/> (shop UI).
+        /// Woo customer checkout note is appended to <see cref="Order.CustomerNote"/> when both exist.
+        /// </summary>
+        private static (string? BillingNotes, string? CustomerNote) ResolveWooCommerceNotesForPersistence(WooCommerceOrderPayload p)
+        {
+            var bill = p.GetResolvedBillingNotes();
+            var cust = string.IsNullOrWhiteSpace(p.CustomerNotes) ? null : p.CustomerNotes.Trim();
+            string? customerNote;
+            if (cust != null && bill != null)
+                customerNote = $"{cust}\n\n{bill}";
+            else
+                customerNote = bill ?? cust;
+            return (bill, customerNote);
+        }
+
         /// <summary>Persist WooCommerce-only order fields (labels, billing/internal notes, site/affiliate echo).</summary>
         private static void ApplyWooCommerceStoredMetadata(Order o, WooCommerceOrderPayload p)
         {
-            o.BillingNotes = p.BillingNotes;
             o.InternalOrderNotes = p.InternalOrderNotes;
             o.PaymentMethodTitle = p.PaymentMethodTitle;
             o.PaymentLabel = p.PaymentLabel;
@@ -888,6 +903,7 @@ namespace George.Services
             var existing = await _orderStorage.GetOrderBySiteAndExternalIdAsync(siteId, externalId, cancelToken).ConfigureAwait(false);
             var todayUtc = DateTime.UtcNow.Date;
             var wcRequestJson = SerializeWooCommerceOrderPayloadForStorage(payload);
+            var (wooBillingNotes, wooCustomerNote) = ResolveWooCommerceNotesForPersistence(payload);
             if (existing != null)
             {
                 var deliveryAddress = FormatWooCommerceDeliveryAddress(payload.ShippingAddress);
@@ -902,7 +918,8 @@ namespace George.Services
                     o.CustomerEmail = payload.Customer?.Email;
                     o.CustomerId = updateCustomer.Id;
                     o.DeliveryAddress = deliveryAddress;
-                    o.CustomerNote = string.IsNullOrWhiteSpace(payload.BillingNotes) ? null : payload.BillingNotes.Trim();
+                    o.BillingNotes = wooBillingNotes;
+                    o.CustomerNote = wooCustomerNote;
                     o.ManagerNote = null;
                     var pay = MapWooCommercePaymentMethodToInternal(payload.PaymentMethod, payload.PaymentMethodTitle);
                     if (pay != null) o.PaymentMethod = pay;
@@ -1004,13 +1021,13 @@ namespace George.Services
                 CustomerPhone = payload.Customer?.Phone,
                 CustomerEmail = payload.Customer?.Email,
                 DeliveryAddress = FormatWooCommerceDeliveryAddress(payload.ShippingAddress),
-                CustomerNote = string.IsNullOrWhiteSpace(payload.BillingNotes) ? null : payload.BillingNotes.Trim(),
+                CustomerNote = wooCustomerNote,
                 ManagerNote = null,
                 PaymentMethod = MapWooCommercePaymentMethodToInternal(payload.PaymentMethod, payload.PaymentMethodTitle),
                 PaymentMethodTitle = payload.PaymentMethodTitle,
                 PaymentLabel = payload.PaymentLabel,
                 ShippingLabel = payload.ShippingLabel,
-                BillingNotes = payload.BillingNotes,
+                BillingNotes = wooBillingNotes,
                 InternalOrderNotes = payload.InternalOrderNotes,
                 WooCommerceSiteId = payload.SiteId,
                 WooCommercePickupAffiliateId = payload.ShippingInfo?.PickupAffiliateId,
