@@ -172,7 +172,7 @@ namespace George.Services
                 });
 
             ////////////////////////// Order (Sprint 2)
-            // Ensure all date/time values are marked as UTC so JSON serialization emits "Z" and frontend displays correct local time
+            // Creation/updated timestamps: UTC + "Z" for real instants. Delivery/pickup are calendar dates — do not SpecifyUtc or a noon UTC instant becomes the wrong calendar day in the UI (e.g. .slice(0,10) → "yesterday").
             CreateMap<Order, OrderRes>()
                 .ForMember(dest => dest.Items, opt => opt.MapFrom(src => src.OrderItem ?? new List<OrderItem>()))
                 .ForMember(dest => dest.BagsCount, opt => opt.MapFrom(src => src.BagsCount))
@@ -180,11 +180,13 @@ namespace George.Services
                 {
                     dest.CreationTime = SpecifyUtc(src.CreationTime);
                     dest.UpdatedDate = src.UpdatedDate.HasValue ? SpecifyUtc(src.UpdatedDate.Value) : null;
-                    dest.DeliveryDate = src.DeliveryDate.HasValue ? SpecifyUtc(src.DeliveryDate.Value) : null;
-                    dest.PickupDate = src.PickupDate.HasValue ? SpecifyUtc(src.PickupDate.Value) : null;
+                    dest.DeliveryDate = ToUnspecifiedCalendarDate(src.DeliveryDate);
+                    dest.PickupDate = ToUnspecifiedCalendarDate(src.PickupDate);
                 });
             CreateMap<OrderItem, OrderItemRes>();
-            CreateMap<CreateOrderReq, Order>();
+            CreateMap<CreateOrderReq, Order>()
+                .ForMember(d => d.PickupDate, o => o.MapFrom(s => s.PickupDate.HasValue ? s.PickupDate.Value.ToDateTime(TimeOnly.MinValue) : (DateTime?)null))
+                .ForMember(d => d.DeliveryDate, o => o.MapFrom(s => s.DeliveryDate.HasValue ? s.DeliveryDate.Value.ToDateTime(TimeOnly.MinValue) : (DateTime?)null));
             CreateMap<CreateOrderItemReq, OrderItem>();
             CreateMap<UpdateOrderReq, Order>()
                 .ForAllMembers(opt => opt.Condition((src, dest, srcMember) => srcMember != null));
@@ -278,6 +280,9 @@ namespace George.Services
             if (value.Kind == DateTimeKind.Utc) return value;
             return DateTime.SpecifyKind(value, DateTimeKind.Utc);
         }
+
+        private static DateTime? ToUnspecifiedCalendarDate(DateTime? value) =>
+            value.HasValue ? DateTime.SpecifyKind(value.Value.Date, DateTimeKind.Unspecified) : null;
 
 
         private JsonDocument? ParseJson(string settings)

@@ -113,8 +113,7 @@ namespace George.Services
             order.CreationUserId = AuthUser.Id;
             order.IsDeleted = false;
             var todayUtc = DateTime.UtcNow.Date;
-            if (!order.DeliveryDate.HasValue) order.DeliveryDate = todayUtc;
-            if (!order.PickupDate.HasValue) order.PickupDate = todayUtc;
+            NormalizeOrderDeliveryAndPickupDates(order, todayUtc);
             var items = new List<OrderItem>();
             var productCache = new Dictionary<int, Product?>();
             for (var i = 0; i < req.Items.Count; i++)
@@ -321,9 +320,9 @@ namespace George.Services
                 if (req.ManagerNote != null) o.ManagerNote = req.ManagerNote;
                 if (req.CustomerNote != null) o.CustomerNote = req.CustomerNote;
                 if (req.DeliveryNote != null) o.DeliveryNote = req.DeliveryNote;
-                if (req.DeliveryDate.HasValue) o.DeliveryDate = req.DeliveryDate;
+                if (req.DeliveryDate.HasValue) o.DeliveryDate = req.DeliveryDate.Value.ToDateTime(TimeOnly.MinValue);
                 if (req.DeliveryTime != null) o.DeliveryTime = req.DeliveryTime;
-                if (req.PickupDate.HasValue) o.PickupDate = req.PickupDate;
+                if (req.PickupDate.HasValue) o.PickupDate = req.PickupDate.Value.ToDateTime(TimeOnly.MinValue);
                 if (req.PickupTime != null) o.PickupTime = req.PickupTime;
                 if (req.DeliveryAddress != null) o.DeliveryAddress = req.DeliveryAddress;
                 if (req.PaymentStatus != null) o.PaymentStatus = req.PaymentStatus;
@@ -534,8 +533,9 @@ namespace George.Services
                     var parsed = ParseWooCommerceDate(shippingInfo.Date);
                     if (parsed.HasValue)
                     {
-                        if (isPickup) order.PickupDate = parsed.Value;
-                        else order.DeliveryDate = parsed.Value;
+                        var cal = DateTime.SpecifyKind(parsed.Value.Date, DateTimeKind.Unspecified);
+                        if (isPickup) order.PickupDate = cal;
+                        else order.DeliveryDate = cal;
                     }
                 }
                 var slot = string.IsNullOrWhiteSpace(shippingInfo.SlotStart) ? shippingInfo.SlotEnd : shippingInfo.SlotStart;
@@ -552,6 +552,28 @@ namespace George.Services
                     order.DeliveryNote = shippingInfo.PickupAffiliateId.Trim();
             }
         }
+
+        /// <summary>
+        /// <see cref="ApplyShippingInfoToOrder"/> sets only <see cref="Order.PickupDate"/> for pickup or only <see cref="Order.DeliveryDate"/> for shipping.
+        /// Copy the scheduled date to the sibling field before falling back to today so pickup orders do not keep <see cref="Order.DeliveryDate"/> empty and then get forced to "today".
+        /// </summary>
+        private static void NormalizeOrderDeliveryAndPickupDates(Order order, DateTime todayUtc)
+        {
+            var pickup = ToUnspecifiedCalendarDate(order.PickupDate);
+            var delivery = ToUnspecifiedCalendarDate(order.DeliveryDate);
+            var todayCal = DateTime.SpecifyKind(todayUtc.Date, DateTimeKind.Unspecified);
+
+            if (!delivery.HasValue)
+                delivery = pickup ?? todayCal;
+            if (!pickup.HasValue)
+                pickup = delivery ?? todayCal;
+
+            order.PickupDate = pickup;
+            order.DeliveryDate = delivery;
+        }
+
+        private static DateTime? ToUnspecifiedCalendarDate(DateTime? value) =>
+            value.HasValue ? DateTime.SpecifyKind(value.Value.Date, DateTimeKind.Unspecified) : null;
 
         private static DateTime? ParseWooCommerceDate(string dateStr)
         {
@@ -930,8 +952,7 @@ namespace George.Services
                     o.SubTotal = (payload.OrderTotal ?? o.SubTotal) - (payload.ShippingTotal ?? 0);
                     o.UpdatedDate = DateTime.UtcNow;
                     ApplyShippingInfoToOrder(o, payload.ShippingInfo, payload.ShippingLabel);
-                    if (!o.DeliveryDate.HasValue) o.DeliveryDate = todayUtc;
-                    if (!o.PickupDate.HasValue) o.PickupDate = todayUtc;
+                    NormalizeOrderDeliveryAndPickupDates(o, todayUtc);
                 }, cancelToken).ConfigureAwait(false);
                 if (updated == null)
                     return CreateResponse(response, StatusCode.ItemNotFound);
@@ -1049,9 +1070,7 @@ namespace George.Services
             order.CreationUserId = null;
             order.WooCommerceRequestJson = wcRequestJson;
             ApplyShippingInfoToOrder(order, payload.ShippingInfo, payload.ShippingLabel);
-            // Default delivery/pickup date to today when not provided (like manual order)
-            if (!order.DeliveryDate.HasValue) order.DeliveryDate = todayUtc;
-            if (!order.PickupDate.HasValue) order.PickupDate = todayUtc;
+            NormalizeOrderDeliveryAndPickupDates(order, todayUtc);
             var items = new List<OrderItem>();
             var wooProductCache = new Dictionary<int, Product?>();
             for (var i = 0; i < req.Items.Count; i++)

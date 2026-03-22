@@ -23,9 +23,11 @@ public class CreateOrderReq
     public bool? MarketingSms { get; set; }
     public int? CustomerId { get; set; }
     public string? DeliveryAddress { get; set; }
-    public DateTime? DeliveryDate { get; set; }
+    /// <summary>Calendar date only (<c>yyyy-MM-dd</c>). Use <see cref="DateOnly"/> so JSON is not shifted through UTC <see cref="DateTime"/> parsing.</summary>
+    public DateOnly? DeliveryDate { get; set; }
     public string? DeliveryTime { get; set; }
-    public DateTime? PickupDate { get; set; }
+    /// <summary>Calendar date only (<c>yyyy-MM-dd</c>).</summary>
+    public DateOnly? PickupDate { get; set; }
     public string? PickupTime { get; set; }
     public string? ManagerNote { get; set; }
     public string? CustomerNote { get; set; }
@@ -98,9 +100,9 @@ public class UpdateOrderReq
     public string? ManagerNote { get; set; }
     public string? CustomerNote { get; set; }
     public string? DeliveryNote { get; set; }
-    public DateTime? DeliveryDate { get; set; }
+    public DateOnly? DeliveryDate { get; set; }
     public string? DeliveryTime { get; set; }
-    public DateTime? PickupDate { get; set; }
+    public DateOnly? PickupDate { get; set; }
     public string? PickupTime { get; set; }
     public string? DeliveryAddress { get; set; }
     public string? PaymentStatus { get; set; }
