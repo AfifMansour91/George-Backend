@@ -834,7 +834,7 @@ namespace George.Services
                 ShortDescription = req.ShortDescription ?? existing.ShortDescription,
                 LongDescription = req.LongDescription ?? existing.LongDescription,
                 Price = req.Price ?? existing.Price,
-                SalePrice = req.SalePrice ?? existing.SalePrice,
+                SalePrice = req.SalePrice,
                 SalePriceStartDate = req.SalePriceStartDate ?? existing.SalePriceStartDate,
                 SalePriceEndDate = req.SalePriceEndDate ?? existing.SalePriceEndDate,
                 CostPrice = req.CostPrice ?? existing.CostPrice,
