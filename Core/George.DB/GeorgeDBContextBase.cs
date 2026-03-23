@@ -641,6 +641,8 @@ public partial class GeorgeDBContextBase : DbContext
         {
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.JobType).HasMaxLength(50);
+            entity.Property(e => e.Trigger).HasMaxLength(80);
+            entity.Property(e => e.ClientSource).HasMaxLength(80);
             entity.Property(e => e.Status).HasMaxLength(20);
             entity.Property(e => e.AgentId).HasMaxLength(100);
             entity.Property(e => e.ErrorMessage).HasMaxLength(500);

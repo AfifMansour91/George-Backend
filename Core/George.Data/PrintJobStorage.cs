@@ -35,6 +35,24 @@ public class PrintJobStorage : StorageBase
             .FirstOrDefaultAsync(j => j.Id == id, cancelToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Find an existing print job by idempotency tuple: SiteId + OrderId + JobType.
+    /// Used for auto-print flows to avoid duplicate enqueue across polling/page re-entry.
+    /// </summary>
+    public async Task<PrintJob?> FindBySiteOrderAndJobTypeAsync(
+        int siteId,
+        int orderId,
+        string jobType,
+        CancellationToken cancelToken = default)
+    {
+        return await _dbContext.PrintJob
+            .AsNoTracking()
+            .Where(j => j.SiteId == siteId && j.OrderId == orderId && j.JobType == jobType)
+            .OrderByDescending(j => j.Id)
+            .FirstOrDefaultAsync(cancelToken)
+            .ConfigureAwait(false);
+    }
+
     public async Task<bool> UpdateStatusAsync(int id, string status, string? agentId = null, string? errorMessage = null, CancellationToken cancelToken = default)
     {
         var job = await _dbContext.PrintJob.FirstOrDefaultAsync(j => j.Id == id, cancelToken).ConfigureAwait(false);

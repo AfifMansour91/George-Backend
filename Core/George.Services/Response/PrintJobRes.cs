@@ -6,6 +6,8 @@ public class PrintJobRes
     public int SiteId { get; set; }
     public int? OrderId { get; set; }
     public string JobType { get; set; } = "";
+    public string Trigger { get; set; } = "";
+    public string ClientSource { get; set; } = "";
     public string Payload { get; set; } = "";
     public string Status { get; set; } = "";
     public DateTime CreatedAt { get; set; }

@@ -5,12 +5,14 @@ using George.DB;
 using George.Services.Request;
 using George.Services.Response;
 using Microsoft.Extensions.Logging;
+using System;
 
 namespace George.Services;
 
 public class PrintJobService : ServiceBase
 {
     private readonly PrintJobStorage _printJobStorage;
+    private const string AutoVoucherJobTypePrefix = "VoucherAuto:";
 
     public PrintJobService(ILogger<PrintJobService> logger, IMapper mapper, CacheManager cache, PrintJobStorage printJobStorage)
         : base(logger, mapper, cache)
@@ -27,11 +29,34 @@ public class PrintJobService : ServiceBase
         if (string.IsNullOrWhiteSpace(req.Payload))
             return CreateResponse(response, StatusCode.InvalidRequest, "Payload is required.");
 
+        var normalizedJobType = string.IsNullOrWhiteSpace(req.JobType) ? "Voucher" : req.JobType.Trim();
+        var normalizedTrigger = string.IsNullOrWhiteSpace(req.Trigger)
+            ? DeriveTriggerFromJobType(normalizedJobType)
+            : req.Trigger.Trim();
+        var normalizedClientSource = string.IsNullOrWhiteSpace(req.ClientSource)
+            ? "Unknown"
+            : req.ClientSource.Trim();
+
+        // Auto-print jobs are idempotent by (siteId, orderId, jobType) to prevent polling duplicates.
+        if (req.OrderId.HasValue && req.OrderId.Value > 0 && normalizedJobType.StartsWith(AutoVoucherJobTypePrefix, StringComparison.Ordinal))
+        {
+            var existing = await _printJobStorage
+                .FindBySiteOrderAndJobTypeAsync(req.SiteId, req.OrderId.Value, normalizedJobType, cancelToken)
+                .ConfigureAwait(false);
+            if (existing != null)
+            {
+                response.Data = MapToRes(existing);
+                return response;
+            }
+        }
+
         var job = new PrintJob
         {
             SiteId = req.SiteId,
             OrderId = req.OrderId,
-            JobType = req.JobType ?? "Voucher",
+            JobType = normalizedJobType,
+            Trigger = normalizedTrigger,
+            ClientSource = normalizedClientSource,
             Payload = req.Payload,
             Status = "Pending"
         };
@@ -75,6 +100,8 @@ public class PrintJobService : ServiceBase
             SiteId = j.SiteId,
             OrderId = j.OrderId,
             JobType = j.JobType ?? "",
+            Trigger = j.Trigger ?? "",
+            ClientSource = j.ClientSource ?? "",
             Payload = j.Payload ?? "",
             Status = j.Status ?? "",
             CreatedAt = j.CreatedAt,
@@ -82,5 +109,12 @@ public class PrintJobService : ServiceBase
             AgentId = j.AgentId,
             ErrorMessage = j.ErrorMessage
         };
+    }
+
+    private static string DeriveTriggerFromJobType(string normalizedJobType)
+    {
+        if (normalizedJobType.StartsWith(AutoVoucherJobTypePrefix, StringComparison.Ordinal))
+            return normalizedJobType.Substring(AutoVoucherJobTypePrefix.Length);
+        return "Manual";
     }
 }

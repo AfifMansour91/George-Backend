@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -10,7 +12,9 @@ using George.DB;
 using George.Providers;
 using George.Services.Request;
 using George.Services.Response;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using QRCoder;
 
 namespace George.Services
 {
@@ -23,6 +27,15 @@ namespace George.Services
         private readonly ProductStorage _productStorage;
         private readonly SmsProvider _smsProvider;
         private readonly WooCommerceService _wooCommerceService;
+        private readonly PrintJobService _printJobService;
+        private readonly string? _publicAppBaseUrl;
+        private static readonly Dictionary<string, string> VoucherSourceLabels = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Website"] = "אתר",
+            ["WooCommerce"] = "אתר",
+            ["Kiosk"] = "קיוסק",
+            ["Phone"] = "טלפוני",
+        };
 
         public OrderService(
             ILogger<OrderService> logger,
@@ -34,7 +47,9 @@ namespace George.Services
             AccountStorage accountStorage,
             ProductStorage productStorage,
             SmsProvider smsProvider,
-            WooCommerceService wooCommerceService)
+            WooCommerceService wooCommerceService,
+            PrintJobService printJobService,
+            IConfiguration configuration)
             : base(logger, mapper, cache)
         {
             _orderStorage = orderStorage;
@@ -44,6 +59,8 @@ namespace George.Services
             _productStorage = productStorage;
             _smsProvider = smsProvider;
             _wooCommerceService = wooCommerceService;
+            _printJobService = printJobService;
+            _publicAppBaseUrl = ResolvePublicAppBaseUrl(configuration);
         }
 
         public async Task<IApiResponse<ApiListResponse<OrderRes>>> GetOrdersAsync(
@@ -137,6 +154,8 @@ namespace George.Services
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken);
             var loaded = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken);
             await TrySendNewOrderCustomerSmsAsync(loaded!, cancelToken).ConfigureAwait(false);
+            if (loaded != null)
+                await TryEnqueueNewOrderAutoPrintAsync(loaded, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(loaded);
             return response;
         }
@@ -1149,8 +1168,247 @@ namespace George.Services
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken).ConfigureAwait(false);
             var loadedOrder = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false);
             await TrySendNewOrderCustomerSmsAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
+            if (loadedOrder != null)
+                await TryEnqueueNewOrderAutoPrintAsync(loadedOrder, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(loadedOrder!);
             return response;
+        }
+
+        /// <summary>
+        /// Backend auto-print for new orders, so printing works even when no user has Orders page open.
+        /// Enqueues idempotent job type <c>VoucherAuto:NewImmediate</c>.
+        /// </summary>
+        private async Task TryEnqueueNewOrderAutoPrintAsync(Order order, CancellationToken cancelToken)
+        {
+            if (!string.Equals(order.Status, "New", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var site = await _siteStorage.GetSiteAsync(order.SiteId, cancelToken).ConfigureAwait(false);
+            if (site == null || site.AutoPrintEnabled != true || site.PrintNewOrderImmediate != true)
+                return;
+
+            var payload = BuildAutoVoucherHtml(order);
+            if (string.IsNullOrWhiteSpace(payload))
+                return;
+
+            var req = new CreatePrintJobReq
+            {
+                SiteId = order.SiteId,
+                OrderId = order.Id,
+                JobType = "VoucherAuto:NewImmediate",
+                Trigger = "NewImmediate",
+                ClientSource = "Backend:OrderService",
+                Payload = payload
+            };
+
+            try
+            {
+                await _printJobService.CreateAsync(req, cancelToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to enqueue auto print job for new order {OrderId}.", order.Id);
+            }
+        }
+
+        private string BuildAutoVoucherHtml(Order order)
+        {
+            var sb = new StringBuilder();
+            var items = order.OrderItem?.OrderBy(i => i.SortOrder).ToList() ?? new List<OrderItem>();
+            var customerName = order.CustomerName ?? "—";
+            var customerPhone = order.CustomerPhone ?? "—";
+            var orderNo = order.OrderNumber ?? order.Id.ToString(CultureInfo.InvariantCulture);
+            var created = FormatOrderDateTime(order.CreationTime);
+            var sourceLabel = VoucherSourceLabels.TryGetValue(order.Source ?? "", out var label) ? label : (order.Source ?? "");
+            var deliveryMethod = string.Equals(order.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase)
+                ? "משלוח עד הבית"
+                : string.Equals(order.DeliveryType, "Pickup", StringComparison.OrdinalIgnoreCase)
+                    ? "איסוף עצמי"
+                    : (order.DeliveryType ?? "");
+            var deliveryDate = string.Equals(order.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase)
+                ? order.DeliveryDate
+                : order.PickupDate;
+            var deliveryTime = string.Equals(order.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase)
+                ? order.DeliveryTime
+                : order.PickupTime;
+            var newVoucher = string.Equals(order.Status, "New", StringComparison.OrdinalIgnoreCase);
+            var orderNotes = CombineOrderLevelNotes(order);
+            var shippingCost = order.ShippingCost ?? 0m;
+            var grandTotal = ComputeVoucherGrandTotal(order);
+            var qrDataUrl = GenerateVoucherQrDataUrl(order, _publicAppBaseUrl);
+
+            sb.AppendLine("<!DOCTYPE html>");
+            sb.AppendLine("<html dir=\"rtl\" lang=\"he\">");
+            sb.AppendLine($"<head><meta charset=\"utf-8\"><title>בון הזמנה {EscapeHtml(orderNo)}</title>");
+            sb.AppendLine("<style>");
+            sb.AppendLine("body { font-family: Arial, sans-serif; max-width: 80mm; margin: 0 auto; padding: 16px; color: #000; background: #fff; font-size: 14px; box-sizing: border-box; }");
+            sb.AppendLine(".muted { color: #666; }");
+            sb.AppendLine(".bold { font-weight: bold; }");
+            sb.AppendLine(".large { font-size: 1.25rem; font-weight: 900; margin: 8px 0; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; color: #111; }");
+            sb.AppendLine("@media print { body { padding: 8px; } }");
+            sb.AppendLine("</style></head><body>");
+            sb.AppendLine($"<div style=\"text-align:center;margin-bottom:8px;\"><div class=\"muted\" style=\"font-size:12px;\">כניסת הזמנה</div><div style=\"font-size:14px;font-weight:500;\">{EscapeHtml(created)}</div></div>");
+            if (!string.IsNullOrWhiteSpace(sourceLabel))
+                sb.AppendLine($"<div style=\"text-align:center;font-size:12px;margin-bottom:4px;\"><span class=\"muted\">מקור הזמנה: </span>{EscapeHtml(sourceLabel)}</div>");
+            sb.AppendLine($"<div style=\"text-align:center;margin-bottom:8px;\"><div class=\"muted\" style=\"font-size:12px;\">מספר הזמנה</div><div style=\"font-size:28px;font-weight:800;letter-spacing:-0.02em;\">{EscapeHtml(orderNo)}</div></div>");
+            if (!string.IsNullOrWhiteSpace(qrDataUrl))
+            {
+                sb.AppendLine($"<div style=\"margin:12px 0;\"><img src=\"{qrDataUrl}\" alt=\"QR\" width=\"120\" height=\"120\" style=\"display:block;margin:0 auto;\" /></div>");
+            }
+            sb.AppendLine("<div style=\"text-align:center;font-size:10px;color:#666;margin-bottom:12px;\">סריקה לפתיחת מסך הליקוט</div>");
+            if (!string.IsNullOrWhiteSpace(deliveryMethod))
+                sb.AppendLine($"<div style=\"margin-bottom:4px;\"><span class=\"muted\">שיטת אספקה: </span><span class=\"bold\">{EscapeHtml(deliveryMethod)}</span></div>");
+            if (deliveryDate.HasValue)
+                sb.AppendLine($"<div style=\"margin-bottom:4px;\"><span class=\"muted\">תאריך אספקה: </span>{EscapeHtml(deliveryDate.Value.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture))}</div>");
+            if (!string.IsNullOrWhiteSpace(deliveryTime))
+                sb.AppendLine($"<div style=\"margin-bottom:8px;\"><span class=\"muted\">שעת אספקה: </span>{EscapeHtml(deliveryTime)}</div>");
+            sb.AppendLine($"<div class=\"large\" style=\"font-size:32px;font-weight:900;\">{EscapeHtml(customerName)}</div>");
+            sb.AppendLine($"<div style=\"margin-bottom:4px;\"><span class=\"muted\">טלפון: </span>{EscapeHtml(customerPhone)}</div>");
+            if (!string.IsNullOrWhiteSpace(orderNotes))
+                sb.AppendLine($"<div style=\"margin:10px 0;font-size:15px;font-weight:bold;line-height:1.4;\">הערות: {EscapeHtml(orderNotes)}</div>");
+            if (string.Equals(order.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase))
+            {
+                var mainAddress = BuildMainAddress(order);
+                var extras = BuildAddressExtras(order);
+                if (!string.IsNullOrWhiteSpace(mainAddress) || !string.IsNullOrWhiteSpace(extras))
+                {
+                    if (!string.IsNullOrWhiteSpace(mainAddress))
+                    {
+                        sb.AppendLine("<div class=\"muted\" style=\"font-size:13px;font-weight:700;\">כתובת:</div>");
+                        sb.AppendLine($"<div class=\"bold\" style=\"font-size:22px;line-height:1.25;\">{EscapeHtml(mainAddress!)}</div>");
+                    }
+                    if (!string.IsNullOrWhiteSpace(extras))
+                        sb.AppendLine($"<div class=\"bold\" style=\"margin-top:4px;font-size:16px;line-height:1.25;\">{EscapeHtml(extras!)}</div>");
+                }
+            }
+            sb.AppendLine("<div style=\"font-weight:600;margin-bottom:4px;\">מוצרים:</div>");
+            foreach (var it in items)
+            {
+                var qty = it.Quantity;
+                var title = EscapeHtml(it.Title ?? "");
+                var qtyStr = it.UnitWeightGrams.HasValue && it.UnitWeightGrams.Value > 0
+                    ? $"{qty:0.###} ק\"ג"
+                    : $"{qty:0.###} יח'";
+                sb.AppendLine("<div style=\"border-bottom:1px solid #f3f4f6;padding-bottom:4px;margin-bottom:4px;\">");
+                sb.AppendLine($"<div style=\"font-weight:600;\">{EscapeHtml(qtyStr)} {title}</div>");
+                if (!string.IsNullOrWhiteSpace(it.VariantTitle))
+                    sb.AppendLine($"<div style=\"font-size:10px;color:#666;margin-right:8px;margin-top:2px;\">{EscapeHtml(it.VariantTitle!)}</div>");
+                if (!newVoucher && it.PickedQuantity.HasValue)
+                {
+                    var picked = it.UnitWeightGrams.HasValue && it.UnitWeightGrams.Value > 0
+                        ? $"{it.PickedQuantity.Value:0.###} ק\"ג"
+                        : $"{it.PickedQuantity.Value:0.###} יח'";
+                    sb.AppendLine($"<div style=\"font-size:12px;font-weight:600;color:#1f2937;margin-right:8px;margin-top:2px;\">אחרי ליקוט: {EscapeHtml(picked)}</div>");
+                }
+                if (!string.IsNullOrWhiteSpace(it.Notes))
+                    sb.AppendLine($"<div style=\"font-size:15px;font-weight:600;margin-right:8px;margin-top:6px;\">הערה: {EscapeHtml(it.Notes!)}</div>");
+                sb.AppendLine("</div>");
+            }
+            if (!newVoucher && shippingCost > 0)
+                sb.AppendLine($"<div style=\"text-align:center;font-size:15px;font-weight:600;margin:8px 0;\">משלוח: ₪{shippingCost:0.00}</div>");
+            if (!newVoucher && grandTotal.HasValue)
+                sb.AppendLine($"<div style=\"text-align:center;margin:12px 0;padding:12px;border:2px solid #1f2937;border-radius:8px;background:#f9fafb;\"><div style=\"font-size:11px;color:#666;margin-bottom:4px;\">סה\"כ לתשלום</div><div style=\"font-size:24px;font-weight:bold;\">₪{grandTotal.Value:0.00}</div></div>");
+            sb.AppendLine("</body></html>");
+            return sb.ToString();
+        }
+
+        private static string FormatOrderDateTime(DateTime creationTime)
+        {
+            var local = creationTime.ToLocalTime();
+            var time = local.ToString("HH:mm", CultureInfo.InvariantCulture);
+            var date = local.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+            return $"{time} {date}";
+        }
+
+        private static string CombineOrderLevelNotes(Order order)
+        {
+            var parts = new[] { order.ManagerNote, order.DeliveryNote, order.CustomerNote }
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s!.Trim());
+            return string.Join(" · ", parts);
+        }
+
+        private static string? BuildMainAddress(Order order)
+        {
+            if (!string.IsNullOrWhiteSpace(order.DeliveryAddress)) return order.DeliveryAddress.Trim();
+            var parts = new[] { order.DeliveryStreet, order.DeliveryCity }
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s!.Trim())
+                .ToList();
+            return parts.Count == 0 ? null : string.Join(", ", parts);
+        }
+
+        private static string? BuildAddressExtras(Order order)
+        {
+            var segs = new List<string>();
+            if (!string.IsNullOrWhiteSpace(order.DeliveryApartment)) segs.Add($"דירה: {order.DeliveryApartment.Trim()}");
+            if (!string.IsNullOrWhiteSpace(order.DeliveryFloor)) segs.Add($"קומה: {order.DeliveryFloor.Trim()}");
+            if (!string.IsNullOrWhiteSpace(order.DeliveryEntranceCode)) segs.Add($"קוד כניסה: {order.DeliveryEntranceCode.Trim()}");
+            return segs.Count == 0 ? null : string.Join(" · ", segs);
+        }
+
+        private static decimal? ComputeVoucherGrandTotal(Order order)
+        {
+            if (order.Total.HasValue) return order.Total.Value;
+            var items = order.OrderItem ?? new List<OrderItem>();
+            var itemsSum = items.Sum(i => i.TotalPrice ?? 0m);
+            var shipping = order.ShippingCost ?? 0m;
+            if (itemsSum <= 0m && shipping <= 0m) return null;
+            return itemsSum + shipping;
+        }
+
+        private static string GenerateVoucherQrDataUrl(Order order, string? publicBaseUrl)
+        {
+            try
+            {
+                var payload = BuildPickingUrl(order.Id, publicBaseUrl);
+                using var generator = new QRCodeGenerator();
+                using var data = generator.CreateQrCode(payload, QRCodeGenerator.ECCLevel.Q);
+                var png = new PngByteQRCode(data);
+                var bytes = png.GetGraphic(8, drawQuietZones: true);
+                return $"data:image/png;base64,{Convert.ToBase64String(bytes)}";
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string BuildPickingUrl(int orderId, string? publicBaseUrl)
+        {
+            var pickingPath = $"/orderpicking?orderId={orderId}";
+            if (string.IsNullOrWhiteSpace(publicBaseUrl))
+                return pickingPath;
+            return $"{publicBaseUrl.TrimEnd('/')}{pickingPath}";
+        }
+
+        private static string? ResolvePublicAppBaseUrl(IConfiguration configuration)
+        {
+            var configured =
+                configuration["App:PublicBaseUrl"] ??
+                configuration["PublicAppBaseUrl"] ??
+                configuration["Client:BaseUrl"];
+            if (!string.IsNullOrWhiteSpace(configured))
+                return configured!.Trim();
+
+            // Fallback: use first configured CORS origin when explicit public URL is not set.
+            var origins = configuration["Cors:AllowedOrigins"];
+            if (string.IsNullOrWhiteSpace(origins))
+                return null;
+            var first = origins
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault();
+            return string.IsNullOrWhiteSpace(first) ? null : first;
+        }
+
+        private static string EscapeHtml(string s)
+        {
+            return s
+                .Replace("&", "&amp;", StringComparison.Ordinal)
+                .Replace("<", "&lt;", StringComparison.Ordinal)
+                .Replace(">", "&gt;", StringComparison.Ordinal)
+                .Replace("\"", "&quot;", StringComparison.Ordinal)
+                .Replace("'", "&#39;", StringComparison.Ordinal);
         }
 
         /// <summary>Record payment from WooCommerce (invoice, clearance, paid-at). API key auth.</summary>
