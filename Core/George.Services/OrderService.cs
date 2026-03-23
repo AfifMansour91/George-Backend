@@ -1250,75 +1250,107 @@ namespace George.Services
             sb.AppendLine("<html dir=\"rtl\" lang=\"he\">");
             sb.AppendLine($"<head><meta charset=\"utf-8\"><title>בון הזמנה {EscapeHtml(orderNo)}</title>");
             sb.AppendLine("<style>");
-            sb.AppendLine("body { font-family: Arial, sans-serif; max-width: 80mm; margin: 0 auto; padding: 16px; color: #000; background: #fff; font-size: 14px; box-sizing: border-box; }");
+            sb.AppendLine(
+                $"body {{ font-family: Arial, sans-serif; max-width: 80mm; margin: 0 auto; padding: 16px; color: #000; background: #fff; font-size: {VoucherPrintHtml.Body}px; box-sizing: border-box; line-height: 1.35; }}");
             sb.AppendLine(".muted { color: #666; }");
             sb.AppendLine(".bold { font-weight: bold; }");
             sb.AppendLine(".large { font-size: 1.25rem; font-weight: 900; margin: 8px 0; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; color: #111; }");
             sb.AppendLine("@media print { body { padding: 8px; } }");
             sb.AppendLine("</style></head><body>");
-            sb.AppendLine($"<div style=\"text-align:center;margin-bottom:8px;\"><div class=\"muted\" style=\"font-size:12px;\">כניסת הזמנה</div><div style=\"font-size:14px;font-weight:500;\">{EscapeHtml(created)}</div></div>");
+            sb.AppendLine(
+                $"<div style=\"text-align:center;margin-bottom:8px;\"><div class=\"muted\" style=\"font-size:{VoucherPrintHtml.Small}px;\">כניסת הזמנה</div><div style=\"font-size:{VoucherPrintHtml.Caption}px;font-weight:500;\">{EscapeHtml(created)}</div></div>");
             if (!string.IsNullOrWhiteSpace(sourceLabel))
-                sb.AppendLine($"<div style=\"text-align:center;font-size:12px;margin-bottom:4px;\"><span class=\"muted\">מקור הזמנה: </span>{EscapeHtml(sourceLabel)}</div>");
-            sb.AppendLine($"<div style=\"text-align:center;margin-bottom:8px;\"><div class=\"muted\" style=\"font-size:12px;\">מספר הזמנה</div><div style=\"font-size:28px;font-weight:800;letter-spacing:-0.02em;\">{EscapeHtml(orderNo)}</div></div>");
+                sb.AppendLine(
+                    $"<div style=\"text-align:center;font-size:{VoucherPrintHtml.Small}px;margin-bottom:4px;\"><span class=\"muted\">מקור הזמנה: </span>{EscapeHtml(sourceLabel)}</div>");
+            sb.AppendLine(
+                $"<div style=\"text-align:center;margin-bottom:8px;\"><div class=\"muted\" style=\"font-size:{VoucherPrintHtml.Small}px;\">מספר הזמנה</div><div style=\"font-size:{VoucherPrintHtml.OrderNumber}px;font-weight:800;letter-spacing:-0.02em;\">{EscapeHtml(orderNo)}</div></div>");
+            sb.AppendLine("<div style=\"margin:12px 0;\">");
             if (!string.IsNullOrWhiteSpace(qrDataUrl))
             {
-                sb.AppendLine($"<div style=\"margin:12px 0;\"><img src=\"{qrDataUrl}\" alt=\"QR\" width=\"120\" height=\"120\" style=\"display:block;margin:0 auto;\" /></div>");
+                sb.AppendLine(
+                    $"<img src=\"{qrDataUrl}\" alt=\"QR\" width=\"{VoucherPrintHtml.QrSizePx}\" height=\"{VoucherPrintHtml.QrSizePx}\" style=\"display:block;margin:0 auto;\" />");
             }
-            sb.AppendLine("<div style=\"text-align:center;font-size:10px;color:#666;margin-bottom:12px;\">סריקה לפתיחת מסך הליקוט</div>");
+            else
+            {
+                sb.AppendLine(
+                    $"<div style=\"width:{VoucherPrintHtml.QrSizePx}px;height:{VoucherPrintHtml.QrSizePx}px;background:#f3f4f6;margin:0 auto;\"></div>");
+            }
+
+            sb.AppendLine("</div>");
+            sb.AppendLine(
+                $"<div style=\"text-align:center;font-size:{VoucherPrintHtml.ProductMeta}px;color:#666;margin-bottom:12px;\">סריקה לפתיחת מסך הליקוט</div>");
             if (!string.IsNullOrWhiteSpace(deliveryMethod))
                 sb.AppendLine($"<div style=\"margin-bottom:4px;\"><span class=\"muted\">שיטת אספקה: </span><span class=\"bold\">{EscapeHtml(deliveryMethod)}</span></div>");
             if (deliveryDate.HasValue)
                 sb.AppendLine($"<div style=\"margin-bottom:4px;\"><span class=\"muted\">תאריך אספקה: </span>{EscapeHtml(deliveryDate.Value.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture))}</div>");
             if (!string.IsNullOrWhiteSpace(deliveryTime))
                 sb.AppendLine($"<div style=\"margin-bottom:8px;\"><span class=\"muted\">שעת אספקה: </span>{EscapeHtml(deliveryTime)}</div>");
-            sb.AppendLine($"<div class=\"large\" style=\"font-size:32px;font-weight:900;\">{EscapeHtml(customerName)}</div>");
+            sb.AppendLine(
+                $"<div class=\"large\" style=\"font-size:{VoucherPrintHtml.CustomerName}px;font-weight:900;\">{EscapeHtml(customerName)}</div>");
             sb.AppendLine($"<div style=\"margin-bottom:4px;\"><span class=\"muted\">טלפון: </span>{EscapeHtml(customerPhone)}</div>");
             if (!string.IsNullOrWhiteSpace(orderNotes))
-                sb.AppendLine($"<div style=\"margin:10px 0;font-size:15px;font-weight:bold;line-height:1.4;\">הערות: {EscapeHtml(orderNotes)}</div>");
+                sb.AppendLine(
+                    $"<div style=\"margin:10px 0;font-size:{VoucherPrintHtml.Lead}px;font-weight:bold;line-height:1.4;\">הערות: {EscapeHtml(orderNotes)}</div>");
             if (string.Equals(order.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase))
             {
                 var mainAddress = BuildMainAddress(order);
                 var extras = BuildAddressExtras(order);
                 if (!string.IsNullOrWhiteSpace(mainAddress) || !string.IsNullOrWhiteSpace(extras))
                 {
+                    sb.AppendLine("<div style=\"margin-bottom:12px;\">");
                     if (!string.IsNullOrWhiteSpace(mainAddress))
                     {
-                        sb.AppendLine("<div class=\"muted\" style=\"font-size:13px;font-weight:700;\">כתובת:</div>");
-                        sb.AppendLine($"<div class=\"bold\" style=\"font-size:22px;line-height:1.25;\">{EscapeHtml(mainAddress!)}</div>");
+                        sb.AppendLine(
+                            $"<div class=\"muted\" style=\"font-size:{VoucherPrintHtml.ShipLabel}px;font-weight:700;\">כתובת:</div>");
+                        sb.AppendLine(
+                            $"<div style=\"font-size:{VoucherPrintHtml.ShipStreet}px;line-height:1.25;font-weight:900;color:#111;\">{EscapeHtml(mainAddress!)}</div>");
                     }
+
                     if (!string.IsNullOrWhiteSpace(extras))
-                        sb.AppendLine($"<div class=\"bold\" style=\"margin-top:4px;font-size:16px;line-height:1.25;\">{EscapeHtml(extras!)}</div>");
+                        sb.AppendLine(
+                            $"<div style=\"margin-top:4px;font-size:{VoucherPrintHtml.ShipExtras}px;line-height:1.25;font-weight:800;color:#111;\">{EscapeHtml(extras!)}</div>");
+                    sb.AppendLine("</div>");
                 }
             }
             sb.AppendLine("<div style=\"font-weight:600;margin-bottom:4px;\">מוצרים:</div>");
+            sb.AppendLine("<div style=\"margin-bottom:8px;\">");
             foreach (var it in items)
             {
                 var title = EscapeHtml(OrderItemLineDisplay.GetOrderItemProductName(it));
                 var qtyStr = OrderItemLineDisplay.FormatOrderItemQuantityBadge(it);
                 sb.AppendLine("<div style=\"border-bottom:1px solid #f3f4f6;padding-bottom:4px;margin-bottom:4px;\">");
-                sb.AppendLine($"<div style=\"font-weight:600;\">{EscapeHtml(qtyStr)} {title}</div>");
+                sb.AppendLine($"<div style=\"font-weight:600;\">{VoucherPrintHtml.ProductLinePrefix}{EscapeHtml(qtyStr)} {title}</div>");
                 var attrLine = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(it);
                 if (!string.IsNullOrWhiteSpace(attrLine))
-                    sb.AppendLine($"<div style=\"font-size:10px;color:#666;margin-right:8px;margin-top:2px;\">{EscapeHtml(attrLine)}</div>");
+                    sb.AppendLine(
+                        $"<div style=\"font-size:{VoucherPrintHtml.ProductMeta}px;color:#666;margin-right:8px;margin-top:2px;\">{EscapeHtml(attrLine)}</div>");
                 if (!newVoucher && it.PickedQuantity.HasValue)
                 {
                     var picked = OrderItemLineDisplay.FormatVoucherPickedDisplay(it);
-                    sb.AppendLine($"<div style=\"font-size:12px;font-weight:600;color:#1f2937;margin-right:8px;margin-top:2px;\">אחרי ליקוט: {EscapeHtml(picked)}</div>");
+                    sb.AppendLine(
+                        $"<div style=\"font-size:{VoucherPrintHtml.PickedLine}px;font-weight:600;color:#1f2937;margin-right:8px;margin-top:2px;\">אחרי ליקוט: {EscapeHtml(picked)}</div>");
                 }
                 else
                 {
                     var legacyHint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(it, newVoucher);
                     if (!string.IsNullOrWhiteSpace(legacyHint))
-                        sb.AppendLine($"<div style=\"font-size:10px;color:#666;margin-right:8px;\">{EscapeHtml(legacyHint)}</div>");
+                        sb.AppendLine(
+                            $"<div style=\"font-size:{VoucherPrintHtml.ProductMeta}px;color:#666;margin-right:8px;\">{EscapeHtml(legacyHint)}</div>");
                 }
+
                 if (!string.IsNullOrWhiteSpace(it.Notes))
-                    sb.AppendLine($"<div style=\"font-size:15px;font-weight:600;margin-right:8px;margin-top:6px;\">הערה: {EscapeHtml(it.Notes!)}</div>");
+                    sb.AppendLine(
+                        $"<div style=\"font-size:{VoucherPrintHtml.Note}px;font-weight:600;margin-right:8px;margin-top:6px;\">הערה: {EscapeHtml(it.Notes!)}</div>");
                 sb.AppendLine("</div>");
             }
+
+            sb.AppendLine("</div>");
             if (!newVoucher && shippingCost > 0)
-                sb.AppendLine($"<div style=\"text-align:center;font-size:15px;font-weight:600;margin:8px 0;\">משלוח: ₪{shippingCost:0.00}</div>");
+                sb.AppendLine(
+                    $"<div style=\"text-align:center;font-size:{VoucherPrintHtml.ShippingRow}px;font-weight:600;margin:8px 0;\">משלוח: ₪{shippingCost:0.00}</div>");
             if (!newVoucher && grandTotal.HasValue)
-                sb.AppendLine($"<div style=\"text-align:center;margin:12px 0;padding:12px;border:2px solid #1f2937;border-radius:8px;background:#f9fafb;\"><div style=\"font-size:11px;color:#666;margin-bottom:4px;\">סה\"כ לתשלום</div><div style=\"font-size:24px;font-weight:bold;\">₪{grandTotal.Value:0.00}</div></div>");
+                sb.AppendLine(
+                    $"<div style=\"text-align:center;margin:12px 0;padding:12px;border:2px solid #1f2937;border-radius:8px;background:#f9fafb;\"><div style=\"font-size:{VoucherPrintHtml.TotalLabel}px;color:#666;margin-bottom:4px;\">סה\"כ לתשלום</div><div style=\"font-size:{VoucherPrintHtml.TotalAmount}px;font-weight:bold;\">₪{grandTotal.Value:0.00}</div></div>");
             sb.AppendLine("</body></html>");
             return sb.ToString();
         }
