@@ -96,6 +96,22 @@ public partial class Order
     [StringLength(500)]
     public string? DeliveryAddress { get; set; }
 
+    /// <summary>Street and building number (separate from city for shop-manager / CRM).</summary>
+    [StringLength(400)]
+    public string? DeliveryStreet { get; set; }
+
+    [StringLength(120)]
+    public string? DeliveryCity { get; set; }
+
+    [StringLength(64)]
+    public string? DeliveryApartment { get; set; }
+
+    [StringLength(32)]
+    public string? DeliveryFloor { get; set; }
+
+    [StringLength(64)]
+    public string? DeliveryEntranceCode { get; set; }
+
     [Precision(0)]
     public DateTime? DeliveryDate { get; set; }
 

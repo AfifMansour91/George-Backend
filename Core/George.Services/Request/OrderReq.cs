@@ -23,6 +23,11 @@ public class CreateOrderReq
     public bool? MarketingSms { get; set; }
     public int? CustomerId { get; set; }
     public string? DeliveryAddress { get; set; }
+    public string? DeliveryStreet { get; set; }
+    public string? DeliveryCity { get; set; }
+    public string? DeliveryApartment { get; set; }
+    public string? DeliveryFloor { get; set; }
+    public string? DeliveryEntranceCode { get; set; }
     /// <summary>Calendar date only (<c>yyyy-MM-dd</c>). Use <see cref="DateOnly"/> so JSON is not shifted through UTC <see cref="DateTime"/> parsing.</summary>
     public DateOnly? DeliveryDate { get; set; }
     public string? DeliveryTime { get; set; }
@@ -105,6 +110,12 @@ public class UpdateOrderReq
     public DateOnly? PickupDate { get; set; }
     public string? PickupTime { get; set; }
     public string? DeliveryAddress { get; set; }
+    public string? DeliveryStreet { get; set; }
+    public string? DeliveryCity { get; set; }
+    public string? DeliveryType { get; set; }
+    public string? DeliveryApartment { get; set; }
+    public string? DeliveryFloor { get; set; }
+    public string? DeliveryEntranceCode { get; set; }
     public string? PaymentStatus { get; set; }
     public string? PaymentMethod { get; set; }
     /// <summary>Number of bags/cartons packed (set at end of picking).</summary>

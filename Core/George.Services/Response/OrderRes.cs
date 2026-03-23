@@ -28,6 +28,11 @@ public class OrderRes
     public string? CustomerPhone { get; set; }
     public int? CustomerId { get; set; }
     public string? DeliveryAddress { get; set; }
+    public string? DeliveryStreet { get; set; }
+    public string? DeliveryCity { get; set; }
+    public string? DeliveryApartment { get; set; }
+    public string? DeliveryFloor { get; set; }
+    public string? DeliveryEntranceCode { get; set; }
     public DateTime? DeliveryDate { get; set; }
     public string? DeliveryTime { get; set; }
     public DateTime? PickupDate { get; set; }

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -102,12 +103,13 @@ namespace George.Services
                 req.CustomerName!,
                 email: req.CustomerEmail,
                 city: null,
-                defaultAddress: req.DeliveryAddress,
+                defaultAddress: BuildCustomerDefaultDeliveryLine(req),
                 notes: null,
                 marketingSms: req.MarketingSms,
                 cancelToken).ConfigureAwait(false);
 
             var order = _mapper.Map<Order>(req);
+            RebuildDeliveryAddressFromStreetAndCity(order);
             order.CustomerId = customer.Id; // always set: customer was either found or created above
             order.CreationTime = DateTime.UtcNow;
             order.CreationUserId = AuthUser.Id;
@@ -325,9 +327,26 @@ namespace George.Services
                 if (req.PickupDate.HasValue) o.PickupDate = req.PickupDate.Value.ToDateTime(TimeOnly.MinValue);
                 if (req.PickupTime != null) o.PickupTime = req.PickupTime;
                 if (req.DeliveryAddress != null) o.DeliveryAddress = req.DeliveryAddress;
+                if (req.DeliveryType != null) o.DeliveryType = req.DeliveryType;
+                var touchStreetOrCity = false;
+                if (req.DeliveryStreet != null)
+                {
+                    o.DeliveryStreet = req.DeliveryStreet;
+                    touchStreetOrCity = true;
+                }
+                if (req.DeliveryCity != null)
+                {
+                    o.DeliveryCity = req.DeliveryCity;
+                    touchStreetOrCity = true;
+                }
+                if (req.DeliveryApartment != null) o.DeliveryApartment = req.DeliveryApartment;
+                if (req.DeliveryFloor != null) o.DeliveryFloor = req.DeliveryFloor;
+                if (req.DeliveryEntranceCode != null) o.DeliveryEntranceCode = req.DeliveryEntranceCode;
                 if (req.PaymentStatus != null) o.PaymentStatus = req.PaymentStatus;
                 if (req.PaymentMethod != null) o.PaymentMethod = req.PaymentMethod;
                 if (req.BagsCount.HasValue) o.BagsCount = req.BagsCount;
+                if (touchStreetOrCity)
+                    RebuildDeliveryAddressFromStreetAndCity(o, clearCombinedLineWhenBothEmpty: true);
                 o.UpdateUserId = AuthUser.Id;
             }, cancelToken);
             if (updated == null)
@@ -631,15 +650,52 @@ namespace George.Services
             return null;
         }
 
-        /// <summary>Same order as manual phone order: street, city, apartment, floor, entrance, zip.</summary>
-        private static string? FormatWooCommerceDeliveryAddress(WooCommerceShippingAddressPayload? a)
+        private static string? NullIfWhiteSpace(string? s) =>
+            string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+        /// <summary>Main delivery line: רחוב, עיר, מיקוד (ללא דירה/קומה/קוד — נשמרים בעמודות נפרדות).</summary>
+        private static string? JoinMainDeliveryLine(string? street, string? city, string? zip = null)
         {
-            if (a == null) return null;
-            var parts = new[] { a.Street, a.City, a.Apartment, a.Floor, a.EntranceCode, a.Zip }
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Select(x => x!.Trim());
-            var joined = string.Join(", ", parts);
-            return string.IsNullOrWhiteSpace(joined) ? null : joined;
+            var parts = new List<string>();
+            void AddPart(string? s)
+            {
+                if (!string.IsNullOrWhiteSpace(s))
+                    parts.Add(s.Trim());
+            }
+            AddPart(street);
+            AddPart(city);
+            AddPart(zip);
+            return parts.Count == 0 ? null : string.Join(", ", parts);
+        }
+
+        /// <summary>אם נשלחו רחוב/עיר — מעדכן את <see cref="Order.DeliveryAddress"/> לשורה אחת. בעדכון, אם שניהם ריקים אחרי עריכה — מנקה את השורה המשולבת.</summary>
+        private static void RebuildDeliveryAddressFromStreetAndCity(Order o, bool clearCombinedLineWhenBothEmpty = false)
+        {
+            var line = JoinMainDeliveryLine(o.DeliveryStreet, o.DeliveryCity);
+            if (!string.IsNullOrWhiteSpace(line))
+            {
+                o.DeliveryAddress = line;
+                return;
+            }
+            if (clearCombinedLineWhenBothEmpty &&
+                string.IsNullOrWhiteSpace(o.DeliveryStreet) &&
+                string.IsNullOrWhiteSpace(o.DeliveryCity))
+                o.DeliveryAddress = null;
+        }
+
+        private static string? BuildCustomerDefaultDeliveryLine(CreateOrderReq req) =>
+            JoinMainDeliveryLine(req.DeliveryStreet, req.DeliveryCity) ?? NullIfWhiteSpace(req.DeliveryAddress);
+
+        /// <summary>Maps WooCommerce shipping JSON into structured columns + main address line (street, city, zip).</summary>
+        private static void ApplyWooCommerceShippingAddressToOrder(Order o, WooCommerceShippingAddressPayload? a)
+        {
+            if (a == null) return;
+            o.DeliveryStreet = NullIfWhiteSpace(a.Street);
+            o.DeliveryCity = NullIfWhiteSpace(a.City);
+            o.DeliveryApartment = NullIfWhiteSpace(a.Apartment);
+            o.DeliveryFloor = NullIfWhiteSpace(a.Floor);
+            o.DeliveryEntranceCode = NullIfWhiteSpace(a.EntranceCode);
+            o.DeliveryAddress = JoinMainDeliveryLine(a.Street, a.City, a.Zip);
         }
 
         /// <summary>Map Woo payment code/title to internal payment method (e.g. Cash for cod).</summary>
@@ -928,10 +984,10 @@ namespace George.Services
             var (wooBillingNotes, wooCustomerNote) = ResolveWooCommerceNotesForPersistence(payload);
             if (existing != null)
             {
-                var deliveryAddress = FormatWooCommerceDeliveryAddress(payload.ShippingAddress);
+                var wcMainAddr = JoinMainDeliveryLine(payload.ShippingAddress?.Street, payload.ShippingAddress?.City, payload.ShippingAddress?.Zip);
                 var updateCustomer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
                     siteId, site.AccountId, payload.Customer?.Phone ?? "", payload.Customer?.Name ?? "", email: payload.Customer?.Email,
-                    city: null, defaultAddress: deliveryAddress, notes: null, marketingSms: null, cancelToken).ConfigureAwait(false);
+                    city: null, defaultAddress: wcMainAddr, notes: null, marketingSms: null, cancelToken).ConfigureAwait(false);
                 var updated = await _orderStorage.UpdateOrderAsync(existing.Id, o =>
                 {
                     o.Status = status;
@@ -939,7 +995,7 @@ namespace George.Services
                     o.CustomerPhone = payload.Customer?.Phone;
                     o.CustomerEmail = payload.Customer?.Email;
                     o.CustomerId = updateCustomer.Id;
-                    o.DeliveryAddress = deliveryAddress;
+                    ApplyWooCommerceShippingAddressToOrder(o, payload.ShippingAddress);
                     o.BillingNotes = wooBillingNotes;
                     o.CustomerNote = wooCustomerNote;
                     o.ManagerNote = null;
@@ -1041,7 +1097,6 @@ namespace George.Services
                 CustomerName = payload.Customer?.Name,
                 CustomerPhone = payload.Customer?.Phone,
                 CustomerEmail = payload.Customer?.Email,
-                DeliveryAddress = FormatWooCommerceDeliveryAddress(payload.ShippingAddress),
                 CustomerNote = wooCustomerNote,
                 ManagerNote = null,
                 PaymentMethod = MapWooCommercePaymentMethodToInternal(payload.PaymentMethod, payload.PaymentMethodTitle),
@@ -1057,10 +1112,12 @@ namespace George.Services
                 SubTotal = payload.OrderTotal - (payload.ShippingTotal ?? 0),
                 Items = createItems
             };
+            var wcMainAddrForCustomer = JoinMainDeliveryLine(payload.ShippingAddress?.Street, payload.ShippingAddress?.City, payload.ShippingAddress?.Zip);
             var customer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
                 req.SiteId, req.AccountId, req.CustomerPhone, req.CustomerName ?? "", email: req.CustomerEmail,
-                city: null, defaultAddress: req.DeliveryAddress, notes: null, marketingSms: null, cancelToken).ConfigureAwait(false);
+                city: null, defaultAddress: wcMainAddrForCustomer, notes: null, marketingSms: null, cancelToken).ConfigureAwait(false);
             var order = _mapper.Map<Order>(req);
+            ApplyWooCommerceShippingAddressToOrder(order, payload.ShippingAddress);
             order.CustomerId = customer.Id;
             order.ManagerNote = null;
             // Use the date when the order was placed in WooCommerce, not when our API received the webhook
