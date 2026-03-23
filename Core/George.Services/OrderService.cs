@@ -1187,7 +1187,16 @@ namespace George.Services
             if (site == null || site.AutoPrintEnabled != true || site.PrintNewOrderImmediate != true)
                 return;
 
-            var payload = BuildAutoVoucherHtml(order);
+            // Ensure voucher is generated from a fully loaded order (including OrderItem rows).
+            var orderForPrint = order;
+            if (order.OrderItem == null || order.OrderItem.Count == 0)
+            {
+                var loaded = await _orderStorage.GetOrderByIdAsync(order.Id, cancelToken).ConfigureAwait(false);
+                if (loaded != null)
+                    orderForPrint = loaded;
+            }
+
+            var payload = BuildAutoVoucherHtml(orderForPrint);
             if (string.IsNullOrWhiteSpace(payload))
                 return;
 
@@ -1284,21 +1293,23 @@ namespace George.Services
             sb.AppendLine("<div style=\"font-weight:600;margin-bottom:4px;\">מוצרים:</div>");
             foreach (var it in items)
             {
-                var qty = it.Quantity;
-                var title = EscapeHtml(it.Title ?? "");
-                var qtyStr = it.UnitWeightGrams.HasValue && it.UnitWeightGrams.Value > 0
-                    ? $"{qty:0.###} ק\"ג"
-                    : $"{qty:0.###} יח'";
+                var title = EscapeHtml(OrderItemLineDisplay.GetOrderItemProductName(it));
+                var qtyStr = OrderItemLineDisplay.FormatOrderItemQuantityBadge(it);
                 sb.AppendLine("<div style=\"border-bottom:1px solid #f3f4f6;padding-bottom:4px;margin-bottom:4px;\">");
                 sb.AppendLine($"<div style=\"font-weight:600;\">{EscapeHtml(qtyStr)} {title}</div>");
-                if (!string.IsNullOrWhiteSpace(it.VariantTitle))
-                    sb.AppendLine($"<div style=\"font-size:10px;color:#666;margin-right:8px;margin-top:2px;\">{EscapeHtml(it.VariantTitle!)}</div>");
+                var attrLine = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(it);
+                if (!string.IsNullOrWhiteSpace(attrLine))
+                    sb.AppendLine($"<div style=\"font-size:10px;color:#666;margin-right:8px;margin-top:2px;\">{EscapeHtml(attrLine)}</div>");
                 if (!newVoucher && it.PickedQuantity.HasValue)
                 {
-                    var picked = it.UnitWeightGrams.HasValue && it.UnitWeightGrams.Value > 0
-                        ? $"{it.PickedQuantity.Value:0.###} ק\"ג"
-                        : $"{it.PickedQuantity.Value:0.###} יח'";
+                    var picked = OrderItemLineDisplay.FormatVoucherPickedDisplay(it);
                     sb.AppendLine($"<div style=\"font-size:12px;font-weight:600;color:#1f2937;margin-right:8px;margin-top:2px;\">אחרי ליקוט: {EscapeHtml(picked)}</div>");
+                }
+                else
+                {
+                    var legacyHint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(it, newVoucher);
+                    if (!string.IsNullOrWhiteSpace(legacyHint))
+                        sb.AppendLine($"<div style=\"font-size:10px;color:#666;margin-right:8px;\">{EscapeHtml(legacyHint)}</div>");
                 }
                 if (!string.IsNullOrWhiteSpace(it.Notes))
                     sb.AppendLine($"<div style=\"font-size:15px;font-weight:600;margin-right:8px;margin-top:6px;\">הערה: {EscapeHtml(it.Notes!)}</div>");
