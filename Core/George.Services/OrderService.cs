@@ -364,6 +364,9 @@ namespace George.Services
                 if (req.PaymentStatus != null) o.PaymentStatus = req.PaymentStatus;
                 if (req.PaymentMethod != null) o.PaymentMethod = req.PaymentMethod;
                 if (req.BagsCount.HasValue) o.BagsCount = req.BagsCount;
+                if (req.ShippingCost.HasValue) o.ShippingCost = req.ShippingCost.Value;
+                if (req.SubTotal.HasValue) o.SubTotal = req.SubTotal.Value;
+                if (req.Total.HasValue) o.Total = req.Total.Value;
                 if (touchStreetOrCity)
                     RebuildDeliveryAddressFromStreetAndCity(o, clearCombinedLineWhenBothEmpty: true);
                 o.UpdateUserId = AuthUser.Id;

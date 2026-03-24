@@ -37,6 +37,7 @@ namespace George.Services.Request
         public bool? AutoPrintEnabled { get; set; }
         public bool? PrintNewOrderImmediate { get; set; }
         public bool? PrintMovedToTreatment { get; set; }
+        public bool? PrintAfterPicking { get; set; }
         public bool? PrintFutureImmediate { get; set; }
         public bool? PrintFutureAtTimeEnabled { get; set; }
         public string? PrintFutureAtTime { get; set; }
