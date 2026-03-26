@@ -43,6 +43,10 @@ public class OrderRes
     public decimal? SubTotal { get; set; }
     public decimal? ShippingCost { get; set; }
     public decimal? Total { get; set; }
+    /// <summary>Merchandise subtotal snapshot when the order was first placed (before picking).</summary>
+    public decimal? OriginalSubTotal { get; set; }
+    /// <summary>Grand total snapshot when the order was first placed (before picking).</summary>
+    public decimal? OriginalTotal { get; set; }
     public string? ExternalOrderId { get; set; }
     /// <summary>Number of bags/cartons packed (set at end of picking).</summary>
     public int? BagsCount { get; set; }

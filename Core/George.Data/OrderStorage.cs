@@ -131,6 +131,8 @@ namespace George.Data
                 item.OrderId = 0;
                 order.OrderItem.Add(item);
             }
+            //FillOrderHeaderTotalsFromLinesIfMissing(order);
+            SnapshotOriginalOrderTotalsIfUnset(order);
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
             return order;
         }
@@ -222,9 +224,51 @@ namespace George.Data
                 item.PickedQuantity = pickedQty;
                 item.TotalPrice = totalPrice;
             }
+            RecalculateOrderHeaderTotalsFromLines(db);
             db.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
             return db;
+        }
+
+        /// <summary>Merchandise counted toward order subtotal after picking: only lines with picked qty &gt; 0 (0 is "not picked", not null-only).</summary>
+        private static decimal SumOrderLineMerchandise(OrderItem i)
+        {
+            if (!i.PickedQuantity.HasValue || i.PickedQuantity.Value <= 0m)
+                return 0m;
+            if (i.TotalPrice.HasValue)
+                return i.TotalPrice.Value;
+            return i.PickedQuantity.Value * (i.PricePerUnit ?? 0m);
+        }
+
+        //private static void FillOrderHeaderTotalsFromLinesIfMissing(Order order)
+        //{
+        //    var active = order.OrderItem?.Where(i => !i.IsDeleted).ToList() ?? new List<OrderItem>();
+        //    if (active.Count == 0)
+        //        return;
+        //    var sum = active.Sum(SumOrderLineMerchandise);
+        //    if (order.SubTotal == null)
+        //        order.SubTotal = sum;
+        //    if (order.Total == null && order.SubTotal != null)
+        //        order.Total = order.SubTotal.Value + (order.ShippingCost ?? 0m);
+        //}
+
+        /// <summary>One-time snapshot of subtotal/total at creation. Does not run when Original* already set (e.g. future manual import).</summary>
+        private static void SnapshotOriginalOrderTotalsIfUnset(Order order)
+        {
+            if (order.OriginalSubTotal != null || order.OriginalTotal != null)
+                return;
+            order.OriginalSubTotal = order.SubTotal;
+            var ship = order.ShippingCost ?? 0m;
+            order.OriginalTotal = order.Total ?? (order.SubTotal.HasValue ? order.SubTotal.Value + ship : null);
+        }
+
+        /// <summary>After picking: refresh header SubTotal/Total from lines + shipping (Original* unchanged).</summary>
+        private static void RecalculateOrderHeaderTotalsFromLines(Order order)
+        {
+            var active = order.OrderItem?.Where(i => !i.IsDeleted).ToList() ?? new List<OrderItem>();
+            var sum = active.Sum(SumOrderLineMerchandise);
+            order.SubTotal = sum;
+            order.Total = sum + (order.ShippingCost ?? 0m);
         }
 
         /// <summary>Set status to Cancelled and optionally set IsDeleted.</summary>

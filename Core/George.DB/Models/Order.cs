@@ -142,6 +142,14 @@ public partial class Order
     [Column(TypeName = "decimal(18, 2)")]
     public decimal? Total { get; set; }
 
+    /// <summary>Subtotal at order creation (before picking adjusts line weights/prices). Immutable after first save.</summary>
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? OriginalSubTotal { get; set; }
+
+    /// <summary>Grand total at order creation (before picking). Immutable after first save.</summary>
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? OriginalTotal { get; set; }
+
     [StringLength(100)]
     public string? ExternalOrderId { get; set; }
 

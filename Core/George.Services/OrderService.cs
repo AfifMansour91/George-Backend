@@ -232,17 +232,8 @@ namespace George.Services
             if (!string.Equals(settings.OrderReadyCustomerChannel, "sms", StringComparison.OrdinalIgnoreCase))
                 return;
 
-            string? template = null;
-            var deliveryType = (order.DeliveryType ?? "").Trim();
-            var source = (order.Source ?? "").Trim();
-            if (string.Equals(deliveryType, "Shipping", StringComparison.OrdinalIgnoreCase))
-                template = settings.OrderReadyCustomerMessageShipping;
-            else if (string.Equals(deliveryType, "Pickup", StringComparison.OrdinalIgnoreCase))
-                template = settings.OrderReadyCustomerMessagePickup;
-            else if (string.Equals(source, "Kiosk", StringComparison.OrdinalIgnoreCase))
-                template = settings.OrderReadyCustomerMessageKiosk;
-            else
-                template = settings.OrderReadyCustomerMessagePickup ?? settings.OrderReadyCustomerMessageShipping;
+            // Kiosk orders use DeliveryType Pickup; must branch on Source before Pickup (same idea as new-order SMS).
+            var template = ResolveOrderReadyCustomerMessageTemplate(settings, order);
 
             if (string.IsNullOrWhiteSpace(template))
                 return;
@@ -265,16 +256,64 @@ namespace George.Services
             }
         }
 
+        /// <summary>
+        /// Order-ready SMS templates: kiosk orders are always Pickup; pick kiosk text when Source is Kiosk before Pickup branch.
+        /// </summary>
+        private static string? ResolveOrderReadyCustomerMessageTemplate(AccountNotificationSettings settings, Order order)
+        {
+            var deliveryType = (order.DeliveryType ?? "").Trim();
+            var source = (order.Source ?? "").Trim();
+            if (string.Equals(source, "Kiosk", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(settings.OrderReadyCustomerMessageKiosk))
+                return settings.OrderReadyCustomerMessageKiosk;
+            if (string.Equals(deliveryType, "Shipping", StringComparison.OrdinalIgnoreCase))
+                return settings.OrderReadyCustomerMessageShipping;
+            if (string.Equals(deliveryType, "Pickup", StringComparison.OrdinalIgnoreCase))
+                return settings.OrderReadyCustomerMessagePickup;
+            return settings.OrderReadyCustomerMessagePickup ?? settings.OrderReadyCustomerMessageShipping;
+        }
+
+        /// <summary>
+        /// Match picking: if any line has picked qty &gt; 0, sum only those lines (+ shipping). Otherwise pre-pick — sum all line totals (new order SMS).
+        /// </summary>
+        private static decimal ResolveOrderTotalForPlaceholders(Order order)
+        {
+            var items = order.OrderItem;
+            if (items == null || items.Count == 0)
+                return order.Total ?? 0m;
+
+            var anyPicked = items.Any(i => i.PickedQuantity.HasValue && i.PickedQuantity.Value > 0m);
+            var shipping = order.ShippingCost ?? 0m;
+            if (anyPicked)
+            {
+                var pickedSum = items.Sum(i =>
+                {
+                    if (!i.PickedQuantity.HasValue || i.PickedQuantity.Value <= 0m)
+                        return 0m;
+                    if (i.TotalPrice.HasValue)
+                        return i.TotalPrice.Value;
+                    return i.PickedQuantity.Value * (i.PricePerUnit ?? 0m);
+                });
+                return pickedSum + shipping;
+            }
+
+            var allLines = items.Sum(i => i.TotalPrice ?? i.Quantity * (i.PricePerUnit ?? 0m));
+            if (allLines + shipping > 0m)
+                return allLines + shipping;
+            return order.Total ?? 0m;
+        }
+
         private static string ReplaceOrderPlaceholders(string template, Order order)
         {
             var orderDate = order.CreationTime;
             var deliveryDate = order.DeliveryDate;
             var pickupDate = order.PickupDate;
+            var orderTotalStr = ResolveOrderTotalForPlaceholders(order).ToString("N2", CultureInfo.InvariantCulture);
             return template
                 .Replace("[customer_name]", order.CustomerName ?? "")
                 .Replace("[order_number]", order.OrderNumber ?? "")
                 .Replace("[order_date]", orderDate.ToString("dd/MM/yyyy"))
-                .Replace("[order_total]", (order.Total ?? 0).ToString("N2"))
+                .Replace("[order_total]", orderTotalStr)
                 .Replace("[delivery_date]", deliveryDate.HasValue ? deliveryDate.Value.ToString("dd/MM/yyyy") : "")
                 .Replace("[delivery_time]", order.DeliveryTime ?? "")
                 .Replace("[pickup_date]", pickupDate.HasValue ? pickupDate.Value.ToString("dd/MM/yyyy") : "")
@@ -296,17 +335,7 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.InvalidRequest, "Notification settings not found.");
             if (!string.Equals(settings.OrderReadyCustomerChannel, "sms", StringComparison.OrdinalIgnoreCase))
                 return CreateResponse(response, StatusCode.InvalidRequest, "Order ready customer channel is not SMS.");
-            string? template = null;
-            var deliveryType = (order.DeliveryType ?? "").Trim();
-            var source = (order.Source ?? "").Trim();
-            if (string.Equals(deliveryType, "Shipping", StringComparison.OrdinalIgnoreCase))
-                template = settings.OrderReadyCustomerMessageShipping;
-            else if (string.Equals(deliveryType, "Pickup", StringComparison.OrdinalIgnoreCase))
-                template = settings.OrderReadyCustomerMessagePickup;
-            else if (string.Equals(source, "Kiosk", StringComparison.OrdinalIgnoreCase))
-                template = settings.OrderReadyCustomerMessageKiosk;
-            else
-                template = settings.OrderReadyCustomerMessagePickup ?? settings.OrderReadyCustomerMessageShipping;
+            var template = ResolveOrderReadyCustomerMessageTemplate(settings, order);
             if (string.IsNullOrWhiteSpace(template))
                 return CreateResponse(response, StatusCode.InvalidRequest, "No reminder message template configured for this order.");
             var body = ReplaceOrderPlaceholders(template, order);
@@ -1327,7 +1356,7 @@ namespace George.Services
                 if (!string.IsNullOrWhiteSpace(attrLine))
                     sb.AppendLine(
                         $"<div style=\"font-size:{VoucherPrintHtml.ProductMeta}px;color:#666;margin-right:8px;margin-top:2px;\">{EscapeHtml(attrLine)}</div>");
-                if (!newVoucher && it.PickedQuantity.HasValue)
+                if (!newVoucher && it.PickedQuantity.HasValue && it.PickedQuantity.Value > 0m)
                 {
                     var picked = OrderItemLineDisplay.FormatVoucherPickedDisplay(it);
                     sb.AppendLine(
@@ -1397,8 +1426,23 @@ namespace George.Services
         {
             if (order.Total.HasValue) return order.Total.Value;
             var items = order.OrderItem ?? new List<OrderItem>();
-            var itemsSum = items.Sum(i => i.TotalPrice ?? 0m);
             var shipping = order.ShippingCost ?? 0m;
+            var anyPicked = items.Any(i => i.PickedQuantity.HasValue && i.PickedQuantity.Value > 0m);
+            decimal itemsSum;
+            if (anyPicked)
+            {
+                itemsSum = items.Sum(i =>
+                {
+                    if (!i.PickedQuantity.HasValue || i.PickedQuantity.Value <= 0m) return 0m;
+                    if (i.TotalPrice.HasValue) return i.TotalPrice.Value;
+                    return i.PickedQuantity.Value * (i.PricePerUnit ?? 0m);
+                });
+            }
+            else
+            {
+                itemsSum = items.Sum(i => i.TotalPrice ?? i.Quantity * (i.PricePerUnit ?? 0m));
+            }
+
             if (itemsSum <= 0m && shipping <= 0m) return null;
             return itemsSum + shipping;
         }

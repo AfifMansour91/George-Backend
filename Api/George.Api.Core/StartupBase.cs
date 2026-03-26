@@ -3,6 +3,7 @@ using George.Data;
 using George.DB;
 using George.Providers;
 using George.Services;
+using George.Services.Utils;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -344,7 +345,9 @@ namespace George.Api.Core
 			services.AddSingleton<FileStorageManager>();
 			services.AddSingleton<IFileStorage>(sp => sp.GetRequiredService<FileStorageManager>());
 			services.AddSingleton<DataUpdater>();
-			
+			services.AddSingleton<PlaywrightHtmlRenderService>();
+			services.AddSingleton<IHtmlRenderService>(sp => sp.GetRequiredService<PlaywrightHtmlRenderService>());
+
 			// Providers.
 			services.AddScoped<George.Providers.SmsProvider>();
 			services.AddScoped<George.Providers.Twilio.TwilioVoiceOtpProvider>();

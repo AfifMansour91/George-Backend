@@ -4,6 +4,7 @@ using George.Data;
 using George.DB;
 using George.Services.Request;
 using George.Services.Response;
+using George.Services.Utils;
 using Microsoft.Extensions.Logging;
 using System;
 
@@ -12,12 +13,15 @@ namespace George.Services;
 public class PrintJobService : ServiceBase
 {
     private readonly PrintJobStorage _printJobStorage;
+    private readonly IHtmlRenderService _htmlRenderService;
     private const string AutoVoucherJobTypePrefix = "VoucherAuto:";
 
-    public PrintJobService(ILogger<PrintJobService> logger, IMapper mapper, CacheManager cache, PrintJobStorage printJobStorage)
+    public PrintJobService(ILogger<PrintJobService> logger, IMapper mapper, CacheManager cache, PrintJobStorage printJobStorage,
+    IHtmlRenderService htmlRenderService)
         : base(logger, mapper, cache)
     {
         _printJobStorage = printJobStorage;
+        _htmlRenderService = htmlRenderService;
     }
 
     /// <summary>Enqueue a print job (e.g. order voucher). React/frontend calls this; local agent polls and prints.</summary>
@@ -45,7 +49,7 @@ public class PrintJobService : ServiceBase
                 .ConfigureAwait(false);
             if (existing != null)
             {
-                response.Data = MapToRes(existing);
+                response.Data = await MapToResAsync(existing, cancelToken).ConfigureAwait(false);
                 return response;
             }
         }
@@ -61,19 +65,34 @@ public class PrintJobService : ServiceBase
             Status = "Pending"
         };
         await _printJobStorage.CreateAsync(job, cancelToken).ConfigureAwait(false);
-        response.Data = MapToRes(job);
+        response.Data = await MapToResAsync(job, cancelToken).ConfigureAwait(false);
         return response;
     }
 
     /// <summary>Local agent polls this to get pending jobs for the branch (siteId).</summary>
-    public async Task<IApiResponse<List<PrintJobRes>>> GetPendingAsync(int siteId, int limit = 50, CancellationToken cancelToken = default)
+    public async Task<IApiResponse<List<PrintJobRes>>> GetPendingAsync(
+        int siteId,
+        int limit = 50,
+        CancellationToken cancelToken = default)
     {
         var response = new ApiResponse<List<PrintJobRes>> { Data = new List<PrintJobRes>() };
+
         if (siteId <= 0)
             return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required.");
 
-        var jobs = await _printJobStorage.GetPendingBySiteAsync(siteId, limit, cancelToken).ConfigureAwait(false);
-        response.Data = jobs.ConvertAll(MapToRes);
+        var jobs = await _printJobStorage
+            .GetPendingBySiteAsync(siteId, limit, cancelToken)
+            .ConfigureAwait(false);
+
+        var result = new List<PrintJobRes>(jobs.Count);
+
+        foreach (var job in jobs)
+        {
+            var mapped = await MapToResAsync(job, cancelToken).ConfigureAwait(false);
+            result.Add(mapped);
+        }
+
+        response.Data = result;
         return response;
     }
 
@@ -92,8 +111,20 @@ public class PrintJobService : ServiceBase
         return response;
     }
 
-    private static PrintJobRes MapToRes(PrintJob j)
+    private async Task<PrintJobRes> MapToResAsync(PrintJob j, CancellationToken cancelToken = default)
     {
+        var payload = j.Payload ?? string.Empty;
+        var payloadType = "html";
+
+        if (!string.IsNullOrWhiteSpace(payload) && payloadType != "html")
+        {
+            var pngBytes = await _htmlRenderService
+                .RenderPdfAsync(payload, cancelToken)
+                .ConfigureAwait(false);
+
+            payload = Convert.ToBase64String(pngBytes);
+        }
+
         return new PrintJobRes
         {
             Id = j.Id,
@@ -102,7 +133,8 @@ public class PrintJobService : ServiceBase
             JobType = j.JobType ?? "",
             Trigger = j.Trigger ?? "",
             ClientSource = j.ClientSource ?? "",
-            Payload = j.Payload ?? "",
+            Payload = payload,
+            PayloadType = payloadType,
             Status = j.Status ?? "",
             CreatedAt = j.CreatedAt,
             PrintedAt = j.PrintedAt,
