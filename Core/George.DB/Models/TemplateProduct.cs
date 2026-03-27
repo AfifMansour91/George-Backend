@@ -81,6 +81,11 @@ public partial class TemplateProduct
 
     public int? WeightConfigId { get; set; }
 
+    public bool? ShowAsMl { get; set; }
+
+    [StringLength(5)]
+    public string? WeightUnit { get; set; }
+
     [StringLength(300)]
     public string? SeoTitle { get; set; }
 

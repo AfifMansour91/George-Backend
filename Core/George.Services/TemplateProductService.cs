@@ -550,7 +550,9 @@ namespace George.Services
                 IsWeighted = req.IsWeighted,
                 SeoTitle = req.SeoTitle,
                 SeoDescription = req.SeoDescription,
-                SourceProductId = req.SourceProductId
+                SourceProductId = req.SourceProductId,
+                ShowAsMl = req.ShowAsMl ?? (req.WeightUnit == "ml" ? true : null),
+                WeightUnit = req.WeightUnit ?? (req.ShowAsMl == true ? "ml" : null)
             };
         }
 
@@ -580,6 +582,8 @@ namespace George.Services
                 SeoTitle = req.SeoTitle ?? existing.SeoTitle,
                 SeoDescription = req.SeoDescription ?? existing.SeoDescription,
                 SourceProductId = req.SourceProductId ?? existing.SourceProductId,
+                ShowAsMl = req.ShowAsMl.HasValue ? (req.ShowAsMl ?? (req.WeightUnit == "ml" ? true : null)) : existing.ShowAsMl,
+                WeightUnit = req.WeightUnit != null ? (req.WeightUnit == "ml" || req.ShowAsMl == true ? "ml" : req.WeightUnit) : existing.WeightUnit,
                 // Preserve lookup IDs from existing; MapLookupsAsync will overwrite only when req has values
                 BrandId = existing.BrandId,
                 SupplierId = existing.SupplierId,
@@ -633,7 +637,9 @@ namespace George.Services
                 DisplayOrder = templateProduct.DisplayOrder,
                 SeoTitle = templateProduct.SeoTitle,
                 SeoDescription = templateProduct.SeoDescription,
-                SourceProductId = templateProduct.SourceProductId
+                SourceProductId = templateProduct.SourceProductId,
+                ShowAsMl = templateProduct.ShowAsMl ?? (templateProduct.WeightUnit == "ml" ? true : null),
+                WeightUnit = templateProduct.WeightUnit
             };
 
             // Map images

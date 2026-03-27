@@ -68,6 +68,8 @@ namespace George.Services.Response
         public bool? IsWeighted { get; set; }
         public string? SetupType { get; set; } // "standard" | "by_unit" | "by_weight" | "by_unit_and_weight"
         public WeightConfigRes? WeightConfig { get; set; }
+        public bool? ShowAsMl { get; set; }
+        public string? WeightUnit { get; set; } // "kg" | "g" | "ml"
         public List<int> SiteIds { get; set; } = new(); // Empty = all sites
         public int? AccountId { get; set; }
         public int? DisplayOrder { get; set; }

@@ -56,6 +56,8 @@ namespace George.Services.Response
         public bool? IsWeighted { get; set; }
         public string? SetupType { get; set; }
         public George.Services.Response.WeightConfigRes? WeightConfig { get; set; }
+        public bool? ShowAsMl { get; set; }
+        public string? WeightUnit { get; set; } // "kg" | "g" | "ml"
         public List<int> SiteIds { get; set; } = new(); // Empty = all sites
         public int? DisplayOrder { get; set; }
         public string? SeoTitle { get; set; }
