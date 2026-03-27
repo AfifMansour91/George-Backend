@@ -5,6 +5,7 @@ using George.DB;
 using George.Services.Request;
 using George.Services.Response;
 using George.Services.Utils;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System;
 
@@ -14,14 +15,16 @@ public class PrintJobService : ServiceBase
 {
     private readonly PrintJobStorage _printJobStorage;
     private readonly IHtmlRenderService _htmlRenderService;
+    private readonly string _payloadType;
     private const string AutoVoucherJobTypePrefix = "VoucherAuto:";
 
     public PrintJobService(ILogger<PrintJobService> logger, IMapper mapper, CacheManager cache, PrintJobStorage printJobStorage,
-    IHtmlRenderService htmlRenderService)
+    IHtmlRenderService htmlRenderService, IConfiguration configuration)
         : base(logger, mapper, cache)
     {
         _printJobStorage = printJobStorage;
         _htmlRenderService = htmlRenderService;
+        _payloadType = configuration.GetValue<string>("PrintJob:PayloadType") ?? "html";
     }
 
     /// <summary>Enqueue a print job (e.g. order voucher). React/frontend calls this; local agent polls and prints.</summary>
@@ -114,7 +117,7 @@ public class PrintJobService : ServiceBase
     private async Task<PrintJobRes> MapToResAsync(PrintJob j, CancellationToken cancelToken = default)
     {
         var payload = j.Payload ?? string.Empty;
-        var payloadType = "html";
+        var payloadType = _payloadType;
 
         if (!string.IsNullOrWhiteSpace(payload) && payloadType != "html")
         {
