@@ -16,6 +16,7 @@ using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using Attribute = George.DB.Attribute;
+using System.Globalization;
 
 namespace George.Services
 {
@@ -1246,7 +1247,9 @@ namespace George.Services
 
                 var wooSku = GetWooCommerceSku(siteId, product.Sku);
                 // Send product weight to WooCommerce only when product is weighable; otherwise leave empty so previous value is not applied.
-                var productWeightForWoo = isWeighted ? (product.Weight?.ToString() ?? "") : "";
+                // Fallback: for weighted setups where Product.Weight is empty, use WeightConfig.UnitWeight.
+                //var productWeightForWoo = ResolveProductWeightForWoo(product, isWeighted);
+                var productWeightForWoo = product.Weight.HasValue && product.Weight.Value > 0 ? (product.Weight?.ToString() ?? "") : "";
                 var wooProduct = new Dictionary<string, object>
                 {
                     ["name"] = product.Name,
@@ -2015,6 +2018,34 @@ namespace George.Services
             // collapse multiple spaces (including Hebrew/RTL spacing issues)
             s = Regex.Replace(s, @"\s+", " ");
             return s;
+        }
+
+        /// <summary>
+        /// Resolve product weight for WooCommerce "weight" field (kg string).
+        /// Uses Product.Weight first, then falls back to WeightConfig.UnitWeight for weighted products.
+        /// </summary>
+        private static string ResolveProductWeightForWoo(Product product, bool isWeighted)
+        {
+            if (!isWeighted)
+                return "";
+
+            if (product.Weight.HasValue && product.Weight.Value > 0)
+                return product.Weight.Value.ToString(CultureInfo.InvariantCulture);
+
+            var unitWeightRaw = product.WeightConfig?.UnitWeight;
+            if (string.IsNullOrWhiteSpace(unitWeightRaw))
+                return "";
+
+            var normalized = unitWeightRaw.Trim().Replace(',', '.');
+            if (!decimal.TryParse(normalized, NumberStyles.Number, CultureInfo.InvariantCulture, out var unitWeightValue) || unitWeightValue <= 0)
+                return "";
+
+            var unitName = product.WeightConfig?.Unit?.Name?.Trim().ToLowerInvariant();
+            var valueInKg = unitName is "g" or "gram" or "grams" or "גרם"
+                ? unitWeightValue / 1000m
+                : unitWeightValue;
+
+            return valueInKg.ToString(CultureInfo.InvariantCulture);
         }
         public class WooErrorResponse
         {
