@@ -1230,8 +1230,23 @@ namespace George.Services
                         metaData.Add(new { key = "ocwsu_min_weight_", value = weightConfig.StartWeight ?? "" });
                         metaData.Add(new { key = "_ocwsu_weight_step", value = weightConfig.Step ?? "" });
                         metaData.Add(new { key = "ocwsu_weight_step_", value = weightConfig.Step ?? "" });
-                        // WooCommerce plugin expects "fixed" for משקל קבוע; we store "average" for that mode
-                        var unitWeightTypeForWoo = string.Equals(weightConfig.UnitWeightMode?.Name, "average", StringComparison.OrdinalIgnoreCase) ? "fixed" : (weightConfig.UnitWeightMode?.Name ?? "");
+                        // WooCommerce plugin expects "fixed" for משקל קבוע and "variable" for משקל משתנה.
+                        // Our modes: "average" = fixed weight per unit, "variable" = variable weight, "by_variant" = weight from variant.
+                        // "by_variant" maps to "variable" in WooCommerce (_ocwsu_unit_weight_type); the "get from variation" flag is sent separately.
+                        // When UnitWeightMode is null, fall back to FixedWeightPerUnit (false = variable, true = fixed).
+                        string unitWeightTypeForWoo;
+                        var unitWeightModeName = weightConfig.UnitWeightMode?.Name;
+                        if (string.Equals(unitWeightModeName, "average", StringComparison.OrdinalIgnoreCase))
+                            unitWeightTypeForWoo = "fixed";
+                        else if (string.Equals(unitWeightModeName, "variable", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(unitWeightModeName, "by_variant", StringComparison.OrdinalIgnoreCase))
+                            unitWeightTypeForWoo = "variable";
+                        else if (weightConfig.FixedWeightPerUnit == true)
+                            unitWeightTypeForWoo = "fixed";
+                        else if (weightConfig.FixedWeightPerUnit == false)
+                            unitWeightTypeForWoo = "variable";
+                        else
+                            unitWeightTypeForWoo = "";
                         metaData.Add(new { key = "_ocwsu_unit_weight_type", value = unitWeightTypeForWoo });
                         metaData.Add(new { key = "ocwsu_unit_weight_type_", value = unitWeightTypeForWoo });
                         metaData.Add(new { key = "_ocwsu_unit_weight", value = weightConfig.UnitWeight ?? "" });
