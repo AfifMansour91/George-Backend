@@ -581,7 +581,7 @@ namespace George.Data
             var productIdsSet = orderedProductIds.Distinct().ToHashSet();
             var products = await _dbContext.Product
                 .AsNoTracking()
-                .Where(p => productIdsSet.Contains(p.Id) && p.WooCommerceId != null && p.Site.Any(s => s.Id == siteId))
+                .Where(p => productIdsSet.Contains(p.Id) && p.WooCommerceId != null && p.WooCommerceId > 0 && p.Site.Any(s => s.Id == siteId))
                 .Select(p => new { p.Id, WooId = p.WooCommerceId!.Value })
                 .ToListAsync(cancelToken);
             var idToWooId = products.ToDictionary(p => p.Id, p => p.WooId);

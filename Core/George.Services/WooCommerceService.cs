@@ -1190,8 +1190,9 @@ namespace George.Services
                     metaData.Add(new { key = "_supplier", value = product.Supplier.Name });
                 metaData.Add(new { key = "_is_kosher", value = product.IsKosher == true ? "yes" : "no" });
                 var showAsMl = product.ShowAsMl == true || product.WeightUnit == "ml";
-                metaData.Add(new { key = "_show_as_ml", value = showAsMl ? "yes" : "no" });
-                metaData.Add(new { key = "show_as_ml_", value = showAsMl ? "yes" : "no" });
+                // ACF true/false field: value goes in "show_as_ml" (1/0), reference key goes in "_show_as_ml"
+                metaData.Add(new { key = "show_as_ml", value = showAsMl ? "1" : "0" });
+                metaData.Add(new { key = "_show_as_ml", value = "field_699f090751cad" });
                 if (product.CostPrice.HasValue)
                     metaData.Add(new { key = "_cost_price", value = product.CostPrice.Value.ToString() });
                 if (!string.IsNullOrEmpty(product.SeoTitle))
