@@ -14,6 +14,8 @@ using George.Services.Request;
 using George.Services.Response;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using QRCoder;
 
 namespace George.Services
@@ -413,6 +415,9 @@ namespace George.Services
                     var orderIdCapture = orderId;
                     var siteIdCapture = updated.SiteId;
                     var externalIdCapture = updated.ExternalOrderId!;
+                    _logger.LogInformation(
+                        "Order update: scheduling WooCommerce store sync (background). internalOrderId={InternalOrderId}, siteId={SiteId}, externalStoreOrderId={ExternalStoreOrderId}, mappedStoreStatus={MappedStoreStatus}",
+                        orderIdCapture, siteIdCapture, externalIdCapture, wcStatus);
                     _ = Task.Run(async () =>
                     {
                         try
@@ -452,6 +457,9 @@ namespace George.Services
                 {
                     var siteIdCapture = order.SiteId;
                     var externalIdCapture = order.ExternalOrderId!;
+                    _logger.LogInformation(
+                        "Order cancel: scheduling WooCommerce store sync with status cancelled (background). internalOrderId={InternalOrderId}, siteId={SiteId}, externalStoreOrderId={ExternalStoreOrderId}",
+                        orderId, siteIdCapture, externalIdCapture);
                     _ = Task.Run(async () =>
                     {
                         try
@@ -798,7 +806,7 @@ namespace George.Services
         {
             try
             {
-                return JsonSerializer.Serialize(p, WooCommerceOrderRequestJsonOptions);
+                return System.Text.Json.JsonSerializer.Serialize(p, WooCommerceOrderRequestJsonOptions);
             }
             catch
             {
@@ -1695,26 +1703,72 @@ namespace George.Services
                 .Replace("'", "&#39;", StringComparison.Ordinal);
         }
 
-        /// <summary>Record payment from WooCommerce (invoice, clearance, paid-at). API key auth.</summary>
+        /// <summary>Record payment from WooCommerce (invoice, Cardcom JSON, gateway status). API key auth. Order: <c>orderNumber</c> and/or <c>orderId</c> (WooCommerce id) must match <see cref="Order.ExternalOrderId"/>.</summary>
         public async Task<IApiResponse<OrderRes>> RecordPaymentFromWooCommerceAsync(int siteId, WooCommerceOrderPaymentPayload payment, CancellationToken cancelToken = default)
         {
             var response = new ApiResponse<OrderRes>();
-            var order = await _orderStorage.GetOrderBySiteAndExternalIdAsync(siteId, payment.OrderNumber, cancelToken).ConfigureAwait(false);
+            var externalKey = payment.ResolveExternalOrderKey();
+            if (string.IsNullOrWhiteSpace(externalKey))
+            {
+                _logger.LogWarning(
+                    "WooCommerce OrderPayment rejected: orderNumber and orderId missing. siteId={SiteId}",
+                    siteId);
+                return CreateResponse(response, StatusCode.InvalidRequest, "orderNumber or orderId is required.");
+            }
+            var order = await _orderStorage.GetOrderBySiteAndExternalIdAsync(siteId, externalKey, cancelToken).ConfigureAwait(false);
             if (order == null)
+            {
+                _logger.LogWarning(
+                    "WooCommerce OrderPayment: order not found for external key. siteId={SiteId}, externalOrderKey={ExternalOrderKey}, gatewayStatus={GatewayStatus}",
+                    siteId, externalKey, payment.Status);
                 return CreateResponse(response, StatusCode.ItemNotFound, "Order not found.");
+            }
+            var treatAsPaid = IsSuccessfulWooCommerceGatewayPaymentStatus(payment.Status);
+            var cardcomJson = SerializeCardcomPaymentToken(payment.CardcomPayment);
+            var cardcomChars = cardcomJson?.Length ?? 0;
+            _logger.LogInformation(
+                "WooCommerce OrderPayment processing. siteId={SiteId}, externalOrderKey={ExternalOrderKey}, internalOrderId={InternalOrderId}, gatewayStatus={GatewayStatus}, treatAsPaid={TreatAsPaid}, cardcomJsonChars={CardcomChars}, hasInvoice={HasInvoice}",
+                siteId, externalKey, order.Id, payment.Status, treatAsPaid, cardcomChars, !string.IsNullOrWhiteSpace(payment.InvoiceNumber));
             var updated = await _orderStorage.UpdateOrderAsync(order.Id, o =>
             {
                 if (payment.InvoiceNumber != null) o.InvoiceNumber = payment.InvoiceNumber;
-                o.PaymentReference = payment.PaymentReference ?? payment.ClearanceNumber;
-                if (payment.PaidAt.HasValue) o.PaidAt = payment.PaidAt;
-                o.PaymentStatus = "Paid";
+                if (payment.PaymentReference != null || payment.ClearanceNumber != null)
+                    o.PaymentReference = payment.PaymentReference ?? payment.ClearanceNumber;
+                if (treatAsPaid && payment.PaidAt.HasValue) o.PaidAt = payment.PaidAt;
+                if (treatAsPaid) o.PaymentStatus = "Paid";
+                if (!string.IsNullOrWhiteSpace(payment.Status)) o.ExternalPaymentStatus = payment.Status.Trim();
+                if (!string.IsNullOrWhiteSpace(cardcomJson)) o.CardcomPaymentJson = cardcomJson;
                 o.UpdatedDate = DateTime.UtcNow;
             }, cancelToken).ConfigureAwait(false);
             if (updated == null)
+            {
+                _logger.LogWarning(
+                    "WooCommerce OrderPayment: UpdateOrderAsync returned null. siteId={SiteId}, internalOrderId={InternalOrderId}, externalOrderKey={ExternalOrderKey}",
+                    siteId, order.Id, externalKey);
                 return CreateResponse(response, StatusCode.ItemNotFound);
+            }
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(loaded!);
+            _logger.LogInformation(
+                "WooCommerce OrderPayment completed. siteId={SiteId}, internalOrderId={InternalOrderId}, externalOrderKey={ExternalOrderKey}, paymentStatus={PaymentStatus}, externalPaymentStatus={ExternalPaymentStatus}",
+                siteId, loaded!.Id, externalKey, loaded.PaymentStatus, loaded.ExternalPaymentStatus);
             return response;
+        }
+
+        private static string? SerializeCardcomPaymentToken(JToken? cardcom)
+        {
+            if (cardcom == null || cardcom.Type == JTokenType.Null) return null;
+            return cardcom.ToString(Formatting.None);
+        }
+
+        /// <summary>When <paramref name="status"/> is empty, treat as success (legacy webhooks). Otherwise avoid marking paid on clear failure tokens.</summary>
+        private static bool IsSuccessfulWooCommerceGatewayPaymentStatus(string? status)
+        {
+            if (string.IsNullOrWhiteSpace(status)) return true;
+            var s = status.Trim().ToLowerInvariant();
+            if (s is "failed" or "fail" or "error" or "declined" or "rejected" or "cancelled" or "canceled") return false;
+            if (s.Contains("declin", StringComparison.Ordinal) || s.Contains("fail", StringComparison.Ordinal)) return false;
+            return true;
         }
 
         private static string MapWooCommerceStatusToOurs(string? wc)

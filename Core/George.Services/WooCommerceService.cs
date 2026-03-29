@@ -5,7 +5,9 @@ using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using System.Net.Http.Headers;
 using George.Common;
 using George.Data;
 using George.DB;
@@ -1488,9 +1490,21 @@ namespace George.Services
             var isOcStoreos = !string.IsNullOrEmpty(baseUrl) && baseUrl.Contains("oc-storeos", StringComparison.OrdinalIgnoreCase);
             if (isOcStoreos)
             {
-                var order = await _orderStorage.GetOrderBySiteAndExternalIdAsync(siteId, wooOrderId.Trim(), cancelToken);
+                var wooId = wooOrderId.Trim();
+                var order = await _orderStorage.GetOrderBySiteAndExternalIdAsync(siteId, wooId, cancelToken);
                 if (order != null)
+                {
+                    _logger.LogInformation(
+                        "WooCommerce UpdateOrderStatus: oc-storeos full POST sync. siteId={SiteId}, externalStoreOrderId={ExternalStoreOrderId}, internalOrderId={InternalOrderId}, requestedStatusHint={RequestedStatus}",
+                        siteId, wooId, order.Id, status);
                     await SyncOrderToOcStoreosAsync(siteId, order.Id, cancelToken);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "WooCommerce UpdateOrderStatus: oc-storeos sync skipped — no local order for external id. siteId={SiteId}, externalStoreOrderId={ExternalStoreOrderId}, requestedStatusHint={RequestedStatus}",
+                        siteId, wooId, status);
+                }
                 return;
             }
             if (string.IsNullOrEmpty(site.WooCommerceKey) || string.IsNullOrEmpty(site.WooCommerceSecret)) return;
@@ -1513,16 +1527,34 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Syncs full order to oc-storeos API (POST .../orders). Used when completing/updating/cancelling orders that came from WooCommerce. Payload: orderId, status, externalOrderId, customer, shippingAddress, shippingInfo, items (sku/quantity), shippingTotal, customerNotes. Does not throw; logs errors.
+        /// Syncs full order to oc-storeos API (POST .../orders). Used when completing/updating/cancelling orders that came from WooCommerce. Payload matches plugin shape: order_id, status, customer, shippingAddress, shippingInfo, items, shippingTotal, customerNotes; optional externalOrderId (our display order number). Does not throw; logs errors.
         /// </summary>
         public async Task SyncOrderToOcStoreosAsync(int siteId, int orderId, CancellationToken cancelToken)
         {
             var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
-            if (site == null || string.IsNullOrWhiteSpace(site.WooCommerceOrderUpdateBaseUrl)) return;
+            if (site == null || string.IsNullOrWhiteSpace(site.WooCommerceOrderUpdateBaseUrl))
+            {
+                _logger.LogWarning(
+                    "oc-storeos sync skipped: site missing or WooCommerceOrderUpdateBaseUrl empty. siteId={SiteId}, internalOrderId={InternalOrderId}",
+                    siteId, orderId);
+                return;
+            }
             var baseUrl = site.WooCommerceOrderUpdateBaseUrl.Trim().TrimEnd('/');
-            if (!baseUrl.Contains("oc-storeos", StringComparison.OrdinalIgnoreCase)) return;
+            if (!baseUrl.Contains("oc-storeos", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "oc-storeos sync skipped: base URL does not contain oc-storeos. siteId={SiteId}, internalOrderId={InternalOrderId}, baseUrl={BaseUrl}",
+                    siteId, orderId, baseUrl);
+                return;
+            }
             var order = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
-            if (order == null || string.IsNullOrWhiteSpace(order.ExternalOrderId)) return;
+            if (order == null || string.IsNullOrWhiteSpace(order.ExternalOrderId))
+            {
+                _logger.LogWarning(
+                    "oc-storeos sync skipped: order not found or ExternalOrderId empty. siteId={SiteId}, internalOrderId={InternalOrderId}",
+                    siteId, orderId);
+                return;
+            }
             var wcStatus = MapOurStatusToWooCommerceForOcStoreos(order.Status);
             var productIds = (order.OrderItem ?? new List<OrderItem>()).Where(i => i.ProductId.HasValue).Select(i => i.ProductId!.Value).Distinct().ToList();
             var productSkuAndWoo = new Dictionary<int, (string? Sku, int? WooCommerceId)>();
@@ -1533,30 +1565,43 @@ namespace George.Services
                 foreach (var p in productsRes.Items ?? Enumerable.Empty<Product>())
                     productSkuAndWoo[p.Id] = (p.Sku, p.WooCommerceId);
             }
-            var items = new List<object>();
+            var items = new List<Dictionary<string, object?>>();
             foreach (var line in order.OrderItem?.OrderBy(i => i.SortOrder) ?? Enumerable.Empty<OrderItem>())
             {
                 var qty = (decimal)(line.Quantity > 0 ? line.Quantity : 1);
+                var row = new Dictionary<string, object?>();
                 if (line.ProductId.HasValue && productSkuAndWoo.TryGetValue(line.ProductId.Value, out var skuWoo))
                 {
                     if (!string.IsNullOrWhiteSpace(skuWoo.Sku))
-                        items.Add(new { sku = skuWoo.Sku.Trim(), quantity = qty });
+                    {
+                        row["sku"] = skuWoo.Sku.Trim();
+                        row["quantity"] = qty;
+                    }
                     else if (skuWoo.WooCommerceId.HasValue)
-                        items.Add(new { productId = skuWoo.WooCommerceId.Value, quantity = qty });
+                    {
+                        row["productId"] = skuWoo.WooCommerceId.Value;
+                        row["quantity"] = qty;
+                    }
                     else
-                        items.Add(new { quantity = qty });
+                        row["quantity"] = qty;
                 }
                 else
-                    items.Add(new { quantity = qty });
+                    row["quantity"] = qty;
+                items.Add(row);
             }
             var deliveryDate = order.DeliveryDate ?? order.PickupDate;
             var deliveryTime = order.DeliveryTime ?? order.PickupTime;
             var slotStart = string.IsNullOrWhiteSpace(deliveryTime) ? (string?)null : deliveryTime.Trim();
             var deliveryType = (order.DeliveryType ?? "").Trim();
             var shippingType = string.Equals(deliveryType, "Pickup", StringComparison.OrdinalIgnoreCase) ? "pickup" : "delivery";
+            object orderIdForStore = int.TryParse(order.ExternalOrderId.Trim(), out var wooOid) ? wooOid : order.ExternalOrderId.Trim();
+            var shippingStreet = !string.IsNullOrWhiteSpace(order.DeliveryStreet)
+                ? order.DeliveryStreet.Trim()
+                : order.DeliveryAddress?.Trim();
+            var shippingCity = string.IsNullOrWhiteSpace(order.DeliveryCity) ? "" : order.DeliveryCity.Trim();
             var payload = new Dictionary<string, object?>
             {
-                ["orderId"] = int.TryParse(order.ExternalOrderId, out var oid) ? oid : (object)order.ExternalOrderId,
+                ["orderId"] = orderIdForStore,
                 ["status"] = wcStatus ?? "on-hold",
                 ["externalOrderId"] = order.OrderNumber ?? order.ExternalOrderId,
                 ["customer"] = new Dictionary<string, string?>
@@ -1567,8 +1612,8 @@ namespace George.Services
                 },
                 ["shippingAddress"] = new Dictionary<string, string?>
                 {
-                    ["street"] = order.DeliveryAddress,
-                    ["city"] = "",
+                    ["street"] = shippingStreet ?? "",
+                    ["city"] = shippingCity,
                     ["zip"] = ""
                 },
                 ["shippingInfo"] = new Dictionary<string, object?>
@@ -1582,17 +1627,39 @@ namespace George.Services
                 ["shippingTotal"] = order.ShippingCost ?? 0,
                 ["customerNotes"] = order.CustomerNote ?? ""
             };
-            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = false };
+            var jsonOptions = new JsonSerializerOptions
+            {
+                WriteIndented = false,
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            };
             var body = JsonSerializer.Serialize(payload, jsonOptions);
+            var useBasicAuth = !string.IsNullOrWhiteSpace(site.WooCommerceKey) && !string.IsNullOrWhiteSpace(site.WooCommerceSecret);
+            _logger.LogInformation(
+                "oc-storeos POST /orders starting. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}, mappedStatus={MappedStatus}, itemCount={ItemCount}, basicAuth={BasicAuth}, bodyChars={BodyChars}",
+                siteId, orderId, order.ExternalOrderId, wcStatus ?? "on-hold", items.Count, useBasicAuth, body.Length);
             using var httpClient = _httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(30);
+            httpClient.DefaultRequestHeaders.Clear();
+            if (useBasicAuth)
+            {
+                var basic = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey!.Trim()}:{site.WooCommerceSecret!.Trim()}"));
+                httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", basic);
+            }
             using var content = new StringContent(body, Encoding.UTF8, "application/json");
             var url = $"{baseUrl}/orders";
             var response = await httpClient.PostAsync(url, content, cancelToken);
-            if (!response.IsSuccessStatusCode)
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation(
+                    "oc-storeos POST /orders succeeded. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}, httpStatus={HttpStatus}",
+                    siteId, orderId, order.ExternalOrderId, (int)response.StatusCode);
+            }
+            else
             {
                 var err = await response.Content.ReadAsStringAsync(cancelToken);
-                _logger.LogWarning("oc-storeos order sync failed for site {SiteId}, order {OrderId}: {Status} {Error}", siteId, orderId, (int)response.StatusCode, err);
+                _logger.LogWarning(
+                    "oc-storeos POST /orders failed. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}, httpStatus={HttpStatus}, error={Error}",
+                    siteId, orderId, order.ExternalOrderId, (int)response.StatusCode, err);
             }
         }
 

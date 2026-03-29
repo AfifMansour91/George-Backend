@@ -11,6 +11,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Newtonsoft.Json.Linq;
 
 namespace George.Api.Controllers
 {
@@ -215,20 +216,43 @@ namespace George.Api.Controllers
             });
         }
 
-        /// <summary>Record payment from WooCommerce (invoice, clearance, paid-at). Auth: X-Api-Key or Bearer &lt;key&gt;.</summary>
+        /// <summary>Record payment from WooCommerce (invoice, Cardcom <c>cardcomPayment</c> JSON, <c>status</c>). Use <c>orderNumber</c> and/or <c>orderId</c> (WooCommerce id). Auth: X-Api-Key or Bearer &lt;key&gt;.</summary>
         [HttpPost("OrderPayment")]
         [Authorize(AuthenticationSchemes = WooCommerceApiKeyAuthenticationHandler.SchemeName)]
         [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]
         [ProducesResponseType((int)HttpStatusCode.Unauthorized)]
         public async Task<IActionResult> RecordOrderPaymentAsync(
-            [FromBody] WooCommerceOrderPaymentPayload payload,
+            [FromBody] WooCommerceOrderPaymentPayload? payload,
             CancellationToken cancelToken = default)
         {
             var siteId = GetWooCommerceSiteId();
             if (siteId == null)
                 return Unauthorized();
-            return await SafeCallWithErrorCatchingAsync(() =>
-                _orderService.RecordPaymentFromWooCommerceAsync(siteId.Value, payload!, cancelToken));
+            if (payload == null)
+            {
+                _logger.LogWarning("WooCommerce OrderPayment: empty body (null payload).");
+                return BadRequest();
+            }
+            var hasCardcom = payload.CardcomPayment != null && payload.CardcomPayment.Type != JTokenType.Null;
+            _logger.LogInformation(
+                "WooCommerce OrderPayment request received. siteId={SiteId}, orderNumber={OrderNumber}, orderId={OrderId}, gatewayStatus={GatewayStatus}, hasCardcomPayment={HasCardcom}, headers={Headers}",
+                siteId.Value,
+                payload.OrderNumber,
+                payload.OrderId?.ToString(),
+                payload.Status,
+                hasCardcom,
+                SerializeForLog(GetRequestHeadersForLog()));
+            return await SafeCallWithErrorCatchingAsync(async () =>
+            {
+                var apiResponse = await _orderService.RecordPaymentFromWooCommerceAsync(siteId.Value, payload, cancelToken).ConfigureAwait(false);
+                _logger.LogInformation(
+                    "WooCommerce OrderPayment HTTP layer response. siteId={SiteId}, orderNumber={OrderNumber}, isSuccessful={IsSuccessful}, statusCode={StatusCode}",
+                    siteId.Value,
+                    payload.OrderNumber,
+                    apiResponse.IsSuccessful,
+                    apiResponse.StatusCode);
+                return apiResponse;
+            });
         }
 
         private int? GetWooCommerceSiteId()

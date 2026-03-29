@@ -50,5 +50,9 @@ public class OrderRes
     public string? ExternalOrderId { get; set; }
     /// <summary>Number of bags/cartons packed (set at end of picking).</summary>
     public int? BagsCount { get; set; }
+    /// <summary>JSON from WooCommerce payment webhook (<c>cardcomPayment</c>).</summary>
+    public string? CardcomPaymentJson { get; set; }
+    /// <summary>Gateway <c>status</c> from WooCommerce payment webhook.</summary>
+    public string? ExternalPaymentStatus { get; set; }
     public List<OrderItemRes> Items { get; set; } = new();
 }

@@ -167,6 +167,14 @@ public partial class Order
     [Precision(0)]
     public DateTime? PaidAt { get; set; }
 
+    /// <summary>Raw JSON of <c>cardcomPayment</c> from WooCommerce <c>POST /WooCommerce/OrderPayment</c>.</summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? CardcomPaymentJson { get; set; }
+
+    /// <summary>Gateway-reported <c>status</c> from the same webhook (e.g. success / failed).</summary>
+    [StringLength(100)]
+    public string? ExternalPaymentStatus { get; set; }
+
     [ForeignKey("AccountId")]
     [InverseProperty("Order")]
     public virtual Account Account { get; set; } = null!;
