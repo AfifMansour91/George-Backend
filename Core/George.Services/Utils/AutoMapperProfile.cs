@@ -67,7 +67,9 @@ namespace George.Services
                             Name = src.WizardType.Name
                         }
                         : null;
-                    dest.WizardType = "all_sites"; // until you store it
+                    dest.WizardType = src.WizardType != null && !string.IsNullOrEmpty(src.WizardType.Name)
+                        ? src.WizardType.Name
+                        : "all_sites";
                     dest.WizardStep = src?.WizardStep ?? 0;
 
                     dest.ContentOwner = src?.ContentOwner?.Name ?? "Company";

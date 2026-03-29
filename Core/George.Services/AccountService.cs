@@ -95,6 +95,8 @@ namespace George.Services
                 ManagerId = managerUser.Id,
                 Status = req.Status,
                 WizardStep = req.WizardStep,
+                WizardStatusId = MapWizardStatusNameToId(req.WizardStatus),
+                WizardTypeId = MapWizardTypeNameToId(req.WizardType),
                 LogoUrl = req.LogoUrl,
                 Website = req.Website,
                 IsKosherShop = req.IsKosherShop,
@@ -197,6 +199,12 @@ namespace George.Services
                 wizardStatusId = existingAccount.WizardStatusId;
             }
 
+            int? wizardTypeId = existingAccount.WizardTypeId;
+            if (!string.IsNullOrWhiteSpace(req.WizardType))
+            {
+                wizardTypeId = MapWizardTypeNameToId(req.WizardType);
+            }
+
             var model = new Account
             {
                 Id = accountId,
@@ -208,6 +216,7 @@ namespace George.Services
                 WizardStep = req.WizardStep ?? existingAccount.WizardStep,
                 // Update WizardStatusId if provided, otherwise preserve existing
                 WizardStatusId = wizardStatusId,
+                WizardTypeId = wizardTypeId,
                 // Handle LogoUrl:
                 // - If LogoUrl is provided (property exists in JSON, even if null or empty), use it
                 // - Empty string or null in request means clear the logo (set to null)
@@ -346,6 +355,32 @@ namespace George.Services
                 WizardType = req.WizardType
             };
             return response;
+        }
+
+        private static int? MapWizardTypeNameToId(string? wizardType)
+        {
+            if (string.IsNullOrWhiteSpace(wizardType))
+                return 1;
+            return wizardType.Trim().ToLowerInvariant() switch
+            {
+                "all_sites" => 1,
+                "per_site" => 2,
+                "none" => 3,
+                _ => 1
+            };
+        }
+
+        private static int? MapWizardStatusNameToId(string? status)
+        {
+            if (string.IsNullOrWhiteSpace(status))
+                return 1;
+            return status switch
+            {
+                "Not Started" => 1,
+                "In Progress" => 2,
+                "Completed" => 3,
+                _ => 1
+            };
         }
 
         private static AccountNotificationSettings MapNotificationSettingsReqToEntity(int accountId, NotificationSettingsReq req)

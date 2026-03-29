@@ -50,6 +50,8 @@ INSERT [dbo].[WizardType] ([Id], [Name], [IsDeleted]) VALUES (1, N'all_sites', 0
 GO
 INSERT [dbo].[WizardType] ([Id], [Name], [IsDeleted]) VALUES (2, N'per_site', 0)
 GO
+INSERT [dbo].[WizardType] ([Id], [Name], [IsDeleted]) VALUES (3, N'none', 0)
+GO
 SET IDENTITY_INSERT [dbo].[WizardType] OFF
 GO
 SET IDENTITY_INSERT [dbo].[AccountStatus] ON 

@@ -125,6 +125,12 @@ namespace George.Data
             {
                 dbAcc.WizardStatusId = updated.WizardStatusId;
             }
+
+            // Update WizardTypeId if provided
+            if (updated.WizardTypeId.HasValue)
+            {
+                dbAcc.WizardTypeId = updated.WizardTypeId;
+            }
             
             // Update LogoUrl
             dbAcc.LogoUrl = updated.LogoUrl;

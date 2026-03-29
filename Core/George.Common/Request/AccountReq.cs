@@ -232,7 +232,9 @@ namespace George.Common.Request
         public bool KioskEnabled { get; set; }
         public int? WizardStep { get; set; }
         public string? WizardStatus { get; set; }
-        
+        /// <summary>Wizard type: "all_sites", "per_site", or "none" (no client-facing wizard).</summary>
+        public string? WizardType { get; set; }
+
         public string? LogoUrl { get; set; }
 
         public string? Address { get; set; }
@@ -466,6 +468,7 @@ namespace George.Common.Request
         public string Status { get; set; } = "Active";
         public string WizardStatus { get; set; } = "Not Started";
         public int WizardStep { get; set; } = 1;
+        /// <summary>all_sites, per_site, or none (no client-facing wizard).</summary>
         public string WizardType { get; set; } = "all_sites";
 
         public bool SendInviteToClient { get; set; } = false;
