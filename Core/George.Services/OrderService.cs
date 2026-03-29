@@ -1376,7 +1376,7 @@ namespace George.Services
                     sb.Append("</div>");
                 }
 
-                if (!newVoucher && it.PickedQuantity.HasValue && it.PickedQuantity.Value > 0m)
+                if (it.PickedQuantity.HasValue && it.PickedQuantity.Value > 0m)
                 {
                     var picked = OrderItemLineDisplay.FormatVoucherPickedDisplay(it);
                     sb.Append("<div style=\"font-size:12px;font-weight:700;color:#000;margin-top:3px;");
@@ -1385,6 +1385,16 @@ namespace George.Services
                     sb.Append("\">אחרי ליקוט: ");
                     sb.Append(EscapeHtml(picked));
                     sb.Append("</div>");
+                    var lineAmt = GetVoucherPickedLineAmount(it);
+                    if (lineAmt.HasValue)
+                    {
+                        sb.Append("<div style=\"font-size:12px;font-weight:800;color:#000;margin-top:2px;direction:ltr;text-align:right;");
+                        sb.Append(tw);
+                        sb.Append(pa);
+                        sb.Append("\">₪");
+                        sb.Append(lineAmt.Value.ToString("0.00", CultureInfo.InvariantCulture));
+                        sb.Append("</div>");
+                    }
                 }
                 else
                 {
@@ -1603,6 +1613,14 @@ namespace George.Services
             public string? EntranceCode { get; init; }
         }
 
+        /// <summary>Match shop-manager <c>getVoucherPickedLineAmount</c>: line total after pick (TotalPrice or picked × PricePerUnit).</summary>
+        private static decimal? GetVoucherPickedLineAmount(OrderItem item)
+        {
+            if (!item.PickedQuantity.HasValue || item.PickedQuantity.Value <= 0m) return null;
+            if (item.TotalPrice.HasValue) return item.TotalPrice.Value;
+            return item.PickedQuantity.Value * (item.PricePerUnit ?? 0m);
+        }
+
         private static decimal? ComputeVoucherGrandTotal(Order order)
         {
             if (order.Total.HasValue) return order.Total.Value;
@@ -1612,12 +1630,7 @@ namespace George.Services
             decimal itemsSum;
             if (anyPicked)
             {
-                itemsSum = items.Sum(i =>
-                {
-                    if (!i.PickedQuantity.HasValue || i.PickedQuantity.Value <= 0m) return 0m;
-                    if (i.TotalPrice.HasValue) return i.TotalPrice.Value;
-                    return i.PickedQuantity.Value * (i.PricePerUnit ?? 0m);
-                });
+                itemsSum = items.Sum(i => GetVoucherPickedLineAmount(i) ?? 0m);
             }
             else
             {
