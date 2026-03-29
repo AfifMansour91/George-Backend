@@ -299,6 +299,8 @@ namespace George.Data
             dbTemplateProduct.Weight = updated.Weight;
             dbTemplateProduct.IsKosher = updated.IsKosher;
             dbTemplateProduct.IsWeighted = updated.IsWeighted;
+            dbTemplateProduct.ShowAsMl = updated.ShowAsMl;
+            dbTemplateProduct.WeightUnit = updated.WeightUnit;
             dbTemplateProduct.BrandId = updated.BrandId;
             dbTemplateProduct.SupplierId = updated.SupplierId;
             dbTemplateProduct.StatusId = updated.StatusId;
