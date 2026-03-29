@@ -252,8 +252,9 @@ namespace George.Data
             {
                 product.Sku = null;
             }
-            // New products appear at the top of the list (sort by DisplayOrder ascending, then CreationTime desc)
-            product.DisplayOrder = 0;
+            // Sort: DisplayOrder ascending, then CreationTime desc. Client may set DisplayOrder (e.g. wizard order).
+            if (!product.DisplayOrder.HasValue)
+                product.DisplayOrder = 0;
             _dbContext.Product.Add(product);
 
             // Add sites

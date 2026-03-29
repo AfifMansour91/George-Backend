@@ -70,6 +70,8 @@ namespace George.Services.Request
         public string? WeightUnit { get; set; }
         public List<int>? SiteIds { get; set; } // Empty = all sites
         public int? AccountId { get; set; }
+        /// <summary>List sort order (ascending). When omitted on create, defaults to 0 in storage.</summary>
+        public int? DisplayOrder { get; set; }
         public string? SeoTitle { get; set; }
         public string? SeoDescription { get; set; }
 

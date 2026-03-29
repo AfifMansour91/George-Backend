@@ -816,6 +816,7 @@ namespace George.Services
                 IsKosher = req.IsKosher,
                 IsWeighted = req.IsWeighted,
                 AccountId = req.AccountId,
+                DisplayOrder = req.DisplayOrder,
                 SeoTitle = req.SeoTitle,
                 SeoDescription = req.SeoDescription,
                 ShowAsMl = req.ShowAsMl ?? (req.WeightUnit == "ml" ? true : null),
@@ -850,7 +851,7 @@ namespace George.Services
                 SeoDescription = req.SeoDescription ?? existing.SeoDescription,
                 ShowAsMl = req.ShowAsMl.HasValue ? (req.ShowAsMl ?? (req.WeightUnit == "ml" ? true : null)) : existing.ShowAsMl,
                 WeightUnit = req.WeightUnit != null ? (req.WeightUnit == "ml" || req.ShowAsMl == true ? "ml" : req.WeightUnit) : existing.WeightUnit,
-                DisplayOrder = existing.DisplayOrder,
+                DisplayOrder = req.DisplayOrder ?? existing.DisplayOrder,
                 // Preserve lookup IDs from existing; MapLookupsAsync will overwrite only when req has values
                 BrandId = existing.BrandId,
                 SupplierId = existing.SupplierId,
