@@ -1510,6 +1510,7 @@ namespace George.Services
             if (string.IsNullOrEmpty(site.WooCommerceKey) || string.IsNullOrEmpty(site.WooCommerceSecret)) return;
             if (string.IsNullOrEmpty(site.WooCommerceUrl)) return;
             baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
+            //baseUrl = $"https://deliz-short.mywebsite.co.il/wp-json/oc-storeos/v1/orders";
             var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
             using var httpClient = _httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(30);
@@ -1527,7 +1528,7 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Syncs full order to oc-storeos API (POST .../orders). Used when completing/updating/cancelling orders that came from WooCommerce. Payload matches plugin shape: order_id, status, customer, shippingAddress, shippingInfo, items, shippingTotal, customerNotes; optional externalOrderId (our display order number). Does not throw; logs errors.
+        /// Syncs full order to oc-storeos API (POST .../orders). Body matches ingest shape: orderNumber, status, customer, shippingAddress, shippingInfo, items (sku + quantity), shippingTotal, customerNotes. Quantities prefer picked values when set.
         /// </summary>
         public async Task SyncOrderToOcStoreosAsync(int siteId, int orderId, CancellationToken cancelToken)
         {
@@ -1568,7 +1569,8 @@ namespace George.Services
             var items = new List<Dictionary<string, object?>>();
             foreach (var line in order.OrderItem?.OrderBy(i => i.SortOrder) ?? Enumerable.Empty<OrderItem>())
             {
-                var qty = (decimal)(line.Quantity > 0 ? line.Quantity : 1);
+                var qtyBase = line.PickedQuantity is > 0 ? line.PickedQuantity.Value : line.Quantity;
+                var qty = qtyBase > 0 ? qtyBase : 1;
                 var row = new Dictionary<string, object?>();
                 if (line.ProductId.HasValue && productSkuAndWoo.TryGetValue(line.ProductId.Value, out var skuWoo))
                 {
@@ -1587,26 +1589,42 @@ namespace George.Services
                 }
                 else
                     row["quantity"] = qty;
+                row["name"] = line.Title ?? "";
+                row["variationId"] = line.WooCommerceVariationId;
+                row["variants"] = BuildWooVariantsFromVariantTitle(line.VariantTitle);
+                row["note"] = line.Notes;
+                row["productNote"] = line.Notes;
+                row["unitPrice"] = line.PricePerUnit;
+                row["lineTotal"] = line.TotalPrice;
+                row["saleUnits"] = line.SaleUnits;
+                row["saleTotalWeight"] = line.SaleTotalWeight;
+                if (line.WooCommerceProductId.HasValue)
+                    row["productId"] = line.WooCommerceProductId.Value;
                 items.Add(row);
             }
             var deliveryDate = order.DeliveryDate ?? order.PickupDate;
             var deliveryTime = order.DeliveryTime ?? order.PickupTime;
-            var slotStart = string.IsNullOrWhiteSpace(deliveryTime) ? (string?)null : deliveryTime.Trim();
+            ParseDeliverySlotWindow(deliveryTime, out var slotStart, out var slotEnd);
             var deliveryType = (order.DeliveryType ?? "").Trim();
             var shippingType = string.Equals(deliveryType, "Pickup", StringComparison.OrdinalIgnoreCase) ? "pickup" : "delivery";
-            object orderIdForStore = int.TryParse(order.ExternalOrderId.Trim(), out var wooOid) ? wooOid : order.ExternalOrderId.Trim();
+            object orderNumberValue = int.TryParse(order.ExternalOrderId.Trim(), out var wooOid) ? wooOid : order.ExternalOrderId.Trim();
             var shippingStreet = !string.IsNullOrWhiteSpace(order.DeliveryStreet)
                 ? order.DeliveryStreet.Trim()
                 : order.DeliveryAddress?.Trim();
             var shippingCity = string.IsNullOrWhiteSpace(order.DeliveryCity) ? "" : order.DeliveryCity.Trim();
+            var shippingZip = TryExtractPostalCodeFromOrderAddress(order);
+            var safeOrderDate = order.CreationTime == default ? DateTime.UtcNow : order.CreationTime;
             var payload = new Dictionary<string, object?>
             {
-                ["orderId"] = orderIdForStore,
-                ["status"] = wcStatus ?? "on-hold",
-                ["externalOrderId"] = order.OrderNumber ?? order.ExternalOrderId,
+                ["orderNumber"] = orderNumberValue,
+                ["externalOrderId"] = order.ExternalOrderId,
+                ["source"] = order.Source,
+                ["siteId"] = order.WooCommerceSiteId ?? siteId.ToString(CultureInfo.InvariantCulture),
+                ["status"] = wcStatus ?? "pending",
+                ["orderDate"] = safeOrderDate.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                 ["customer"] = new Dictionary<string, string?>
                 {
-                    ["name"] = order.CustomerName,
+                    ["name"] = order.CustomerName ?? "",
                     ["email"] = order.CustomerEmail ?? "",
                     ["phone"] = order.CustomerPhone ?? ""
                 },
@@ -1614,18 +1632,25 @@ namespace George.Services
                 {
                     ["street"] = shippingStreet ?? "",
                     ["city"] = shippingCity,
-                    ["zip"] = ""
+                    ["zip"] = shippingZip
                 },
                 ["shippingInfo"] = new Dictionary<string, object?>
                 {
                     ["type"] = shippingType,
                     ["date"] = deliveryDate.HasValue ? deliveryDate.Value.ToString("yyyy-MM-dd") : null,
                     ["slotStart"] = slotStart,
-                    ["slotEnd"] = slotStart
+                    ["slotEnd"] = slotEnd
                 },
                 ["items"] = items,
                 ["shippingTotal"] = order.ShippingCost ?? 0,
-                ["customerNotes"] = order.CustomerNote ?? ""
+                ["orderTotal"] = order.Total,
+                ["customerNotes"] = order.CustomerNote ?? "",
+                ["billing_notes"] = order.BillingNotes,
+                ["internalOrderNotes"] = order.InternalOrderNotes,
+                ["paymentMethod"] = order.PaymentMethod,
+                ["paymentMethodTitle"] = order.PaymentMethodTitle,
+                ["shipping_label"] = order.ShippingLabel,
+                ["payment_label"] = order.PaymentLabel
             };
             var jsonOptions = new JsonSerializerOptions
             {
@@ -1636,7 +1661,7 @@ namespace George.Services
             var useBasicAuth = !string.IsNullOrWhiteSpace(site.WooCommerceKey) && !string.IsNullOrWhiteSpace(site.WooCommerceSecret);
             _logger.LogInformation(
                 "oc-storeos POST /orders starting. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}, mappedStatus={MappedStatus}, itemCount={ItemCount}, basicAuth={BasicAuth}, bodyChars={BodyChars}",
-                siteId, orderId, order.ExternalOrderId, wcStatus ?? "on-hold", items.Count, useBasicAuth, body.Length);
+                siteId, orderId, order.ExternalOrderId, wcStatus ?? "pending", items.Count, useBasicAuth, body.Length);
             using var httpClient = _httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(30);
             httpClient.DefaultRequestHeaders.Clear();
@@ -1646,7 +1671,8 @@ namespace George.Services
                 httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", basic);
             }
             using var content = new StringContent(body, Encoding.UTF8, "application/json");
-            var url = $"{baseUrl}/orders";
+            //var url = $"{baseUrl}/wp-json/oc-storeos/v1/orders";
+            var url = $"{baseUrl}";
             var response = await httpClient.PostAsync(url, content, cancelToken);
             if (response.IsSuccessStatusCode)
             {
@@ -1663,15 +1689,69 @@ namespace George.Services
             }
         }
 
+        /// <summary>Parses slot text like "11:00 - 12:00" or "11:00-12:00" into start/end; single time yields both equal.</summary>
+        private static void ParseDeliverySlotWindow(string? deliveryOrPickupTime, out string? slotStart, out string? slotEnd)
+        {
+            slotStart = null;
+            slotEnd = null;
+            if (string.IsNullOrWhiteSpace(deliveryOrPickupTime))
+                return;
+            var t = deliveryOrPickupTime.Trim();
+            foreach (var sep in new[] { " - ", " – ", " — ", "-", "–", "—" })
+            {
+                var idx = t.IndexOf(sep, StringComparison.Ordinal);
+                if (idx <= 0) continue;
+                var a = t[..idx].Trim();
+                var b = t[(idx + sep.Length)..].Trim();
+                if (!string.IsNullOrEmpty(a))
+                    slotStart = a;
+                slotEnd = string.IsNullOrEmpty(b) ? slotStart : b;
+                return;
+            }
+            slotStart = t;
+            slotEnd = t;
+        }
+
+        /// <summary>Best-effort postal code from combined address lines (no dedicated zip column).</summary>
+        private static string TryExtractPostalCodeFromOrderAddress(Order order)
+        {
+            var blobs = new[] { order.DeliveryAddress, order.DeliveryStreet, order.DeliveryCity };
+            foreach (var blob in blobs)
+            {
+                if (string.IsNullOrWhiteSpace(blob)) continue;
+                var m = Regex.Match(blob, @"\b(\d{5,7})\b");
+                if (m.Success) return m.Groups[1].Value;
+            }
+            return "";
+        }
+
+        /// <summary>Converts stored variant title text into Woo-like variants array [{id,name}] (id unknown => null).</summary>
+        private static List<Dictionary<string, object?>>? BuildWooVariantsFromVariantTitle(string? variantTitle)
+        {
+            if (string.IsNullOrWhiteSpace(variantTitle))
+                return null;
+            var parts = variantTitle
+                .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            if (parts.Count == 0)
+                return null;
+            return parts
+                .Select(p => new Dictionary<string, object?> { ["id"] = null, ["name"] = p })
+                .ToList();
+        }
+
+        /// <summary>Statuses aligned with store ingest (e.g. pending for new).</summary>
         private static string MapOurStatusToWooCommerceForOcStoreos(string? ourStatus)
         {
-            if (string.IsNullOrWhiteSpace(ourStatus)) return "on-hold";
+            if (string.IsNullOrWhiteSpace(ourStatus)) return "pending";
             var s = ourStatus.Trim();
-            if (string.Equals(s, "New", StringComparison.OrdinalIgnoreCase)) return "on-hold";
+            if (string.Equals(s, "New", StringComparison.OrdinalIgnoreCase)) return "pending";
             if (string.Equals(s, "InTreatment", StringComparison.OrdinalIgnoreCase)) return "processing";
             if (string.Equals(s, "Ready", StringComparison.OrdinalIgnoreCase) || string.Equals(s, "Completed", StringComparison.OrdinalIgnoreCase)) return "completed";
             if (string.Equals(s, "Cancelled", StringComparison.OrdinalIgnoreCase)) return "cancelled";
-            return "on-hold";
+            return "pending";
         }
 
         /// <summary>

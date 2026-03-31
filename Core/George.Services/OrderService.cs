@@ -13,6 +13,7 @@ using George.Providers;
 using George.Services.Request;
 using George.Services.Response;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -28,7 +29,7 @@ namespace George.Services
         private readonly AccountStorage _accountStorage;
         private readonly ProductStorage _productStorage;
         private readonly SmsProvider _smsProvider;
-        private readonly WooCommerceService _wooCommerceService;
+        private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly PrintJobService _printJobService;
         private readonly string? _publicAppBaseUrl;
         private static readonly Dictionary<string, string> VoucherSourceLabels = new(StringComparer.OrdinalIgnoreCase)
@@ -49,7 +50,7 @@ namespace George.Services
             AccountStorage accountStorage,
             ProductStorage productStorage,
             SmsProvider smsProvider,
-            WooCommerceService wooCommerceService,
+            IServiceScopeFactory serviceScopeFactory,
             PrintJobService printJobService,
             IConfiguration configuration)
             : base(logger, mapper, cache)
@@ -60,7 +61,7 @@ namespace George.Services
             _accountStorage = accountStorage;
             _productStorage = productStorage;
             _smsProvider = smsProvider;
-            _wooCommerceService = wooCommerceService;
+            _serviceScopeFactory = serviceScopeFactory;
             _printJobService = printJobService;
             _publicAppBaseUrl = ResolvePublicAppBaseUrl(configuration);
         }
@@ -404,33 +405,7 @@ namespace George.Services
             }, cancelToken);
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
-            // Sync to WooCommerce/oc-storeos when order came from WooCommerce: on any update (status, delivery, notes, etc.). oc-storeos gets full order POST; standard WC gets status PUT.
-            if (!string.IsNullOrWhiteSpace(updated.ExternalOrderId) &&
-                string.Equals(updated.Source, "WooCommerce", StringComparison.OrdinalIgnoreCase))
-            {
-                var site = await _siteStorage.GetSiteAsync(updated.SiteId, cancelToken);
-                if (site?.WooCommerceEnabled == true)
-                {
-                    var wcStatus = MapOurStatusToWooCommerce(updated.Status) ?? "on-hold";
-                    var orderIdCapture = orderId;
-                    var siteIdCapture = updated.SiteId;
-                    var externalIdCapture = updated.ExternalOrderId!;
-                    _logger.LogInformation(
-                        "Order update: scheduling WooCommerce store sync (background). internalOrderId={InternalOrderId}, siteId={SiteId}, externalStoreOrderId={ExternalStoreOrderId}, mappedStoreStatus={MappedStoreStatus}",
-                        orderIdCapture, siteIdCapture, externalIdCapture, wcStatus);
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await _wooCommerceService.UpdateOrderStatusAsync(siteIdCapture, externalIdCapture, wcStatus, CancellationToken.None);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "WooCommerce/oc-storeos order sync failed for order {OrderId}", orderIdCapture);
-                        }
-                    }, CancellationToken.None);
-                }
-            }
+            await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "order update", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             if (loaded != null &&
                 !string.Equals(previousStatus, "Ready", StringComparison.OrdinalIgnoreCase) &&
@@ -448,31 +423,7 @@ namespace George.Services
             var order = await _orderStorage.CancelOrderAsync(orderId, AuthUser.Id, softDelete, cancelToken);
             if (order == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
-            // Sync cancelled status to WooCommerce/oc-storeos only for orders that came from WooCommerce.
-            if (!string.IsNullOrWhiteSpace(order.ExternalOrderId) &&
-                string.Equals(order.Source, "WooCommerce", StringComparison.OrdinalIgnoreCase))
-            {
-                var site = await _siteStorage.GetSiteAsync(order.SiteId, cancelToken);
-                if (site?.WooCommerceEnabled == true)
-                {
-                    var siteIdCapture = order.SiteId;
-                    var externalIdCapture = order.ExternalOrderId!;
-                    _logger.LogInformation(
-                        "Order cancel: scheduling WooCommerce store sync with status cancelled (background). internalOrderId={InternalOrderId}, siteId={SiteId}, externalStoreOrderId={ExternalStoreOrderId}",
-                        orderId, siteIdCapture, externalIdCapture);
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await _wooCommerceService.UpdateOrderStatusAsync(siteIdCapture, externalIdCapture, "cancelled", CancellationToken.None);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "WooCommerce/oc-storeos order cancel sync failed for order {OrderId}", orderId);
-                        }
-                    }, CancellationToken.None);
-                }
-            }
+            await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, order, "order cancel", statusOverrideForWcRest: "cancelled", cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(order);
             return response;
         }
@@ -542,6 +493,8 @@ namespace George.Services
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
+            if (loaded != null)
+                await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, loaded, "add items", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(loaded);
             return response;
         }
@@ -558,6 +511,7 @@ namespace George.Services
             var updated = await _orderStorage.RemoveOrderItemAsync(orderId, orderItemId, cancelToken);
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound, "Order item not found.");
+            await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "remove item", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(updated);
             return response;
         }
@@ -584,8 +538,47 @@ namespace George.Services
             var updated = await _orderStorage.UpdatePickingAsync(orderId, updates, cancelToken);
             if (updated == null) return CreateResponse(response, StatusCode.ItemNotFound);
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
-            response.Data = _mapper.Map<OrderRes>(loaded);
+            var forResponse = loaded ?? updated;
+            if (forResponse != null)
+                await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, forResponse, "picking update", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
+            response.Data = _mapper.Map<OrderRes>(forResponse);
             return response;
+        }
+
+        /// <summary>After order mutations that should mirror to WooCommerce/oc-storeos (full POST for oc-storeos). Uses a new DI scope inside background work to avoid DbContext concurrency.</summary>
+        private async Task ScheduleWooCommerceStoreSyncIfApplicableAsync(
+            int orderId,
+            Order order,
+            string logReason,
+            string? statusOverrideForWcRest,
+            CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(order.ExternalOrderId) ||
+                !string.Equals(order.Source, "WooCommerce", StringComparison.OrdinalIgnoreCase))
+                return;
+            var site = await _siteStorage.GetSiteAsync(order.SiteId, cancelToken).ConfigureAwait(false);
+            if (site?.WooCommerceEnabled != true)
+                return;
+            var wcStatus = statusOverrideForWcRest ?? MapOurStatusToWooCommerce(order.Status) ?? "on-hold";
+            var siteIdCapture = order.SiteId;
+            var externalIdCapture = order.ExternalOrderId!;
+            var orderIdCapture = orderId;
+            _logger.LogInformation(
+                "WooCommerce store sync scheduled ({Reason}). internalOrderId={InternalOrderId}, siteId={SiteId}, externalStoreOrderId={ExternalStoreOrderId}, mappedStoreStatus={MappedStoreStatus}",
+                logReason, orderIdCapture, siteIdCapture, externalIdCapture, wcStatus);
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await using var scope = _serviceScopeFactory.CreateAsyncScope();
+                    var wooCommerceService = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
+                    await wooCommerceService.UpdateOrderStatusAsync(siteIdCapture, externalIdCapture, wcStatus, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "WooCommerce/oc-storeos order sync failed for order {OrderId}", orderIdCapture);
+                }
+            }, CancellationToken.None);
         }
 
         /// <summary>Parse shippingInfo and shipping_label into delivery type, date, time and optional note. Date may be "DD/MM/YYYY" or "YYYY-MM-DD".</summary>
@@ -1112,6 +1105,9 @@ namespace George.Services
                         updateItems.Add(oi);
                     }
                 }
+                MergePickingStateIntoWooCommerceReplacementItems(
+                    updateItems,
+                    updated.OrderItem?.OrderBy(i => i.SortOrder).ToList());
                 await _orderStorage.ReplaceOrderItemsAsync(existing.Id, updateItems, cancelToken).ConfigureAwait(false);
                 var loaded = await _orderStorage.GetOrderByIdAsync(existing.Id, cancelToken).ConfigureAwait(false);
                 response.Data = _mapper.Map<OrderRes>(loaded!);
@@ -1769,6 +1765,38 @@ namespace George.Services
             if (s is "failed" or "fail" or "error" or "declined" or "rejected" or "cancelled" or "canceled") return false;
             if (s.Contains("declin", StringComparison.Ordinal) || s.Contains("fail", StringComparison.Ordinal)) return false;
             return true;
+        }
+
+        /// <summary>
+        /// WooCommerce webhooks rebuild all lines via <see cref="OrderStorage.ReplaceOrderItemsAsync"/>, which would drop
+        /// <see cref="OrderItem.PickedQuantity"/> / picked line totals. Copy them from the previous rows when line identity matches.
+        /// </summary>
+        private static void MergePickingStateIntoWooCommerceReplacementItems(
+            List<OrderItem> newItems,
+            List<OrderItem>? previousItemsOrdered)
+        {
+            if (newItems.Count == 0 || previousItemsOrdered == null || previousItemsOrdered.Count == 0)
+                return;
+            var oldOrdered = previousItemsOrdered.OrderBy(i => i.SortOrder).ToList();
+            var n = Math.Min(newItems.Count, oldOrdered.Count);
+            for (var i = 0; i < n; i++)
+            {
+                var line = newItems[i];
+                var prev = oldOrdered[i];
+                if (!SameWooCommerceLineIdentityForPickingMerge(line, prev))
+                    continue;
+                if (!prev.PickedQuantity.HasValue || prev.PickedQuantity.Value <= 0m)
+                    continue;
+                line.PickedQuantity = prev.PickedQuantity;
+                line.TotalPrice = prev.TotalPrice;
+            }
+        }
+
+        private static bool SameWooCommerceLineIdentityForPickingMerge(OrderItem a, OrderItem b)
+        {
+            if (a.WooCommerceProductId != b.WooCommerceProductId)
+                return false;
+            return (a.WooCommerceVariationId ?? 0) == (b.WooCommerceVariationId ?? 0);
         }
 
         private static string MapWooCommerceStatusToOurs(string? wc)
