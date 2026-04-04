@@ -1224,8 +1224,9 @@ namespace George.Services
                     if (product.WeightConfig != null)
                     {
                         var weightConfig = product.WeightConfig;
-                        metaData.Add(new { key = "_ocwsu_product_weight_units", value = weightConfig.Unit?.Name ?? "" });
-                        metaData.Add(new { key = "ocwsu_product_weight_units_", value = weightConfig.Unit?.Name ?? "" });
+                        var ocwsuWeightUnits = MapOcwsuProductWeightUnits(weightConfig.Unit?.Name);
+                        metaData.Add(new { key = "_ocwsu_product_weight_units", value = ocwsuWeightUnits });
+                        metaData.Add(new { key = "ocwsu_product_weight_units_", value = ocwsuWeightUnits });
                         metaData.Add(new { key = "_ocwsu_display_price_per_100g", value = weightConfig.ShowPricePer100g == true ? "yes" : "no" });
                         metaData.Add(new { key = "ocwsu_display_price_per_100g_", value = weightConfig.ShowPricePer100g == true ? "yes" : "no" });
                         metaData.Add(new { key = "_ocwsu_min_weight", value = weightConfig.StartWeight ?? "" });
@@ -2189,6 +2190,29 @@ namespace George.Services
             // collapse multiple spaces (including Hebrew/RTL spacing issues)
             s = Regex.Replace(s, @"\s+", " ");
             return s;
+        }
+
+        /// <summary>
+        /// OCWSU weighable plugin expects meta <c>_ocwsu_product_weight_units</c> to match radio values: <c>kg</c> or <c>grams</c>.
+        /// Our <see cref="Unit.Name"/> may be <c>g</c>, <c>gram</c>, Hebrew <c>גרם</c>, etc.
+        /// </summary>
+        private static string MapOcwsuProductWeightUnits(string? unitName)
+        {
+            if (string.IsNullOrWhiteSpace(unitName))
+                return "";
+
+            var u = unitName.Trim();
+            var lower = u.ToLowerInvariant();
+            if (lower is "kg" or "kilogram" or "kilograms")
+                return "kg";
+            if (string.Equals(u, "ק\"ג", StringComparison.Ordinal))
+                return "kg";
+            if (string.Equals(u, "גרם", StringComparison.Ordinal))
+                return "grams";
+            if (lower is "g" or "gram" or "grams")
+                return "grams";
+
+            return u;
         }
 
         /// <summary>
