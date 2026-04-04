@@ -156,6 +156,7 @@ namespace George.Services
             }
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken);
             var loaded = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken);
+            await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loaded, cancelToken).ConfigureAwait(false);
             await TrySendNewOrderCustomerSmsAsync(loaded!, cancelToken).ConfigureAwait(false);
             if (loaded != null)
                 await TryEnqueueNewOrderAutoPrintAsync(loaded, cancelToken).ConfigureAwait(false);
@@ -407,6 +408,7 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.ItemNotFound);
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "order update", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
+            await TryApplyCompletionInventoryWhenOrderCompletedAsync(orderId, previousStatus, loaded, cancelToken).ConfigureAwait(false);
             if (loaded != null &&
                 !string.Equals(previousStatus, "Ready", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(loaded.Status, "Ready", StringComparison.OrdinalIgnoreCase))
@@ -508,9 +510,26 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.ItemNotFound, "Order not found.");
             if (string.Equals(order.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
                 return CreateResponse(response, StatusCode.InvalidRequest, "Cannot remove items from a cancelled order.");
+            var line = order.OrderItem?.FirstOrDefault(i => i.Id == orderItemId && !i.IsDeleted);
+            var restoreProductId = line?.ProductId;
+            var restoreVariantId = line?.ProductVariantId;
+            var restorePicked = line?.PickedQuantity;
+
             var updated = await _orderStorage.RemoveOrderItemAsync(orderId, orderItemId, cancelToken);
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound, "Order item not found.");
+
+            if (restoreProductId is > 0 && restorePicked is > 0m)
+            {
+                await _productStorage
+                    .ApplyPickingConsumptionDeltaAsync(
+                        restoreProductId.Value,
+                        restoreVariantId,
+                        -restorePicked.Value,
+                        cancelToken)
+                    .ConfigureAwait(false);
+            }
+
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "remove item", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(updated);
             return response;
@@ -537,6 +556,23 @@ namespace George.Services
                 .ToList();
             var updated = await _orderStorage.UpdatePickingAsync(orderId, updates, cancelToken);
             if (updated == null) return CreateResponse(response, StatusCode.ItemNotFound);
+
+            foreach (var (orderItemId, newPicked, _) in updates)
+            {
+                var line = orderCheck.OrderItem?.FirstOrDefault(i => i.Id == orderItemId && !i.IsDeleted);
+                if (line == null || line.ProductId is not > 0) continue;
+                var oldPicked = line.PickedQuantity ?? 0m;
+                var newPickedVal = newPicked ?? 0m;
+                var consumptionDelta = newPickedVal - oldPicked;
+                if (consumptionDelta == 0m) continue;
+                await _productStorage
+                    .ApplyPickingConsumptionDeltaAsync(
+                        line.ProductId.Value,
+                        line.ProductVariantId,
+                        consumptionDelta,
+                        cancelToken)
+                    .ConfigureAwait(false);
+            }
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             var forResponse = loaded ?? updated;
             if (forResponse != null)
@@ -1036,6 +1072,7 @@ namespace George.Services
             var (wooBillingNotes, wooCustomerNote) = ResolveWooCommerceNotesForPersistence(payload);
             if (existing != null)
             {
+                var previousWooStatus = existing.Status;
                 var wcMainAddr = JoinMainDeliveryLine(payload.ShippingAddress?.Street, payload.ShippingAddress?.City, payload.ShippingAddress?.Zip);
                 var updateCustomer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
                     siteId, site.AccountId, payload.Customer?.Phone ?? "", payload.Customer?.Name ?? "", email: payload.Customer?.Email,
@@ -1110,6 +1147,7 @@ namespace George.Services
                     updated.OrderItem?.OrderBy(i => i.SortOrder).ToList());
                 await _orderStorage.ReplaceOrderItemsAsync(existing.Id, updateItems, cancelToken).ConfigureAwait(false);
                 var loaded = await _orderStorage.GetOrderByIdAsync(existing.Id, cancelToken).ConfigureAwait(false);
+                await TryApplyCompletionInventoryWhenOrderCompletedAsync(existing.Id, previousWooStatus, loaded, cancelToken).ConfigureAwait(false);
                 response.Data = _mapper.Map<OrderRes>(loaded!);
                 return response;
             }
@@ -1203,6 +1241,7 @@ namespace George.Services
             }
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken).ConfigureAwait(false);
             var loadedOrder = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false);
+            await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loadedOrder, cancelToken).ConfigureAwait(false);
             await TrySendNewOrderCustomerSmsAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
             if (loadedOrder != null)
                 await TryEnqueueNewOrderAutoPrintAsync(loadedOrder, cancelToken).ConfigureAwait(false);
@@ -1797,6 +1836,56 @@ namespace George.Services
             if (a.WooCommerceProductId != b.WooCommerceProductId)
                 return false;
             return (a.WooCommerceVariationId ?? 0) == (b.WooCommerceVariationId ?? 0);
+        }
+
+        /// <summary>
+        /// When an order first reaches <c>Completed</c>, reduce catalog stock for lines that never had <see cref="OrderItem.PickedQuantity"/> set,
+        /// using <see cref="OrderItem.Quantity"/> (ordered amount). Lines with picking use stock updates from <see cref="UpdatePickingAsync"/> only.
+        /// Idempotent via <see cref="Order.CompletionInventoryApplied"/>.
+        /// </summary>
+        private async Task TryApplyCompletionInventoryWhenOrderCompletedAsync(
+            int orderId,
+            string? previousStatus,
+            Order? orderWithItems,
+            CancellationToken cancelToken)
+        {
+            if (orderWithItems == null) return;
+            if (orderWithItems.CompletionInventoryApplied) return;
+            if (!string.Equals(orderWithItems.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (string.Equals(previousStatus, "Completed", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var adjustedLines = await ApplyOrderedQuantityToCatalogForUnpickedLinesAsync(orderWithItems, cancelToken).ConfigureAwait(false);
+            await _orderStorage.SetOrderCompletionInventoryAppliedAsync(orderId, true, cancelToken).ConfigureAwait(false);
+            if (adjustedLines > 0)
+            {
+                _logger.LogInformation(
+                    "Catalog stock adjusted on order completion (ordered qty for lines without picking). orderId={OrderId}, lines={LineCount}",
+                    orderId, adjustedLines);
+            }
+        }
+
+        private async Task<int> ApplyOrderedQuantityToCatalogForUnpickedLinesAsync(Order order, CancellationToken cancelToken)
+        {
+            var n = 0;
+            foreach (var line in order.OrderItem?.Where(i => !i.IsDeleted) ?? Enumerable.Empty<OrderItem>())
+            {
+                if (line.ProductId is not > 0) continue;
+                if (line.PickedQuantity.HasValue)
+                    continue;
+                if (line.Quantity <= 0m) continue;
+                await _productStorage
+                    .ApplyPickingConsumptionDeltaAsync(
+                        line.ProductId.Value,
+                        line.ProductVariantId,
+                        line.Quantity,
+                        cancelToken)
+                    .ConfigureAwait(false);
+                n++;
+            }
+
+            return n;
         }
 
         private static string MapWooCommerceStatusToOurs(string? wc)

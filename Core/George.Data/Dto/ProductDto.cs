@@ -12,7 +12,7 @@ namespace George.Data.Dto
         public Dictionary<string, string>? OptionValues { get; set; }
         public decimal? Price { get; set; }
         public decimal? SalePrice { get; set; }
-        public int? StockQuantity { get; set; }
+        public decimal? StockQuantity { get; set; }
         public string? Sku { get; set; }
         public decimal? Weight { get; set; }
     }

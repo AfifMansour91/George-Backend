@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -56,7 +56,8 @@ public partial class Product
 
     public int? StockManagementTypeId { get; set; }
 
-    public int? StockQuantity { get; set; }
+    [Column(TypeName = "decimal(18, 4)")]
+    public decimal? StockQuantity { get; set; }
 
     public int? StockStatusId { get; set; }
 
@@ -103,6 +104,9 @@ public partial class Product
     public int? WooCommerceId { get; set; }
 
     public int? DisplayOrder { get; set; }
+
+    /// <summary>When stock is managed per variation: if true, use quantity per variation in Woo; if false, in/out only (no per-variation manage_stock quantity).</summary>
+    public bool? VariationStockByQuantity { get; set; }
 
     [ForeignKey("BrandId")]
     [InverseProperty("Product")]

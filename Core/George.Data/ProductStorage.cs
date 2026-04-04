@@ -376,6 +376,7 @@ namespace George.Data
             dbProduct.VisibilityId = updated.VisibilityId;
             dbProduct.StockManagementTypeId = updated.StockManagementTypeId;
             dbProduct.StockStatusId = updated.StockStatusId;
+            dbProduct.VariationStockByQuantity = updated.VariationStockByQuantity;
             dbProduct.ShippingClassId = updated.ShippingClassId;
             dbProduct.SetupTypeId = updated.SetupTypeId;
             dbProduct.WeightConfigId = updated.WeightConfigId;
@@ -1024,6 +1025,62 @@ namespace George.Data
                 var weightConfig = await CreateOrUpdateWeightConfigAsync(req.WeightConfig, cancelToken);
                 product.WeightConfigId = weightConfig?.Id;
             }
+        }
+
+        /// <summary>
+        /// Applies catalog stock change from picking: <c>StockQuantity -= consumptionDelta</c>.
+        /// <paramref name="consumptionDelta"/> is (new picked − old picked): more picked reduces stock; negative restores stock.
+        /// For weight lines, picked values are kg; for unit lines, unit count. Skips when stock is not quantity-managed.
+        /// </summary>
+        public async Task ApplyPickingConsumptionDeltaAsync(
+            int productId,
+            int? productVariantId,
+            decimal consumptionDelta,
+            CancellationToken cancelToken)
+        {
+            if (consumptionDelta == 0m) return;
+
+            var product = await _dbContext.Product
+                .Include(p => p.StockManagementType)
+                .Include(p => p.ProductVariant)
+                .FirstOrDefaultAsync(p => p.Id == productId && !p.IsDeleted, cancelToken)
+                .ConfigureAwait(false);
+            if (product == null) return;
+
+            var smt = product.StockManagementType?.Name;
+            if (string.Equals(smt, "status", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var perVariationQty = string.Equals(smt, "variation", StringComparison.OrdinalIgnoreCase)
+                && product.VariationStockByQuantity == true
+                && productVariantId.HasValue;
+
+            if (perVariationQty)
+            {
+                var v = product.ProductVariant?.FirstOrDefault(x => x.Id == productVariantId && !x.IsDeleted);
+                if (v == null) return;
+                v.StockQuantity = SubtractConsumptionFromStock(v.StockQuantity, consumptionDelta);
+            }
+            else if (string.Equals(smt, "quantity", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(smt, "variation", StringComparison.OrdinalIgnoreCase))
+            {
+                product.StockQuantity = SubtractConsumptionFromStock(product.StockQuantity, consumptionDelta);
+            }
+            else
+            {
+                return;
+            }
+
+            product.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+        }
+
+        private static decimal? SubtractConsumptionFromStock(decimal? stock, decimal consumptionDelta)
+        {
+            var cur = stock ?? 0m;
+            var next = cur - consumptionDelta;
+            if (next < 0m) next = 0m;
+            return next;
         }
 
     }

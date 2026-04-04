@@ -149,6 +149,15 @@ namespace George.Data
             return db;
         }
 
+        public async Task SetOrderCompletionInventoryAppliedAsync(int orderId, bool value, CancellationToken cancelToken)
+        {
+            var o = await _dbContext.Order.FirstOrDefaultAsync(x => x.Id == orderId && !x.IsDeleted, cancelToken).ConfigureAwait(false);
+            if (o == null) return;
+            o.CompletionInventoryApplied = value;
+            o.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+        }
+
         /// <summary>Add line items to an existing order (e.g. from picking "הוסף פריט").</summary>
         public async Task<Order?> AddOrderItemsAsync(int orderId, List<OrderItem> newItems, CancellationToken cancelToken)
         {

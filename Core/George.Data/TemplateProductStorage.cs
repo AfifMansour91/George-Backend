@@ -588,7 +588,9 @@ namespace George.Data
                     ImageUrl = variant.ImageUrl,
                     Price = variant.Price,
                     SalePrice = variant.SalePrice,
-                    StockQuantity = variant.StockQuantity,
+                    StockQuantity = variant.StockQuantity == null
+                        ? null
+                        : (int)Math.Truncate(variant.StockQuantity.Value),
                     Sku = string.IsNullOrWhiteSpace(variant.Sku) ? null : variant.Sku,
                     Weight = variant.Weight,
                     IsDeleted = false

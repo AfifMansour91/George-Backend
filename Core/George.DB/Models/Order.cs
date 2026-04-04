@@ -167,6 +167,9 @@ public partial class Order
     [Precision(0)]
     public DateTime? PaidAt { get; set; }
 
+    /// <summary>When true, one-time catalog stock deduction for lines without saved picking has already run when the order reached Completed.</summary>
+    public bool CompletionInventoryApplied { get; set; }
+
     /// <summary>Raw JSON of <c>cardcomPayment</c> from WooCommerce <c>POST /WooCommerce/OrderPayment</c>.</summary>
     [Column(TypeName = "nvarchar(max)")]
     public string? CardcomPaymentJson { get; set; }

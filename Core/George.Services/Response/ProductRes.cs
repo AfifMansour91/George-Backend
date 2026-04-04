@@ -13,7 +13,7 @@ namespace George.Services.Response
         public Dictionary<string, string>? OptionValues { get; set; }
         public decimal? Price { get; set; }
         public decimal? SalePrice { get; set; }
-        public int? StockQuantity { get; set; }
+        public decimal? StockQuantity { get; set; }
         public string? Sku { get; set; }
         public decimal? Weight { get; set; }
     }
@@ -50,8 +50,10 @@ namespace George.Services.Response
         public DateTime? SalePriceEndDate { get; set; }
         public decimal? CostPrice { get; set; }
         public string? Sku { get; set; }
-        public string? StockManagementType { get; set; } // "quantity" | "status"
-        public int? StockQuantity { get; set; }
+        public string? StockManagementType { get; set; } // "quantity" | "status" | "variation"
+        public decimal? StockQuantity { get; set; }
+        /// <summary>When stock per variation: whether each variation uses quantity (true) or in/out only (false).</summary>
+        public bool? VariationStockByQuantity { get; set; }
         public string? StockStatus { get; set; } // "in_stock" | "out_of_stock" | "on_backorder"
         public decimal? Weight { get; set; }
         public string? ShippingClass { get; set; } // "default" | "heavy" | "fragile"

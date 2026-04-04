@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -22,7 +22,8 @@ public partial class ProductVariant
     [Column(TypeName = "decimal(18, 2)")]
     public decimal? SalePrice { get; set; }
 
-    public int? StockQuantity { get; set; }
+    [Column(TypeName = "decimal(18, 4)")]
+    public decimal? StockQuantity { get; set; }
 
     [StringLength(100)]
     public string? Sku { get; set; }

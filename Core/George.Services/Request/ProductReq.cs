@@ -16,7 +16,7 @@ namespace George.Services.Request
         public Dictionary<string, string>? OptionValues { get; set; }
         public decimal? Price { get; set; }
         public decimal? SalePrice { get; set; }
-        public int? StockQuantity { get; set; }
+        public decimal? StockQuantity { get; set; }
         public string? Sku { get; set; }
         public decimal? Weight { get; set; }
     }
@@ -49,8 +49,10 @@ namespace George.Services.Request
         public decimal? CostPrice { get; set; }
         public string? Sku { get; set; }
         public string? StockManagementType { get; set; }
-        public int? StockQuantity { get; set; }
+        public decimal? StockQuantity { get; set; }
         public string? StockStatus { get; set; }
+        /// <summary>When StockManagementType is variation: true = track quantity per variation; false = in/out only (default).</summary>
+        public bool? VariationStockByQuantity { get; set; }
         public decimal? Weight { get; set; }
         public string? ShippingClass { get; set; }
         public List<ProductOptionReq>? ProductOptions { get; set; }

@@ -1253,11 +1253,15 @@ namespace George.Services
                         metaData.Add(new { key = "ocwsu_unit_weight_type_", value = unitWeightTypeForWoo });
                         metaData.Add(new { key = "_ocwsu_unit_weight", value = weightConfig.UnitWeight ?? "" });
                         metaData.Add(new { key = "ocwsu_unit_weight_", value = weightConfig.UnitWeight ?? "" });
-                        // WooCommerce expects one weight option per line; we store comma-separated
+                        // WooCommerce expects one weight option per line; we store comma-separated.
+                        // Inactive weights may follow "##" (admin quick stock); never send those to Woo.
                         var weightOptionsRaw = weightConfig.WeightOptions ?? "";
-                        var unitWeightOptionsForWoo = string.IsNullOrWhiteSpace(weightOptionsRaw)
+                        var weightOptionsActiveOnly = weightOptionsRaw.Contains("##", StringComparison.Ordinal)
+                            ? weightOptionsRaw.Split("##", 2, StringSplitOptions.TrimEntries)[0]
+                            : weightOptionsRaw;
+                        var unitWeightOptionsForWoo = string.IsNullOrWhiteSpace(weightOptionsActiveOnly)
                             ? ""
-                            : string.Join("\n", weightOptionsRaw.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).Where(s => s.Length > 0));
+                            : string.Join("\n", weightOptionsActiveOnly.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).Where(s => s.Length > 0));
                         metaData.Add(new { key = "_ocwsu_unit_weight_options", value = unitWeightOptionsForWoo });
                         metaData.Add(new { key = "ocwsu_unit_weight_options_", value = unitWeightOptionsForWoo });
                         var getWeightFromVariation = weightConfig.WeightByVariant == true ? "yes" : "no";
@@ -1823,8 +1827,9 @@ namespace George.Services
 
             var usedWooVariationIds = new HashSet<int>();
 
-            // When stock is not managed per variation ("במלאי" / "מלאי לפי כמות"), variations must not have their own stock column so they inherit from product.
+            // When stock is not managed per variation, variations inherit product stock. When "variation" but VariationStockByQuantity is false, use in/out per variation only (no Woo manage_stock on variation).
             var stockManagedPerVariation = string.Equals(product.StockManagementType?.Name, "variation", StringComparison.OrdinalIgnoreCase);
+            var variationTrackQuantity = stockManagedPerVariation && product.VariationStockByQuantity == true;
             var productStockStatus = "instock";
             if (product.StockStatus?.Name == "out_of_stock" || product.Status?.Name == "outOfStock")
                 productStockStatus = "outofstock";
@@ -1891,13 +1896,13 @@ namespace George.Services
                         ["regular_price"] = variant.Price?.ToString() ?? product.Price?.ToString() ?? "0",
                         ["sale_price"] = variant.SalePrice?.ToString() ?? "",
                         ["sku"] = variantWooSku,
-                        ["manage_stock"] = stockManagedPerVariation,
+                        ["manage_stock"] = variationTrackQuantity,
                         ["stock_status"] = variantStockStatus,
                         //["weight"] = variationWeightForWoo,
                         ["weight"] = variant.Weight?.ToString() ?? "",
                         ["attributes"] = variationAttributesList
                     };
-                    if (stockManagedPerVariation)
+                    if (variationTrackQuantity)
                         wooVariation["stock_quantity"] = variant.StockQuantity ?? 0;
                     if (!string.IsNullOrEmpty(variant.ImageUrl))
                         wooVariation["image"] = new { src = variant.ImageUrl };
