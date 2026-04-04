@@ -1828,7 +1828,7 @@ namespace George.Services
 
             var usedWooVariationIds = new HashSet<int>();
 
-            // When stock is not managed per variation, variations inherit product stock. When "variation" but VariationStockByQuantity is false, use in/out per variation only (no Woo manage_stock on variation).
+            // Per-variation quantity in Woo only when "מלאי לפי וריאציה" (VariationStockByQuantity). Otherwise do not derive status from variant.StockQuantity — those columns are unused and are often zero, which wrongly marked all variations out of stock.
             var stockManagedPerVariation = string.Equals(product.StockManagementType?.Name, "variation", StringComparison.OrdinalIgnoreCase);
             var variationTrackQuantity = stockManagedPerVariation && product.VariationStockByQuantity == true;
             var productStockStatus = "instock";
@@ -1841,7 +1841,7 @@ namespace George.Services
             {
                 try
                 {
-                    var variantStockStatus = stockManagedPerVariation
+                    var variantStockStatus = variationTrackQuantity
                         ? ((variant.StockQuantity ?? 0) > 0 ? "instock" : "outofstock")
                         : productStockStatus;
 
