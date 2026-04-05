@@ -1378,7 +1378,30 @@ namespace George.Services
 
                     wooProduct["attributes"] = attributes;
 
-
+                    // Variable product: parent-level inventory when stock is managed at product level (not per variation).
+                    // WooCommerce: "Settings below apply to all variations without manual stock management enabled."
+                    // Without this, _manage_stock stays unchecked and _stock wrong in WP admin despite app showing quantity.
+                    var smt = product.StockManagementType?.Name;
+                    if (string.Equals(smt, "quantity", StringComparison.OrdinalIgnoreCase))
+                    {
+                        wooProduct["manage_stock"] = true;
+                        wooProduct["stock_quantity"] = product.StockQuantity ?? 0;
+                        wooProduct["stock_status"] = stockStatus;
+                        wooProduct["backorders"] = product.StockStatus?.Name == "on_backorder" ? "yes" : "no";
+                    }
+                    else if (string.Equals(smt, "status", StringComparison.OrdinalIgnoreCase))
+                    {
+                        wooProduct["manage_stock"] = false;
+                        wooProduct["stock_status"] = stockStatus;
+                        wooProduct["backorders"] = product.StockStatus?.Name == "on_backorder" ? "yes" : "no";
+                    }
+                    else
+                    {
+                        // variation-level stock: parent does not track quantity; SyncProductVariantsAsync sets each variation.
+                        wooProduct["manage_stock"] = false;
+                        wooProduct["stock_status"] = stockStatus;
+                        wooProduct["backorders"] = product.StockStatus?.Name == "on_backorder" ? "yes" : "no";
+                    }
                 }
 
                 // Create or update product
