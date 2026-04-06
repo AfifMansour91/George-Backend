@@ -134,8 +134,7 @@ namespace George.Services
             order.CreationTime = DateTime.UtcNow;
             order.CreationUserId = AuthUser.Id;
             order.IsDeleted = false;
-            var todayUtc = DateTime.UtcNow.Date;
-            NormalizeOrderDeliveryAndPickupDates(order, todayUtc);
+            NormalizeOrderDeliveryAndPickupDates(order);
             var items = new List<OrderItem>();
             var productCache = new Dictionary<int, Product?>();
             for (var i = 0; i < req.Items.Count; i++)
@@ -664,11 +663,15 @@ namespace George.Services
         /// <see cref="ApplyShippingInfoToOrder"/> sets only <see cref="Order.PickupDate"/> for pickup or only <see cref="Order.DeliveryDate"/> for shipping.
         /// Copy the scheduled date to the sibling field before falling back to today so pickup orders do not keep <see cref="Order.DeliveryDate"/> empty and then get forced to "today".
         /// </summary>
-        private static void NormalizeOrderDeliveryAndPickupDates(Order order, DateTime todayUtc)
+        /// <remarks>
+        /// "Today" for the fallback uses Israel calendar date (Asia/Jerusalem), not UTC midnight, so late-night local orders
+        /// still match the shop-manager "delivery today" filter which uses the manager's local calendar date.
+        /// </remarks>
+        private static void NormalizeOrderDeliveryAndPickupDates(Order order)
         {
             var pickup = ToUnspecifiedCalendarDate(order.PickupDate);
             var delivery = ToUnspecifiedCalendarDate(order.DeliveryDate);
-            var todayCal = DateTime.SpecifyKind(todayUtc.Date, DateTimeKind.Unspecified);
+            var todayCal = GetIsraelCalendarTodayUnspecified();
 
             if (!delivery.HasValue)
                 delivery = pickup ?? todayCal;
@@ -677,6 +680,22 @@ namespace George.Services
 
             order.PickupDate = pickup;
             order.DeliveryDate = delivery;
+        }
+
+        /// <summary>Calendar date (date-only, Unspecified kind) in Israel — aligns default delivery/pickup with Hebrew storefront day boundary.</summary>
+        private static DateTime GetIsraelCalendarTodayUnspecified()
+        {
+            try
+            {
+                var tzId = OperatingSystem.IsWindows() ? "Israel Standard Time" : "Asia/Jerusalem";
+                var tz = TimeZoneInfo.FindSystemTimeZoneById(tzId);
+                var israelNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
+                return DateTime.SpecifyKind(israelNow.Date, DateTimeKind.Unspecified);
+            }
+            catch
+            {
+                return DateTime.SpecifyKind(DateTime.UtcNow.Date, DateTimeKind.Unspecified);
+            }
         }
 
         private static DateTime? ToUnspecifiedCalendarDate(DateTime? value) =>
@@ -1067,7 +1086,6 @@ namespace George.Services
             var status = MapWooCommerceStatusToOurs(payload.Status);
             var externalId = !string.IsNullOrWhiteSpace(payload.OrderNumber) ? payload.OrderNumber : payload.ExternalOrderId?.ToString() ?? "";
             var existing = await _orderStorage.GetOrderBySiteAndExternalIdAsync(siteId, externalId, cancelToken).ConfigureAwait(false);
-            var todayUtc = DateTime.UtcNow.Date;
             var wcRequestJson = SerializeWooCommerceOrderPayloadForStorage(payload);
             var (wooBillingNotes, wooCustomerNote) = ResolveWooCommerceNotesForPersistence(payload);
             if (existing != null)
@@ -1097,7 +1115,7 @@ namespace George.Services
                     o.SubTotal = (payload.OrderTotal ?? o.SubTotal) - (payload.ShippingTotal ?? 0);
                     o.UpdatedDate = DateTime.UtcNow;
                     ApplyShippingInfoToOrder(o, payload.ShippingInfo, payload.ShippingLabel);
-                    NormalizeOrderDeliveryAndPickupDates(o, todayUtc);
+                    NormalizeOrderDeliveryAndPickupDates(o);
                 }, cancelToken).ConfigureAwait(false);
                 if (updated == null)
                     return CreateResponse(response, StatusCode.ItemNotFound);
@@ -1220,7 +1238,7 @@ namespace George.Services
             order.CreationUserId = null;
             order.WooCommerceRequestJson = wcRequestJson;
             ApplyShippingInfoToOrder(order, payload.ShippingInfo, payload.ShippingLabel);
-            NormalizeOrderDeliveryAndPickupDates(order, todayUtc);
+            NormalizeOrderDeliveryAndPickupDates(order);
             var items = new List<OrderItem>();
             var wooProductCache = new Dictionary<int, Product?>();
             for (var i = 0; i < req.Items.Count; i++)
