@@ -49,6 +49,27 @@ public class CustomerService : ServiceBase
         };
     }
 
+    private static List<string>? BuildAddressLinesFromCustomer(Customer c)
+    {
+        var lines = new List<string>();
+        if (!string.IsNullOrWhiteSpace(c.DeliveryStreet))
+            lines.Add(c.DeliveryStreet.Trim());
+        if (!string.IsNullOrWhiteSpace(c.City))
+            lines.Add(c.City.Trim());
+        var tail = new List<string>();
+        if (!string.IsNullOrWhiteSpace(c.DeliveryApartment))
+            tail.Add(c.DeliveryApartment.Trim());
+        if (!string.IsNullOrWhiteSpace(c.DeliveryFloor))
+            tail.Add(c.DeliveryFloor.Trim());
+        if (!string.IsNullOrWhiteSpace(c.DeliveryEntranceCode))
+            tail.Add(c.DeliveryEntranceCode.Trim());
+        if (tail.Count > 0)
+            lines.Add(string.Join(" · ", tail));
+        if (lines.Count == 0 && !string.IsNullOrWhiteSpace(c.DefaultAddress))
+            lines.Add(c.DefaultAddress.Trim());
+        return lines.Count == 0 ? null : lines;
+    }
+
     private static CustomerDetailRes MapCustomerToDetailRes(Customer c, int orderCount, decimal totalRevenue, int? lastOrderId, DateTime? lastOrderAt, int averageReturnDays)
     {
         return new CustomerDetailRes
@@ -66,7 +87,11 @@ public class CustomerService : ServiceBase
             IsReturning = orderCount > 1,
             LastOrderId = lastOrderId,
             DefaultAddress = c.DefaultAddress,
-            AddressLines = string.IsNullOrWhiteSpace(c.DefaultAddress) ? null : new List<string> { c.DefaultAddress },
+            DeliveryStreet = c.DeliveryStreet,
+            DeliveryApartment = c.DeliveryApartment,
+            DeliveryFloor = c.DeliveryFloor,
+            DeliveryEntranceCode = c.DeliveryEntranceCode,
+            AddressLines = BuildAddressLinesFromCustomer(c),
             MarketingEmail = c.MarketingEmail,
             MarketingSms = c.MarketingSms,
             LastOrderDate = lastOrderAt?.ToString("dd/MM/yyyy"),

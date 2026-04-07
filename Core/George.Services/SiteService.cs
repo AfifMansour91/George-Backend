@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using George.Common;
 using George.Data;
 using George.DB;

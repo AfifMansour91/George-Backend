@@ -22,7 +22,7 @@ public class CustomerStorage : StorageBase
 
     private IQueryable<Customer> CustomerSet => _dbContext.Set<Customer>().Where(c => !c.IsDeleted);
 
-    /// <summary>Find customer for this site by normalized phone, or create if not found. Used when creating an order so every order has a linked customer. When marketingSms is provided, it is set on create or update so the customer record reflects consent.</summary>
+    /// <summary>Find customer for this site by normalized phone, or create if not found. Used when creating an order so every order has a linked customer. When marketingSms is provided, it is set on create or update so the customer record reflects consent. Structured delivery fields are persisted when non-null (same semantics as city/defaultAddress).</summary>
     public async Task<Customer> GetOrCreateCustomerByPhoneAsync(
         int siteId,
         int accountId,
@@ -33,6 +33,10 @@ public class CustomerStorage : StorageBase
         string? defaultAddress,
         string? notes,
         bool? marketingSms = null,
+        string? deliveryStreet = null,
+        string? deliveryApartment = null,
+        string? deliveryFloor = null,
+        string? deliveryEntranceCode = null,
         CancellationToken cancelToken = default)
     {
         var normalized = NormalizePhone(phone);
@@ -51,6 +55,10 @@ public class CustomerStorage : StorageBase
                 if (email != null && existing.Email != email) { existing.Email = email; updated = true; }
                 if (city != null && existing.City != city) { existing.City = city; updated = true; }
                 if (defaultAddress != null && existing.DefaultAddress != defaultAddress) { existing.DefaultAddress = defaultAddress; updated = true; }
+                if (deliveryStreet != null && existing.DeliveryStreet != deliveryStreet) { existing.DeliveryStreet = deliveryStreet; updated = true; }
+                if (deliveryApartment != null && existing.DeliveryApartment != deliveryApartment) { existing.DeliveryApartment = deliveryApartment; updated = true; }
+                if (deliveryFloor != null && existing.DeliveryFloor != deliveryFloor) { existing.DeliveryFloor = deliveryFloor; updated = true; }
+                if (deliveryEntranceCode != null && existing.DeliveryEntranceCode != deliveryEntranceCode) { existing.DeliveryEntranceCode = deliveryEntranceCode; updated = true; }
                 if (notes != null && existing.Notes != notes) { existing.Notes = notes; updated = true; }
                 if (marketingSms.HasValue && existing.MarketingSms != marketingSms.Value) { existing.MarketingSms = marketingSms.Value; updated = true; }
                 if (updated)
@@ -73,6 +81,10 @@ public class CustomerStorage : StorageBase
                 Email = email,
                 Phone = phone,
                 City = city,
+                DeliveryStreet = deliveryStreet,
+                DeliveryApartment = deliveryApartment,
+                DeliveryFloor = deliveryFloor,
+                DeliveryEntranceCode = deliveryEntranceCode,
                 DefaultAddress = defaultAddress,
                 Notes = notes,
                 MarketingApproval = false,
@@ -156,7 +168,11 @@ public class CustomerStorage : StorageBase
                 (r.Customer.Phone != null && r.Customer.Phone.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
                 (r.Customer.Email != null && r.Customer.Email.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
                 (r.Customer.City != null && r.Customer.City.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
-                (r.Customer.DefaultAddress != null && r.Customer.DefaultAddress.Contains(term, StringComparison.OrdinalIgnoreCase))).ToList();
+                (r.Customer.DefaultAddress != null && r.Customer.DefaultAddress.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                (r.Customer.DeliveryStreet != null && r.Customer.DeliveryStreet.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                (r.Customer.DeliveryApartment != null && r.Customer.DeliveryApartment.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                (r.Customer.DeliveryFloor != null && r.Customer.DeliveryFloor.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                (r.Customer.DeliveryEntranceCode != null && r.Customer.DeliveryEntranceCode.Contains(term, StringComparison.OrdinalIgnoreCase))).ToList();
         }
 
         if (filter?.Phone?.Trim() is { } phoneFilter)

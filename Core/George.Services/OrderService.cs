@@ -115,17 +115,21 @@ namespace George.Services
                 req.AccountId = site.AccountId;
             }
 
-            // Ensure customer exists for this site (find by SiteId + phone, or create); then link order to that customer. Pass marketingSms so it is persisted on the customer.
+            // Ensure customer exists for this site (find by SiteId + phone, or create); then link order to that customer. Pass marketingSms so it is persisted on the customer. Persist full delivery address on Customer (structured + combined line).
             var customer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
                 req.SiteId,
                 req.AccountId,
                 req.CustomerPhone,
                 req.CustomerName!,
                 email: req.CustomerEmail,
-                city: null,
+                city: req.DeliveryCity,
                 defaultAddress: BuildCustomerDefaultDeliveryLine(req),
                 notes: null,
                 marketingSms: req.MarketingSms,
+                deliveryStreet: req.DeliveryStreet,
+                deliveryApartment: req.DeliveryApartment,
+                deliveryFloor: req.DeliveryFloor,
+                deliveryEntranceCode: req.DeliveryEntranceCode,
                 cancelToken).ConfigureAwait(false);
 
             var order = _mapper.Map<Order>(req);
@@ -407,6 +411,29 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.ItemNotFound);
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "order update", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
+            if (loaded != null && loaded.CustomerId is int customerId && customerId > 0)
+            {
+                var touchDelivery = req.DeliveryStreet != null || req.DeliveryCity != null || req.DeliveryApartment != null ||
+                    req.DeliveryFloor != null || req.DeliveryEntranceCode != null || req.DeliveryAddress != null;
+                if (touchDelivery)
+                {
+                    await _customerStorage.GetOrCreateCustomerByPhoneAsync(
+                        loaded.SiteId,
+                        loaded.AccountId,
+                        loaded.CustomerPhone,
+                        loaded.CustomerName ?? "",
+                        email: loaded.CustomerEmail,
+                        city: loaded.DeliveryCity,
+                        defaultAddress: JoinMainDeliveryLine(loaded.DeliveryStreet, loaded.DeliveryCity) ?? NullIfWhiteSpace(loaded.DeliveryAddress),
+                        notes: null,
+                        marketingSms: null,
+                        deliveryStreet: loaded.DeliveryStreet,
+                        deliveryApartment: loaded.DeliveryApartment,
+                        deliveryFloor: loaded.DeliveryFloor,
+                        deliveryEntranceCode: loaded.DeliveryEntranceCode,
+                        cancelToken).ConfigureAwait(false);
+                }
+            }
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(orderId, previousStatus, loaded, cancelToken).ConfigureAwait(false);
             if (loaded != null &&
                 !string.Equals(previousStatus, "Ready", StringComparison.OrdinalIgnoreCase) &&
@@ -1092,9 +1119,12 @@ namespace George.Services
             {
                 var previousWooStatus = existing.Status;
                 var wcMainAddr = JoinMainDeliveryLine(payload.ShippingAddress?.Street, payload.ShippingAddress?.City, payload.ShippingAddress?.Zip);
+                var sa = payload.ShippingAddress;
                 var updateCustomer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
                     siteId, site.AccountId, payload.Customer?.Phone ?? "", payload.Customer?.Name ?? "", email: payload.Customer?.Email,
-                    city: null, defaultAddress: wcMainAddr, notes: null, marketingSms: null, cancelToken).ConfigureAwait(false);
+                    city: sa?.City, defaultAddress: wcMainAddr, notes: null, marketingSms: null,
+                    deliveryStreet: sa?.Street, deliveryApartment: sa?.Apartment, deliveryFloor: sa?.Floor, deliveryEntranceCode: sa?.EntranceCode,
+                    cancelToken).ConfigureAwait(false);
                 var updated = await _orderStorage.UpdateOrderAsync(existing.Id, o =>
                 {
                     o.Status = status;
@@ -1224,9 +1254,12 @@ namespace George.Services
                 Items = createItems
             };
             var wcMainAddrForCustomer = JoinMainDeliveryLine(payload.ShippingAddress?.Street, payload.ShippingAddress?.City, payload.ShippingAddress?.Zip);
+            var saNew = payload.ShippingAddress;
             var customer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
                 req.SiteId, req.AccountId, req.CustomerPhone, req.CustomerName ?? "", email: req.CustomerEmail,
-                city: null, defaultAddress: wcMainAddrForCustomer, notes: null, marketingSms: null, cancelToken).ConfigureAwait(false);
+                city: saNew?.City, defaultAddress: wcMainAddrForCustomer, notes: null, marketingSms: null,
+                deliveryStreet: saNew?.Street, deliveryApartment: saNew?.Apartment, deliveryFloor: saNew?.Floor, deliveryEntranceCode: saNew?.EntranceCode,
+                cancelToken).ConfigureAwait(false);
             var order = _mapper.Map<Order>(req);
             ApplyWooCommerceShippingAddressToOrder(order, payload.ShippingAddress);
             order.CustomerId = customer.Id;

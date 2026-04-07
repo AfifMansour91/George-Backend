@@ -33,6 +33,19 @@ public partial class Customer
     [StringLength(200)]
     public string? City { get; set; }
 
+    /// <summary>Street and building number (mirrors <see cref="Order.DeliveryStreet"/>).</summary>
+    [StringLength(400)]
+    public string? DeliveryStreet { get; set; }
+
+    [StringLength(64)]
+    public string? DeliveryApartment { get; set; }
+
+    [StringLength(32)]
+    public string? DeliveryFloor { get; set; }
+
+    [StringLength(64)]
+    public string? DeliveryEntranceCode { get; set; }
+
     [StringLength(500)]
     public string? DefaultAddress { get; set; }
 

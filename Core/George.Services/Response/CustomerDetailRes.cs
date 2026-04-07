@@ -4,6 +4,11 @@ namespace George.Services.Response;
 public class CustomerDetailRes : CustomerRes
 {
     public string? DefaultAddress { get; set; }
+    /// <summary>Structured delivery fields (same semantics as order shipping).</summary>
+    public string? DeliveryStreet { get; set; }
+    public string? DeliveryApartment { get; set; }
+    public string? DeliveryFloor { get; set; }
+    public string? DeliveryEntranceCode { get; set; }
     public List<string>? AddressLines { get; set; }
     public bool? MarketingEmail { get; set; }
     public bool? MarketingSms { get; set; }
