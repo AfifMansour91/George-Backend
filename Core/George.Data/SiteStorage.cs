@@ -141,6 +141,7 @@ namespace George.Data
             if (updated.PrepTimeMinutes.HasValue) dbSite.PrepTimeMinutes = updated.PrepTimeMinutes;
             if (updated.ShippingCost.HasValue) dbSite.ShippingCost = updated.ShippingCost;
             if (updated.FreeShippingAbove.HasValue) dbSite.FreeShippingAbove = updated.FreeShippingAbove;
+            if (updated.IsraelCityPickerEnabled.HasValue) dbSite.IsraelCityPickerEnabled = updated.IsraelCityPickerEnabled;
             if (updated.AutoPrintEnabled.HasValue) dbSite.AutoPrintEnabled = updated.AutoPrintEnabled;
             if (updated.PrintNewOrderImmediate.HasValue) dbSite.PrintNewOrderImmediate = updated.PrintNewOrderImmediate;
             if (updated.PrintMovedToTreatment.HasValue) dbSite.PrintMovedToTreatment = updated.PrintMovedToTreatment;

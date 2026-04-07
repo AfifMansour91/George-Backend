@@ -34,6 +34,8 @@ namespace George.Services.Request
         public int? PrepTimeMinutes { get; set; }
         public decimal? ShippingCost { get; set; }
         public decimal? FreeShippingAbove { get; set; }
+        /// <summary>When true, manual/phone order uses searchable Israel city picker (default true).</summary>
+        public bool? IsraelCityPickerEnabled { get; set; }
         public bool? AutoPrintEnabled { get; set; }
         public bool? PrintNewOrderImmediate { get; set; }
         public bool? PrintMovedToTreatment { get; set; }

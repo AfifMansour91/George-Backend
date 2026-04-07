@@ -51,6 +51,8 @@ namespace George.Services
             model.CreationUserId = AuthUser.Id;
             model.CreationTime = DateTime.UtcNow;
             model.IsActive = true;
+            if (!model.IsraelCityPickerEnabled.HasValue)
+                model.IsraelCityPickerEnabled = true;
 
             // Create the data in the DB.
             model = await _siteStorage.CreateSiteAsync(model, req.BusinessTypeIds, cancelToken).ConfigureAwait(false);

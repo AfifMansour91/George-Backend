@@ -88,6 +88,9 @@ public partial class Site
     [Column(TypeName = "decimal(18, 2)")]
     public decimal? FreeShippingAbove { get; set; }
 
+    /// <summary>When true, manual/phone order shipping address uses searchable Israel city list. Default true for new sites.</summary>
+    public bool? IsraelCityPickerEnabled { get; set; }
+
     public bool? AutoPrintEnabled { get; set; }
 
     public bool? PrintNewOrderImmediate { get; set; }
