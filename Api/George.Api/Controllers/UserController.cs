@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Net;
 using System.Reflection.Metadata;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using George.Api.Core;
@@ -14,6 +15,7 @@ namespace George.Api.Controllers
 {
 	[Route("[controller]", Name = "User")]
 	[ApiController]
+	[Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme + "," + AutomationApiKeyAuthenticationHandler.SchemeName)]
 	public class UserController : GeorgeControllerBase, IAuthUserProvider
 	{
 		//***********************  Data members/Constants  ***********************//

@@ -3,6 +3,7 @@ using George.Common;
 using George.Common.Request;
 using George.Services;
 using George.Services.Response;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Net;
@@ -11,6 +12,7 @@ namespace George.Api.Controllers
 {
     [Route("[controller]", Name = "Account")]
     [ApiController]
+    [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme + "," + AutomationApiKeyAuthenticationHandler.SchemeName)]
     public class AccountController : GeorgeControllerBase, IAuthUserProvider
     {
         private readonly AccountService _accountSvc;

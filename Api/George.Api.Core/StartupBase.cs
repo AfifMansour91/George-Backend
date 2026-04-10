@@ -300,6 +300,13 @@ namespace George.Api.Core
 					Scheme = "Bearer"
 				});
 
+				options.AddSecurityDefinition("AutomationApiKey", new OpenApiSecurityScheme() {
+					In = ParameterLocation.Header,
+					Description = "Machine-to-machine: same as appsettings Automation:ApiKey. Sends header X-Automation-Api-Key. Acts as Automation:ActAsUserId for audit.",
+					Name = AutomationApiKeyAuthenticationHandler.HeaderName,
+					Type = SecuritySchemeType.ApiKey
+				});
+
 				options.AddSecurityRequirement(new OpenApiSecurityRequirement()
 				{
 					{
@@ -411,6 +418,11 @@ namespace George.Api.Core
 			JwtSecurityTokenHandler.DefaultInboundClaimTypeMap.Clear();
 			var key = Encoding.UTF8.GetBytes(Configuration["Auth:Jwt:Key"]);
 			services.Configure<PrintAgentApiKeyOptions>(o => o.ApiKey = Configuration["PrintAgent:ApiKey"]);
+			services.Configure<AutomationApiKeyOptions>(o => {
+				o.ApiKey = Configuration["Automation:ApiKey"];
+				o.ActAsUserId = Configuration.GetValue<int>("Automation:ActAsUserId");
+				o.ActAsMaster = Configuration.GetValue<bool?>("Automation:ActAsMaster") ?? true;
+			});
 			services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 				.AddJwtBearer(options => 
 				{
@@ -428,6 +440,7 @@ namespace George.Api.Core
 					};
 				})
 				.AddScheme<AuthenticationSchemeOptions, PrintAgentApiKeyAuthenticationHandler>(PrintAgentApiKeyAuthenticationHandler.SchemeName, _ => { })
+				.AddScheme<AuthenticationSchemeOptions, AutomationApiKeyAuthenticationHandler>(AutomationApiKeyAuthenticationHandler.SchemeName, _ => { })
 				.AddScheme<AuthenticationSchemeOptions, WooCommerceApiKeyAuthenticationHandler>(WooCommerceApiKeyAuthenticationHandler.SchemeName, _ => { });
 
 			//// Authorization

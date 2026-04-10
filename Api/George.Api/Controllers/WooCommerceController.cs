@@ -4,6 +4,7 @@ using George.Data;
 using George.Services;
 using George.Services.Request;
 using George.Services.Response;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Net;
@@ -35,8 +36,9 @@ namespace George.Api.Controllers
             _siteStorage = siteStorage;
         }
 
-        /// <summary>Generate a new WooCommerce API key for a site. Requires JWT. Returns the key once – copy it into the WooCommerce plugin.</summary>
+        /// <summary>Generate a new WooCommerce API key for a site. Auth: JWT or machine-to-machine <c>X-Automation-Api-Key</c>. Returns the key once – copy it into the WooCommerce plugin.</summary>
         [HttpPost("GenerateSiteApiKey")]
+        [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme + "," + AutomationApiKeyAuthenticationHandler.SchemeName)]
         [ProducesResponseType(typeof(IApiResponse<object>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GenerateSiteApiKeyAsync([FromQuery] int siteId, CancellationToken cancelToken = default)
         {
