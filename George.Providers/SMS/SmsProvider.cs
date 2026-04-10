@@ -127,10 +127,10 @@ namespace George.Providers
             _logger.LogTrace($"Sending OTP SMS to {phone}");
 
             // Build the otp text
-            //string otpText = $"קוד הכניסה שלך הוא: {otp}";
+            string otpText = $"קוד האימות שלך הוא: {otp}";
 
             // Build the otp text. Append a line with only the code so browsers (Chrome Web OTP, iOS) can offer "tap to fill" from the message.
-            string otpText = $"קוד הכניסה שלך הוא: {otp}\n{otp}";
+            //string otpText = $"קוד הכניסה שלך הוא: {otp}\n{otp}";
 
 
             var phones = new List<string>() { phone };
