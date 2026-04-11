@@ -143,8 +143,9 @@ namespace George.Services
         {
             IApiResponse<bool> response = new ApiResponse<bool>();
 
-            // format the phone number.
-            //request.Phone = PhoneUtils.FormatPhone(request.Phone)!;
+            // Normalize the phone number: strip all non-digit characters so that
+            // formats like 0544-123456, 054-4123456, 054-412-3456 all work.
+            request.Phone = new string(request.Phone.Where(char.IsDigit).ToArray());
 
             // Get the data from the DB.
             User? model = await _userStorage.GetUserByPhoneAsync(request.Phone, cancelToken).ConfigureAwait(false);
@@ -184,6 +185,7 @@ namespace George.Services
             {
                 // Set the override otp directly in the user model
                 model.Otp = overrideOtp;
+				model.OtpExpiration = DateTime.UtcNow.AddMinutes(SysConfig.Data.LockoutExpirationInMin);
                 await _userStorage.UpdateUserAsync(model, cancelToken).ConfigureAwait(false);
                 response.Data = true;
             }
@@ -221,8 +223,9 @@ namespace George.Services
         {
             IApiResponse<AuthRes> response = new ApiResponse<AuthRes>();
 
-            // format the phone number.
-            //request.Phone = PhoneUtils.FormatPhone(request.Phone)!;
+            // Normalize the phone number: strip all non-digit characters so that
+            // formats like 0544-123456, 054-4123456, 054-412-3456 all work.
+            request.Phone = new string(request.Phone.Where(char.IsDigit).ToArray());
 
             // Get the data from the DB.
             User? user = await _userStorage.GetUserByPhoneAsync(request.Phone, cancelToken).ConfigureAwait(false);

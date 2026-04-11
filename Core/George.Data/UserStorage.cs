@@ -9,108 +9,108 @@ using Task = System.Threading.Tasks.Task;
 
 namespace George.Data
 {
-	public class UserStorage : StorageBase
-	{
-		//***********************  Data members/Constants  ***********************//
+    public class UserStorage : StorageBase
+    {
+        //***********************  Data members/Constants  ***********************//
 
 
-		//**************************    Construction    **************************//
-		public UserStorage(GeorgeDBContext dbContext, ILogger<UserStorage> logger) : base(dbContext, logger)
-		{
+        //**************************    Construction    **************************//
+        public UserStorage(GeorgeDBContext dbContext, ILogger<UserStorage> logger) : base(dbContext, logger)
+        {
 
-		}
-
-
-		//*************************    Public Methods    *************************//
-		
-		public async Task<DataListResult<User>> GetUsersAsync(UserFilter filter, PagingExDto paging, CancellationToken cancelToken = default)
-		{
-			DataListResult<User> res = new DataListResult<User>();
-
-			// Build the query.
-			var query = _dbContext.User.Include(u => u.Site).AsNoTracking();
-
-			// Filter
-			if (filter.StatusId.HasValue)
-				query = query.Where(a => a.StatusId == (int)filter.StatusId!);
-			if (filter.Name.HasValue())
-				query = query.Where(a => a.FullName.Contains(filter.Name!));
-			if (filter.SearchTerm != null && filter.SearchTerm.HasValue())
-				query = query.Where(a => a.FullName.Contains(filter.SearchTerm!) || (a.Email != null && a.Email.Contains(filter.SearchTerm!)));
-
-			// Get the total from the DB.
-			if (paging.IncludeTotal)
-				res.Total = await query.CountAsync(cancelToken).ConfigureAwait(false);
-
-			// Add sorting.
-			query = query.OrderBy(a => a.FullName);
-
-			// Add paging.
-			//query = query.Skip(paging.Skip).Take(paging.Take);
-
-			// Add includes.
-
-			// Get the data from the DB.
-			res.Items = await query.ToListAsync(cancelToken).ConfigureAwait(false);
-			if (res.Items.HasValue())
-			{
-				// Check for user dependencies.
-				//List<int> userIds = res.Items.Select(a => a.Id).ToList();
-				//var usersDependencies = await _dbContext.User.AsNoTracking()
-				//		.Where(a => userIds.Contains(a.Id))
-				//		.Select(a => new {
-				//			Id = a.Id
-				//		})
-				//		.ToListAsync(cancelToken);
-				//if(usersDependencies.HasValue())
-				//{
-				//	foreach (var dependency in usersDependencies)
-				//	{
-				//		var user = res.Items.FirstOrDefault(a => a.Id == dependency.Id);
-				//		if (user != null)
-				//			user.HasOpenAlert = dependency.HasOpenAlert;
-				//	}
-				//}
-			}
+        }
 
 
-			return res;
-		}
+        //*************************    Public Methods    *************************//
+
+        public async Task<DataListResult<User>> GetUsersAsync(UserFilter filter, PagingExDto paging, CancellationToken cancelToken = default)
+        {
+            DataListResult<User> res = new DataListResult<User>();
+
+            // Build the query.
+            var query = _dbContext.User.Include(u => u.Site).AsNoTracking();
+
+            // Filter
+            if (filter.StatusId.HasValue)
+                query = query.Where(a => a.StatusId == (int)filter.StatusId!);
+            if (filter.Name.HasValue())
+                query = query.Where(a => a.FullName.Contains(filter.Name!));
+            if (filter.SearchTerm != null && filter.SearchTerm.HasValue())
+                query = query.Where(a => a.FullName.Contains(filter.SearchTerm!) || (a.Email != null && a.Email.Contains(filter.SearchTerm!)));
+
+            // Get the total from the DB.
+            if (paging.IncludeTotal)
+                res.Total = await query.CountAsync(cancelToken).ConfigureAwait(false);
+
+            // Add sorting.
+            query = query.OrderBy(a => a.FullName);
+
+            // Add paging.
+            //query = query.Skip(paging.Skip).Take(paging.Take);
+
+            // Add includes.
+
+            // Get the data from the DB.
+            res.Items = await query.ToListAsync(cancelToken).ConfigureAwait(false);
+            if (res.Items.HasValue())
+            {
+                // Check for user dependencies.
+                //List<int> userIds = res.Items.Select(a => a.Id).ToList();
+                //var usersDependencies = await _dbContext.User.AsNoTracking()
+                //		.Where(a => userIds.Contains(a.Id))
+                //		.Select(a => new {
+                //			Id = a.Id
+                //		})
+                //		.ToListAsync(cancelToken);
+                //if(usersDependencies.HasValue())
+                //{
+                //	foreach (var dependency in usersDependencies)
+                //	{
+                //		var user = res.Items.FirstOrDefault(a => a.Id == dependency.Id);
+                //		if (user != null)
+                //			user.HasOpenAlert = dependency.HasOpenAlert;
+                //	}
+                //}
+            }
 
 
-		//public async Task<User?> GetUserAsync(int id, CancellationToken cancelToken = default)
-		//{
-		//	return await _dbContext.User.AsNoTracking()
-		//					.Include(a => a.SiteUsers)
-		//					.Include(a => a.AccountUsers).ThenInclude(b => b.Account)
-		//					.Include(a => a.UserQualifications)
-		//					.FirstOrDefaultAsync(a => a.Id == id, cancelToken);
-		//}
+            return res;
+        }
 
-		public async Task<User?> GetUserAsync(int id, CancellationToken cancelToken = default)
-		{
-			return await _dbContext.User.AsNoTracking()
-				.Include(u => u.Site)
-				.Where(a => a.Id == id)
-				.FirstOrDefaultAsync(cancelToken);
-		}
 
-		public async Task<User?> GetThinUserAsync(int id, CancellationToken cancelToken = default)
-		{
-			return await _dbContext.User.AsNoTracking()
-							.FirstOrDefaultAsync(a => a.Id == id, cancelToken);
-		}
+        //public async Task<User?> GetUserAsync(int id, CancellationToken cancelToken = default)
+        //{
+        //	return await _dbContext.User.AsNoTracking()
+        //					.Include(a => a.SiteUsers)
+        //					.Include(a => a.AccountUsers).ThenInclude(b => b.Account)
+        //					.Include(a => a.UserQualifications)
+        //					.FirstOrDefaultAsync(a => a.Id == id, cancelToken);
+        //}
 
-		public async Task<User?> GetUserByEmailAsync(string email, CancellationToken cancelToken = default)
-		{
-			// NOTE: Email is a unique index so only one user can exist in the DB.
+        public async Task<User?> GetUserAsync(int id, CancellationToken cancelToken = default)
+        {
+            return await _dbContext.User.AsNoTracking()
+                .Include(u => u.Site)
+                .Where(a => a.Id == id)
+                .FirstOrDefaultAsync(cancelToken);
+        }
 
-			if (!email.HasValue())
-				return null;
+        public async Task<User?> GetThinUserAsync(int id, CancellationToken cancelToken = default)
+        {
+            return await _dbContext.User.AsNoTracking()
+                            .FirstOrDefaultAsync(a => a.Id == id, cancelToken);
+        }
 
-			// Get the data from the DB.
-			return await _dbContext.User.AsNoTracking()
-					.FirstOrDefaultAsync(a => a.Email == email, cancelToken).ConfigureAwait(false);
+        public async Task<User?> GetUserByEmailAsync(string email, CancellationToken cancelToken = default)
+        {
+            // NOTE: Email is a unique index so only one user can exist in the DB.
+
+            if (!email.HasValue())
+                return null;
+
+            // Get the data from the DB.
+            return await _dbContext.User.AsNoTracking()
+                    .FirstOrDefaultAsync(a => a.Email == email, cancelToken).ConfigureAwait(false);
         }
 
         public async Task<User?> GetUserByPhoneAsync(string phone, CancellationToken cancelToken = default)
@@ -134,7 +134,7 @@ namespace George.Data
 
             // Update OTP
             dbModel.Otp = otp;
-			dbModel.OtpExpiration = DateTime.Now.AddMinutes(5);
+            dbModel.OtpExpiration = DateTime.Now.AddMinutes(5);
 
             // Save to the DB
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
@@ -164,387 +164,391 @@ namespace George.Data
         }
 
         public async Task<bool> IsEmailExistAsync(string email, CancellationToken cancelToken = default)
-		{
-			if (!email.HasValue())
-				return false;
+        {
+            if (!email.HasValue())
+                return false;
 
-			return await _dbContext.User.AsNoTracking()
-							.AnyAsync(a => a.Email == email, cancelToken);
-		}
+            return await _dbContext.User.AsNoTracking()
+                            .AnyAsync(a => a.Email == email, cancelToken);
+        }
 
-		public async Task<User?> GetUserByCredentialsAsync(string email, string password, CancellationToken cancelToken = default)
-		{
-			// Get user by email
-			var user = await _dbContext.User.AsNoTracking()
-							.FirstOrDefaultAsync(a => a.Email == email, cancelToken);
-			
-			if (user == null || string.IsNullOrWhiteSpace(user.Password))
-				return null;
+        public async Task<User?> GetUserByCredentialsAsync(string email, string password, CancellationToken cancelToken = default)
+        {
+            // Get user by email
+            var user = await _dbContext.User.AsNoTracking()
+                            .FirstOrDefaultAsync(a => a.Email == email, cancelToken);
 
-			// Verify password hash
-			// Support both hashed and plain text passwords (for migration)
-			bool isPasswordValid = false;
-			if (user.Password.Contains(':'))
-			{
-				// Password is hashed (format: "salt:hash")
-				isPasswordValid = Cryptography.VerifyPasswordHash(password, user.Password);
-			}
-			else
-			{
-				// Plain text password (legacy support during migration)
-				isPasswordValid = user.Password == password;
-			}
+            if (user == null || string.IsNullOrWhiteSpace(user.Password))
+                return null;
 
-			return isPasswordValid ? user : null;
-		}
+            // Verify password hash
+            // Support both hashed and plain text passwords (for migration)
+            bool isPasswordValid = false;
+            if (user.Password.Contains(':'))
+            {
+                // Password is hashed (format: "salt:hash")
+                isPasswordValid = Cryptography.VerifyPasswordHash(password, user.Password);
+            }
+            else
+            {
+                // Plain text password (legacy support during migration)
+                isPasswordValid = user.Password == password;
+            }
 
-
-		public async Task<string?> GetUserNameAsync(int id, CancellationToken cancelToken = default)
-		{
-			return await _dbContext.User.AsNoTracking()
-							.Where(a => a.Id == id)
-							.Select(a => a.FullName)
-							.FirstOrDefaultAsync(cancelToken);
-		}
-
-		public async Task<Common.UserStatus?> GetUserStatusAsync(int id, CancellationToken cancelToken = default)
-		{
-			return await _dbContext.User.AsNoTracking()
-							.Where(a => a.Id == id)
-							.Select(a => (Common.UserStatus?)a.StatusId)
-							.FirstOrDefaultAsync(cancelToken);
-		}
-
-		public async Task<User?> UpdateUserProfileAsync(User model, CancellationToken cancelToken = default)
-		{
-			// Get the data from the DB.
-			User? dbModel = await _dbContext.User
-										.Where(a => a.Id == model.Id)
-										.FirstOrDefaultAsync(cancelToken);
-			if (dbModel != null)
-			{
-				// Update fields.
-				dbModel.FirstName = model.FirstName;
-				dbModel.LastName = model.LastName;
-
-				dbModel.Email = model.Email;
-				dbModel.IsEmailVerified = model.IsEmailVerified;
-				//dbModel.IsEmailVerified = model.Email.HasValue(); // TODO: TEMP CODE UNTIL WE WILL HAVE EMAIL INTEGRATION.
+            return isPasswordValid ? user : null;
+        }
 
 
-				dbModel.StatusId = model.StatusId;
+        public async Task<string?> GetUserNameAsync(int id, CancellationToken cancelToken = default)
+        {
+            return await _dbContext.User.AsNoTracking()
+                            .Where(a => a.Id == id)
+                            .Select(a => a.FullName)
+                            .FirstOrDefaultAsync(cancelToken);
+        }
+
+        public async Task<Common.UserStatus?> GetUserStatusAsync(int id, CancellationToken cancelToken = default)
+        {
+            return await _dbContext.User.AsNoTracking()
+                            .Where(a => a.Id == id)
+                            .Select(a => (Common.UserStatus?)a.StatusId)
+                            .FirstOrDefaultAsync(cancelToken);
+        }
+
+        public async Task<User?> UpdateUserProfileAsync(User model, CancellationToken cancelToken = default)
+        {
+            // Get the data from the DB.
+            User? dbModel = await _dbContext.User
+                                        .Where(a => a.Id == model.Id)
+                                        .FirstOrDefaultAsync(cancelToken);
+            if (dbModel != null)
+            {
+                // Update fields.
+                dbModel.FirstName = model.FirstName;
+                dbModel.LastName = model.LastName;
+
+                dbModel.Email = model.Email;
+                dbModel.IsEmailVerified = model.IsEmailVerified;
+                //dbModel.IsEmailVerified = model.Email.HasValue(); // TODO: TEMP CODE UNTIL WE WILL HAVE EMAIL INTEGRATION.
 
 
-				// Save to the DB.
-				await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
-			}
+                dbModel.StatusId = model.StatusId;
 
-			return dbModel;
-		}
 
-		public async Task<bool> IsEmailAvailableAsync(string email, CancellationToken cancelToken = default)
-		{
-			// Get the data from the DB.
-			bool isExists = await _dbContext.User.AsNoTracking()
-							.AnyAsync(a => a.Email == email, cancelToken).ConfigureAwait(false);
+                // Save to the DB.
+                await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            }
 
-			return !isExists;
-		}
+            return dbModel;
+        }
 
-		public async Task<User?> RemoveRefreshTokenAsync(int userId, CancellationToken cancelToken = default)
-		{
-			// Get the data from the DB.
-			var dbModel = await _dbContext.User
-									.Where(a => a.Id == userId)
-									.FirstOrDefaultAsync(cancelToken);
-			if (dbModel != null)
-			{
-				// Update fields.
-				dbModel.RefreshToken = null;
-				dbModel.RefreshTokenExpiration = null;
+        public async Task<bool> IsEmailAvailableAsync(string email, CancellationToken cancelToken = default)
+        {
+            // Get the data from the DB.
+            bool isExists = await _dbContext.User.AsNoTracking()
+                            .AnyAsync(a => a.Email == email, cancelToken).ConfigureAwait(false);
 
-				// Save to the DB.
-				await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
-			}
+            return !isExists;
+        }
 
-			return dbModel;
-		}
+        public async Task<User?> RemoveRefreshTokenAsync(int userId, CancellationToken cancelToken = default)
+        {
+            // Get the data from the DB.
+            var dbModel = await _dbContext.User
+                                    .Where(a => a.Id == userId)
+                                    .FirstOrDefaultAsync(cancelToken);
+            if (dbModel != null)
+            {
+                // Update fields.
+                dbModel.RefreshToken = null;
+                dbModel.RefreshTokenExpiration = null;
 
-		
-		public async Task UpdateUserLockoutFailCountAsync(int id, int lockoutFailCount, DateTime? lockoutExpiration = null, CancellationToken cancelToken = default)
-		{
-			// Check if the model is already in the local cache (no DB access).
-			var model = _dbContext.User.Local.FirstOrDefault(a => a.Id == id);
-			if (model == null)
-				model = new User() { Id = id, LockoutFailCount = lockoutFailCount, LockoutExpiration = lockoutExpiration };
-			else
-			{
-				model.LockoutFailCount = lockoutFailCount;
-				model.LockoutExpiration = lockoutExpiration;
-			}
+                // Save to the DB.
+                await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            }
 
-			// Attach the model to the DB context if it is not.
-			if (_dbContext.Entry(model).State == EntityState.Detached)
-				_dbContext.Attach(model);
+            return dbModel;
+        }
 
-			// Update only one property.
-			_dbContext.Entry(model).Property(a => a.LockoutFailCount).IsModified = true;
-			_dbContext.Entry(model).Property(a => a.LockoutExpiration).IsModified = true;
 
-			// Save to the DB.
-			await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
-		}
+        public async Task UpdateUserLockoutFailCountAsync(int id, int lockoutFailCount, DateTime? lockoutExpiration = null, CancellationToken cancelToken = default)
+        {
+            // Check if the model is already in the local cache (no DB access).
+            var model = _dbContext.User.Local.FirstOrDefault(a => a.Id == id);
+            if (model == null)
+                model = new User() { Id = id, LockoutFailCount = lockoutFailCount, LockoutExpiration = lockoutExpiration };
+            else
+            {
+                model.LockoutFailCount = lockoutFailCount;
+                model.LockoutExpiration = lockoutExpiration;
+            }
 
-		public async Task<User?> UpdateUserLoginAsync(int id, string refreshToken, DateTime refreshTokenExpiration, bool isSetUserEmailOtpToValid = false, Common.UserStatus? statusId = null, CancellationToken cancelToken = default)
-		{
-			// Get the data from the DB.
-			User? dbModel = await _dbContext.User
-									.Where(a => a.Id == id)
-									.FirstOrDefaultAsync(cancelToken).ConfigureAwait(false);
-			if (dbModel != null)
-			{
-				// Update fields.
+            // Attach the model to the DB context if it is not.
+            if (_dbContext.Entry(model).State == EntityState.Detached)
+                _dbContext.Attach(model);
 
-				// Set the user email otp to valid?
-				if (isSetUserEmailOtpToValid) // NOTE: This is just after we verified the user's email otp.
-				{
-					// Update fields.
-					dbModel.IsEmailVerified = true;
-					//dbModel.EmailVerificationToken = null;
+            // Update only one property.
+            _dbContext.Entry(model).Property(a => a.LockoutFailCount).IsModified = true;
+            _dbContext.Entry(model).Property(a => a.LockoutExpiration).IsModified = true;
 
-					//// If the phone is also verified, then set the user as active.
-					//if(dbModel.IsPhoneVerified  && dbModel.StatusId == (int)UserStatus.Pending)
-					//	dbModel.StatusId = (int)UserStatus.Active;
-				}
+            // Save to the DB.
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+        }
 
-				// Update fields.
-				dbModel.LastLoginDate = DateTime.UtcNow;
-				dbModel.LockoutFailCount = 0;
-				dbModel.RefreshToken = refreshToken;
-				dbModel.RefreshTokenExpiration = refreshTokenExpiration;
+        public async Task<User?> UpdateUserLoginAsync(int id, string refreshToken, DateTime refreshTokenExpiration, bool isSetUserEmailOtpToValid = false, Common.UserStatus? statusId = null, CancellationToken cancelToken = default)
+        {
+            // Get the data from the DB.
+            User? dbModel = await _dbContext.User
+                                    .Where(a => a.Id == id)
+                                    .FirstOrDefaultAsync(cancelToken).ConfigureAwait(false);
+            if (dbModel != null)
+            {
+                // Update fields.
+
+                // Set the user email otp to valid?
+                if (isSetUserEmailOtpToValid) // NOTE: This is just after we verified the user's email otp.
+                {
+                    // Update fields.
+                    dbModel.IsEmailVerified = true;
+                    //dbModel.EmailVerificationToken = null;
+
+                    //// If the phone is also verified, then set the user as active.
+                    //if(dbModel.IsPhoneVerified  && dbModel.StatusId == (int)UserStatus.Pending)
+                    //	dbModel.StatusId = (int)UserStatus.Active;
+                }
+
+                // Update fields.
+                dbModel.LastLoginDate = DateTime.UtcNow;
+                dbModel.LockoutFailCount = 0;
+                dbModel.RefreshToken = refreshToken;
+                dbModel.RefreshTokenExpiration = refreshTokenExpiration;
                 dbModel.Otp = null;
                 dbModel.OtpExpiration = null;
                 if (statusId.HasValue)
-					dbModel.StatusId = (int)statusId.Value;
+                    dbModel.StatusId = (int)statusId.Value;
 
-				// Save to the DB.
-				await _dbContext.SaveChangesAsync(cancelToken);
-			}
+                // Save to the DB.
+                await _dbContext.SaveChangesAsync(cancelToken);
+            }
 
-			return dbModel;
-		}
+            return dbModel;
+        }
 
-		public async Task<User?> DeleteUserAsync(int id, CancellationToken cancelToken = default)
-		{
-			// Get the data from the DB.
-			var dbModel = await _dbContext.User
-								.FirstOrDefaultAsync(a => a.Id == id, cancelToken).ConfigureAwait(false);
-			if (dbModel != null)
-			{
-				// Delete the entity.
-				_dbContext.User.Remove(dbModel);
+        public async Task<User?> DeleteUserAsync(int id, CancellationToken cancelToken = default)
+        {
+            // Get the data from the DB.
+            var dbModel = await _dbContext.User
+                                .FirstOrDefaultAsync(a => a.Id == id, cancelToken).ConfigureAwait(false);
+            if (dbModel != null)
+            {
+                // Delete the entity.
+                _dbContext.User.Remove(dbModel);
 
-				// Save to the DB.
-				await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
-			}
+                // Save to the DB.
+                await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            }
 
-			return dbModel;
-		}
+            return dbModel;
+        }
 
-		public async Task<User?> BlockUserAsync(int id, bool isBlocked, CancellationToken cancelToken = default)
-		{
-			// Get the data from the DB.
-			var dbModel = await _dbContext.User
-								.FirstOrDefaultAsync(a => a.Id == id, cancelToken).ConfigureAwait(false);
-			if (dbModel != null)
-			{
-				// Delete the entity.
-				dbModel.StatusId = isBlocked ? (int)Common.UserStatus.Blocked : (int)Common.UserStatus.Active;
+        public async Task<User?> BlockUserAsync(int id, bool isBlocked, CancellationToken cancelToken = default)
+        {
+            // Get the data from the DB.
+            var dbModel = await _dbContext.User
+                                .FirstOrDefaultAsync(a => a.Id == id, cancelToken).ConfigureAwait(false);
+            if (dbModel != null)
+            {
+                // Delete the entity.
+                dbModel.StatusId = isBlocked ? (int)Common.UserStatus.Blocked : (int)Common.UserStatus.Active;
 
-				// Save to the DB.
-				await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
-			}
+                // Save to the DB.
+                await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            }
 
-			return dbModel;
-		}
+            return dbModel;
+        }
 
-		public async Task<bool> UserHasDependenciesAsync(int id, CancellationToken cancelToken = default)
-		{
-			return false;
-		}
+        public async Task<bool> UserHasDependenciesAsync(int id, CancellationToken cancelToken = default)
+        {
+            return false;
+        }
 
-		public async Task<User> CreateUserAsync(User user, CancellationToken cancelToken = default)
-		{
-			return await CreateUserAsync(user, null, cancelToken);
-		}
+        public async Task<User> CreateUserAsync(User user, CancellationToken cancelToken = default)
+        {
+            return await CreateUserAsync(user, null, cancelToken);
+        }
 
-		public async Task<User> CreateUserAsync(User user, List<int>? siteIds, CancellationToken cancelToken = default)
-		{
-			// Set required fields
-			if (string.IsNullOrWhiteSpace(user.FullName))
-			{
-				user.FullName = $"{user.FirstName} {user.LastName}".Trim();
-			}
+        public async Task<User> CreateUserAsync(User user, List<int>? siteIds, CancellationToken cancelToken = default)
+        {
+            // Set required fields
+            if (string.IsNullOrWhiteSpace(user.FullName))
+            {
+                user.FullName = $"{user.FirstName} {user.LastName}".Trim();
+            }
 
-			if (user.GuidId == Guid.Empty)
-			{
-				user.GuidId = Guid.NewGuid();
-			}
+            if (user.GuidId == Guid.Empty)
+            {
+                user.GuidId = Guid.NewGuid();
+            }
 
-			if (user.CreationTime == default)
-			{
-				user.CreationTime = DateTime.UtcNow;
-			}
+            if (user.CreationTime == default)
+            {
+                user.CreationTime = DateTime.UtcNow;
+            }
 
-			if (user.StatusId == 0)
-			{
-				user.StatusId = (int)Common.UserStatus.Active;
-			}
+            if (user.StatusId == 0)
+            {
+                user.StatusId = (int)Common.UserStatus.Active;
+            }
 
-			if (user.RoleId == 0)
-			{
-				user.RoleId = (int)Common.UserRole.SiteAdmin;
-			}
+            if (user.RoleId == 0)
+            {
+                user.RoleId = (int)Common.UserRole.SiteAdmin;
+            }
 
-			// Add to DB
-			_dbContext.User.Add(user);
-			await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            // Add to DB
+            _dbContext.User.Add(user);
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
 
-			// Add site associations for site_admin role
-			if (siteIds != null && siteIds.Any())
-			{
-				var sites = await _dbContext.Site
-					.Where(s => siteIds.Contains(s.Id))
-					.ToListAsync(cancelToken);
-				foreach (var site in sites)
-				{
-					user.Site.Add(site);
-				}
-				await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
-			}
+            // Add site associations for site_admin role
+            if (siteIds != null && siteIds.Any())
+            {
+                var sites = await _dbContext.Site
+                    .Where(s => siteIds.Contains(s.Id))
+                    .ToListAsync(cancelToken);
+                foreach (var site in sites)
+                {
+                    user.Site.Add(site);
+                }
+                await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            }
 
-			return user;
-		}
+            return user;
+        }
 
-		public async Task<User?> UpdateUserAsync(User user, CancellationToken cancelToken = default)
-		{
-			return await UpdateUserAsync(user, null, cancelToken);
-		}
+        public async Task<User?> UpdateUserAsync(User user, CancellationToken cancelToken = default)
+        {
+            return await UpdateUserAsync(user, null, cancelToken);
+        }
 
-		public async Task<User?> UpdateUserAsync(User user, List<int>? siteIds, CancellationToken cancelToken = default)
-		{
-			// Get the data from the DB (include Sites for site_admin updates)
-			User? dbModel = await _dbContext.User
-									.Include(u => u.Site)
-									.Where(a => a.Id == user.Id)
-									.FirstOrDefaultAsync(cancelToken);
-			if (dbModel == null)
-				return null;
+        public async Task<User?> UpdateUserAsync(User user, List<int>? siteIds, CancellationToken cancelToken = default)
+        {
+            // Get the data from the DB (include Sites for site_admin updates)
+            User? dbModel = await _dbContext.User
+                                    .Include(u => u.Site)
+                                    .Where(a => a.Id == user.Id)
+                                    .FirstOrDefaultAsync(cancelToken);
+            if (dbModel == null)
+                return null;
 
-			// Update fields.
-			if (user.FirstName.HasValue())
-			{
-				dbModel.FirstName = user.FirstName;
-			}
+            // Update fields.
+            if (user.FirstName.HasValue())
+            {
+                dbModel.FirstName = user.FirstName;
+            }
 
-			if (user.LastName != null)
-			{
-				dbModel.LastName = user.LastName;
-			}
+            if (user.LastName != null)
+            {
+                dbModel.LastName = user.LastName;
+            }
 
-			// Update FullName if FirstName or LastName changed
-			if (user.FirstName.HasValue() || user.LastName != null)
-			{
-				dbModel.FullName = $"{dbModel.FirstName} {dbModel.LastName}".Trim();
-			}
+            // Update FullName if FirstName or LastName changed
+            if (user.FirstName.HasValue() || user.LastName != null)
+            {
+                dbModel.FullName = $"{dbModel.FirstName} {dbModel.LastName}".Trim();
+            }
 
-			if (user.Email != null)
-			{
-				dbModel.Email = user.Email;
-			}
+            if (user.Email != null)
+            {
+                dbModel.Email = user.Email;
+            }
 
 
             if (user.Otp != null)
             {
                 dbModel.Otp = user.Otp;
             }
+            if (user.OtpExpiration != null)
+            {
+                dbModel.OtpExpiration = user.OtpExpiration;
+            }
 
             if (user.Phone != null)
-		{
-			dbModel.Phone = user.Phone;
-		}
+            {
+                dbModel.Phone = user.Phone;
+            }
 
-		if (user.Password != null)
-		{
-			dbModel.Password = user.Password;
-			dbModel.IsEmailVerified = true;
-		}
+            if (user.Password != null)
+            {
+                dbModel.Password = user.Password;
+                dbModel.IsEmailVerified = true;
+            }
 
-		if (user.AccountId.HasValue)
-		{
-			dbModel.AccountId = user.AccountId;
-		}
+            if (user.AccountId.HasValue)
+            {
+                dbModel.AccountId = user.AccountId;
+            }
 
-			if (user.RoleId > 0)
-			{
-				dbModel.RoleId = user.RoleId;
-			}
+            if (user.RoleId > 0)
+            {
+                dbModel.RoleId = user.RoleId;
+            }
 
-			if (user.StatusId > 0)
-			{
-				dbModel.StatusId = user.StatusId;
-			}
+            if (user.StatusId > 0)
+            {
+                dbModel.StatusId = user.StatusId;
+            }
 
-			// Always apply AvatarUrl so that null clears the stored value
-			dbModel.AvatarUrl = user.AvatarUrl;
+            // Always apply AvatarUrl so that null clears the stored value
+            dbModel.AvatarUrl = user.AvatarUrl;
 
-			// Update site associations for site_admin role
-			if (siteIds != null)
-			{
-				dbModel.Site.Clear();
-				if (siteIds.Any())
-				{
-					var sites = await _dbContext.Site
-						.Where(s => siteIds.Contains(s.Id))
-						.ToListAsync(cancelToken);
-					foreach (var site in sites)
-					{
-						dbModel.Site.Add(site);
-					}
-				}
-			}
+            // Update site associations for site_admin role
+            if (siteIds != null)
+            {
+                dbModel.Site.Clear();
+                if (siteIds.Any())
+                {
+                    var sites = await _dbContext.Site
+                        .Where(s => siteIds.Contains(s.Id))
+                        .ToListAsync(cancelToken);
+                    foreach (var site in sites)
+                    {
+                        dbModel.Site.Add(site);
+                    }
+                }
+            }
 
-			// Update timestamp
-			dbModel.UpdatedDate = DateTime.UtcNow;
+            // Update timestamp
+            dbModel.UpdatedDate = DateTime.UtcNow;
 
-			// Save to the DB.
-			await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            // Save to the DB.
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
 
-			return dbModel;
-		}
+            return dbModel;
+        }
 
-		public async Task<User?> UpdateUserPasswordAsync(int userId, string passwordHash, CancellationToken cancelToken = default)
-		{
-			// Get the data from the DB.
-			User? dbModel = await _dbContext.User
-									.Where(a => a.Id == userId)
-									.FirstOrDefaultAsync(cancelToken);
-			if (dbModel == null)
-				return null;
+        public async Task<User?> UpdateUserPasswordAsync(int userId, string passwordHash, CancellationToken cancelToken = default)
+        {
+            // Get the data from the DB.
+            User? dbModel = await _dbContext.User
+                                    .Where(a => a.Id == userId)
+                                    .FirstOrDefaultAsync(cancelToken);
+            if (dbModel == null)
+                return null;
 
-			// Update password and set email as verified (user has set/confirmed password)
-			dbModel.Password = passwordHash;
-			dbModel.IsEmailVerified = true;
-			dbModel.UpdatedDate = DateTime.UtcNow;
+            // Update password and set email as verified (user has set/confirmed password)
+            dbModel.Password = passwordHash;
+            dbModel.IsEmailVerified = true;
+            dbModel.UpdatedDate = DateTime.UtcNow;
 
-			// Save to the DB.
-			await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            // Save to the DB.
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
 
-			return dbModel;
-		}
+            return dbModel;
+        }
 
 
-		
-	}
+
+    }
 }
 
