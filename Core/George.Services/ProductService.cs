@@ -380,13 +380,75 @@ namespace George.Services
 
             if (siteId.HasValue)
             {
+                var productBefore = await _productStorage.GetProductAsync(productId, cancelToken);
+                var hadSite = productBefore != null && productBefore.Site.Any(s => s.Id == siteId.Value);
+                var siteCountBefore = productBefore?.Site?.Count ?? 0;
+                var wooIdForDelete = siteCountBefore == 1 ? productBefore!.WooCommerceId : null;
+                var skuForDelete = productBefore?.Sku;
+
                 var result = await _productStorage.RemoveProductFromSiteAsync(productId, siteId.Value, cancelToken);
                 response.Data = result;
+
+                if (hadSite)
+                {
+                    var sid = siteId.Value;
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            using var scope = _serviceScopeFactory.CreateScope();
+                            var woo = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
+                            await woo.DeleteProductFromWooCommerceForSiteAsync(sid, wooIdForDelete, skuForDelete, CancellationToken.None).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "WooCommerce delete after RemoveProductFromSite failed for product {ProductId} site {SiteId}", productId, sid);
+                        }
+                    }, CancellationToken.None);
+                }
+
                 return response;
             }
 
+            var productSnapshot = await _productStorage.GetProductAsync(productId, cancelToken);
+            var siteIds = productSnapshot?.Site?.Select(s => s.Id).ToList() ?? new List<int>();
+            var multiSite = siteIds.Count > 1;
+            var wooIdFull = multiSite ? null : productSnapshot?.WooCommerceId;
+            var skuFull = productSnapshot?.Sku;
+
             var deleteResult = await _productStorage.DeleteProductAsync(productId, cancelToken);
             response.Data = deleteResult;
+
+            if (productSnapshot != null && siteIds.Count > 0)
+            {
+                var copySiteIds = siteIds.ToList();
+                var copyWooId = wooIdFull;
+                var copySku = skuFull;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var scope = _serviceScopeFactory.CreateScope();
+                        var woo = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
+                        foreach (var sid in copySiteIds)
+                        {
+                            try
+                            {
+                                await woo.DeleteProductFromWooCommerceForSiteAsync(sid, copyWooId, copySku, CancellationToken.None).ConfigureAwait(false);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "WooCommerce delete failed for product {ProductId} site {SiteId}", productId, sid);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "WooCommerce delete after DeleteProduct failed for product {ProductId}", productId);
+                    }
+                }, CancellationToken.None);
+            }
+
             return response;
         }
 

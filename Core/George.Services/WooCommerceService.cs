@@ -933,6 +933,50 @@ namespace George.Services
         }
 
         /// <summary>
+        /// Deletes a product from WooCommerce for the given site. Resolves Woo product id from <paramref name="wooCommerceId"/> when provided,
+        /// otherwise by SKU (same rules as sync). When the product is linked to multiple sites, pass <c>wooCommerceId: null</c> so each store is matched by SKU only (avoids wrong id in another Woo store).
+        /// </summary>
+        public async Task<bool> DeleteProductFromWooCommerceForSiteAsync(int siteId, int? wooCommerceId, string? sku, CancellationToken cancelToken)
+        {
+            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+            if (site == null || site.WooCommerceEnabled != true ||
+                string.IsNullOrEmpty(site.WooCommerceUrl) ||
+                string.IsNullOrEmpty(site.WooCommerceKey) ||
+                string.IsNullOrEmpty(site.WooCommerceSecret))
+                return false;
+
+            var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
+            var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
+
+            using var httpClient = _httpClientFactory.CreateClient();
+            httpClient.Timeout = WooCommerceHttpTimeout;
+            httpClient.DefaultRequestHeaders.Clear();
+            httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+
+            int? wooId = wooCommerceId;
+            if (!wooId.HasValue && !string.IsNullOrWhiteSpace(sku))
+                wooId = await FindProductIdBySkuAsync(baseUrl, siteId, sku, httpClient, cancelToken);
+
+            if (!wooId.HasValue)
+            {
+                _logger.LogDebug("Skipping WooCommerce product delete for site {SiteId}: no Woo id and no SKU match", siteId);
+                return false;
+            }
+
+            var deleteUrl = $"{baseUrl}/products/{wooId.Value}?force=true";
+            var deleteResponse = await httpClient.DeleteAsync(deleteUrl, cancelToken);
+            if (deleteResponse.IsSuccessStatusCode)
+            {
+                _logger.LogInformation("Deleted WooCommerce product {WooId} for site {SiteId}", wooId.Value, siteId);
+                return true;
+            }
+
+            var err = await deleteResponse.Content.ReadAsStringAsync(cancelToken);
+            _logger.LogWarning("Failed to delete WooCommerce product {WooId} for site {SiteId}: {Status} {Error}", wooId.Value, siteId, deleteResponse.StatusCode, err);
+            return false;
+        }
+
+        /// <summary>
         /// Deserializes JSON from WooCommerce API response. If the response is HTML (e.g. error page, redirect)
         /// instead of JSON, throws a clear exception to avoid JsonException on '&lt;' invalid start.
         /// </summary>
