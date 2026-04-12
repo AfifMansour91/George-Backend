@@ -195,11 +195,39 @@ namespace George.Services
 		{
 			IApiResponse<UserRes> response = new ApiResponse<UserRes>();
 
-			// Check if email is already in use
-			bool isEmailAvailable = await _userStorage.IsEmailAvailableAsync(request.Email, cancelToken).ConfigureAwait(false);
-			if (!isEmailAvailable)
+			User? existingByEmail = await _userStorage.GetUserByEmailAsync(request.Email, cancelToken).ConfigureAwait(false);
+			if (existingByEmail != null)
 			{
-				return CreateResponse(response, StatusCode.UserEmailAlreadyInUse, "The specified email is already in use by another user.");
+				if (existingByEmail.IsDeleted)
+					return CreateResponse(response, StatusCode.UserEmailAlreadyInUse, "The specified email is already in use by another user.");
+
+				if (!request.AccountId.HasValue)
+					return CreateResponse(response, StatusCode.InvalidRequest, "AccountId is required when attaching an existing user by email.");
+
+				int targetAccountId = request.AccountId.Value;
+
+				// Block moving a user from one account to another via "create" (use an explicit transfer/update instead).
+				if (existingByEmail.AccountId.HasValue && existingByEmail.AccountId.Value != targetAccountId)
+					return CreateResponse(response, StatusCode.UserEmailAlreadyInUse, "The specified email is already in use by another user.");
+
+				// Same email, no account (e.g. after remove-from-account) or already on this account: upsert as update.
+				var attachReq = new UpdateUserReq
+				{
+					Id = existingByEmail.Id,
+					FirstName = request.FirstName,
+					LastName = request.LastName,
+					Email = request.Email,
+					Phone = request.Phone,
+					Password = request.Password,
+					AccountId = targetAccountId,
+					RoleId = request.RoleId,
+					StatusId = request.StatusId,
+					AvatarUrl = request.AvatarUrl,
+					SiteIds = request.SiteIds,
+					RemoveFromAccount = false,
+				};
+
+				return await UpdateUserAsync(attachReq, cancelToken).ConfigureAwait(false);
 			}
 
 			// Hash password if provided
@@ -259,6 +287,8 @@ namespace George.Services
 				}
 			}
 
+		bool removeFromAccount = request.RemoveFromAccount == true;
+
 		// Update user model
 		var user = new User
 		{
@@ -267,7 +297,7 @@ namespace George.Services
 			LastName = request.LastName ?? existingUser.LastName,
 			Email = request.Email ?? existingUser.Email,
 			Phone = request.Phone ?? existingUser.Phone,
-			AccountId = request.AccountId ?? existingUser.AccountId,
+			AccountId = removeFromAccount ? null : (request.AccountId ?? existingUser.AccountId),
 			RoleId = request.RoleId ?? existingUser.RoleId,
 			StatusId = request.StatusId ?? existingUser.StatusId,
 			// Empty string from client means "clear avatar"; null/omit means keep existing
@@ -285,8 +315,11 @@ namespace George.Services
 			user.Password = existingUser.Password; // Keep existing password
 		}
 
+		// When detaching from account, always clear site links (same as empty list in UI)
+		List<int>? siteIdsForStorage = removeFromAccount ? new List<int>() : request.SiteIds;
+
 		// Update in DB (with site associations for site_admin)
-		User? updatedUser = await _userStorage.UpdateUserAsync(user, request.SiteIds, cancelToken).ConfigureAwait(false);
+		User? updatedUser = await _userStorage.UpdateUserAsync(user, siteIdsForStorage, cancelToken).ConfigureAwait(false);
 
 			if (updatedUser != null)
 			{

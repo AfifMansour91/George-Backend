@@ -484,10 +484,8 @@ namespace George.Data
                 dbModel.IsEmailVerified = true;
             }
 
-            if (user.AccountId.HasValue)
-            {
-                dbModel.AccountId = user.AccountId;
-            }
+            // Apply AccountId including null (detach from account). Callers merge intent in UserService.
+            dbModel.AccountId = user.AccountId;
 
             if (user.RoleId > 0)
             {

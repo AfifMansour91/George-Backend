@@ -74,6 +74,12 @@ namespace George.Services
 
 		/// <summary>Site IDs for site_admin role. Empty/null = no sites assigned.</summary>
 		public List<int>? SiteIds { get; set; }
+
+		/// <summary>
+		/// When true, clears <see cref="AccountId"/> and site assignments for this user (account-scoped removal).
+		/// Needed because JSON cannot distinguish omitted <c>accountId</c> from explicit null on <c>int?</c>.
+		/// </summary>
+		public bool? RemoveFromAccount { get; set; }
 	}
 
 }
