@@ -935,12 +935,15 @@ namespace George.Data
                 // Normalize status names from client
                 if (statusName == "public") statusName = "active";
                 if (statusName == "published") statusName = "active";
-                if (statusName == "draft") statusName = "hidden";
+                // Do not map "draft" → "hidden": draft must stay a distinct ProductStatus so WooCommerce sync sends status "draft"
+                // (hidden maps to Woo "private"). Catalog import and forms use draft for "not published yet".
                 if (statusName == "archived") statusName = "hidden";
 
                 var status = await _dbContext.ProductStatus
                     .FirstOrDefaultAsync(s => s.Name.ToLower() == statusName.ToLower().Trim(), cancelToken);
                 product.StatusId = status?.Id;
+                // If client sends "draft" but DB has no ProductStatus row named "draft", leave StatusId unset (null).
+                // Do not fall back to "hidden": that maps to WooCommerce "private". Add a `draft` row to ProductStatus if you need draft in George.
             }
 
             // Map visibility
@@ -950,7 +953,7 @@ namespace George.Data
                 // Normalize visibility names from client
                 if (visibilityName == "public") visibilityName = "active";
                 if (visibilityName == "published") visibilityName = "active";
-                if (visibilityName == "draft") visibilityName = "hidden";
+                // Do not map "draft" → "hidden": same overload problem as ProductStatus (hidden → Woo private).
                 if (visibilityName == "archived") visibilityName = "hidden";
 
                 var visibility = await _dbContext.Visibility

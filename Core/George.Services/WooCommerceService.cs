@@ -1146,8 +1146,10 @@ namespace George.Services
 
                 // Map WooCommerce status
                 var wooStatus = "publish";
+                // George "hidden" historically meant "unpublished / draft-like" for many flows; WooCommerce "private" is a different
+                // visibility mode (often shown as "פרטי" in admin). Use "draft" so catalog imports and legacy data are not mis-tagged as private.
                 if (product.Status?.Name == "hidden")
-                    wooStatus = "private";
+                    wooStatus = "draft";
                 else if (product.Status?.Name == "outOfStock")
                     wooStatus = "publish";
                 else if (product.Status?.Name == "active")
