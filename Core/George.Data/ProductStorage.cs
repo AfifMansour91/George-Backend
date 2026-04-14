@@ -382,6 +382,7 @@ namespace George.Data
             dbProduct.WeightConfigId = updated.WeightConfigId;
             dbProduct.SeoTitle = updated.SeoTitle;
             dbProduct.SeoDescription = updated.SeoDescription;
+            dbProduct.LowStockThreshold = updated.LowStockThreshold;
             if (updated.DisplayOrder.HasValue)
                 dbProduct.DisplayOrder = updated.DisplayOrder;
             dbProduct.UpdatedDate = DateTime.UtcNow;

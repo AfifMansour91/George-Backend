@@ -248,6 +248,12 @@ namespace George.Common.Request
 
         /// <summary>Sprint 2: Notification settings (התראות). When provided, replaces existing.</summary>
         public NotificationSettingsReq? NotificationSettings { get; set; }
+
+        /// <summary>Default low-stock threshold for weighted (kg-style) products. Null = keep existing.</summary>
+        public decimal? DefaultLowStockThresholdWeighted { get; set; }
+
+        /// <summary>Default low-stock threshold for unit-count products. Null = keep existing.</summary>
+        public decimal? DefaultLowStockThresholdUnits { get; set; }
     }
 
     /// <summary>Sprint 2: Notification settings request (relational, no JSON).</summary>

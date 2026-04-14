@@ -103,6 +103,8 @@ namespace George.Services
                     dest.NotificationSettings = src.AccountNotificationSettings != null
                         ? MapNotificationSettingsToRes(src.AccountNotificationSettings)
                         : null;
+                    dest.DefaultLowStockThresholdWeighted = src.DefaultLowStockThresholdWeighted;
+                    dest.DefaultLowStockThresholdUnits = src.DefaultLowStockThresholdUnits;
                 });
             CreateMap<KioskSettings, KioskSettingsRes>()
                 .ForMember(dest => dest.HomeVideoUrl, opt => opt.Ignore())

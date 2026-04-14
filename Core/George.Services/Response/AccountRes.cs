@@ -48,6 +48,12 @@ namespace George.Services.Response
 
         /// <summary>Sprint 2: Notification settings (התראות), relational.</summary>
         public NotificationSettingsRes? NotificationSettings { get; set; }
+
+        /// <summary>Default low-stock threshold for weighted (kg-style) products. Null = use frontend fallback (5).</summary>
+        public decimal? DefaultLowStockThresholdWeighted { get; set; }
+
+        /// <summary>Default low-stock threshold for unit-count products. Null = use frontend fallback (5).</summary>
+        public decimal? DefaultLowStockThresholdUnits { get; set; }
     }
 
     //public class AccountRes

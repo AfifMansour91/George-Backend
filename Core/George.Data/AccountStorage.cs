@@ -148,6 +148,10 @@ namespace George.Data
             dbAcc.Phone = updated.Phone;
             dbAcc.Website = updated.Website;
 
+            // Update low-stock threshold defaults (null = keep existing, already resolved in service)
+            dbAcc.DefaultLowStockThresholdWeighted = updated.DefaultLowStockThresholdWeighted;
+            dbAcc.DefaultLowStockThresholdUnits = updated.DefaultLowStockThresholdUnits;
+
             await _dbContext.SaveChangesAsync(cancelToken);
             return dbAcc;
         }

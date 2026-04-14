@@ -83,6 +83,9 @@ namespace George.Services.Response
 
         /// <summary>Complementary product IDs (מוצרים משלימים).</summary>
         public List<int> ComplementaryProductIds { get; set; } = new();
+
+        /// <summary>Per-product low-stock threshold. When set (> 0) overrides the account default for low-stock coloring and filtering.</summary>
+        public decimal? LowStockThreshold { get; set; }
     }
 }
 

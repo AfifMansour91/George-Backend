@@ -916,6 +916,13 @@ namespace George.Services
                 ShowAsMl = req.ShowAsMl.HasValue ? (req.ShowAsMl ?? (req.WeightUnit == "ml" ? true : null)) : existing.ShowAsMl,
                 WeightUnit = req.WeightUnit != null ? (req.WeightUnit == "ml" || req.ShowAsMl == true ? "ml" : req.WeightUnit) : existing.WeightUnit,
                 DisplayOrder = req.DisplayOrder ?? existing.DisplayOrder,
+                // Per-product low-stock threshold:
+                //   null (not sent)  → keep existing (partial update safety)
+                //   0 or negative    → clear the override (store null)
+                //   positive number  → store as custom threshold
+                LowStockThreshold = req.LowStockThreshold.HasValue
+                    ? (req.LowStockThreshold.Value <= 0 ? (decimal?)null : req.LowStockThreshold.Value)
+                    : existing.LowStockThreshold,
                 // Preserve lookup IDs from existing; MapLookupsAsync will overwrite only when req has values
                 BrandId = existing.BrandId,
                 SupplierId = existing.SupplierId,
@@ -958,7 +965,8 @@ namespace George.Services
                 ShowAsMl = product.ShowAsMl ?? (product.WeightUnit == "ml" ? true : null),
                 WeightUnit = product.WeightUnit,
                 SeoTitle = product.SeoTitle,
-                SeoDescription = product.SeoDescription
+                SeoDescription = product.SeoDescription,
+                LowStockThreshold = product.LowStockThreshold
             };
 
             // Map images

@@ -233,7 +233,9 @@ namespace George.Services
                 Zip = req.Zip ?? existingAccount.Zip,
                 Phone = req.Phone ?? existingAccount.Phone,
                 Website = req.Website ?? existingAccount.Website,
-                UpdatedDate = DateTime.UtcNow
+                UpdatedDate = DateTime.UtcNow,
+                DefaultLowStockThresholdWeighted = req.DefaultLowStockThresholdWeighted ?? existingAccount.DefaultLowStockThresholdWeighted,
+                DefaultLowStockThresholdUnits = req.DefaultLowStockThresholdUnits ?? existingAccount.DefaultLowStockThresholdUnits,
             };
 
             var updated = await _accountStorage.UpdateAccountAsync(model, cancelToken);

@@ -108,6 +108,10 @@ public partial class Product
     /// <summary>When stock is managed per variation: if true, use quantity per variation in Woo; if false, in/out only (no per-variation manage_stock quantity).</summary>
     public bool? VariationStockByQuantity { get; set; }
 
+    /// <summary>Per-product low-stock threshold. When set (> 0), overrides the account-level default for low-stock coloring and filtering.</summary>
+    [Column(TypeName = "decimal(18, 4)")]
+    public decimal? LowStockThreshold { get; set; }
+
     [ForeignKey("BrandId")]
     [InverseProperty("Product")]
     public virtual Brand? Brand { get; set; }

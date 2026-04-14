@@ -82,6 +82,9 @@ namespace George.Services.Request
 
         /// <summary>Complementary product IDs (מוצרים משלימים).</summary>
         public List<int>? ComplementaryProductIds { get; set; }
+
+        /// <summary>Per-product low-stock threshold. When set overrides the account default. Null clears the override.</summary>
+        public decimal? LowStockThreshold { get; set; }
     }
 
     public class CreateProductReq : ProductReq

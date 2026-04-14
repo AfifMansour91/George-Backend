@@ -81,6 +81,14 @@ public partial class Account
 
     public bool KioskEnabled { get; set; }
 
+    /// <summary>Default low-stock threshold for weighted-style (kg) products in this account.</summary>
+    [Column(TypeName = "decimal(18, 4)")]
+    public decimal? DefaultLowStockThresholdWeighted { get; set; }
+
+    /// <summary>Default low-stock threshold for unit-count products in this account.</summary>
+    [Column(TypeName = "decimal(18, 4)")]
+    public decimal? DefaultLowStockThresholdUnits { get; set; }
+
     [InverseProperty("Account")]
     public virtual ICollection<AccountMedia> AccountMedia { get; set; } = new List<AccountMedia>();
 
