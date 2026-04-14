@@ -78,6 +78,30 @@ public partial class Order
     [Column(TypeName = "nvarchar(max)")]
     public string? WooCommerceRequestJson { get; set; }
 
+    /// <summary>Raw <c>status</c> from ingest payload (e.g. WooCommerce on-hold) before our status mapping.</summary>
+    [StringLength(50)]
+    public string? ExternalOrderStatusRaw { get; set; }
+
+    /// <summary>Raw gateway <c>paymentMethod</c> code from ingest (e.g. cod) before internal mapping.</summary>
+    [StringLength(100)]
+    public string? GatewayPaymentMethodCode { get; set; }
+
+    /// <summary>Ingest <c>shippingstorename</c> (pickup branch display name).</summary>
+    [StringLength(200)]
+    public string? ShippingStoreName { get; set; }
+
+    /// <summary>Serialized <c>shippingInfo</c> from last ingest payload.</summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? ShippingInfoJson { get; set; }
+
+    /// <summary>Serialized <c>shippingAddress</c> from last ingest payload.</summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? ShippingAddressJson { get; set; }
+
+    /// <summary>Serialized <c>customer</c> object from last ingest payload.</summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? OrderCustomerJson { get; set; }
+
     [StringLength(200)]
     public string? CustomerName { get; set; }
 

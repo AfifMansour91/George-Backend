@@ -20,6 +20,12 @@ public class OrderItemRes
     public string? SaleTotalWeight { get; set; }
     public int? WooCommerceProductId { get; set; }
     public int? WooCommerceVariationId { get; set; }
+    public string? LineSku { get; set; }
+    public string? LineQuantityType { get; set; }
+    public decimal? LineUnit { get; set; }
+    public decimal? LineUnitWeightKg { get; set; }
+    public string? SaleUnitsLine { get; set; }
+    public string? LinePayloadJson { get; set; }
     public int SortOrder { get; set; }
     /// <summary>total_weight | per_unit | units_only — for order line display without loading the catalog product.</summary>
     public string? WeightDisplayMode { get; set; }

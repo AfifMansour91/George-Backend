@@ -763,13 +763,21 @@ namespace George.Services
             return null;
         }
 
-        /// <summary>Parse plugin <c>saleTotalWeight</c> (usually kg).</summary>
+        /// <summary>Parse plugin <c>saleTotalWeight</c>: plain kg number, <c>1.5 ק"ג</c>, or grams e.g. <c>600 גר'</c>.</summary>
         private static decimal? TryParseSaleTotalWeightKg(string? s)
         {
             if (string.IsNullOrWhiteSpace(s)) return null;
             var t = s.Trim().Replace(',', '.');
             if (decimal.TryParse(t, NumberStyles.Any, CultureInfo.InvariantCulture, out var d) && d > 0)
                 return d;
+            var m = Regex.Match(t, @"^\s*(\d+(?:\.\d+)?)");
+            if (!m.Success) return null;
+            if (!decimal.TryParse(m.Groups[1].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var n) || n <= 0)
+                return null;
+            if (t.Contains("קג", StringComparison.Ordinal) || t.Contains("ק\"ג", StringComparison.Ordinal))
+                return n;
+            if (t.Contains("גר", StringComparison.Ordinal))
+                return n / 1000m;
             return null;
         }
 
@@ -828,13 +836,36 @@ namespace George.Services
             o.DeliveryCity = NullIfWhiteSpace(a.City);
             o.DeliveryApartment = NullIfWhiteSpace(a.Apartment);
             o.DeliveryFloor = NullIfWhiteSpace(a.Floor);
-            o.DeliveryEntranceCode = NullIfWhiteSpace(a.EntranceCode);
+            o.DeliveryEntranceCode = NullIfWhiteSpace(a.ResolvedEntranceCode);
             o.DeliveryAddress = JoinMainDeliveryLine(a.Street, a.City, a.Zip);
         }
 
-        /// <summary>Map Woo payment code/title to internal payment method (e.g. Cash for cod).</summary>
-        private static string? MapWooCommercePaymentMethodToInternal(string? code, string? title)
+        /// <summary>Pickup branch name from plugin <c>shippingstorename</c> when delivery type is pickup.</summary>
+        private static void ApplyWooCommercePickupStoreNote(Order order, string? shippingStoreName)
         {
+            var name = NullIfWhiteSpace(shippingStoreName);
+            if (name == null) return;
+            if (!string.Equals(order.DeliveryType, "Pickup", StringComparison.OrdinalIgnoreCase)) return;
+            if (string.IsNullOrWhiteSpace(order.DeliveryNote))
+            {
+                order.DeliveryNote = name;
+                return;
+            }
+            if (order.DeliveryNote.Contains(name, StringComparison.Ordinal)) return;
+            order.DeliveryNote = $"{name} — {order.DeliveryNote}";
+        }
+
+        /// <summary>Map Woo payment code/title/label to internal payment method (e.g. Cash for cod or מזומן).</summary>
+        private static string? MapWooCommercePaymentMethodToInternal(string? code, string? title, string? paymentLabel = null)
+        {
+            var pl = paymentLabel?.Trim();
+            if (!string.IsNullOrWhiteSpace(pl))
+            {
+                if (pl.Contains("מזומן", StringComparison.Ordinal)) return "Cash";
+                if (pl.Contains("אשראי", StringComparison.Ordinal)) return "CreditCard";
+                // COD-style labels from Hebrew stores (e.g. "במסירה", "תשלום במסירה")
+                if (pl.Contains("מסירה", StringComparison.Ordinal)) return "Cash";
+            }
             if (string.IsNullOrWhiteSpace(code) && string.IsNullOrWhiteSpace(title)) return null;
             var c = (code ?? "").Trim().ToLowerInvariant();
             if (c == "cod") return "Cash";
@@ -863,8 +894,8 @@ namespace George.Services
         {
             o.InternalOrderNotes = p.InternalOrderNotes;
             o.PaymentMethodTitle = p.PaymentMethodTitle;
-            o.PaymentLabel = p.PaymentLabel;
-            o.ShippingLabel = p.ShippingLabel;
+            o.PaymentLabel = p.GetResolvedPaymentLabel();
+            o.ShippingLabel = p.GetResolvedShippingLabel();
             o.WooCommerceSiteId = p.SiteId;
             o.WooCommercePickupAffiliateId = p.ShippingInfo?.PickupAffiliateId;
         }
@@ -887,6 +918,73 @@ namespace George.Services
             {
                 return null;
             }
+        }
+
+        private static string? SerializeWooCommerceFragmentForStorage<T>(T? value)
+        {
+            if (value == null) return null;
+            try
+            {
+                return System.Text.Json.JsonSerializer.Serialize(value, WooCommerceOrderRequestJsonOptions);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string? SerializeWooCommerceOrderItemLineForStorage(WooCommerceOrderItemPayload it)
+        {
+            try
+            {
+                return System.Text.Json.JsonSerializer.Serialize(it, WooCommerceOrderRequestJsonOptions);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>Persist WooCommerce payload fragments as first-class DB columns (in addition to <see cref="Order.WooCommerceRequestJson"/>).</summary>
+        private static void ApplyWooCommercePayloadColumnSnapshot(Order o, WooCommerceOrderPayload p)
+        {
+            o.ExternalOrderStatusRaw = NullIfWhiteSpace(p.Status);
+            o.GatewayPaymentMethodCode = NullIfWhiteSpace(p.PaymentMethod);
+            o.ShippingStoreName = NullIfWhiteSpace(p.ShippingStoreName);
+            o.ShippingInfoJson = SerializeWooCommerceFragmentForStorage(p.ShippingInfo);
+            o.ShippingAddressJson = SerializeWooCommerceFragmentForStorage(p.ShippingAddress);
+            o.OrderCustomerJson = SerializeWooCommerceFragmentForStorage(p.Customer);
+        }
+
+        private static void PopulateWooCommerceOrderItemPayloadColumns(OrderItem oi, WooCommerceOrderItemPayload it)
+        {
+            oi.LineSku = NullIfWhiteSpace(it.Sku);
+            oi.LineQuantityType = NullIfWhiteSpace(it.QuantityType);
+            oi.LineUnit = it.Unit;
+            oi.LineUnitWeightKg = it.UnitWeight;
+            oi.SaleUnitsLine = NullIfWhiteSpace(it.SaleUnitsLine);
+            oi.LinePayloadJson = SerializeWooCommerceOrderItemLineForStorage(it);
+        }
+
+        /// <summary>
+        /// Sets <see cref="OrderItem.OrderLineQuantityMode"/> from Woo <c>quantityType</c> so shop-manager badges match the storefront (kg total vs יח').
+        /// Runs after <see cref="OrderLineDisplayFieldsBuilder.MergeComputedDisplayFields"/> so it overrides wrong heuristics when <c>saleUnits</c>/<c>saleTotalWeight</c> are empty.
+        /// </summary>
+        private static void ApplyWooCommerceQuantityTypeToLineDisplay(OrderItem oi, WooCommerceOrderItemPayload it)
+        {
+            if (string.IsNullOrWhiteSpace(it.QuantityType)) return;
+
+            if (string.Equals(it.QuantityType, "kg", StringComparison.OrdinalIgnoreCase))
+            {
+                oi.OrderLineQuantityMode = "weight";
+                // quantity is total kg; UI derives total grams as Quantity × UnitWeightGrams when saleTotalWeight is empty.
+                if (oi.Quantity > 0m && (oi.UnitWeightGrams == null || oi.UnitWeightGrams <= 0m))
+                    oi.UnitWeightGrams = 1000m;
+                return;
+            }
+
+            if (string.Equals(it.QuantityType, "unit", StringComparison.OrdinalIgnoreCase))
+                oi.OrderLineQuantityMode = "units";
         }
 
         /// <summary>Resolves WooCommerce order item to our Product.Id: parent <see cref="Product.WooCommerceId"/>, then variation <see cref="ProductVariant.WooCommerceVariationId"/> (WC often sends variation id as product_id), then SKU. Returns null if not found (caller may keep payload ProductId as fallback).</summary>
@@ -990,6 +1088,20 @@ namespace George.Services
         {
             var saleWeightKg = TryParseSaleTotalWeightKg(it.SaleTotalWeight);
             var saleUnits = TryParseSaleUnitsCount(it.SaleUnits);
+
+            if (string.Equals(it.QuantityType, "kg", StringComparison.OrdinalIgnoreCase)
+                && it.Unit is > 0
+                && it.UnitWeight is > 0)
+            {
+                saleUnits = it.Unit;
+                saleWeightKg = it.Unit!.Value * it.UnitWeight!.Value;
+            }
+            else if (string.Equals(it.QuantityType, "unit", StringComparison.OrdinalIgnoreCase)
+                     && it.Unit is > 0
+                     && !saleUnits.HasValue)
+            {
+                saleUnits = it.Unit;
+            }
 
             if (product == null)
                 return (saleUnits ?? it.Quantity, null, null);
@@ -1123,7 +1235,7 @@ namespace George.Services
                 var updateCustomer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
                     siteId, site.AccountId, payload.Customer?.Phone ?? "", payload.Customer?.Name ?? "", email: payload.Customer?.Email,
                     city: sa?.City, defaultAddress: wcMainAddr, notes: null, marketingSms: null,
-                    deliveryStreet: sa?.Street, deliveryApartment: sa?.Apartment, deliveryFloor: sa?.Floor, deliveryEntranceCode: sa?.EntranceCode,
+                    deliveryStreet: sa?.Street, deliveryApartment: sa?.Apartment, deliveryFloor: sa?.Floor, deliveryEntranceCode: sa?.ResolvedEntranceCode,
                     cancelToken).ConfigureAwait(false);
                 var updated = await _orderStorage.UpdateOrderAsync(existing.Id, o =>
                 {
@@ -1136,16 +1248,18 @@ namespace George.Services
                     o.BillingNotes = wooBillingNotes;
                     o.CustomerNote = wooCustomerNote;
                     o.ManagerNote = null;
-                    var pay = MapWooCommercePaymentMethodToInternal(payload.PaymentMethod, payload.PaymentMethodTitle);
+                    var pay = MapWooCommercePaymentMethodToInternal(payload.PaymentMethod, payload.PaymentMethodTitle, payload.GetResolvedPaymentLabel());
                     if (pay != null) o.PaymentMethod = pay;
                     ApplyWooCommerceStoredMetadata(o, payload);
                     o.WooCommerceRequestJson = wcRequestJson;
+                    ApplyWooCommercePayloadColumnSnapshot(o, payload);
                     o.ShippingCost = payload.ShippingTotal;
                     o.Total = payload.OrderTotal ?? o.Total;
                     o.SubTotal = (payload.OrderTotal ?? o.SubTotal) - (payload.ShippingTotal ?? 0);
                     o.UpdatedDate = DateTime.UtcNow;
-                    ApplyShippingInfoToOrder(o, payload.ShippingInfo, payload.ShippingLabel);
+                    ApplyShippingInfoToOrder(o, payload.ShippingInfo, payload.GetResolvedShippingLabel());
                     NormalizeOrderDeliveryAndPickupDates(o);
+                    ApplyWooCommercePickupStoreNote(o, payload.ShippingStoreName);
                 }, cancelToken).ConfigureAwait(false);
                 if (updated == null)
                     return CreateResponse(response, StatusCode.ItemNotFound);
@@ -1173,10 +1287,12 @@ namespace George.Services
                             Notes = !string.IsNullOrWhiteSpace(it.Note) ? it.Note : it.ProductNote,
                             SaleUnits = it.SaleUnits,
                             SaleTotalWeight = it.SaleTotalWeight,
+                            OrderLineSizeLabel = NullIfWhiteSpace(it.SaleUnitsLine),
                             WooCommerceProductId = it.ProductId,
                             WooCommerceVariationId = GetEffectiveVariationId(it),
                             SortOrder = i
                         };
+                        PopulateWooCommerceOrderItemPayloadColumns(oi, it);
                         var mergeReq = new CreateOrderItemReq
                         {
                             ProductId = ourProductId ?? it.ProductId,
@@ -1185,8 +1301,10 @@ namespace George.Services
                             UnitWeightGrams = unitWeightGrams,
                             SaleUnits = it.SaleUnits,
                             SaleTotalWeight = it.SaleTotalWeight,
+                            OrderLineSizeLabel = NullIfWhiteSpace(it.SaleUnitsLine),
                         };
                         OrderLineDisplayFieldsBuilder.MergeComputedDisplayFields(oi, mergeReq, product);
+                        ApplyWooCommerceQuantityTypeToLineDisplay(oi, it);
                         updateItems.Add(oi);
                     }
                 }
@@ -1222,6 +1340,7 @@ namespace George.Services
                         Notes = !string.IsNullOrWhiteSpace(it.Note) ? it.Note : it.ProductNote,
                         SaleUnits = it.SaleUnits,
                         SaleTotalWeight = it.SaleTotalWeight,
+                        OrderLineSizeLabel = NullIfWhiteSpace(it.SaleUnitsLine),
                         WooCommerceProductId = it.ProductId,
                         WooCommerceVariationId = GetEffectiveVariationId(it),
                         SortOrder = i
@@ -1240,10 +1359,10 @@ namespace George.Services
                 CustomerEmail = payload.Customer?.Email,
                 CustomerNote = wooCustomerNote,
                 ManagerNote = null,
-                PaymentMethod = MapWooCommercePaymentMethodToInternal(payload.PaymentMethod, payload.PaymentMethodTitle),
+                PaymentMethod = MapWooCommercePaymentMethodToInternal(payload.PaymentMethod, payload.PaymentMethodTitle, payload.GetResolvedPaymentLabel()),
                 PaymentMethodTitle = payload.PaymentMethodTitle,
-                PaymentLabel = payload.PaymentLabel,
-                ShippingLabel = payload.ShippingLabel,
+                PaymentLabel = payload.GetResolvedPaymentLabel(),
+                ShippingLabel = payload.GetResolvedShippingLabel(),
                 BillingNotes = wooBillingNotes,
                 InternalOrderNotes = payload.InternalOrderNotes,
                 WooCommerceSiteId = payload.SiteId,
@@ -1258,7 +1377,7 @@ namespace George.Services
             var customer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
                 req.SiteId, req.AccountId, req.CustomerPhone, req.CustomerName ?? "", email: req.CustomerEmail,
                 city: saNew?.City, defaultAddress: wcMainAddrForCustomer, notes: null, marketingSms: null,
-                deliveryStreet: saNew?.Street, deliveryApartment: saNew?.Apartment, deliveryFloor: saNew?.Floor, deliveryEntranceCode: saNew?.EntranceCode,
+                deliveryStreet: saNew?.Street, deliveryApartment: saNew?.Apartment, deliveryFloor: saNew?.Floor, deliveryEntranceCode: saNew?.ResolvedEntranceCode,
                 cancelToken).ConfigureAwait(false);
             var order = _mapper.Map<Order>(req);
             ApplyWooCommerceShippingAddressToOrder(order, payload.ShippingAddress);
@@ -1270,8 +1389,10 @@ namespace George.Services
                 : DateTime.UtcNow;
             order.CreationUserId = null;
             order.WooCommerceRequestJson = wcRequestJson;
-            ApplyShippingInfoToOrder(order, payload.ShippingInfo, payload.ShippingLabel);
+            ApplyWooCommercePayloadColumnSnapshot(order, payload);
+            ApplyShippingInfoToOrder(order, payload.ShippingInfo, payload.GetResolvedShippingLabel());
             NormalizeOrderDeliveryAndPickupDates(order);
+            ApplyWooCommercePickupStoreNote(order, payload.ShippingStoreName);
             var items = new List<OrderItem>();
             var wooProductCache = new Dictionary<int, Product?>();
             for (var i = 0; i < req.Items.Count; i++)
@@ -1279,6 +1400,8 @@ namespace George.Services
                 var lineReq = req.Items[i];
                 var oi = _mapper.Map<OrderItem>(lineReq);
                 oi.SortOrder = i;
+                if (payload.Items != null && i < payload.Items.Count)
+                    PopulateWooCommerceOrderItemPayloadColumns(oi, payload.Items[i]);
                 if (lineReq.ProductId is > 0)
                 {
                     if (!wooProductCache.TryGetValue(lineReq.ProductId.Value, out var p))
@@ -1288,6 +1411,8 @@ namespace George.Services
                     }
                     OrderLineDisplayFieldsBuilder.MergeComputedDisplayFields(oi, lineReq, p);
                 }
+                if (payload.Items != null && i < payload.Items.Count)
+                    ApplyWooCommerceQuantityTypeToLineDisplay(oi, payload.Items[i]);
                 items.Add(oi);
             }
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken).ConfigureAwait(false);

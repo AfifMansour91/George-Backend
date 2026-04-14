@@ -58,6 +58,30 @@ public partial class OrderItem
     /// <summary>WooCommerce variation id when applicable.</summary>
     public int? WooCommerceVariationId { get; set; }
 
+    /// <summary>Payload <c>sku</c> as sent on ingest (e.g. WooCommerce line).</summary>
+    [StringLength(120)]
+    public string? LineSku { get; set; }
+
+    /// <summary>Payload <c>quantityType</c> (e.g. unit, kg).</summary>
+    [StringLength(16)]
+    public string? LineQuantityType { get; set; }
+
+    /// <summary>Payload <c>unit</c> (piece count when applicable).</summary>
+    [Column(TypeName = "decimal(18, 4)")]
+    public decimal? LineUnit { get; set; }
+
+    /// <summary>Payload <c>unitWeight</c> in kg per piece when applicable.</summary>
+    [Column(TypeName = "decimal(18, 4)")]
+    public decimal? LineUnitWeightKg { get; set; }
+
+    /// <summary>Payload <c>saleUnitsLine</c> as sent (e.g. combined Hebrew display).</summary>
+    [StringLength(200)]
+    public string? SaleUnitsLine { get; set; }
+
+    /// <summary>Full line item payload JSON for audit (all plugin fields).</summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? LinePayloadJson { get; set; }
+
     public int SortOrder { get; set; }
 
     /// <summary>

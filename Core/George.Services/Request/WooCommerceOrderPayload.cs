@@ -80,13 +80,41 @@ public class WooCommerceOrderPayload
     [JsonPropertyName("shipping_label")]
     public string? ShippingLabel { get; set; }
 
+    /// <summary>Same as <see cref="ShippingLabel"/>; plugin may send one word key <c>shippinglabel</c>.</summary>
+    [JsonPropertyName("shippinglabel")]
+    public string? ShippingLabelFlat { get; set; }
+
     /// <summary>Payment method label (e.g. "תשלום לשליח").</summary>
     [JsonPropertyName("payment_label")]
     public string? PaymentLabel { get; set; }
 
+    /// <summary>Same as <see cref="PaymentLabel"/>; plugin may send <c>paymentlabel</c>.</summary>
+    [JsonPropertyName("paymentlabel")]
+    public string? PaymentLabelFlat { get; set; }
+
+    /// <summary>Pickup branch name (e.g. "סניף חיפה") when <c>shippinglabel</c> is איסוף.</summary>
+    [JsonPropertyName("shippingstorename")]
+    public string? ShippingStoreName { get; set; }
+
     /// <summary>Delivery/pickup slot and type (type, date DD/MM/YYYY, slotStart, slotEnd, pickupAffiliateId, pickupAffiliateName).</summary>
     [JsonPropertyName("shippingInfo")]
     public WooCommerceShippingInfoPayload? ShippingInfo { get; set; }
+
+    public string? GetResolvedShippingLabel()
+    {
+        var a = ShippingLabel?.Trim();
+        if (!string.IsNullOrWhiteSpace(a)) return a;
+        var b = ShippingLabelFlat?.Trim();
+        return string.IsNullOrWhiteSpace(b) ? null : b;
+    }
+
+    public string? GetResolvedPaymentLabel()
+    {
+        var a = PaymentLabel?.Trim();
+        if (!string.IsNullOrWhiteSpace(a)) return a;
+        var b = PaymentLabelFlat?.Trim();
+        return string.IsNullOrWhiteSpace(b) ? null : b;
+    }
 }
 
 public class WooCommerceShippingInfoPayload
@@ -141,6 +169,14 @@ public class WooCommerceShippingAddressPayload
 
     [JsonPropertyName("entranceCode")]
     public string? EntranceCode { get; set; }
+
+    /// <summary>Plugin alias for <see cref="EntranceCode"/>.</summary>
+    [JsonPropertyName("enterCode")]
+    public string? EnterCode { get; set; }
+
+    [JsonIgnore]
+    public string? ResolvedEntranceCode =>
+        string.IsNullOrWhiteSpace(EntranceCode) ? (string.IsNullOrWhiteSpace(EnterCode) ? null : EnterCode.Trim()) : EntranceCode.Trim();
 }
 
 /// <summary>One selected option in a variant (e.g. cutting shape or size). <see cref="Name"/> is used for display; <see cref="Id"/> is accepted from JSON but not used for matching (we use variationId / names).</summary>
@@ -199,6 +235,18 @@ public class WooCommerceOrderItemPayload
     [JsonPropertyName("quantity")]
     public decimal Quantity { get; set; }
 
+    /// <summary><c>unit</c> or <c>kg</c> from WooCommerce plugin.</summary>
+    [JsonPropertyName("quantityType")]
+    public string? QuantityType { get; set; }
+
+    /// <summary>When <see cref="QuantityType"/> is <c>kg</c>: number of pieces (e.g. 3). Optional for <c>unit</c>.</summary>
+    [JsonPropertyName("unit")]
+    public decimal? Unit { get; set; }
+
+    /// <summary>When <see cref="QuantityType"/> is <c>kg</c>: weight per piece in kg (e.g. 0.6).</summary>
+    [JsonPropertyName("unitWeight")]
+    public decimal? UnitWeight { get; set; }
+
     [JsonPropertyName("unitPrice")]
     public decimal? UnitPrice { get; set; }
 
@@ -212,4 +260,8 @@ public class WooCommerceOrderItemPayload
     /// <summary>Total ordered weight as string (typically kg, e.g. "0.8 "). Parsed when present.</summary>
     [JsonPropertyName("saleTotalWeight")]
     public string? SaleTotalWeight { get; set; }
+
+    /// <summary>Combined display e.g. "3 יח', 600 גר'" (optional).</summary>
+    [JsonPropertyName("saleUnitsLine")]
+    public string? SaleUnitsLine { get; set; }
 }
