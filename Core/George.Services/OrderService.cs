@@ -1842,17 +1842,19 @@ namespace George.Services
 
         private static decimal? ComputeVoucherGrandTotal(Order order)
         {
-            if (order.Total.HasValue) return order.Total.Value;
             var items = order.OrderItem ?? new List<OrderItem>();
             var shipping = order.ShippingCost ?? 0m;
             var anyPicked = items.Any(i => i.PickedQuantity.HasValue && i.PickedQuantity.Value > 0m);
             decimal itemsSum;
             if (anyPicked)
             {
+                // After picking: compute from actual picked line totals — order.Total is the original pre-picking value and is not updated after picking.
                 itemsSum = items.Sum(i => GetVoucherPickedLineAmount(i) ?? 0m);
             }
             else
             {
+                // No picking done: prefer order.Total (e.g. from WooCommerce), otherwise compute from item prices.
+                if (order.Total.HasValue) return order.Total.Value;
                 itemsSum = items.Sum(i => i.TotalPrice ?? i.Quantity * (i.PricePerUnit ?? 0m));
             }
 
