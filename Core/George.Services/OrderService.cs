@@ -969,6 +969,7 @@ namespace George.Services
         /// <summary>
         /// Sets <see cref="OrderItem.OrderLineQuantityMode"/> from Woo <c>quantityType</c> so shop-manager badges match the storefront (kg total vs יח').
         /// Runs after <see cref="OrderLineDisplayFieldsBuilder.MergeComputedDisplayFields"/> so it overrides wrong heuristics when <c>saleUnits</c>/<c>saleTotalWeight</c> are empty.
+        /// When <c>quantityType=kg</c> but <c>saleUnits</c> indicates piece-based sale (e.g. "2 יח'"), the display unit is pieces — quantity was stored in kg by the plugin, but the item is sold by piece count.
         /// </summary>
         private static void ApplyWooCommerceQuantityTypeToLineDisplay(OrderItem oi, WooCommerceOrderItemPayload it)
         {
@@ -976,6 +977,13 @@ namespace George.Services
 
             if (string.Equals(it.QuantityType, "kg", StringComparison.OrdinalIgnoreCase))
             {
+                // When unit > 0 the plugin is telling us this is a piece-based sale (N pieces weighed in kg).
+                // The display unit for the customer is pieces, not kg total.
+                if (it.Unit is > 0)
+                {
+                    oi.OrderLineQuantityMode = "units";
+                    return;
+                }
                 oi.OrderLineQuantityMode = "weight";
                 // quantity is total kg; UI derives total grams as Quantity × UnitWeightGrams when saleTotalWeight is empty.
                 if (oi.Quantity > 0m && (oi.UnitWeightGrams == null || oi.UnitWeightGrams <= 0m))
@@ -1287,7 +1295,6 @@ namespace George.Services
                             Notes = !string.IsNullOrWhiteSpace(it.Note) ? it.Note : it.ProductNote,
                             SaleUnits = it.SaleUnits,
                             SaleTotalWeight = it.SaleTotalWeight,
-                            OrderLineSizeLabel = NullIfWhiteSpace(it.SaleUnitsLine),
                             WooCommerceProductId = it.ProductId,
                             WooCommerceVariationId = GetEffectiveVariationId(it),
                             SortOrder = i
@@ -1301,7 +1308,6 @@ namespace George.Services
                             UnitWeightGrams = unitWeightGrams,
                             SaleUnits = it.SaleUnits,
                             SaleTotalWeight = it.SaleTotalWeight,
-                            OrderLineSizeLabel = NullIfWhiteSpace(it.SaleUnitsLine),
                         };
                         OrderLineDisplayFieldsBuilder.MergeComputedDisplayFields(oi, mergeReq, product);
                         ApplyWooCommerceQuantityTypeToLineDisplay(oi, it);
@@ -1340,7 +1346,6 @@ namespace George.Services
                         Notes = !string.IsNullOrWhiteSpace(it.Note) ? it.Note : it.ProductNote,
                         SaleUnits = it.SaleUnits,
                         SaleTotalWeight = it.SaleTotalWeight,
-                        OrderLineSizeLabel = NullIfWhiteSpace(it.SaleUnitsLine),
                         WooCommerceProductId = it.ProductId,
                         WooCommerceVariationId = GetEffectiveVariationId(it),
                         SortOrder = i
