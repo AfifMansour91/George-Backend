@@ -1551,18 +1551,16 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Updates the order status on the store side (WooCommerce or oc-storeos). When base URL is oc-storeos, POSTs full order to their API (order_id + status + customer + items etc.). Otherwise PUTs status to WooCommerce REST API. Does not throw; logs errors.
+        /// Updates the order status on the store side (oc-storeos under <see cref="Site.WooCommerceOrderUpdateBaseUrl"/>, or WooCommerce REST). When that storefront URL is set, POSTs full order to <c>.../wp-json/oc-storeos/v1/orders</c>. Otherwise PUTs status to wc/v3 using <see cref="Site.WooCommerceUrl"/>. Does not throw; logs errors.
         /// </summary>
         public async Task UpdateOrderStatusAsync(int siteId, string wooOrderId, string status, CancellationToken cancelToken)
         {
             if (string.IsNullOrWhiteSpace(wooOrderId)) return;
             var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
             if (site == null || site.WooCommerceEnabled != true) return;
-            var baseUrl = !string.IsNullOrWhiteSpace(site.WooCommerceOrderUpdateBaseUrl)
-                ? site.WooCommerceOrderUpdateBaseUrl.Trim().TrimEnd('/')
-                : null;
-            var isOcStoreos = !string.IsNullOrEmpty(baseUrl) && baseUrl.Contains("oc-storeos", StringComparison.OrdinalIgnoreCase);
-            if (isOcStoreos)
+            var ocV1Base = OcStoreosApiUrls.V1BaseFromWooCommerceRoot(site.WooCommerceOrderUpdateBaseUrl);
+            var useOcStoreosOrderApi = !string.IsNullOrEmpty(ocV1Base);
+            if (useOcStoreosOrderApi)
             {
                 var wooId = wooOrderId.Trim();
                 var order = await _orderStorage.GetOrderBySiteAndExternalIdAsync(siteId, wooId, cancelToken);
@@ -1583,8 +1581,7 @@ namespace George.Services
             }
             if (string.IsNullOrEmpty(site.WooCommerceKey) || string.IsNullOrEmpty(site.WooCommerceSecret)) return;
             if (string.IsNullOrEmpty(site.WooCommerceUrl)) return;
-            baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
-            //baseUrl = $"https://deliz-short.mywebsite.co.il/wp-json/oc-storeos/v1/orders";
+            var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
             var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
             using var httpClient = _httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(30);
@@ -1602,24 +1599,17 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Syncs full order to oc-storeos API (POST .../orders). Body matches ingest shape: orderNumber, status, customer, shippingAddress, shippingInfo, items (sku + quantity), shippingTotal, customerNotes. Quantities prefer picked values when set.
+        /// Syncs full order to oc-storeos API: POST <c>{WooCommerceOrderUpdateBaseUrl}/wp-json/oc-storeos/v1/orders</c>. Body matches ingest shape: orderNumber, status, customer, shippingAddress, shippingInfo, items (sku + quantity), shippingTotal, customerNotes. Quantities prefer picked values when set.
         /// </summary>
         public async Task SyncOrderToOcStoreosAsync(int siteId, int orderId, CancellationToken cancelToken)
         {
             var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
-            if (site == null || string.IsNullOrWhiteSpace(site.WooCommerceOrderUpdateBaseUrl))
+            var ocV1Base = OcStoreosApiUrls.V1BaseFromWooCommerceRoot(site?.WooCommerceOrderUpdateBaseUrl);
+            if (site == null || string.IsNullOrWhiteSpace(ocV1Base))
             {
                 _logger.LogWarning(
                     "oc-storeos sync skipped: site missing or WooCommerceOrderUpdateBaseUrl empty. siteId={SiteId}, internalOrderId={InternalOrderId}",
                     siteId, orderId);
-                return;
-            }
-            var baseUrl = site.WooCommerceOrderUpdateBaseUrl.Trim().TrimEnd('/');
-            if (!baseUrl.Contains("oc-storeos", StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.LogWarning(
-                    "oc-storeos sync skipped: base URL does not contain oc-storeos. siteId={SiteId}, internalOrderId={InternalOrderId}, baseUrl={BaseUrl}",
-                    siteId, orderId, baseUrl);
                 return;
             }
             var order = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
@@ -1745,8 +1735,7 @@ namespace George.Services
                 httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", basic);
             }
             using var content = new StringContent(body, Encoding.UTF8, "application/json");
-            //var url = $"{baseUrl}/wp-json/oc-storeos/v1/orders";
-            var url = $"{baseUrl}";
+            var url = $"{ocV1Base}/orders";
             var response = await httpClient.PostAsync(url, content, cancelToken);
             if (response.IsSuccessStatusCode)
             {
