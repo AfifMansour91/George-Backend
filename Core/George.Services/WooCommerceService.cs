@@ -222,6 +222,56 @@ namespace George.Services
         }
 
         /// <summary>
+        /// Imports WooCommerce catalog into our side for a site and overwrites existing matched entities.
+        /// </summary>
+        public async Task<IApiResponse<WooCommerceImportFromWooRes>> ImportFromWooCommerceAsync(
+            WooCommerceSyncReq req,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<WooCommerceImportFromWooRes> { Data = new WooCommerceImportFromWooRes() };
+            try
+            {
+                var site = await _siteStorage.GetSiteAsync(req.SiteId, cancelToken);
+                if (site == null)
+                    return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
+                if (string.IsNullOrWhiteSpace(site.WooCommerceUrl) ||
+                    string.IsNullOrWhiteSpace(site.WooCommerceKey) ||
+                    string.IsNullOrWhiteSpace(site.WooCommerceSecret))
+                {
+                    return CreateResponse(response, StatusCode.InvalidRequest,
+                        "WooCommerce integration not configured. Please set up your credentials in Store Settings.");
+                }
+
+                var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
+                var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
+
+                using var httpClient = _httpClientFactory.CreateClient();
+                httpClient.Timeout = WooCommerceHttpTimeout;
+                httpClient.DefaultRequestHeaders.Clear();
+                httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+
+                var wooCategories = await FetchWooPagedAsync<WooImportCategoryItem>(httpClient, $"{baseUrl}/products/categories", cancelToken);
+                var wooProducts = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products", cancelToken);
+
+                using var scope = _scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<GeorgeDBContext>();
+                using var tx = await db.Database.BeginTransactionAsync(cancelToken);
+
+                var categoryMap = await UpsertCategoriesFromWooAsync(db, site, wooCategories, response.Data, cancelToken);
+                await UpsertProductsFromWooAsync(db, site, baseUrl, httpClient, wooProducts, categoryMap, response.Data, cancelToken);
+
+                await tx.CommitAsync(cancelToken);
+                response.Data.Message = $"Imported from WooCommerce: {wooCategories.Count} categories and {wooProducts.Count} products processed.";
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error importing from WooCommerce");
+                return CreateResponse(response, StatusCode.UnknownError, ex.Message);
+            }
+        }
+
+        /// <summary>
         /// Verifies sync consistency for an account (and optionally a single site): product counts per site,
         /// duplicate SKUs within a site, and cross-site SKU overlap (same raw SKU in different sites).
         /// Use this to confirm data syncs without collision between branches.
@@ -2300,6 +2350,302 @@ namespace George.Services
 
             return valueInKg.ToString(CultureInfo.InvariantCulture);
         }
+
+        private static async Task<List<T>> FetchWooPagedAsync<T>(HttpClient httpClient, string endpointUrl, CancellationToken cancelToken)
+        {
+            var page = 1;
+            const int perPage = 100;
+            var items = new List<T>();
+            while (true)
+            {
+                var url = endpointUrl.Contains('?')
+                    ? $"{endpointUrl}&per_page={perPage}&page={page}"
+                    : $"{endpointUrl}?per_page={perPage}&page={page}";
+                var response = await httpClient.GetAsync(url, cancelToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var body = await response.Content.ReadAsStringAsync(cancelToken);
+                    throw new InvalidOperationException($"WooCommerce fetch failed ({(int)response.StatusCode}) for {url}: {body}");
+                }
+
+                var bodyJson = await response.Content.ReadAsStringAsync(cancelToken);
+                var pageItems = JsonSerializer.Deserialize<List<T>>(bodyJson, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                }) ?? new List<T>();
+
+                if (pageItems.Count == 0)
+                    break;
+
+                items.AddRange(pageItems);
+                if (pageItems.Count < perPage)
+                    break;
+                page++;
+            }
+            return items;
+        }
+
+        private async Task<Dictionary<int, int>> UpsertCategoriesFromWooAsync(
+            GeorgeDBContext db,
+            Site site,
+            List<WooImportCategoryItem> wooCategories,
+            WooCommerceImportFromWooRes stats,
+            CancellationToken cancelToken)
+        {
+            var siteId = site.Id;
+            var accountId = site.AccountId;
+            var existingCategories = await db.Category
+                .Include(c => c.Site)
+                .Where(c => !c.IsDeleted && c.AccountId == accountId && c.Site.Any(s => s.Id == siteId))
+                .ToListAsync(cancelToken);
+
+            var byWooId = existingCategories
+                .Where(c => c.WooCommerceId.HasValue)
+                .GroupBy(c => c.WooCommerceId!.Value)
+                .ToDictionary(g => g.Key, g => g.First());
+
+            var byName = existingCategories
+                .GroupBy(c => (c.Name ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            var map = new Dictionary<int, int>();
+            foreach (var wc in wooCategories.OrderBy(c => c.parent))
+            {
+                if (wc.id <= 0 || string.IsNullOrWhiteSpace(wc.name))
+                    continue;
+
+                Category? category = null;
+                if (byWooId.TryGetValue(wc.id, out var existingByWoo))
+                    category = existingByWoo;
+                else if (byName.TryGetValue(wc.name.Trim(), out var existingByName))
+                    category = existingByName;
+
+                if (category == null)
+                {
+                    category = new Category
+                    {
+                        AccountId = accountId,
+                        Name = wc.name.Trim(),
+                        Description = wc.description,
+                        WooCommerceId = wc.id,
+                        IsActive = true,
+                        IsDeleted = false,
+                        CreationTime = DateTime.UtcNow,
+                        GuidId = Guid.NewGuid()
+                    };
+                    category.Site.Add(site);
+                    db.Category.Add(category);
+                    stats.Categories.Created++;
+                }
+                else
+                {
+                    category.Name = wc.name.Trim();
+                    category.Description = wc.description;
+                    category.WooCommerceId = wc.id;
+                    category.IsDeleted = false;
+                    category.UpdatedDate = DateTime.UtcNow;
+                    if (!category.Site.Any(s => s.Id == siteId))
+                        category.Site.Add(site);
+                    stats.Categories.Updated++;
+                }
+
+                await db.SaveChangesAsync(cancelToken);
+                map[wc.id] = category.Id;
+                byWooId[wc.id] = category;
+                byName[category.Name.Trim()] = category;
+            }
+
+            foreach (var wc in wooCategories)
+            {
+                if (wc.id <= 0 || wc.parent <= 0) continue;
+                if (!map.TryGetValue(wc.id, out var childId) || !map.TryGetValue(wc.parent, out var parentId)) continue;
+                var child = await db.Category.FirstOrDefaultAsync(c => c.Id == childId, cancelToken);
+                if (child != null && child.ParentCategoryId != parentId)
+                {
+                    child.ParentCategoryId = parentId;
+                    child.UpdatedDate = DateTime.UtcNow;
+                }
+            }
+            await db.SaveChangesAsync(cancelToken);
+            return map;
+        }
+
+        private async Task UpsertProductsFromWooAsync(
+            GeorgeDBContext db,
+            Site site,
+            string baseUrl,
+            HttpClient httpClient,
+            List<WooImportProductItem> wooProducts,
+            Dictionary<int, int> categoryMap,
+            WooCommerceImportFromWooRes stats,
+            CancellationToken cancelToken)
+        {
+            var siteId = site.Id;
+            var accountId = site.AccountId;
+            var existingProducts = await db.Product
+                .Include(p => p.Site)
+                .Include(p => p.ProductCategory)
+                .Include(p => p.ProductOption).ThenInclude(po => po.ProductOptionValue)
+                .Include(p => p.ProductVariant).ThenInclude(v => v.ProductVariantOptionValue)
+                .Where(p => !p.IsDeleted && p.AccountId == accountId && p.Site.Any(s => s.Id == siteId))
+                .ToListAsync(cancelToken);
+
+            var byWooId = existingProducts
+                .Where(p => p.WooCommerceId.HasValue)
+                .GroupBy(p => p.WooCommerceId!.Value)
+                .ToDictionary(g => g.Key, g => g.First());
+
+            var bySku = existingProducts
+                .Where(p => !string.IsNullOrWhiteSpace(p.Sku))
+                .GroupBy(p => p.Sku!.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var wp in wooProducts)
+            {
+                if (wp.id <= 0 || string.IsNullOrWhiteSpace(wp.name))
+                    continue;
+
+                Product? product = null;
+                if (byWooId.TryGetValue(wp.id, out var existingByWoo))
+                    product = existingByWoo;
+                else if (!string.IsNullOrWhiteSpace(wp.sku) && bySku.TryGetValue(wp.sku.Trim(), out var existingBySku))
+                    product = existingBySku;
+
+                var isCreate = product == null;
+                if (isCreate)
+                {
+                    product = new Product
+                    {
+                        AccountId = accountId,
+                        GuidId = Guid.NewGuid(),
+                        CreationTime = DateTime.UtcNow,
+                        IsDeleted = false,
+                        IsActive = true
+                    };
+                    product.Site.Add(site);
+                    db.Product.Add(product);
+                    stats.Products.Created++;
+                }
+                else
+                {
+                    stats.Products.Updated++;
+                    if (!product!.Site.Any(s => s.Id == siteId))
+                        product.Site.Add(site);
+                    product.IsDeleted = false;
+                    product.UpdatedDate = DateTime.UtcNow;
+                }
+
+                product!.Name = wp.name.Trim();
+                product.ShortDescription = wp.short_description;
+                product.LongDescription = wp.description;
+                product.Sku = string.IsNullOrWhiteSpace(wp.sku) ? null : wp.sku.Trim();
+                product.WooCommerceId = wp.id;
+                product.Price = ParseNullableDecimal(wp.regular_price);
+                product.SalePrice = ParseNullableDecimal(wp.sale_price);
+                product.Weight = ParseNullableDecimal(wp.weight);
+                product.StockQuantity = wp.manage_stock == true ? wp.stock_quantity : null;
+                product.StockStatusId = null;
+                product.StockManagementTypeId = null;
+
+                await db.SaveChangesAsync(cancelToken);
+
+                db.ProductCategory.RemoveRange(db.ProductCategory.Where(x => x.ProductId == product.Id));
+                var optionIds = product.ProductOption.Select(o => o.Id).ToList();
+                var variantIds = product.ProductVariant.Select(v => v.Id).ToList();
+                if (variantIds.Count > 0)
+                {
+                    db.ProductVariantOptionValue.RemoveRange(db.ProductVariantOptionValue.Where(x => variantIds.Contains(x.ProductVariantId)));
+                    db.ProductVariant.RemoveRange(db.ProductVariant.Where(x => variantIds.Contains(x.Id)));
+                }
+                if (optionIds.Count > 0)
+                {
+                    db.ProductOptionValue.RemoveRange(db.ProductOptionValue.Where(x => optionIds.Contains(x.ProductOptionId)));
+                    db.ProductOption.RemoveRange(db.ProductOption.Where(x => optionIds.Contains(x.Id)));
+                }
+
+                if (wp.categories != null)
+                {
+                    foreach (var wc in wp.categories)
+                    {
+                        if (wc.id > 0 && categoryMap.TryGetValue(wc.id, out var localCategoryId))
+                            db.ProductCategory.Add(new ProductCategory { ProductId = product.Id, CategoryId = localCategoryId });
+                    }
+                }
+
+                var optionNameToValues = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+                if (wp.attributes != null)
+                {
+                    foreach (var attr in wp.attributes.Where(a => !string.IsNullOrWhiteSpace(a.name)))
+                    {
+                        if (!optionNameToValues.TryGetValue(attr.name!.Trim(), out var values))
+                        {
+                            values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                            optionNameToValues[attr.name.Trim()] = values;
+                        }
+                        foreach (var value in attr.options ?? new List<string>())
+                        {
+                            if (!string.IsNullOrWhiteSpace(value))
+                                values.Add(value.Trim());
+                        }
+                    }
+                }
+
+                foreach (var kv in optionNameToValues)
+                {
+                    var po = new ProductOption { ProductId = product.Id, Name = kv.Key, IsDeleted = false };
+                    db.ProductOption.Add(po);
+                    await db.SaveChangesAsync(cancelToken);
+                    foreach (var value in kv.Value)
+                        db.ProductOptionValue.Add(new ProductOptionValue { ProductOptionId = po.Id, Value = value });
+                }
+
+                var wooVariations = await FetchWooPagedAsync<WooImportVariationItem>(httpClient, $"{baseUrl}/products/{wp.id}/variations", cancelToken);
+                foreach (var vv in wooVariations)
+                {
+                    var variant = new ProductVariant
+                    {
+                        ProductId = product.Id,
+                        WooCommerceVariationId = vv.id,
+                        Sku = string.IsNullOrWhiteSpace(vv.sku) ? null : vv.sku.Trim(),
+                        Price = ParseNullableDecimal(vv.regular_price),
+                        SalePrice = ParseNullableDecimal(vv.sale_price),
+                        Weight = ParseNullableDecimal(vv.weight),
+                        StockQuantity = vv.manage_stock == true ? vv.stock_quantity : null,
+                        ImageUrl = vv.image?.src,
+                        IsDeleted = false
+                    };
+                    db.ProductVariant.Add(variant);
+                    await db.SaveChangesAsync(cancelToken);
+
+                    foreach (var a in vv.attributes ?? new List<WooImportVariationAttributeItem>())
+                    {
+                        if (string.IsNullOrWhiteSpace(a.name) || string.IsNullOrWhiteSpace(a.option))
+                            continue;
+                        db.ProductVariantOptionValue.Add(new ProductVariantOptionValue
+                        {
+                            ProductVariantId = variant.Id,
+                            OptionName = a.name.Trim(),
+                            OptionValue = a.option.Trim()
+                        });
+                    }
+                }
+                stats.Variations.Updated += wooVariations.Count;
+
+                await db.SaveChangesAsync(cancelToken);
+                byWooId[wp.id] = product;
+                if (!string.IsNullOrWhiteSpace(product.Sku))
+                    bySku[product.Sku.Trim()] = product;
+            }
+        }
+
+        private static decimal? ParseNullableDecimal(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return null;
+            if (decimal.TryParse(raw.Trim().Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var value))
+                return value;
+            return null;
+        }
         public class WooErrorResponse
         {
             public string? code { get; set; }
@@ -2311,6 +2657,66 @@ namespace George.Services
                 public int? status { get; set; }
                 public int? resource_id { get; set; }
             }
+        }
+
+        private class WooImportCategoryItem
+        {
+            public int id { get; set; }
+            public string? name { get; set; }
+            public string? description { get; set; }
+            public int parent { get; set; }
+        }
+
+        private class WooImportProductCategoryItem
+        {
+            public int id { get; set; }
+        }
+
+        private class WooImportProductAttributeItem
+        {
+            public string? name { get; set; }
+            public bool variation { get; set; }
+            public List<string>? options { get; set; }
+        }
+
+        private class WooImportProductItem
+        {
+            public int id { get; set; }
+            public string? name { get; set; }
+            public string? description { get; set; }
+            public string? short_description { get; set; }
+            public string? sku { get; set; }
+            public string? regular_price { get; set; }
+            public string? sale_price { get; set; }
+            public string? weight { get; set; }
+            public bool? manage_stock { get; set; }
+            public decimal? stock_quantity { get; set; }
+            public List<WooImportProductCategoryItem>? categories { get; set; }
+            public List<WooImportProductAttributeItem>? attributes { get; set; }
+        }
+
+        private class WooImportImageItem
+        {
+            public string? src { get; set; }
+        }
+
+        private class WooImportVariationAttributeItem
+        {
+            public string? name { get; set; }
+            public string? option { get; set; }
+        }
+
+        private class WooImportVariationItem
+        {
+            public int id { get; set; }
+            public string? sku { get; set; }
+            public string? regular_price { get; set; }
+            public string? sale_price { get; set; }
+            public string? weight { get; set; }
+            public bool? manage_stock { get; set; }
+            public decimal? stock_quantity { get; set; }
+            public WooImportImageItem? image { get; set; }
+            public List<WooImportVariationAttributeItem>? attributes { get; set; }
         }
     }
 }

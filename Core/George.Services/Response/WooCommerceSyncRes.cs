@@ -40,5 +40,20 @@ namespace George.Services.Response
         public bool Success { get; set; }
         public string Message { get; set; } = string.Empty;
     }
+
+    public class WooCommerceImportEntityCounts
+    {
+        public int Created { get; set; }
+        public int Updated { get; set; }
+    }
+
+    public class WooCommerceImportFromWooRes
+    {
+        public string Message { get; set; } = string.Empty;
+        public WooCommerceImportEntityCounts Categories { get; set; } = new();
+        public WooCommerceImportEntityCounts Products { get; set; } = new();
+        public WooCommerceImportEntityCounts Variations { get; set; } = new();
+        public List<string> Errors { get; set; } = new();
+    }
 }
 

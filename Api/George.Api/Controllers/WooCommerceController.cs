@@ -85,6 +85,16 @@ namespace George.Api.Controllers
             });
         }
 
+        [HttpPost("ImportFromWooCommerce")]
+        [ProducesResponseType(typeof(IApiResponse<WooCommerceImportFromWooRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> ImportFromWooCommerceAsync(
+            [FromBody] WooCommerceSyncReq request,
+            CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _wooCommerceService.ImportFromWooCommerceAsync(request, cancelToken));
+        }
+
         /// <summary>Sync with streaming progress (NDJSON). Response: progress lines then one "done" line with result.</summary>
         [HttpPost("SyncStream")]
         [ProducesResponseType((int)HttpStatusCode.OK)]
