@@ -1601,14 +1601,14 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Updates the order status on the store side (oc-storeos under <see cref="Site.WooCommerceOrderUpdateBaseUrl"/>, or WooCommerce REST). When that storefront URL is set, POSTs full order to <c>.../wp-json/oc-storeos/v1/orders</c>. Otherwise PUTs status to wc/v3 using <see cref="Site.WooCommerceUrl"/>. Does not throw; logs errors.
+        /// Updates the order status on the store side (oc-storeos under <see cref="Site.WooCommerceUrl"/>, or WooCommerce REST). When that site URL is set, POSTs full order to <c>.../wp-json/oc-storeos/v1/orders</c>. Otherwise PUTs status to wc/v3 using <see cref="Site.WooCommerceUrl"/>. Does not throw; logs errors.
         /// </summary>
         public async Task UpdateOrderStatusAsync(int siteId, string wooOrderId, string status, CancellationToken cancelToken)
         {
             if (string.IsNullOrWhiteSpace(wooOrderId)) return;
             var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
             if (site == null || site.WooCommerceEnabled != true) return;
-            var ocV1Base = OcStoreosApiUrls.V1BaseFromWooCommerceRoot(site.WooCommerceOrderUpdateBaseUrl);
+            var ocV1Base = OcStoreosApiUrls.V1BaseFromWooCommerceRoot(site.WooCommerceUrl);
             var useOcStoreosOrderApi = !string.IsNullOrEmpty(ocV1Base);
             if (useOcStoreosOrderApi)
             {
@@ -1649,16 +1649,16 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Syncs full order to oc-storeos API: POST <c>{WooCommerceOrderUpdateBaseUrl}/wp-json/oc-storeos/v1/orders</c>. Body matches ingest shape: orderNumber, status, customer, shippingAddress, shippingInfo, items (sku + quantity), shippingTotal, customerNotes. Quantities prefer picked values when set.
+        /// Syncs full order to oc-storeos API: POST <c>{WooCommerceUrl}/wp-json/oc-storeos/v1/orders</c>. Body matches ingest shape: orderNumber, status, customer, shippingAddress, shippingInfo, items (sku + quantity), shippingTotal, customerNotes. Quantities prefer picked values when set.
         /// </summary>
         public async Task SyncOrderToOcStoreosAsync(int siteId, int orderId, CancellationToken cancelToken)
         {
             var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
-            var ocV1Base = OcStoreosApiUrls.V1BaseFromWooCommerceRoot(site?.WooCommerceOrderUpdateBaseUrl);
+            var ocV1Base = OcStoreosApiUrls.V1BaseFromWooCommerceRoot(site?.WooCommerceUrl);
             if (site == null || string.IsNullOrWhiteSpace(ocV1Base))
             {
                 _logger.LogWarning(
-                    "oc-storeos sync skipped: site missing or WooCommerceOrderUpdateBaseUrl empty. siteId={SiteId}, internalOrderId={InternalOrderId}",
+                    "oc-storeos sync skipped: site missing or WooCommerceUrl empty. siteId={SiteId}, internalOrderId={InternalOrderId}",
                     siteId, orderId);
                 return;
             }

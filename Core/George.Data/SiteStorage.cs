@@ -124,8 +124,6 @@ namespace George.Data
             dbSite.WooCommerceUrl = updated.WooCommerceUrl ?? dbSite.WooCommerceUrl;
             dbSite.WooCommerceKey = updated.WooCommerceKey ?? dbSite.WooCommerceKey;
             dbSite.WooCommerceSecret = updated.WooCommerceSecret ?? dbSite.WooCommerceSecret;
-            if (updated.WooCommerceOrderUpdateBaseUrl != null)
-                dbSite.WooCommerceOrderUpdateBaseUrl = updated.WooCommerceOrderUpdateBaseUrl;
             if (updated.WooCommerceEnabled.HasValue)
             {
                 dbSite.WooCommerceEnabled = updated.WooCommerceEnabled;

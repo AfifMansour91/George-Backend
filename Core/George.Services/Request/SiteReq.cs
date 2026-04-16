@@ -21,8 +21,6 @@ namespace George.Services.Request
         public string? WooCommerceUrl { get; set; }
         public string? WooCommerceKey { get; set; }
         public string? WooCommerceSecret { get; set; }
-        /// <summary>Public storefront URL for oc-storeos order + closing-dates APIs (may differ from <see cref="WooCommerceUrl"/> used for wc/v3 product sync).</summary>
-        public string? WooCommerceOrderUpdateBaseUrl { get; set; }
         public bool? WooCommerceEnabled { get; set; }
         /// <summary>Internal API key for external integrations (e.g. WooCommerce plugin) to call our Order/OrderPayment APIs. Set manually or use GenerateSiteApiKey.</summary>
         public string? InternalApiKey { get; set; }

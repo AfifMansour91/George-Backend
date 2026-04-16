@@ -74,7 +74,7 @@ public class OrderReceptionService : ServiceBase
 
     /// <summary>
     /// Pushes the current closing dates to the WooCommerce oc-storeos API:
-    /// POST <c>{WooCommerceOrderUpdateBaseUrl}/wp-json/oc-storeos/v1/default-closing-dates</c>.
+    /// POST <c>{WooCommerceUrl}/wp-json/oc-storeos/v1/default-closing-dates</c>.
     /// Two calls: one for "shipping" (delivery) and one for "pickup".
     /// </summary>
     private async Task SyncClosingDatesToWooCommerceAsync(int siteId, OrderReceptionRes state, CancellationToken cancelToken)
@@ -82,7 +82,7 @@ public class OrderReceptionService : ServiceBase
         var site = await _siteStorage.GetSiteAsync(siteId, cancelToken).ConfigureAwait(false);
         if (site == null || site.WooCommerceEnabled != true) return;
 
-        var ocV1Base = OcStoreosApiUrls.V1BaseFromWooCommerceRoot(site.WooCommerceOrderUpdateBaseUrl);
+        var ocV1Base = OcStoreosApiUrls.V1BaseFromWooCommerceRoot(site.WooCommerceUrl);
         if (string.IsNullOrWhiteSpace(ocV1Base)) return;
 
         var endpoint = $"{ocV1Base}/default-closing-dates";

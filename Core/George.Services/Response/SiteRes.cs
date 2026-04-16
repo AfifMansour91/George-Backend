@@ -20,7 +20,6 @@ namespace George.Services.Response
         public string? WooCommerceUrl { get; set; }
         public string? WooCommerceKey { get; set; }
         public string? WooCommerceSecret { get; set; }
-        public string? WooCommerceOrderUpdateBaseUrl { get; set; }
         public bool? WooCommerceEnabled { get; set; }
         public string? InternalApiKey { get; set; }
 

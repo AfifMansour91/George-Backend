@@ -54,6 +54,7 @@ public partial class Site
     [StringLength(10)]
     public string Currency { get; set; } = null!;
 
+    /// <summary>WooCommerce site root (wc/v3 product REST and oc-storeos plugin: orders + closing-dates under the same host).</summary>
     [StringLength(500)]
     public string? WooCommerceUrl { get; set; }
 
@@ -62,10 +63,6 @@ public partial class Site
 
     [StringLength(250)]
     public string? WooCommerceSecret { get; set; }
-
-    /// <summary>Optional public storefront/site URL for oc-storeos (e.g. https://yourstore.com). When set, order sync and reception closing dates POST to {url}/wp-json/oc-storeos/v1/orders and .../default-closing-dates. <see cref="WooCommerceUrl"/> is used separately for product REST (wc/v3).</summary>
-    [StringLength(500)]
-    public string? WooCommerceOrderUpdateBaseUrl { get; set; }
 
     public bool? WooCommerceEnabled { get; set; }
 
