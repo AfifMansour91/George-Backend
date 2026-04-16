@@ -1,9 +1,14 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
+using Newtonsoft.Json;
 
 namespace George.Services.Request;
 
 /// <summary>Payload from WooCommerce plugin when order is opened/edited. Matches their JSON (camelCase and snake_case for new fields).</summary>
+/// <remarks>
+/// API uses <c>AddNewtonsoftJson</c> with camelCase contract. <see cref="JsonPropertyNameAttribute"/> (System.Text.Json) is ignored on deserialize;
+/// snake_case keys must use <see cref="JsonPropertyAttribute"/> (Newtonsoft).
+/// </remarks>
 public class WooCommerceOrderPayload
 {
     [Required]
@@ -47,7 +52,7 @@ public class WooCommerceOrderPayload
     [JsonPropertyName("customerNotes")]
     public string? CustomerNotes { get; set; }
 
-    /// <summary>Cashier / checkout notes from WooCommerce (snake_case in JSON).</summary>
+    /// <summary>Cashier / checkout notes from WooCommerce (camelCase JSON).</summary>
     [JsonPropertyName("billing_notes")]
     public string? BillingNotes { get; set; }
 
@@ -55,9 +60,15 @@ public class WooCommerceOrderPayload
     [JsonPropertyName("billingNotes")]
     public string? BillingNotesCamel { get; set; }
 
+    /// <summary>Snake_case <c>billing_notes</c> (Newtonsoft binding).</summary>
+    [JsonProperty("billing_notes")]
+    public string? BillingNotesSnake { get; set; }
+
     /// <summary>First non-empty of snake_case or camelCase billing note.</summary>
     public string? GetResolvedBillingNotes()
     {
+        var snake = BillingNotesSnake?.Trim();
+        if (!string.IsNullOrWhiteSpace(snake)) return snake;
         var a = BillingNotes?.Trim();
         if (!string.IsNullOrWhiteSpace(a)) return a;
         var b = BillingNotesCamel?.Trim();
@@ -76,25 +87,39 @@ public class WooCommerceOrderPayload
     [JsonPropertyName("paymentMethodTitle")]
     public string? PaymentMethodTitle { get; set; }
 
-    /// <summary>Shipping method label (e.g. "איסוף עצמי").</summary>
+    /// <summary>Shipping method label (e.g. "איסוף עצמי"); camelCase JSON <c>shippingLabel</c>.</summary>
     [JsonPropertyName("shipping_label")]
     public string? ShippingLabel { get; set; }
 
+    /// <summary>Snake_case <c>shipping_label</c> (Newtonsoft binding).</summary>
+    [JsonProperty("shipping_label")]
+    public string? ShippingLabelSnake { get; set; }
+
     /// <summary>Same as <see cref="ShippingLabel"/>; plugin may send one word key <c>shippinglabel</c>.</summary>
     [JsonPropertyName("shippinglabel")]
+    [JsonProperty("shippinglabel")]
     public string? ShippingLabelFlat { get; set; }
 
-    /// <summary>Payment method label (e.g. "תשלום לשליח").</summary>
+    /// <summary>Payment method label (e.g. "תשלום לשליח"); camelCase JSON <c>paymentLabel</c>.</summary>
     [JsonPropertyName("payment_label")]
     public string? PaymentLabel { get; set; }
 
+    /// <summary>Snake_case <c>payment_label</c> (Newtonsoft binding).</summary>
+    [JsonProperty("payment_label")]
+    public string? PaymentLabelSnake { get; set; }
+
     /// <summary>Same as <see cref="PaymentLabel"/>; plugin may send <c>paymentlabel</c>.</summary>
     [JsonPropertyName("paymentlabel")]
+    [JsonProperty("paymentlabel")]
     public string? PaymentLabelFlat { get; set; }
 
-    /// <summary>Pickup branch name (e.g. "סניף חיפה") when <c>shippinglabel</c> is איסוף.</summary>
+    /// <summary>Pickup branch name (e.g. "סניף חיפה"); camelCase <c>shippingStoreName</c>.</summary>
     [JsonPropertyName("shippingstorename")]
     public string? ShippingStoreName { get; set; }
+
+    /// <summary>All-lowercase <c>shippingstorename</c> from plugin (Newtonsoft binding).</summary>
+    [JsonProperty("shippingstorename")]
+    public string? ShippingStoreNameSnake { get; set; }
 
     /// <summary>Delivery/pickup slot and type (type, date DD/MM/YYYY, slotStart, slotEnd, pickupAffiliateId, pickupAffiliateName).</summary>
     [JsonPropertyName("shippingInfo")]
@@ -104,6 +129,8 @@ public class WooCommerceOrderPayload
     {
         var a = ShippingLabel?.Trim();
         if (!string.IsNullOrWhiteSpace(a)) return a;
+        var snake = ShippingLabelSnake?.Trim();
+        if (!string.IsNullOrWhiteSpace(snake)) return snake;
         var b = ShippingLabelFlat?.Trim();
         return string.IsNullOrWhiteSpace(b) ? null : b;
     }
@@ -112,7 +139,18 @@ public class WooCommerceOrderPayload
     {
         var a = PaymentLabel?.Trim();
         if (!string.IsNullOrWhiteSpace(a)) return a;
+        var snake = PaymentLabelSnake?.Trim();
+        if (!string.IsNullOrWhiteSpace(snake)) return snake;
         var b = PaymentLabelFlat?.Trim();
+        return string.IsNullOrWhiteSpace(b) ? null : b;
+    }
+
+    /// <summary>Branch name from camelCase or all-lowercase plugin key.</summary>
+    public string? GetResolvedShippingStoreName()
+    {
+        var a = ShippingStoreName?.Trim();
+        if (!string.IsNullOrWhiteSpace(a)) return a;
+        var b = ShippingStoreNameSnake?.Trim();
         return string.IsNullOrWhiteSpace(b) ? null : b;
     }
 }
@@ -172,9 +210,10 @@ public class WooCommerceShippingAddressPayload
 
     /// <summary>Plugin alias for <see cref="EntranceCode"/>.</summary>
     [JsonPropertyName("enterCode")]
+    [JsonProperty("enterCode")]
     public string? EnterCode { get; set; }
 
-    [JsonIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
     public string? ResolvedEntranceCode =>
         string.IsNullOrWhiteSpace(EntranceCode) ? (string.IsNullOrWhiteSpace(EnterCode) ? null : EnterCode.Trim()) : EntranceCode.Trim();
 }

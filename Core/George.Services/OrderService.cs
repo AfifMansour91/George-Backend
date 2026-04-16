@@ -950,7 +950,7 @@ namespace George.Services
         {
             o.ExternalOrderStatusRaw = NullIfWhiteSpace(p.Status);
             o.GatewayPaymentMethodCode = NullIfWhiteSpace(p.PaymentMethod);
-            o.ShippingStoreName = NullIfWhiteSpace(p.ShippingStoreName);
+            o.ShippingStoreName = NullIfWhiteSpace(p.GetResolvedShippingStoreName());
             o.ShippingInfoJson = SerializeWooCommerceFragmentForStorage(p.ShippingInfo);
             o.ShippingAddressJson = SerializeWooCommerceFragmentForStorage(p.ShippingAddress);
             o.OrderCustomerJson = SerializeWooCommerceFragmentForStorage(p.Customer);
@@ -1267,7 +1267,7 @@ namespace George.Services
                     o.UpdatedDate = DateTime.UtcNow;
                     ApplyShippingInfoToOrder(o, payload.ShippingInfo, payload.GetResolvedShippingLabel());
                     NormalizeOrderDeliveryAndPickupDates(o);
-                    ApplyWooCommercePickupStoreNote(o, payload.ShippingStoreName);
+                    ApplyWooCommercePickupStoreNote(o, payload.GetResolvedShippingStoreName());
                 }, cancelToken).ConfigureAwait(false);
                 if (updated == null)
                     return CreateResponse(response, StatusCode.ItemNotFound);
@@ -1397,7 +1397,7 @@ namespace George.Services
             ApplyWooCommercePayloadColumnSnapshot(order, payload);
             ApplyShippingInfoToOrder(order, payload.ShippingInfo, payload.GetResolvedShippingLabel());
             NormalizeOrderDeliveryAndPickupDates(order);
-            ApplyWooCommercePickupStoreNote(order, payload.ShippingStoreName);
+            ApplyWooCommercePickupStoreNote(order, payload.GetResolvedShippingStoreName());
             var items = new List<OrderItem>();
             var wooProductCache = new Dictionary<int, Product?>();
             for (var i = 0; i < req.Items.Count; i++)
