@@ -63,7 +63,7 @@ public partial class Site
     [StringLength(250)]
     public string? WooCommerceSecret { get; set; }
 
-    /// <summary>Optional. When set, we call this base URL to update order status (e.g. oc-storeos: https://.../wp-json/oc-storeos/v1). We PUT to {base}/orders/{orderId} with status. If empty, use WooCommerceUrl + /wp-json/wc/v3.</summary>
+    /// <summary>Optional public storefront/site URL for oc-storeos (e.g. https://yourstore.com). When set, order sync and reception closing dates POST to {url}/wp-json/oc-storeos/v1/orders and .../default-closing-dates. <see cref="WooCommerceUrl"/> is used separately for product REST (wc/v3).</summary>
     [StringLength(500)]
     public string? WooCommerceOrderUpdateBaseUrl { get; set; }
 
