@@ -75,6 +75,62 @@ public class WooCommerceOrderPayload
         return string.IsNullOrWhiteSpace(b) ? null : b;
     }
 
+    /// <summary>Single coupon code from plugin (camelCase).</summary>
+    [JsonPropertyName("couponCode")]
+    public string? CouponCode { get; set; }
+
+    /// <summary>Snake_case <c>coupon_code</c>.</summary>
+    [JsonProperty("coupon_code")]
+    public string? CouponCodeSnake { get; set; }
+
+    /// <summary>Woo-style <c>coupon_lines</c> (array of <c>{ "code": "..." }</c>).</summary>
+    [JsonProperty("coupon_lines")]
+    public List<WooCommerceCouponLinePayload>? CouponLinesSnake { get; set; }
+
+    /// <summary>Same as <see cref="CouponLinesSnake"/>; camelCase from plugin.</summary>
+    [JsonPropertyName("couponLines")]
+    public List<WooCommerceCouponLinePayload>? CouponLines { get; set; }
+
+    /// <summary>Alternate key: list of coupon objects.</summary>
+    [JsonPropertyName("coupons")]
+    public List<WooCommerceCouponLinePayload>? Coupons { get; set; }
+
+    /// <summary>Resolved coupon string for persistence (comma-separated, de-duplicated by case).</summary>
+    public string? GetResolvedCouponCodeForStorage(int maxLength = 100)
+    {
+        var codes = new List<string>(4);
+        void AddDistinct(string? s)
+        {
+            var t = s?.Trim();
+            if (string.IsNullOrEmpty(t)) return;
+            if (codes.Exists(x => string.Equals(x, t, StringComparison.OrdinalIgnoreCase))) return;
+            codes.Add(t);
+        }
+
+        AddDistinct(CouponCodeSnake);
+        AddDistinct(CouponCode);
+        if (Coupons != null)
+        {
+            foreach (var c in Coupons)
+                AddDistinct(c?.Code);
+        }
+        if (CouponLinesSnake != null)
+        {
+            foreach (var c in CouponLinesSnake)
+                AddDistinct(c?.Code);
+        }
+        if (CouponLines != null)
+        {
+            foreach (var c in CouponLines)
+                AddDistinct(c?.Code);
+        }
+
+        if (codes.Count == 0) return null;
+        var joined = string.Join(", ", codes);
+        if (joined.Length <= maxLength) return joined;
+        return joined.Substring(0, maxLength);
+    }
+
     /// <summary>Internal WooCommerce / plugin order notes (status history, sync messages).</summary>
     [JsonPropertyName("internalOrderNotes")]
     public string? InternalOrderNotes { get; set; }
@@ -153,6 +209,12 @@ public class WooCommerceOrderPayload
         var b = ShippingStoreNameSnake?.Trim();
         return string.IsNullOrWhiteSpace(b) ? null : b;
     }
+}
+
+public class WooCommerceCouponLinePayload
+{
+    [JsonPropertyName("code")]
+    public string? Code { get; set; }
 }
 
 public class WooCommerceShippingInfoPayload

@@ -13,7 +13,7 @@ namespace George.Data
 
         /// <summary>
         /// Completed + paid orders in [fromUtc, toUtcExclusive) for income reporting.
-        /// Optional coupon: substring match on billing / WC JSON / notes (until dedicated coupon column exists).
+        /// Optional coupon: substring on <see cref="Order.CouponCode"/> first, then legacy text/JSON fields for older rows.
         /// </summary>
         public async Task<List<Order>> GetReportOrdersAsync(
             int siteId,
@@ -35,6 +35,7 @@ namespace George.Data
             {
                 var c = couponContains.Trim();
                 q = q.Where(o =>
+                    (o.CouponCode != null && o.CouponCode.Contains(c)) ||
                     (o.BillingNotes != null && o.BillingNotes.Contains(c)) ||
                     (o.WooCommerceRequestJson != null && o.WooCommerceRequestJson.Contains(c)) ||
                     (o.CustomerNote != null && o.CustomerNote.Contains(c)) ||

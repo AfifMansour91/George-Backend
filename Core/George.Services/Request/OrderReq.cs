@@ -51,6 +51,9 @@ public class CreateOrderReq
     public string? WooCommerceSiteId { get; set; }
     public string? WooCommercePickupAffiliateId { get; set; }
 
+    /// <summary>Optional; WooCommerce ingest sets via <see cref="WooCommerceOrderPayload"/>.</summary>
+    public string? CouponCode { get; set; }
+
     public List<CreateOrderItemReq> Items { get; set; } = new();
 }
 

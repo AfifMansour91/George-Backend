@@ -58,6 +58,10 @@ public partial class Order
     [StringLength(150)]
     public string? ShippingLabel { get; set; }
 
+    /// <summary>Coupon code(s) applied on the order (from WooCommerce ingest). Comma-separated when multiple.</summary>
+    [StringLength(100)]
+    public string? CouponCode { get; set; }
+
     /// <summary>WooCommerce <c>billing_notes</c> (קופה).</summary>
     [StringLength(2000)]
     public string? BillingNotes { get; set; }

@@ -951,6 +951,7 @@ namespace George.Services
             o.ExternalOrderStatusRaw = NullIfWhiteSpace(p.Status);
             o.GatewayPaymentMethodCode = NullIfWhiteSpace(p.PaymentMethod);
             o.ShippingStoreName = NullIfWhiteSpace(p.GetResolvedShippingStoreName());
+            o.CouponCode = NullIfWhiteSpace(p.GetResolvedCouponCodeForStorage());
             o.ShippingInfoJson = SerializeWooCommerceFragmentForStorage(p.ShippingInfo);
             o.ShippingAddressJson = SerializeWooCommerceFragmentForStorage(p.ShippingAddress);
             o.OrderCustomerJson = SerializeWooCommerceFragmentForStorage(p.Customer);

@@ -411,6 +411,7 @@ namespace George.Services
                 return new IncomeReportOrderRowDto
                 {
                     OrderId = o.Id,
+                    OrderNumber = o.OrderNumber ?? "",
                     OrderDate = o.CreationTime,
                     CustomerName = o.CustomerName ?? "",
                     Source = o.Source ?? "",
@@ -602,6 +603,9 @@ namespace George.Services
 
         private static string? TryGetCouponCodeFromOrder(Order o)
         {
+            if (!string.IsNullOrWhiteSpace(o.CouponCode))
+                return o.CouponCode.Trim();
+
             var code = TryParseCouponFromJson(o.WooCommerceRequestJson);
             if (!string.IsNullOrWhiteSpace(code)) return code.Trim();
             code = TryParseCouponFromJson(o.ShippingInfoJson);

@@ -57,6 +57,8 @@ namespace George.Services.Response
     public class IncomeReportOrderRowDto
     {
         public int OrderId { get; set; }
+        /// <summary>Store-facing order number (WooCommerce / manual); use <see cref="OrderId"/> for internal links.</summary>
+        public string OrderNumber { get; set; } = "";
         public DateTime OrderDate { get; set; }
         public string CustomerName { get; set; } = "";
         public string Source { get; set; } = "";

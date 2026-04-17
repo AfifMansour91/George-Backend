@@ -24,6 +24,8 @@ public class OrderRes
     public string? InternalOrderNotes { get; set; }
     public string? WooCommerceSiteId { get; set; }
     public string? WooCommercePickupAffiliateId { get; set; }
+    /// <summary>Coupon code(s) from ingest or API (comma-separated when multiple).</summary>
+    public string? CouponCode { get; set; }
     /// <summary>Raw ingest <c>status</c> from last Woo payload (e.g. on-hold).</summary>
     public string? ExternalOrderStatusRaw { get; set; }
     /// <summary>Raw gateway <c>paymentMethod</c> code from last ingest (e.g. cod).</summary>
