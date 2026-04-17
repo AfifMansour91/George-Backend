@@ -22,10 +22,16 @@ using System.Globalization;
 
 namespace George.Services
 {
-    public class WooCommerceService : ServiceBase
+    public partial class WooCommerceService : ServiceBase
     {
         /// <summary>HTTP client timeout for WooCommerce API calls (bulk sync can take many minutes).</summary>
         private static readonly TimeSpan WooCommerceHttpTimeout = TimeSpan.FromMinutes(30);
+
+        /// <summary>Import processes products in batches; variation lists for each batch are prefetched in parallel.</summary>
+        private const int WooImportProductBatchSize = 25;
+
+        /// <summary>Max concurrent WooCommerce GET /products/{id}/variations calls while prefetching a batch.</summary>
+        private const int WooImportVariationPrefetchParallelism = 8;
 
         /// <summary>Semaphore per (siteId, attributeName) so parallel product syncs don't create the same global attribute multiple times.</summary>
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> AttributeEnsureLocks = new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.Ordinal);
@@ -224,8 +230,21 @@ namespace George.Services
         /// <summary>
         /// Imports WooCommerce catalog into our side for a site and overwrites existing matched entities.
         /// </summary>
-        public async Task<IApiResponse<WooCommerceImportFromWooRes>> ImportFromWooCommerceAsync(
+        public Task<IApiResponse<WooCommerceImportFromWooRes>> ImportFromWooCommerceAsync(
             WooCommerceSyncReq req,
+            CancellationToken cancelToken) =>
+            RunImportFromWooAsync(req, importProgress: null, cancelToken);
+
+        /// <summary>Same import as <see cref="ImportFromWooCommerceAsync"/> with progress callbacks (e.g. NDJSON stream).</summary>
+        public Task<IApiResponse<WooCommerceImportFromWooRes>> ImportFromWooCommerceWithProgressAsync(
+            WooCommerceSyncReq req,
+            IProgress<WooCommerceImportProgress>? importProgress,
+            CancellationToken cancelToken) =>
+            RunImportFromWooAsync(req, importProgress, cancelToken);
+
+        private async Task<IApiResponse<WooCommerceImportFromWooRes>> RunImportFromWooAsync(
+            WooCommerceSyncReq req,
+            IProgress<WooCommerceImportProgress>? importProgress,
             CancellationToken cancelToken)
         {
             var response = new ApiResponse<WooCommerceImportFromWooRes> { Data = new WooCommerceImportFromWooRes() };
@@ -250,15 +269,28 @@ namespace George.Services
                 httpClient.DefaultRequestHeaders.Clear();
                 httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
 
+                importProgress?.Report(new WooCommerceImportProgress { Phase = "fetch", Total = 2, Completed = 0 });
                 var wooCategories = await FetchWooPagedAsync<WooImportCategoryItem>(httpClient, $"{baseUrl}/products/categories", cancelToken);
+                importProgress?.Report(new WooCommerceImportProgress { Phase = "fetch", Total = 2, Completed = 1 });
                 var wooProducts = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products", cancelToken);
+                importProgress?.Report(new WooCommerceImportProgress { Phase = "fetch", Total = 2, Completed = 2 });
 
                 using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<GeorgeDBContext>();
                 using var tx = await db.Database.BeginTransactionAsync(cancelToken);
 
-                var categoryMap = await UpsertCategoriesFromWooAsync(db, site, wooCategories, response.Data, cancelToken);
-                await UpsertProductsFromWooAsync(db, site, baseUrl, httpClient, wooProducts, categoryMap, response.Data, cancelToken);
+                // Must use Site tracked on this db context. Passing site from GetSiteAsync (other context / detached)
+                // with Include(... Site) on categories/products causes: "another instance with the same key is already being tracked".
+                var siteForImport = await db.Site.FirstOrDefaultAsync(s => s.Id == req.SiteId && !s.IsDeleted, cancelToken);
+                if (siteForImport == null)
+                    return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
+
+                var importLookups = await LoadWooImportCatalogLookupsAsync(db, cancelToken);
+                importProgress?.Report(new WooCommerceImportProgress { Phase = "categories", Total = wooCategories.Count, Completed = 0 });
+                var categoryMap = await UpsertCategoriesFromWooAsync(db, siteForImport, wooCategories, response.Data, cancelToken);
+                importProgress?.Report(new WooCommerceImportProgress { Phase = "categories", Total = wooCategories.Count, Completed = wooCategories.Count });
+
+                await UpsertProductsFromWooAsync(db, siteForImport, baseUrl, httpClient, wooProducts, categoryMap, importLookups, response.Data, importProgress, cancelToken);
 
                 await tx.CommitAsync(cancelToken);
                 response.Data.Message = $"Imported from WooCommerce: {wooCategories.Count} categories and {wooProducts.Count} products processed.";
@@ -2477,7 +2509,9 @@ namespace George.Services
             HttpClient httpClient,
             List<WooImportProductItem> wooProducts,
             Dictionary<int, int> categoryMap,
+            WooImportCatalogLookups importLookups,
             WooCommerceImportFromWooRes stats,
+            IProgress<WooCommerceImportProgress>? importProgress,
             CancellationToken cancelToken)
         {
             var siteId = site.Id;
@@ -2485,6 +2519,8 @@ namespace George.Services
             var existingProducts = await db.Product
                 .Include(p => p.Site)
                 .Include(p => p.ProductCategory)
+                .Include(p => p.Tag)
+                .Include(p => p.ProductImage)
                 .Include(p => p.ProductOption).ThenInclude(po => po.ProductOptionValue)
                 .Include(p => p.ProductVariant).ThenInclude(v => v.ProductVariantOptionValue)
                 .Where(p => !p.IsDeleted && p.AccountId == accountId && p.Site.Any(s => s.Id == siteId))
@@ -2500,141 +2536,171 @@ namespace George.Services
                 .GroupBy(p => p.Sku!.Trim(), StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
-            foreach (var wp in wooProducts)
+            var eligibleProducts = wooProducts.Where(wp => wp.id > 0 && !string.IsNullOrWhiteSpace(wp.name)).ToList();
+            var productTotal = eligibleProducts.Count;
+            importProgress?.Report(new WooCommerceImportProgress { Phase = "products", Total = productTotal, Completed = 0 });
+            var completedProducts = 0;
+
+            for (var offset = 0; offset < eligibleProducts.Count; offset += WooImportProductBatchSize)
             {
-                if (wp.id <= 0 || string.IsNullOrWhiteSpace(wp.name))
-                    continue;
+                cancelToken.ThrowIfCancellationRequested();
+                var batch = eligibleProducts.Skip(offset).Take(WooImportProductBatchSize).ToList();
+                var batchEnd = offset + batch.Count;
+                _logger.LogInformation(
+                    "WooCommerce import: processing products {From}-{To} of {Total}",
+                    offset + 1,
+                    batchEnd,
+                    productTotal);
 
-                Product? product = null;
-                if (byWooId.TryGetValue(wp.id, out var existingByWoo))
-                    product = existingByWoo;
-                else if (!string.IsNullOrWhiteSpace(wp.sku) && bySku.TryGetValue(wp.sku.Trim(), out var existingBySku))
-                    product = existingBySku;
+                var variationMap = await PrefetchWooImportVariationsAsync(
+                    httpClient,
+                    baseUrl,
+                    batch,
+                    WooImportVariationPrefetchParallelism,
+                    cancelToken);
 
-                var isCreate = product == null;
-                if (isCreate)
+                foreach (var wp in batch)
                 {
-                    product = new Product
+                    if (!variationMap.TryGetValue(wp.id, out var wooVariations))
+                        wooVariations = new List<WooImportVariationItem>();
+
+                    Product? product = null;
+                    if (byWooId.TryGetValue(wp.id, out var existingByWoo))
+                        product = existingByWoo;
+                    else if (!string.IsNullOrWhiteSpace(wp.sku) && bySku.TryGetValue(wp.sku.Trim(), out var existingBySku))
+                        product = existingBySku;
+
+                    var isCreate = product == null;
+                    if (isCreate)
                     {
-                        AccountId = accountId,
-                        GuidId = Guid.NewGuid(),
-                        CreationTime = DateTime.UtcNow,
-                        IsDeleted = false,
-                        IsActive = true
-                    };
-                    product.Site.Add(site);
-                    db.Product.Add(product);
-                    stats.Products.Created++;
-                }
-                else
-                {
-                    stats.Products.Updated++;
-                    if (!product!.Site.Any(s => s.Id == siteId))
+                        product = new Product
+                        {
+                            AccountId = accountId,
+                            GuidId = Guid.NewGuid(),
+                            CreationTime = DateTime.UtcNow,
+                            IsDeleted = false,
+                            IsActive = true
+                        };
                         product.Site.Add(site);
-                    product.IsDeleted = false;
-                    product.UpdatedDate = DateTime.UtcNow;
-                }
-
-                product!.Name = wp.name.Trim();
-                product.ShortDescription = wp.short_description;
-                product.LongDescription = wp.description;
-                product.Sku = string.IsNullOrWhiteSpace(wp.sku) ? null : wp.sku.Trim();
-                product.WooCommerceId = wp.id;
-                product.Price = ParseNullableDecimal(wp.regular_price);
-                product.SalePrice = ParseNullableDecimal(wp.sale_price);
-                product.Weight = ParseNullableDecimal(wp.weight);
-                product.StockQuantity = wp.manage_stock == true ? wp.stock_quantity : null;
-                product.StockStatusId = null;
-                product.StockManagementTypeId = null;
-
-                await db.SaveChangesAsync(cancelToken);
-
-                db.ProductCategory.RemoveRange(db.ProductCategory.Where(x => x.ProductId == product.Id));
-                var optionIds = product.ProductOption.Select(o => o.Id).ToList();
-                var variantIds = product.ProductVariant.Select(v => v.Id).ToList();
-                if (variantIds.Count > 0)
-                {
-                    db.ProductVariantOptionValue.RemoveRange(db.ProductVariantOptionValue.Where(x => variantIds.Contains(x.ProductVariantId)));
-                    db.ProductVariant.RemoveRange(db.ProductVariant.Where(x => variantIds.Contains(x.Id)));
-                }
-                if (optionIds.Count > 0)
-                {
-                    db.ProductOptionValue.RemoveRange(db.ProductOptionValue.Where(x => optionIds.Contains(x.ProductOptionId)));
-                    db.ProductOption.RemoveRange(db.ProductOption.Where(x => optionIds.Contains(x.Id)));
-                }
-
-                if (wp.categories != null)
-                {
-                    foreach (var wc in wp.categories)
-                    {
-                        if (wc.id > 0 && categoryMap.TryGetValue(wc.id, out var localCategoryId))
-                            db.ProductCategory.Add(new ProductCategory { ProductId = product.Id, CategoryId = localCategoryId });
+                        db.Product.Add(product);
+                        stats.Products.Created++;
                     }
-                }
-
-                var optionNameToValues = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-                if (wp.attributes != null)
-                {
-                    foreach (var attr in wp.attributes.Where(a => !string.IsNullOrWhiteSpace(a.name)))
+                    else
                     {
-                        if (!optionNameToValues.TryGetValue(attr.name!.Trim(), out var values))
-                        {
-                            values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                            optionNameToValues[attr.name.Trim()] = values;
-                        }
-                        foreach (var value in attr.options ?? new List<string>())
-                        {
-                            if (!string.IsNullOrWhiteSpace(value))
-                                values.Add(value.Trim());
-                        }
+                        stats.Products.Updated++;
+                        if (!product!.Site.Any(s => s.Id == siteId))
+                            product.Site.Add(site);
+                        product.IsDeleted = false;
+                        product.UpdatedDate = DateTime.UtcNow;
                     }
-                }
 
-                foreach (var kv in optionNameToValues)
-                {
-                    var po = new ProductOption { ProductId = product.Id, Name = kv.Key, IsDeleted = false };
-                    db.ProductOption.Add(po);
-                    await db.SaveChangesAsync(cancelToken);
-                    foreach (var value in kv.Value)
-                        db.ProductOptionValue.Add(new ProductOptionValue { ProductOptionId = po.Id, Value = value });
-                }
+                    if (product == null)
+                        continue;
 
-                var wooVariations = await FetchWooPagedAsync<WooImportVariationItem>(httpClient, $"{baseUrl}/products/{wp.id}/variations", cancelToken);
-                foreach (var vv in wooVariations)
-                {
-                    var variant = new ProductVariant
-                    {
-                        ProductId = product.Id,
-                        WooCommerceVariationId = vv.id,
-                        Sku = string.IsNullOrWhiteSpace(vv.sku) ? null : vv.sku.Trim(),
-                        Price = ParseNullableDecimal(vv.regular_price),
-                        SalePrice = ParseNullableDecimal(vv.sale_price),
-                        Weight = ParseNullableDecimal(vv.weight),
-                        StockQuantity = vv.manage_stock == true ? vv.stock_quantity : null,
-                        ImageUrl = vv.image?.src,
-                        IsDeleted = false
-                    };
-                    db.ProductVariant.Add(variant);
+                    product.Name = wp.name.Trim();
+                    product.ShortDescription = wp.short_description;
+                    product.LongDescription = wp.description;
+                    product.Sku = string.IsNullOrWhiteSpace(wp.sku) ? null : wp.sku.Trim();
+                    product.WooCommerceId = wp.id;
+                    product.Price = ParseNullableDecimal(wp.regular_price);
+                    product.SalePrice = ParseNullableDecimal(wp.sale_price);
+                    product.Weight = ParseNullableDecimal(wp.weight);
+                    product.StockQuantity = wp.manage_stock == true ? wp.stock_quantity : null;
+
                     await db.SaveChangesAsync(cancelToken);
 
-                    foreach (var a in vv.attributes ?? new List<WooImportVariationAttributeItem>())
+                    db.ProductCategory.RemoveRange(db.ProductCategory.Where(x => x.ProductId == product.Id));
+                    var optionIds = product.ProductOption.Select(o => o.Id).ToList();
+                    var variantIds = product.ProductVariant.Select(v => v.Id).ToList();
+                    if (variantIds.Count > 0)
                     {
-                        if (string.IsNullOrWhiteSpace(a.name) || string.IsNullOrWhiteSpace(a.option))
-                            continue;
-                        db.ProductVariantOptionValue.Add(new ProductVariantOptionValue
-                        {
-                            ProductVariantId = variant.Id,
-                            OptionName = a.name.Trim(),
-                            OptionValue = a.option.Trim()
-                        });
+                        db.ProductVariantOptionValue.RemoveRange(db.ProductVariantOptionValue.Where(x => variantIds.Contains(x.ProductVariantId)));
+                        db.ProductVariant.RemoveRange(db.ProductVariant.Where(x => variantIds.Contains(x.Id)));
                     }
-                }
-                stats.Variations.Updated += wooVariations.Count;
+                    if (optionIds.Count > 0)
+                    {
+                        db.ProductOptionValue.RemoveRange(db.ProductOptionValue.Where(x => optionIds.Contains(x.ProductOptionId)));
+                        db.ProductOption.RemoveRange(db.ProductOption.Where(x => optionIds.Contains(x.Id)));
+                    }
 
-                await db.SaveChangesAsync(cancelToken);
-                byWooId[wp.id] = product;
-                if (!string.IsNullOrWhiteSpace(product.Sku))
-                    bySku[product.Sku.Trim()] = product;
+                    if (wp.categories != null)
+                    {
+                        foreach (var wc in wp.categories)
+                        {
+                            if (wc.id > 0 && categoryMap.TryGetValue(wc.id, out var localCategoryId))
+                                db.ProductCategory.Add(new ProductCategory { ProductId = product.Id, CategoryId = localCategoryId });
+                        }
+                    }
+
+                    var optionNameToValues = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+                    if (wp.attributes != null)
+                    {
+                        foreach (var attr in wp.attributes.Where(a => !string.IsNullOrWhiteSpace(a.name)))
+                        {
+                            if (!optionNameToValues.TryGetValue(attr.name!.Trim(), out var values))
+                            {
+                                values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                optionNameToValues[attr.name.Trim()] = values;
+                            }
+                            foreach (var value in attr.options ?? new List<string>())
+                            {
+                                if (!string.IsNullOrWhiteSpace(value))
+                                    values.Add(value.Trim());
+                            }
+                        }
+                    }
+
+                    foreach (var kv in optionNameToValues)
+                    {
+                        var po = new ProductOption { ProductId = product.Id, Name = kv.Key, IsDeleted = false };
+                        db.ProductOption.Add(po);
+                        await db.SaveChangesAsync(cancelToken);
+                        foreach (var value in kv.Value)
+                            db.ProductOptionValue.Add(new ProductOptionValue { ProductOptionId = po.Id, Value = value });
+                    }
+
+                    foreach (var vv in wooVariations)
+                    {
+                        var variant = new ProductVariant
+                        {
+                            ProductId = product.Id,
+                            WooCommerceVariationId = vv.id,
+                            Sku = string.IsNullOrWhiteSpace(vv.sku) ? null : vv.sku.Trim(),
+                            Price = ParseNullableDecimal(vv.regular_price),
+                            SalePrice = ParseNullableDecimal(vv.sale_price),
+                            Weight = ParseNullableDecimal(vv.weight),
+                            StockQuantity = vv.manage_stock == true ? vv.stock_quantity : null,
+                            ImageUrl = vv.image?.src,
+                            IsDeleted = false
+                        };
+                        db.ProductVariant.Add(variant);
+                        await db.SaveChangesAsync(cancelToken);
+
+                        foreach (var a in vv.attributes ?? new List<WooImportVariationAttributeItem>())
+                        {
+                            if (string.IsNullOrWhiteSpace(a.name) || string.IsNullOrWhiteSpace(a.option))
+                                continue;
+                            db.ProductVariantOptionValue.Add(new ProductVariantOptionValue
+                            {
+                                ProductVariantId = variant.Id,
+                                OptionName = a.name.Trim(),
+                                OptionValue = a.option.Trim()
+                            });
+                        }
+                    }
+                    stats.Variations.Updated += wooVariations.Count;
+
+                    await db.SaveChangesAsync(cancelToken);
+
+                    await ApplyWooImportProductExtensionsAsync(db, product, wp, accountId, importLookups, cancelToken);
+
+                    byWooId[wp.id] = product;
+                    if (!string.IsNullOrWhiteSpace(product.Sku))
+                        bySku[product.Sku.Trim()] = product;
+
+                    completedProducts++;
+                    importProgress?.Report(new WooCommerceImportProgress { Phase = "products", Total = productTotal, Completed = completedProducts });
+                }
             }
         }
 
@@ -2686,13 +2752,26 @@ namespace George.Services
             public string? description { get; set; }
             public string? short_description { get; set; }
             public string? sku { get; set; }
+            public string? type { get; set; }
+            public string? status { get; set; }
+            public string? catalog_visibility { get; set; }
+            public string? stock_status { get; set; }
+            public int menu_order { get; set; }
+            public string? shipping_class { get; set; }
             public string? regular_price { get; set; }
             public string? sale_price { get; set; }
+            public string? date_on_sale_from { get; set; }
+            public string? date_on_sale_from_gmt { get; set; }
+            public string? date_on_sale_to { get; set; }
+            public string? date_on_sale_to_gmt { get; set; }
             public string? weight { get; set; }
             public bool? manage_stock { get; set; }
             public decimal? stock_quantity { get; set; }
             public List<WooImportProductCategoryItem>? categories { get; set; }
             public List<WooImportProductAttributeItem>? attributes { get; set; }
+            public List<WooImportMetaEntry>? meta_data { get; set; }
+            public List<WooImportImageListItem>? images { get; set; }
+            public List<WooImportTagItem>? tags { get; set; }
         }
 
         private class WooImportImageItem

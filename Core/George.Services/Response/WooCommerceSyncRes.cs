@@ -55,5 +55,18 @@ namespace George.Services.Response
         public WooCommerceImportEntityCounts Variations { get; set; } = new();
         public List<string> Errors { get; set; } = new();
     }
+
+    /// <summary>Progress during Woo → George catalog import (streamed as NDJSON).</summary>
+    public class WooCommerceImportProgress
+    {
+        /// <summary>High-level step: <c>fetch</c>, <c>categories</c>, <c>products</c>.</summary>
+        public string Phase { get; set; } = "";
+
+        /// <summary>Items in the current phase (e.g. total products to import).</summary>
+        public int Total { get; set; }
+
+        /// <summary>Items completed in the current phase.</summary>
+        public int Completed { get; set; }
+    }
 }
 
