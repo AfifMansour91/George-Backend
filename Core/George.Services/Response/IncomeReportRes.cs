@@ -93,6 +93,10 @@ namespace George.Services.Response
     {
         public decimal DeliveryPct { get; set; }
         public decimal PickupPct { get; set; }
+        /// <summary>סה״כ הכנסות (Order.Total לפי הקטגוריה) להזמנות משלוח.</summary>
+        public decimal DeliveryIncome { get; set; }
+        /// <summary>סה״כ הכנסות לאיסוף עצמי.</summary>
+        public decimal PickupIncome { get; set; }
         public List<IncomeReportSourceSliceDto> SourceSlices { get; set; } = new();
         public string? PeakOrderHourLabel { get; set; }
         public string? PeakDeliveryHourLabel { get; set; }

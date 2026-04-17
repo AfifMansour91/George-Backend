@@ -453,6 +453,8 @@ namespace George.Services
             {
                 DeliveryPct = tot > 0m ? Round2(dInc / tot * 100m) : 0m,
                 PickupPct = tot > 0m ? Round2(pInc / tot * 100m) : 0m,
+                DeliveryIncome = Round2(dInc),
+                PickupIncome = Round2(pInc),
             };
 
             var srcTotal = bySource.Values.Sum();
