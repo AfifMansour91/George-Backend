@@ -26,7 +26,7 @@ namespace George.Data
                 .AsNoTracking()
                 .Where(o => !o.IsDeleted
                     && o.SiteId == siteId
-                    && o.Status == "Completed"
+                    && (o.Status == "Completed" || o.Status == "Delivered" || o.Status == "Ready")
                     && o.PaymentStatus == "Paid"
                     && o.CreationTime >= fromUtc
                     && o.CreationTime < toUtcExclusive);
@@ -38,7 +38,10 @@ namespace George.Data
                     (o.BillingNotes != null && o.BillingNotes.Contains(c)) ||
                     (o.WooCommerceRequestJson != null && o.WooCommerceRequestJson.Contains(c)) ||
                     (o.CustomerNote != null && o.CustomerNote.Contains(c)) ||
-                    (o.ManagerNote != null && o.ManagerNote.Contains(c)));
+                    (o.ManagerNote != null && o.ManagerNote.Contains(c)) ||
+                    (o.InternalOrderNotes != null && o.InternalOrderNotes.Contains(c)) ||
+                    (o.DeliveryNote != null && o.DeliveryNote.Contains(c)) ||
+                    (o.ShippingInfoJson != null && o.ShippingInfoJson.Contains(c)));
             }
 
             var list = await q
@@ -66,7 +69,7 @@ namespace George.Data
                 .AsNoTracking()
                 .Where(o => !o.IsDeleted
                     && o.SiteId == siteId
-                    && o.Status == "Completed"
+                    && (o.Status == "Completed" || o.Status == "Delivered" || o.Status == "Ready")
                     && o.PaymentStatus == "Paid"
                     && o.CreationTime < beforeUtcExclusive
                     && o.CustomerId != null)
@@ -90,6 +93,7 @@ namespace George.Data
                 .Where(p => ids.Contains(p.Id))
                 .Include(p => p.ProductCategory)
                 .ThenInclude(pc => pc.Category)
+                .Include(p => p.ProductImage)
                 .ToListAsync(cancelToken)
                 .ConfigureAwait(false);
 

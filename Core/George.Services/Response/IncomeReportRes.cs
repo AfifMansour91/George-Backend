@@ -60,10 +60,15 @@ namespace George.Services.Response
         public DateTime OrderDate { get; set; }
         public string CustomerName { get; set; } = "";
         public string Source { get; set; } = "";
+        /// <summary>Merchandise (line totals) attributed to this row — אפיון עמודת "מוצרים".</summary>
+        public decimal ProductRevenue { get; set; }
+        /// <summary>סה״כ לתשלום (כמו Order.Total) לפי הקצאת קטגוריה.</summary>
         public decimal Income { get; set; }
         public decimal ShippingFee { get; set; }
         public decimal Discount { get; set; }
         public string DeliveryType { get; set; } = "";
+        /// <summary>קוד קופון אם זוהה ב-JSON / הערות (אין עמודה ייעודית ב-DB).</summary>
+        public string CouponCode { get; set; } = "";
     }
 
     public class IncomeReportSourceSliceDto
@@ -74,6 +79,14 @@ namespace George.Services.Response
         public decimal Income { get; set; }
     }
 
+    public class IncomeReportHourBucketDto
+    {
+        public int Hour { get; set; }
+        public string Label { get; set; } = "";
+        public int OrderCount { get; set; }
+        public decimal PctOfTotal { get; set; }
+    }
+
     public class IncomeReportSegmentsDto
     {
         public decimal DeliveryPct { get; set; }
@@ -81,6 +94,10 @@ namespace George.Services.Response
         public List<IncomeReportSourceSliceDto> SourceSlices { get; set; } = new();
         public string? PeakOrderHourLabel { get; set; }
         public string? PeakDeliveryHourLabel { get; set; }
+        /// <summary>פילוח הזמנות לפי שעת יצירה (למודאל "לפרטים נוספים").</summary>
+        public List<IncomeReportHourBucketDto> OrderHours { get; set; } = new();
+        /// <summary>פילוח לפי שעת אספקה מתוכננת (כשיש DeliveryDate).</summary>
+        public List<IncomeReportHourBucketDto> DeliveryHours { get; set; } = new();
     }
 
     public class IncomeReportTopProductDto
@@ -91,6 +108,7 @@ namespace George.Services.Response
         public string QuantityLabel { get; set; } = "";
         public decimal Revenue { get; set; }
         public bool TrendUp { get; set; }
+        public string? ImageUrl { get; set; }
     }
 
     public class IncomeReportRes

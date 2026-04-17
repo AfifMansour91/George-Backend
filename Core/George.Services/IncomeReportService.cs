@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using George.Common;
 using George.Data;
 using George.DB;
@@ -88,7 +90,7 @@ namespace George.Services
                 .ToList();
 
             res.Kpis = BuildKpis(currentOrders, baselineOrders, products, catFilter, priorCustomerIds);
-            res.DayRows = BuildDayRows(currentOrders, products, catFilter, fromUtc, toUtcExclusive);
+            res.DayRows = BuildDayRows(currentOrders, products, catFilter, fromUtc, toUtcExclusive, period);
             res.DayTotals = SumDayTotals(res.DayRows);
             res.OrderRows = BuildOrderRows(currentOrders, products, catFilter);
             res.Segments = BuildSegments(currentOrders, products, catFilter);
@@ -111,7 +113,13 @@ namespace George.Services
                 case "today":
                     return (today, today.AddDays(1));
                 case "week":
-                    return (today.AddDays(-6), today.AddDays(1));
+                {
+                    // שבוע קלנדרי: מיום שני 00:00 עד סוף היום (UTC), כמו שבוע נוכחי חלקי
+                    var dow = (int)today.DayOfWeek;
+                    var daysFromMonday = dow == (int)DayOfWeek.Sunday ? 6 : dow - (int)DayOfWeek.Monday;
+                    var monday = today.AddDays(-daysFromMonday);
+                    return (monday, today.AddDays(1));
+                }
                 case "month":
                     return (new DateTime(today.Year, today.Month, 1, 0, 0, 0, DateTimeKind.Utc), today.AddDays(1));
                 case "custom":
@@ -273,71 +281,105 @@ namespace George.Services
             Dictionary<int, Product> products,
             int? categoryId,
             DateTime fromUtc,
-            DateTime toUtcExclusive)
+            DateTime toUtcExclusive,
+            string period)
         {
-            _ = fromUtc;
             _ = toUtcExclusive;
+            var p = (period ?? "month").Trim().ToLowerInvariant();
+            if (p == "today")
+                return BuildDayRowsByHour(orders, products, categoryId, fromUtc);
+
             var dayKeys = orders.Select(o => o.CreationTime.Date).Distinct().OrderBy(d => d);
             var rows = new List<IncomeReportDayRowDto>();
             foreach (var day in dayKeys)
             {
                 var dayOrdersAll = orders.Where(o => o.CreationTime.Date == day).ToList();
-                var dayOrdersFiltered = dayOrdersAll
-                    .Where(o => categoryId == null || OrderHasCategory(o, products, categoryId.Value))
-                    .ToList();
-
-                decimal income = 0m, incomeTotal = 0m;
-                var orderIds = new HashSet<int>();
-                decimal delRev = 0m, pickRev = 0m, ship = 0m, disc = 0m;
-                var delOrd = new HashSet<int>();
-                var pickOrd = new HashSet<int>();
-
-                foreach (var o in dayOrdersAll)
-                    incomeTotal += OrderIncome(o);
-
-                foreach (var o in dayOrdersFiltered)
-                {
-                    var sh = CategoryIncomeShare(o, products, categoryId);
-                    if (sh <= 0m) continue;
-                    income += OrderIncome(o) * sh;
-                    orderIds.Add(o.Id);
-                    ship += OrderShipping(o) * sh;
-                    disc += OrderDiscount(o) * sh;
-                    var merch = OrderLinesMerch(o) * sh;
-                    if (string.Equals(o.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase))
-                    {
-                        delRev += merch;
-                        delOrd.Add(o.Id);
-                    }
-                    else
-                    {
-                        pickRev += merch;
-                        pickOrd.Add(o.Id);
-                    }
-                }
-
-                decimal? pctOfDay = null;
-                if (categoryId != null && incomeTotal > 0m)
-                    pctOfDay = Round2(income / incomeTotal * 100m);
-
-                rows.Add(new IncomeReportDayRowDto
-                {
-                    Date = day.ToString("yyyy-MM-dd"),
-                    Label = day.ToString("dd/MM"),
-                    Income = Round2(income),
-                    IncomeDayTotalUnfiltered = Round2(incomeTotal),
-                    PctOfDay = pctOfDay,
-                    Orders = orderIds.Count,
-                    DeliveryProductRevenue = Round2(delRev),
-                    DeliveryOrders = delOrd.Count,
-                    ShippingFees = Round2(ship),
-                    PickupProductRevenue = Round2(pickRev),
-                    PickupOrders = pickOrd.Count,
-                    Discounts = Round2(disc),
-                });
+                AppendDayBucketRow(rows, dayOrdersAll, products, categoryId, day.ToString("dd/MM"), day.ToString("yyyy-MM-dd"));
             }
 
             return rows;
+        }
+
+        /// <summary>אפיון: כשפילטר = היום — שורות לפי שעה.</summary>
+        private static List<IncomeReportDayRowDto> BuildDayRowsByHour(
+            List<Order> orders,
+            Dictionary<int, Product> products,
+            int? categoryId,
+            DateTime fromUtc)
+        {
+            var day = fromUtc.Date;
+            var dayOrders = orders.Where(o => o.CreationTime.Date == day).ToList();
+            var rows = new List<IncomeReportDayRowDto>();
+            foreach (var hour in dayOrders.Select(o => o.CreationTime.Hour).Distinct().OrderBy(h => h))
+            {
+                var hourOrdersAll = dayOrders.Where(o => o.CreationTime.Hour == hour).ToList();
+                AppendDayBucketRow(rows, hourOrdersAll, products, categoryId, $"{hour:00}:00", $"{day:yyyy-MM-dd}T{hour:00}:00");
+            }
+
+            return rows;
+        }
+
+        private static void AppendDayBucketRow(
+            List<IncomeReportDayRowDto> rows,
+            List<Order> bucketOrdersAll,
+            Dictionary<int, Product> products,
+            int? categoryId,
+            string label,
+            string dateKey)
+        {
+            var bucketFiltered = bucketOrdersAll
+                .Where(o => categoryId == null || OrderHasCategory(o, products, categoryId.Value))
+                .ToList();
+
+            decimal income = 0m, incomeTotal = 0m;
+            var orderIds = new HashSet<int>();
+            decimal delRev = 0m, pickRev = 0m, ship = 0m, disc = 0m;
+            var delOrd = new HashSet<int>();
+            var pickOrd = new HashSet<int>();
+
+            foreach (var o in bucketOrdersAll)
+                incomeTotal += OrderIncome(o);
+
+            foreach (var o in bucketFiltered)
+            {
+                var sh = CategoryIncomeShare(o, products, categoryId);
+                if (sh <= 0m) continue;
+                income += OrderIncome(o) * sh;
+                orderIds.Add(o.Id);
+                ship += OrderShipping(o) * sh;
+                disc += OrderDiscount(o) * sh;
+                var merch = OrderLinesMerch(o) * sh;
+                if (string.Equals(o.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase))
+                {
+                    delRev += merch;
+                    delOrd.Add(o.Id);
+                }
+                else
+                {
+                    pickRev += merch;
+                    pickOrd.Add(o.Id);
+                }
+            }
+
+            decimal? pctOfDay = null;
+            if (categoryId != null && incomeTotal > 0m)
+                pctOfDay = Round2(income / incomeTotal * 100m);
+
+            rows.Add(new IncomeReportDayRowDto
+            {
+                Date = dateKey,
+                Label = label,
+                Income = Round2(income),
+                IncomeDayTotalUnfiltered = Round2(incomeTotal),
+                PctOfDay = pctOfDay,
+                Orders = orderIds.Count,
+                DeliveryProductRevenue = Round2(delRev),
+                DeliveryOrders = delOrd.Count,
+                ShippingFees = Round2(ship),
+                PickupProductRevenue = Round2(pickRev),
+                PickupOrders = pickOrd.Count,
+                Discounts = Round2(disc),
+            });
         }
 
         private static IncomeReportDayTotalsDto SumDayTotals(List<IncomeReportDayRowDto> rows) =>
@@ -372,10 +414,12 @@ namespace George.Services
                     OrderDate = o.CreationTime,
                     CustomerName = o.CustomerName ?? "",
                     Source = o.Source ?? "",
+                    ProductRevenue = Round2(OrderLinesMerch(o) * sh),
                     Income = Round2(OrderIncome(o) * sh),
                     ShippingFee = Round2(OrderShipping(o) * sh),
                     Discount = Round2(OrderDiscount(o) * sh),
                     DeliveryType = o.DeliveryType ?? "",
+                    CouponCode = TryGetCouponCodeFromOrder(o) ?? "",
                 };
             }).ToList();
         }
@@ -425,22 +469,63 @@ namespace George.Services
                 }
             }
 
-            var orderHour = relevant
-                .GroupBy(o => o.CreationTime.Hour)
-                .OrderByDescending(g => g.Count())
-                .FirstOrDefault();
-            if (orderHour != null)
-                dto.PeakOrderHourLabel = $"{orderHour.Key:00}:00–{orderHour.Key + 1:00}:00";
+            dto.OrderHours = BuildOrderHourBuckets(relevant);
+            dto.DeliveryHours = BuildDeliveryHourBuckets(relevant);
 
-            var delHour = relevant
-                .Where(o => o.DeliveryDate != null)
-                .GroupBy(o => o.DeliveryDate!.Value.Hour)
-                .OrderByDescending(g => g.Count())
-                .FirstOrDefault();
-            if (delHour != null)
-                dto.PeakDeliveryHourLabel = $"{delHour.Key:00}:00–{delHour.Key + 1:00}:00";
+            var topOh = dto.OrderHours.OrderByDescending(x => x.OrderCount).FirstOrDefault();
+            if (topOh != null)
+                dto.PeakOrderHourLabel = topOh.Label;
+
+            var topDh = dto.DeliveryHours.OrderByDescending(x => x.OrderCount).FirstOrDefault();
+            if (topDh != null)
+                dto.PeakDeliveryHourLabel = topDh.Label;
 
             return dto;
+        }
+
+        private static List<IncomeReportHourBucketDto> BuildOrderHourBuckets(List<Order> relevant)
+        {
+            var totalOrders = relevant.Count;
+            if (totalOrders == 0)
+                return new List<IncomeReportHourBucketDto>();
+
+            return relevant
+                .GroupBy(o => o.CreationTime.Hour)
+                .OrderBy(g => g.Key)
+                .Select(g => new IncomeReportHourBucketDto
+                {
+                    Hour = g.Key,
+                    Label = HourRangeLabel(g.Key),
+                    OrderCount = g.Count(),
+                    PctOfTotal = Round2((decimal)g.Count() / totalOrders * 100m),
+                })
+                .ToList();
+        }
+
+        private static List<IncomeReportHourBucketDto> BuildDeliveryHourBuckets(List<Order> relevant)
+        {
+            var withDate = relevant.Where(o => o.DeliveryDate != null).ToList();
+            var total = withDate.Count;
+            if (total == 0)
+                return new List<IncomeReportHourBucketDto>();
+
+            return withDate
+                .GroupBy(o => o.DeliveryDate!.Value.Hour)
+                .OrderBy(g => g.Key)
+                .Select(g => new IncomeReportHourBucketDto
+                {
+                    Hour = g.Key,
+                    Label = HourRangeLabel(g.Key),
+                    OrderCount = g.Count(),
+                    PctOfTotal = Round2((decimal)g.Count() / total * 100m),
+                })
+                .ToList();
+        }
+
+        private static string HourRangeLabel(int hour)
+        {
+            var next = (hour + 1) % 24;
+            return $"{hour:00}:00–{next:00}:00";
         }
 
         private static string MapSourceKey(string? source)
@@ -475,17 +560,18 @@ namespace George.Services
                         QuantityLabel = FormatQty(t.qty),
                         Revenue = Round2(t.revenue),
                         TrendUp = trendUp,
+                        ImageUrl = t.imageUrl,
                     };
                 })
                 .ToList();
         }
 
-        private static Dictionary<int, (string name, string cat, decimal qty, decimal revenue)> AggregateProductRevenue(
+        private static Dictionary<int, (string name, string cat, decimal qty, decimal revenue, string? imageUrl)> AggregateProductRevenue(
             List<Order> orders,
             Dictionary<int, Product> products,
             int? categoryId)
         {
-            var map = new Dictionary<int, (string name, string cat, decimal qty, decimal revenue)>();
+            var map = new Dictionary<int, (string name, string cat, decimal qty, decimal revenue, string? imageUrl)>();
             foreach (var o in orders)
             {
                 foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
@@ -500,12 +586,84 @@ namespace George.Services
                     var alloc = OrderIncome(o) * share;
                     var catName = p.ProductCategory?.FirstOrDefault(x => x.CategoryId == cid)?.Category?.Name ?? "";
                     if (!map.ContainsKey(p.Id))
-                        map[p.Id] = (p.Name, catName, 0m, 0m);
+                        map[p.Id] = (p.Name, catName, 0m, 0m, FirstImageUrl(p));
                     var t = map[p.Id];
-                    map[p.Id] = (t.name, string.IsNullOrEmpty(t.cat) ? catName : t.cat, t.qty + line.Quantity, t.revenue + alloc);
+                    map[p.Id] = (t.name, string.IsNullOrEmpty(t.cat) ? catName : t.cat, t.qty + line.Quantity, t.revenue + alloc, t.imageUrl ?? FirstImageUrl(p));
                 }
             }
             return map;
+        }
+
+        private static string? FirstImageUrl(Product? p)
+        {
+            if (p?.ProductImage == null || p.ProductImage.Count == 0) return null;
+            return p.ProductImage.OrderBy(i => i.SortOrder).Select(i => i.Url).FirstOrDefault();
+        }
+
+        private static string? TryGetCouponCodeFromOrder(Order o)
+        {
+            var code = TryParseCouponFromJson(o.WooCommerceRequestJson);
+            if (!string.IsNullOrWhiteSpace(code)) return code.Trim();
+            code = TryParseCouponFromJson(o.ShippingInfoJson);
+            if (!string.IsNullOrWhiteSpace(code)) return code.Trim();
+
+            if (!string.IsNullOrWhiteSpace(o.BillingNotes))
+            {
+                var m = Regex.Match(o.BillingNotes, @"(?:coupon|קופון)\s*[:\s]+([A-Za-z0-9_-]{2,40})", RegexOptions.IgnoreCase);
+                if (m.Success) return m.Groups[1].Value;
+            }
+
+            return null;
+        }
+
+        private static string? TryParseCouponFromJson(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return null;
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                return FindCouponRecursive(doc.RootElement, 0);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string? FindCouponRecursive(JsonElement el, int depth)
+        {
+            if (depth > 8) return null;
+
+            if (el.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var p in el.EnumerateObject())
+                {
+                    if (p.Name.Equals("coupon", StringComparison.OrdinalIgnoreCase) ||
+                        p.Name.Equals("couponCode", StringComparison.OrdinalIgnoreCase) ||
+                        p.Name.Equals("coupon_code", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (p.Value.ValueKind == JsonValueKind.String)
+                            return p.Value.GetString();
+                        if (p.Value.ValueKind == JsonValueKind.Object &&
+                            p.Value.TryGetProperty("code", out var codeEl) &&
+                            codeEl.ValueKind == JsonValueKind.String)
+                            return codeEl.GetString();
+                    }
+
+                    var nested = FindCouponRecursive(p.Value, depth + 1);
+                    if (!string.IsNullOrWhiteSpace(nested)) return nested;
+                }
+            }
+            else if (el.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in el.EnumerateArray())
+                {
+                    var nested = FindCouponRecursive(item, depth + 1);
+                    if (!string.IsNullOrWhiteSpace(nested)) return nested;
+                }
+            }
+
+            return null;
         }
 
         private static string FormatQty(decimal q) =>
