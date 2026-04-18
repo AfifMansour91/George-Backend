@@ -100,5 +100,34 @@ namespace George.Data
 
             return products.ToDictionary(p => p.Id);
         }
+
+        /// <summary>
+        /// Latest paid completed/delivered order time per product for the site (any history).
+        /// Used for &quot;days since last sale&quot; on products that had no sales in the report window.
+        /// </summary>
+        public async Task<Dictionary<int, DateTime>> GetLastPaidCompletedOrderCreationTimeUtcPerProductAsync(
+            int siteId,
+            IEnumerable<int> productIds,
+            CancellationToken cancelToken)
+        {
+            var idSet = productIds.Where(id => id > 0).Distinct().ToArray();
+            if (idSet.Length == 0)
+                return new Dictionary<int, DateTime>();
+
+            var rows = await (
+                from i in _dbContext.OrderItem.AsNoTracking()
+                join o in _dbContext.Order.AsNoTracking() on i.OrderId equals o.Id
+                where !i.IsDeleted && !o.IsDeleted
+                      && o.SiteId == siteId
+                      && i.ProductId != null
+                      && idSet.Contains(i.ProductId.Value)
+                      && (o.Status == "Completed" || o.Status == "Delivered" || o.Status == "Ready")
+                      && o.PaymentStatus == "Paid"
+                group o.CreationTime by i.ProductId!.Value into g
+                select new { ProductId = g.Key, LastUtc = g.Max() }
+            ).ToListAsync(cancelToken).ConfigureAwait(false);
+
+            return rows.ToDictionary(x => x.ProductId, x => x.LastUtc);
+        }
     }
 }

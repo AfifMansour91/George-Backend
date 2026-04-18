@@ -367,6 +367,7 @@ namespace George.Api.Core
 			services.AddScoped<MediaStorage>();
 			services.AddScoped<OrderStorage>();
 			services.AddScoped<IncomeReportStorage>();
+			services.AddScoped<ProductsReportStorage>();
 			services.AddScoped<CustomerStorage>();
 			services.AddScoped<OrderReceptionStorage>();
 			services.AddScoped<PrintJobStorage>();
@@ -390,6 +391,7 @@ namespace George.Api.Core
 			services.AddScoped<MediaService>();
 			services.AddScoped<OrderService>();
 			services.AddScoped<IncomeReportService>();
+			services.AddScoped<ProductsReportService>();
 			services.AddScoped<CustomerService>();
 			services.AddScoped<OrderReceptionService>();
 			services.AddScoped<PrintJobService>();
