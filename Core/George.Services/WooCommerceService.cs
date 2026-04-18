@@ -1086,6 +1086,18 @@ namespace George.Services
         }
 
         /// <summary>
+        /// True when George stock is managed by numeric quantity (matches <see cref="ProductCatalogStockClassification.StockManagementTypeForApi"/> / import lookups, case-insensitive).
+        /// Simple-product Woo payload used <c>Name == "quantity"</c> which broke when DB row was e.g. <c>Quantity</c> — WooCommerce then ignored <c>stock_quantity</c> until a product save rewrote the lookup row.
+        /// </summary>
+        private static bool IsStockQuantityManagementName(string? stockManagementTypeName)
+        {
+            if (string.IsNullOrWhiteSpace(stockManagementTypeName)) return false;
+            var n = stockManagementTypeName.Trim();
+            return string.Equals(n, "quantity", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(n, "qty", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
         /// Parses WooCommerce REST API error response and returns a user-friendly message (Hebrew when applicable).
         /// </summary>
         private static string GetUserFriendlyWooCommerceError(int statusCode, string responseBody)
@@ -1435,7 +1447,7 @@ namespace George.Services
                     wooProduct["sale_price"] = product.SalePrice.HasValue ? product.SalePrice.Value.ToString() : (object?)null;
                     wooProduct["date_on_sale_from"] = product.SalePriceStartDate.HasValue ? product.SalePriceStartDate.Value.ToString("yyyy-MM-ddTHH:mm:ss") : (object?)null;
                     wooProduct["date_on_sale_to"] = product.SalePriceEndDate.HasValue ? product.SalePriceEndDate.Value.ToString("yyyy-MM-ddTHH:mm:ss") : (object?)null;
-                    wooProduct["manage_stock"] = product.StockManagementType?.Name == "quantity";
+                    wooProduct["manage_stock"] = IsStockQuantityManagementName(product.StockManagementType?.Name);
                     wooProduct["stock_quantity"] = product.StockQuantity ?? 0;
                     wooProduct["stock_status"] = stockStatus;
                     wooProduct["backorders"] = product.StockStatus?.Name == "on_backorder" ? "yes" : "no";
@@ -1510,7 +1522,7 @@ namespace George.Services
                     // WooCommerce: "Settings below apply to all variations without manual stock management enabled."
                     // Without this, _manage_stock stays unchecked and _stock wrong in WP admin despite app showing quantity.
                     var smt = product.StockManagementType?.Name;
-                    if (string.Equals(smt, "quantity", StringComparison.OrdinalIgnoreCase))
+                    if (IsStockQuantityManagementName(smt))
                     {
                         wooProduct["manage_stock"] = true;
                         wooProduct["stock_quantity"] = product.StockQuantity ?? 0;
