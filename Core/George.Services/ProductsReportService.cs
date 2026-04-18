@@ -215,7 +215,7 @@ namespace George.Services
                     daysSinceLastSale = Math.Max(0, d);
                 }
 
-                var st = ClassifyStock(p, account);
+                var st = ProductCatalogStockClassification.ClassifyStock(p, account);
                 list.Add(new ProductsReportUnsoldRowDto
                 {
                     ProductId = p.Id,
@@ -277,7 +277,7 @@ namespace George.Services
             var lowCount = 0;
             foreach (var p in catalogProducts)
             {
-                var st = ClassifyStock(p, account);
+                var st = ProductCatalogStockClassification.ClassifyStock(p, account);
                 if (st == "out") outCount++;
                 else if (st == "low") lowCount++;
             }
@@ -350,7 +350,7 @@ namespace George.Services
                         Revenue = Round2(a.revenue),
                         TrendPct = trendPct,
                         TrendUp = trendUp,
-                        StockStatus = p != null ? ClassifyStock(p, account) : "ok",
+                        StockStatus = p != null ? ProductCatalogStockClassification.ClassifyStock(p, account) : "ok",
                         CutRows = cuts,
                     };
                 })
@@ -651,185 +651,5 @@ namespace George.Services
         }
 
         private static decimal Round2(decimal d) => Math.Round(d, 2, MidpointRounding.AwayFromZero);
-
-        /// <summary>
-        /// Maps catalog stock to ok | low | out — same rules as the SPA <c>getProductStockFilterBucket</c>
-        /// in <c>src/lib/stockLevels.ts</c> (My Products stock filters).
-        /// </summary>
-        private static string ClassifyStock(Product p, Account? account)
-        {
-            if (IsOnBackorderStatus(p))
-                return "ok";
-
-            // Same order as SPA getStockColumnAggregate: variable unit-weight before status / variation / simple qty.
-            if (IsVariableUnitWeightProduct(p))
-                return ClassifyVariableUnitWeightStock(p);
-
-            var activeVariants = ActiveVariants(p);
-            if (IsVariationManagement(p) && activeVariants.Count > 0)
-                return ClassifyStockVariation(p, account, activeVariants);
-
-            if (IsStatusOnlyManagement(p))
-                return IsOutOfStockStatus(p) ? "out" : "ok";
-
-            // Simple quantity (management "quantity", null, unknown, or "variation" with no variants)
-            if (IsOutOfStockStatus(p))
-                return "out";
-
-            var qty = p.StockQuantity ?? 0m;
-            if (qty <= 0m)
-                return "out";
-
-            var thr = ResolveLowThreshold(p, account);
-            if (thr > 0m && qty <= thr)
-                return "low";
-
-            return "ok";
-        }
-
-        /// <summary>Matches SPA <c>isVariableUnitWeightProduct</c> + <c>getProductStockFilterBucket</c> for <c>variable_weight</c>.</summary>
-        private static bool IsVariableUnitWeightProduct(Product p)
-        {
-            var setup = (p.SetupType?.Name ?? "").Trim().ToLowerInvariant();
-            if (setup != "by_unit")
-                return false;
-            var mode = (p.WeightConfig?.UnitWeightMode?.Name ?? "").Trim().ToLowerInvariant();
-            return mode == "variable";
-        }
-
-        /// <summary>Active weight tokens before <c>##</c> — same rules as <c>parseWeightOptionsActiveInactive</c> in <c>src/lib/weightOptionsCodec.ts</c>.</summary>
-        private static int CountActiveWeightOptionTokens(string? weightOptionsRaw)
-        {
-            const string inactiveMarker = "##";
-            var s = (weightOptionsRaw ?? "").Trim();
-            if (string.IsNullOrEmpty(s))
-                return 0;
-            var idx = s.IndexOf(inactiveMarker, StringComparison.Ordinal);
-            var activePart = idx < 0 ? s : s[..idx].Trim();
-            if (string.IsNullOrEmpty(activePart))
-                return 0;
-            return activePart
-                .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                .Select(x => x.Trim())
-                .Count(x => x.Length > 0);
-        }
-
-        private static string ClassifyVariableUnitWeightStock(Product p)
-        {
-            var n = CountActiveWeightOptionTokens(p.WeightConfig?.WeightOptions);
-            return n == 0 ? "out" : "ok";
-        }
-
-        private static string ClassifyStockVariation(Product p, Account? account, List<ProductVariant> variants)
-        {
-            var byQty = p.VariationStockByQuantity == true;
-            if (byQty)
-            {
-                var threshold = ResolveLowThreshold(p, account);
-                var lineStates = variants.Select(v => LineStateForQty(v.StockQuantity ?? 0m, threshold)).ToList();
-                if (lineStates.Count == 0)
-                    return "out";
-
-                var agg = AggregateLineStates(lineStates);
-                var hasAnyLow = lineStates.Any(s => s == LineState.Low);
-                if (agg == LineState.Out)
-                    return "out";
-                if (agg == LineState.Low || (agg == LineState.Mixed && hasAnyLow))
-                    return "low";
-                return "ok";
-            }
-
-            var binStates = variants.Select(v => (v.StockQuantity ?? 0m) > 0m ? LineState.Ok : LineState.Out).ToList();
-            var bin = AggregateBinaryStates(binStates);
-            if (bin == LineState.Out)
-                return "out";
-            if (bin == LineState.Mixed)
-                return "low";
-            return "ok";
-        }
-
-        private enum LineState
-        {
-            Ok,
-            Low,
-            Out,
-            Mixed,
-        }
-
-        private static LineState LineStateForQty(decimal qty, decimal threshold)
-        {
-            if (qty <= 0m)
-                return LineState.Out;
-            if (threshold > 0m && qty <= threshold)
-                return LineState.Low;
-            return LineState.Ok;
-        }
-
-        private static LineState AggregateLineStates(List<LineState> states)
-        {
-            if (states.Count == 0)
-                return LineState.Out;
-            var first = states[0];
-            return states.All(s => s == first) ? first : LineState.Mixed;
-        }
-
-        private static LineState AggregateBinaryStates(List<LineState> states)
-        {
-            if (states.Count == 0)
-                return LineState.Out;
-            var first = states[0];
-            return states.All(s => s == first) ? first : LineState.Mixed;
-        }
-
-        private static string NormalizeStockStatusToken(Product p)
-        {
-            return (p.StockStatus?.Name ?? "")
-                .Replace("_", "", StringComparison.Ordinal)
-                .Replace(" ", "", StringComparison.Ordinal)
-                .ToLowerInvariant();
-        }
-
-        private static bool IsOnBackorderStatus(Product p)
-        {
-            var n = NormalizeStockStatusToken(p);
-            return n.Contains("onbackorder", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool IsOutOfStockStatus(Product p)
-        {
-            var n = NormalizeStockStatusToken(p);
-            return n.Contains("outofstock", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static string ManagementTypeNorm(Product p) =>
-            (p.StockManagementType?.Name ?? "").Trim().ToLowerInvariant();
-
-        private static bool IsStatusOnlyManagement(Product p) => ManagementTypeNorm(p) == "status";
-
-        private static bool IsVariationManagement(Product p) => ManagementTypeNorm(p) == "variation";
-
-        private static List<ProductVariant> ActiveVariants(Product p) =>
-            p.ProductVariant?.Where(v => !v.IsDeleted).ToList() ?? new List<ProductVariant>();
-
-        private static bool IsWeightedLikeProduct(Product p)
-        {
-            if (p.IsWeighted == true)
-                return true;
-            var setup = (p.SetupType?.Name ?? "").Trim().ToLowerInvariant();
-            return setup is "by_weight" or "by_unit" or "by_unit_and_weight";
-        }
-
-        private static decimal ResolveLowThreshold(Product p, Account? account)
-        {
-            if (p.LowStockThreshold is > 0m) return p.LowStockThreshold.Value;
-            var weighted = IsWeightedLikeProduct(p);
-            if (account != null)
-            {
-                var d = weighted ? account.DefaultLowStockThresholdWeighted : account.DefaultLowStockThresholdUnits;
-                if (d is > 0m) return d.Value;
-            }
-
-            return weighted ? 2m : 3m;
-        }
     }
 }

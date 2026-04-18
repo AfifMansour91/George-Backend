@@ -30,6 +30,28 @@ namespace George.Data
                 .ConfigureAwait(false);
         }
 
+        /// <summary>Catalog products for inventory report — includes supplier, brand, variant option labels.</summary>
+        public async Task<List<Product>> GetSiteCatalogProductsForInventoryReportAsync(int siteId, CancellationToken cancelToken)
+        {
+            return await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => !p.IsDeleted && p.IsActive && p.Site.Any(s => s.Id == siteId))
+                .Include(p => p.StockStatus)
+                .Include(p => p.StockManagementType)
+                .Include(p => p.SetupType)
+                .Include(p => p.WeightConfig)
+                    .ThenInclude(wc => wc!.UnitWeightMode)
+                .Include(p => p.Supplier)
+                .Include(p => p.Brand)
+                .Include(p => p.ProductVariant)
+                    .ThenInclude(v => v.ProductVariantOptionValue)
+                .Include(p => p.ProductCategory)
+                    .ThenInclude(pc => pc.Category)
+                .Include(p => p.ProductImage)
+                .ToListAsync(cancelToken)
+                .ConfigureAwait(false);
+        }
+
         public async Task<Account?> GetAccountForSiteAsync(int siteId, CancellationToken cancelToken)
         {
             var accountId = await _dbContext.Site

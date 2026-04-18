@@ -393,6 +393,7 @@ namespace George.Api.Core
 			services.AddScoped<OrderService>();
 			services.AddScoped<IncomeReportService>();
 			services.AddScoped<ProductsReportService>();
+			services.AddScoped<InventoryReportService>();
 			services.AddScoped<QuantityConcentrationReportService>();
 			services.AddScoped<CustomerService>();
 			services.AddScoped<OrderReceptionService>();
