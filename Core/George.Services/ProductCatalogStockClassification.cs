@@ -23,6 +23,11 @@ public static class ProductCatalogStockClassification
         if (IsStatusOnlyManagement(p))
             return IsOutOfStockStatus(p) ? "out" : "ok";
 
+        // Unspecified / legacy management with no stored quantity: follow StockStatus (same idea as SPA
+        // isProductInventoryAvailableForSale — do not treat null quantity as 0 units unless quantity mode or a numeric row exists).
+        if (!UsesQuantityThresholds(p))
+            return IsOutOfStockStatus(p) ? "out" : "ok";
+
         if (IsOutOfStockStatus(p))
             return "out";
 
@@ -64,7 +69,8 @@ public static class ProductCatalogStockClassification
             if (d is > 0m) return d.Value;
         }
 
-        return weighted ? 2m : 3m;
+        // Match SPA `FALLBACK_STOCK_THRESHOLDS` in src/lib/stockLevels.ts (both axes use 5).
+        return 5m;
     }
 
     public static List<ProductVariant> ActiveVariants(Product p) =>
@@ -178,6 +184,24 @@ public static class ProductCatalogStockClassification
         (p.StockManagementType?.Name ?? "").Trim().ToLowerInvariant();
 
     private static bool IsStatusOnlyManagement(Product p) => ManagementTypeNorm(p) == "status";
+
+    private static bool IsExplicitQuantityManagement(Product p)
+    {
+        var n = ManagementTypeNorm(p);
+        return n is "quantity" or "qty";
+    }
+
+    /// <summary>
+    /// When false, catalog row has no meaningful on-hand number — classify from <see cref="IsOutOfStockStatus"/> only.
+    /// </summary>
+    private static bool UsesQuantityThresholds(Product p)
+    {
+        if (ManagementTypeNorm(p) == "status")
+            return false;
+        if (IsExplicitQuantityManagement(p))
+            return true;
+        return p.StockQuantity.HasValue;
+    }
 
     private static bool IsVariableUnitWeightProduct(Product p)
     {
