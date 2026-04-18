@@ -249,11 +249,25 @@ namespace George.Services
             var avgItems = cCount > 0 ? curOrders.Sum(AllocQty) / cCount : 0m;
             var avgItemsB = bCount > 0 ? baseOrders.Sum(AllocQty) / bCount : 0m;
 
+            // חדש מול חוזר לפי *עסקה*: העסקה הראשונה של הלקוח (באתר) = חדש; כל עסקה נוספת = חוזר,
+            // גם כששתי ההזמנות באותה תקופת דוח (לפני כן נספרו שתיהן כ"חדש" כי לא היה Order לפני fromUtc).
             decimal retInc = 0m, newInc = 0m;
-            foreach (var o in curOrders)
+            var newCustomerAttributedInWindow = new HashSet<int>();
+            foreach (var o in curOrders.OrderBy(x => x.CreationTime).ThenBy(x => x.Id))
             {
                 var inc = AllocIncome(o);
-                if (o.CustomerId.HasValue && priorCustomerIds.Contains(o.CustomerId.Value))
+                var returning = false;
+                if (o.CustomerId is int cid)
+                {
+                    if (priorCustomerIds.Contains(cid))
+                        returning = true;
+                    else if (newCustomerAttributedInWindow.Contains(cid))
+                        returning = true;
+                    else
+                        newCustomerAttributedInWindow.Add(cid);
+                }
+
+                if (returning)
                     retInc += inc;
                 else
                     newInc += inc;
