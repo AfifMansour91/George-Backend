@@ -49,6 +49,10 @@ public partial class GeorgeDBContextBase : DbContext
 
     public virtual DbSet<OrderItem> OrderItem { get; set; }
 
+    public virtual DbSet<Promotion> Promotion { get; set; }
+
+    public virtual DbSet<PromotionDailyMetric> PromotionDailyMetric { get; set; }
+
     public virtual DbSet<Product> Product { get; set; }
 
     public virtual DbSet<ProductCategory> ProductCategory { get; set; }
@@ -395,6 +399,33 @@ public partial class GeorgeDBContextBase : DbContext
             entity.HasOne(d => d.Site).WithMany(p => p.Order)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_Order_Site");
+        });
+
+        modelBuilder.Entity<Promotion>(entity =>
+        {
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.ShowBadge).HasDefaultValue(false);
+            entity.Property(e => e.IsDraft).HasDefaultValue(true);
+            entity.Property(e => e.PayloadJson).HasDefaultValue("{}");
+            entity.Property(e => e.ListDiscountKind).HasDefaultValue("percent");
+            entity.Property(e => e.ChannelsJson).HasDefaultValue("[\"web\"]");
+
+            entity.HasIndex(e => new { e.SiteId, e.IsDeleted }, "IX_Promotion_SiteId_IsDeleted").HasFilter("([IsDeleted]=(0))");
+
+            entity.HasOne(d => d.Site).WithMany(p => p.Promotion)
+                .OnDelete(DeleteBehavior.NoAction)
+                .HasConstraintName("FK_Promotion_Site");
+        });
+
+        modelBuilder.Entity<PromotionDailyMetric>(entity =>
+        {
+            entity.HasIndex(e => new { e.PromotionId, e.MetricDateUtc }, "UX_PromotionDailyMetric_Promotion_Date").IsUnique();
+
+            entity.HasOne(d => d.Promotion).WithMany(p => p.PromotionDailyMetric)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_PromotionDailyMetric_Promotion");
         });
 
         modelBuilder.Entity<OrderItem>(entity =>

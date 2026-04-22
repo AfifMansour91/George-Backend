@@ -268,6 +268,27 @@ namespace George.Services
 			CreateMap<User, UserRes>()
 				.ForMember(dest => dest.SiteIds, opt => opt.MapFrom(src => src.Site != null ? src.Site.Select(s => s.Id).ToList() : new List<int>()));
 
+            ////////////////////////// Promotion
+            CreateMap<Promotion, PromotionRes>()
+                .AfterMap((src, dest, _) =>
+                {
+                    dest.CreationTime = SpecifyUtc(src.CreationTime);
+                    dest.UpdatedDate = src.UpdatedDate.HasValue ? SpecifyUtc(src.UpdatedDate.Value) : null;
+                    if (src.ScheduleStartDateUtc.HasValue)
+                        dest.ScheduleStartDateUtc = SpecifyUtc(src.ScheduleStartDateUtc.Value);
+                    if (src.ScheduleEndDateUtc.HasValue)
+                        dest.ScheduleEndDateUtc = SpecifyUtc(src.ScheduleEndDateUtc.Value);
+                });
+            CreateMap<CreatePromotionReq, Promotion>()
+                .ForMember(dest => dest.Id, opt => opt.Ignore())
+                .ForMember(dest => dest.GuidId, opt => opt.Ignore())
+                .ForMember(dest => dest.CreationTime, opt => opt.Ignore())
+                .ForMember(dest => dest.UpdatedDate, opt => opt.Ignore())
+                .ForMember(dest => dest.CreationUserId, opt => opt.Ignore())
+                .ForMember(dest => dest.UpdateUserId, opt => opt.Ignore())
+                .ForMember(dest => dest.IsDeleted, opt => opt.Ignore())
+                .ForMember(dest => dest.Site, opt => opt.Ignore());
+
         }
 
 

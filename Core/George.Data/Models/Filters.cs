@@ -174,4 +174,59 @@ namespace George.Common
         public string? SortOrder { get; set; } // asc | desc
     }
 
+    /// <summary>Promotions list: by site, optional tab and search. Wire values: <see cref="George.Data.Models.PromotionWire"/>.</summary>
+    public class PromotionFilter
+    {
+        [Required]
+        public int SiteId { get; set; }
+
+        /// <summary><see cref="George.Data.Models.PromotionWire.ListTab"/> (omit or <c>all</c> = no tab filter).</summary>
+        public string? ListTab { get; set; }
+
+        /// <summary>Server promotion type discriminator (e.g. PercentDiscount), not the UI discount-kind filter.</summary>
+        [StringLength(40)]
+        public string? PromotionType { get; set; }
+
+        public SearchFilter? Search { get; set; }
+
+        /// <summary>UTC start of period for daily-metric aggregates (date component used).</summary>
+        public DateTime? PeriodFromUtc { get; set; }
+
+        /// <summary>UTC end of period for daily-metric aggregates (date component used, inclusive).</summary>
+        public DateTime? PeriodToUtc { get; set; }
+
+        /// <summary><see cref="George.Data.Models.PromotionWire.Channel"/> (omit or <c>all</c> = no filter).</summary>
+        [StringLength(20)]
+        public string? Channel { get; set; }
+
+        /// <summary><see cref="George.Data.Models.PromotionWire.DiscountKind"/> (omit or <c>all</c> = no filter).</summary>
+        [StringLength(20)]
+        public string? DiscountKind { get; set; }
+
+        /// <summary><see cref="George.Data.Models.PromotionWire.SortBy"/> (default <see cref="George.Data.Models.PromotionWire.SortBy.Updated"/>).</summary>
+        [StringLength(20)]
+        public string? SortBy { get; set; }
+
+        /// <summary><see cref="George.Data.Models.PromotionWire.SortDir"/> (default <see cref="George.Data.Models.PromotionWire.SortDir.Desc"/>).</summary>
+        [StringLength(10)]
+        public string? SortDir { get; set; }
+    }
+
+    /// <summary>KPI payload for promotions dashboard (tab counts + period metrics). Channel/discount: <see cref="George.Data.Models.PromotionWire"/>.</summary>
+    public class PromotionStatsFilter
+    {
+        [Required]
+        public int SiteId { get; set; }
+
+        public DateTime? PeriodFromUtc { get; set; }
+
+        public DateTime? PeriodToUtc { get; set; }
+
+        [StringLength(20)]
+        public string? Channel { get; set; }
+
+        [StringLength(20)]
+        public string? DiscountKind { get; set; }
+    }
+
 }

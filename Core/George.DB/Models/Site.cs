@@ -132,6 +132,9 @@ public partial class Site
     public virtual ICollection<Order> Order { get; set; } = new List<Order>();
 
     [InverseProperty("Site")]
+    public virtual ICollection<Promotion> Promotion { get; set; } = new List<Promotion>();
+
+    [InverseProperty("Site")]
     public virtual ICollection<SiteOrderReceptionClosed> SiteOrderReceptionClosed { get; set; } = new List<SiteOrderReceptionClosed>();
 
     [ForeignKey("UpdateUserId")]

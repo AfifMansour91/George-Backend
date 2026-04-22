@@ -1,0 +1,261 @@
+using AutoMapper;
+using George.Common;
+using George.Data;
+using George.Data.Models;
+using George.DB;
+using George.Services.Request;
+using George.Services.Response;
+using Microsoft.Extensions.Logging;
+
+namespace George.Services;
+
+public class PromotionService : ServiceBase
+{
+    private readonly PromotionStorage _promotionStorage;
+    private readonly SiteStorage _siteStorage;
+
+    public PromotionService(
+        ILogger<PromotionService> logger,
+        IMapper mapper,
+        CacheManager cache,
+        PromotionStorage promotionStorage,
+        SiteStorage siteStorage)
+        : base(logger, mapper, cache)
+    {
+        _promotionStorage = promotionStorage;
+        _siteStorage = siteStorage;
+    }
+
+    public async Task<IApiResponse<ApiListResponse<PromotionRes>>> GetPromotionsAsync(
+        ApiListReq<PromotionFilter> request,
+        CancellationToken cancelToken)
+    {
+        var response = new ApiResponse<ApiListResponse<PromotionRes>> { Data = new ApiListResponse<PromotionRes>() };
+
+        var site = await _siteStorage.GetSiteAsync(request.Filter.SiteId, cancelToken).ConfigureAwait(false);
+        if (site == null)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+
+        var res = await _promotionStorage.GetPromotionsAsync(request.Filter, request, cancelToken).ConfigureAwait(false);
+        response.Data!.Items = res.Items.ConvertAll(row =>
+        {
+            var dto = _mapper.Map<PromotionRes>(row.Promotion);
+            dto.PeriodRedemptions = row.PeriodRedemptions;
+            dto.PeriodRevenueNis = row.PeriodRevenueNis;
+            dto.PeriodDiscountNis = row.PeriodDiscountNis;
+            return dto;
+        });
+        response.Data.Skip = request.Skip;
+        response.Data.Limit = request.Take;
+        response.Data.Total = res.Total;
+        return response;
+    }
+
+    public async Task<IApiResponse<PromotionStatsRes>> GetPromotionStatsAsync(
+        PromotionStatsFilter filter,
+        CancellationToken cancelToken)
+    {
+        var response = new ApiResponse<PromotionStatsRes> { Data = new PromotionStatsRes() };
+
+        var site = await _siteStorage.GetSiteAsync(filter.SiteId, cancelToken).ConfigureAwait(false);
+        if (site == null)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+
+        var tabs = await _promotionStorage.GetPromotionTabCountsAsync(filter.SiteId, cancelToken).ConfigureAwait(false);
+        var ending = await _promotionStorage.GetActivePromotionsEndingWithinWeekAsync(filter.SiteId, cancelToken).ConfigureAwait(false);
+
+        var toDate = filter.PeriodToUtc?.Date ?? DateTime.UtcNow.Date;
+        var fromDate = filter.PeriodFromUtc?.Date ?? toDate.AddDays(-30);
+        var fromInstant = DateTime.SpecifyKind(fromDate, DateTimeKind.Utc);
+        var toExclusive = DateTime.SpecifyKind(toDate.AddDays(1), DateTimeKind.Utc);
+
+        var totals = await _promotionStorage.GetPromotionPeriodTotalsAsync(
+                filter.SiteId,
+                fromInstant,
+                DateTime.SpecifyKind(toDate, DateTimeKind.Utc),
+                filter.Channel,
+                filter.DiscountKind,
+                cancelToken)
+            .ConfigureAwait(false);
+
+        var siteOrders = await _promotionStorage.GetSiteOrderTotalForPeriodAsync(filter.SiteId, fromInstant, toExclusive, cancelToken)
+            .ConfigureAwait(false);
+
+        response.Data!.TabAll = tabs.All;
+        response.Data.TabActive = tabs.Active;
+        response.Data.TabScheduled = tabs.Scheduled;
+        response.Data.TabDrafts = tabs.Drafts;
+        response.Data.TabEnded = tabs.Ended;
+        response.Data.EndingWithinWeek = ending;
+        response.Data.PeriodRevenueNis = totals.RevenueNis;
+        response.Data.PeriodDiscountNis = totals.DiscountNis;
+        response.Data.PeriodRedemptions = totals.Redemptions;
+        response.Data.YieldPerDiscountNis = totals.DiscountNis > 0m
+            ? decimal.Round(totals.RevenueNis / totals.DiscountNis, 2, MidpointRounding.AwayFromZero)
+            : 0m;
+        response.Data.RevenuePctOfSiteOrders = siteOrders > 0m
+            ? (int?)decimal.ToInt32(decimal.Round(totals.RevenueNis / siteOrders * 100m, 0, MidpointRounding.AwayFromZero))
+            : null;
+
+        return response;
+    }
+
+    public async Task<IApiResponse<PromotionRes>> GetPromotionAsync(int promotionId, CancellationToken cancelToken)
+    {
+        var response = new ApiResponse<PromotionRes>();
+        var p = await _promotionStorage.GetPromotionAsync(promotionId, cancelToken).ConfigureAwait(false);
+        if (p == null)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+        response.Data = _mapper.Map<PromotionRes>(p);
+        return response;
+    }
+
+    public async Task<IApiResponse<PromotionRes>> CreatePromotionAsync(CreatePromotionReq req, CancellationToken cancelToken)
+    {
+        var response = new ApiResponse<PromotionRes>();
+        var site = await _siteStorage.GetSiteAsync(req.SiteId, cancelToken).ConfigureAwait(false);
+        if (site == null)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+
+        if (req.ScheduleStartDateUtc.HasValue && req.ScheduleEndDateUtc.HasValue
+            && req.ScheduleStartDateUtc.Value.Date > req.ScheduleEndDateUtc.Value.Date)
+            return CreateResponse(response, StatusCode.InvalidRequest, "Schedule end date must be on or after start date.");
+
+        var typeNorm = PromotionWire.PromotionType.NormalizeOrNull(req.PromotionType);
+        if (typeNorm == null)
+            return CreateResponse(response, StatusCode.InvalidRequest, "PromotionType must be discount, buy_x_pay_y, or buy_x_get_y.");
+
+        var payloadJson = string.IsNullOrWhiteSpace(req.PayloadJson) ? "{}" : req.PayloadJson.Trim();
+        var listKind = string.IsNullOrWhiteSpace(req.ListDiscountKind) ? null : req.ListDiscountKind.Trim().ToLowerInvariant();
+        if (!PromotionPayloadValidator.TryValidate(typeNorm, payloadJson, req.IsDraft, listKind, out var payloadError))
+            return CreateResponse(response, StatusCode.InvalidRequest, payloadError ?? "Invalid promotion payload.");
+
+        var couponNorm = NormalizeCouponCode(req.CouponCode);
+        if (couponNorm != null && await _promotionStorage.PromotionCouponCodeExistsAsync(req.SiteId, couponNorm, null, cancelToken).ConfigureAwait(false))
+            return CreateResponse(response, StatusCode.DBDuplicateKeyViolation, "Coupon code is already in use for this site.");
+
+        var model = _mapper.Map<Promotion>(req);
+        model.PromotionType = typeNorm;
+        model.PayloadJson = payloadJson;
+        if (string.IsNullOrWhiteSpace(model.ChannelsJson))
+            model.ChannelsJson = PromotionWire.DefaultChannelsJson;
+        if (model.GuidId == Guid.Empty)
+            model.GuidId = Guid.NewGuid();
+        if (string.IsNullOrWhiteSpace(model.ListDiscountKind))
+        {
+            model.ListDiscountKind = typeNorm switch
+            {
+                PromotionWire.PromotionType.Discount => PromotionWire.DiscountKind.Percent,
+                PromotionWire.PromotionType.BuyXPayY => PromotionWire.DiscountKind.Bxpy,
+                PromotionWire.PromotionType.BuyXGetY => PromotionWire.DiscountKind.Bxgy,
+                _ => PromotionWire.DiscountKind.Percent,
+            };
+        }
+
+        model.CreationUserId = AuthUser.Id;
+        model = await _promotionStorage.CreatePromotionAsync(model, cancelToken).ConfigureAwait(false);
+        var reloaded = await _promotionStorage.GetPromotionAsync(model.Id, cancelToken).ConfigureAwait(false);
+        response.Data = _mapper.Map<PromotionRes>(reloaded!);
+        return response;
+    }
+
+    public async Task<IApiResponse<PromotionRes>> UpdatePromotionAsync(int promotionId, UpdatePromotionReq req, CancellationToken cancelToken)
+    {
+        var response = new ApiResponse<PromotionRes>();
+        var existing = await _promotionStorage.GetPromotionAsync(promotionId, cancelToken).ConfigureAwait(false);
+        if (existing == null)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+
+        string mergedType;
+        if (!string.IsNullOrWhiteSpace(req.PromotionType))
+        {
+            var tn = PromotionWire.PromotionType.NormalizeOrNull(req.PromotionType);
+            if (tn == null)
+                return CreateResponse(response, StatusCode.InvalidRequest, "PromotionType must be discount, buy_x_pay_y, or buy_x_get_y.");
+            mergedType = tn;
+        }
+        else
+            mergedType = existing.PromotionType;
+
+        var mergedPayload = req.PayloadJson != null
+            ? (string.IsNullOrWhiteSpace(req.PayloadJson) ? "{}" : req.PayloadJson.Trim())
+            : existing.PayloadJson;
+        var mergedIsDraft = req.IsDraft ?? existing.IsDraft;
+        var mergedListKind = !string.IsNullOrWhiteSpace(req.ListDiscountKind)
+            ? req.ListDiscountKind.Trim().ToLowerInvariant()
+            : existing.ListDiscountKind;
+
+        if (!PromotionPayloadValidator.TryValidate(mergedType, mergedPayload, mergedIsDraft, mergedListKind, out var payloadError))
+            return CreateResponse(response, StatusCode.InvalidRequest, payloadError ?? "Invalid promotion payload.");
+
+        var mergedCoupon = req.CouponCode != null
+            ? NormalizeCouponCode(req.CouponCode)
+            : NormalizeCouponCode(existing.CouponCode);
+        if (mergedCoupon != null && await _promotionStorage.PromotionCouponCodeExistsAsync(existing.SiteId, mergedCoupon, promotionId, cancelToken).ConfigureAwait(false))
+            return CreateResponse(response, StatusCode.DBDuplicateKeyViolation, "Coupon code is already in use for this site.");
+
+        var mergedStart = req.ScheduleStartDateUtc ?? existing.ScheduleStartDateUtc;
+        var mergedEnd = req.ScheduleEndDateUtc ?? existing.ScheduleEndDateUtc;
+        if (mergedStart.HasValue && mergedEnd.HasValue && mergedStart.Value.Date > mergedEnd.Value.Date)
+            return CreateResponse(response, StatusCode.InvalidRequest, "Schedule end date must be on or after start date.");
+
+        var updated = await _promotionStorage.UpdatePromotionAsync(promotionId, db =>
+        {
+            if (!string.IsNullOrWhiteSpace(req.PromotionType))
+                db.PromotionType = mergedType;
+            if (!string.IsNullOrWhiteSpace(req.Name))
+                db.Name = req.Name.Trim();
+            if (req.IsActive.HasValue) db.IsActive = req.IsActive.Value;
+            if (req.ShowBadge.HasValue) db.ShowBadge = req.ShowBadge.Value;
+            if (req.IsDraft.HasValue) db.IsDraft = req.IsDraft.Value;
+            if (req.ScheduleStartDateUtc.HasValue) db.ScheduleStartDateUtc = req.ScheduleStartDateUtc;
+            if (req.ScheduleEndDateUtc.HasValue) db.ScheduleEndDateUtc = req.ScheduleEndDateUtc;
+            if (req.PayloadJson != null) db.PayloadJson = mergedPayload;
+            if (!string.IsNullOrWhiteSpace(req.ListDiscountKind))
+                db.ListDiscountKind = req.ListDiscountKind.Trim();
+            if (req.ChannelsJson != null) db.ChannelsJson = string.IsNullOrWhiteSpace(req.ChannelsJson) ? PromotionWire.DefaultChannelsJson : req.ChannelsJson;
+            if (req.CouponCode != null) db.CouponCode = string.IsNullOrWhiteSpace(req.CouponCode) ? null : req.CouponCode.Trim();
+            if (req.AppliesToSummary != null) db.AppliesToSummary = string.IsNullOrWhiteSpace(req.AppliesToSummary) ? null : req.AppliesToSummary.Trim();
+            db.UpdateUserId = AuthUser.Id;
+        }, cancelToken).ConfigureAwait(false);
+
+        if (updated == null)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+
+        var reloaded = await _promotionStorage.GetPromotionAsync(promotionId, cancelToken).ConfigureAwait(false);
+        response.Data = _mapper.Map<PromotionRes>(reloaded!);
+        return response;
+    }
+
+    public async Task<IApiResponse<PromotionRes>> UpdatePromotionStatusAsync(int promotionId, UpdatePromotionStatusReq req, CancellationToken cancelToken)
+    {
+        var response = new ApiResponse<PromotionRes>();
+        var updated = await _promotionStorage.UpdatePromotionAsync(promotionId, db =>
+        {
+            db.IsActive = req.IsActive;
+            db.UpdateUserId = AuthUser.Id;
+        }, cancelToken).ConfigureAwait(false);
+
+        if (updated == null)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+
+        var reloaded = await _promotionStorage.GetPromotionAsync(promotionId, cancelToken).ConfigureAwait(false);
+        response.Data = _mapper.Map<PromotionRes>(reloaded!);
+        return response;
+    }
+
+    public async Task<IApiResponse<object?>> DeletePromotionAsync(int promotionId, CancellationToken cancelToken)
+    {
+        var response = new ApiResponse<object?>();
+        var ok = await _promotionStorage.DeletePromotionAsync(promotionId, cancelToken).ConfigureAwait(false);
+        if (!ok)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+        return response;
+    }
+
+    private static string? NormalizeCouponCode(string? coupon)
+    {
+        if (string.IsNullOrWhiteSpace(coupon)) return null;
+        return coupon.Trim().ToLowerInvariant();
+    }
+}
