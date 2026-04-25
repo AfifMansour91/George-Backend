@@ -1007,20 +1007,58 @@ namespace George.Data
                 product.SetupTypeId = st?.Id;
             }
 
-            // Map brand
+            // Map brand — free text from UI: find or create Brand for this account (same idea as TemplateProductStorage).
             if (req.Brand.HasValue())
             {
+                var name = req.Brand.Trim();
+                var accountId = product.AccountId;
                 var brand = await _dbContext.Brand
-                    .FirstOrDefaultAsync(b => b.Name == req.Brand && b.AccountId == product.AccountId, cancelToken);
-                product.BrandId = brand?.Id;
+                    .FirstOrDefaultAsync(b => b.Name == name && b.AccountId == accountId && !b.IsDeleted, cancelToken);
+                if (brand == null)
+                {
+                    brand = new Brand
+                    {
+                        Name = name,
+                        AccountId = accountId,
+                        IsDeleted = false,
+                        CreationTime = DateTime.UtcNow,
+                    };
+                    _dbContext.Brand.Add(brand);
+                    await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+                }
+
+                product.BrandId = brand.Id;
+            }
+            else
+            {
+                product.BrandId = null;
             }
 
-            // Map supplier
+            // Map supplier — find or create Supplier for this account.
             if (req.Supplier.HasValue())
             {
+                var name = req.Supplier.Trim();
+                var accountId = product.AccountId;
                 var supplier = await _dbContext.Supplier
-                    .FirstOrDefaultAsync(s => s.Name == req.Supplier && s.AccountId == product.AccountId, cancelToken);
-                product.SupplierId = supplier?.Id;
+                    .FirstOrDefaultAsync(s => s.Name == name && s.AccountId == accountId && !s.IsDeleted, cancelToken);
+                if (supplier == null)
+                {
+                    supplier = new Supplier
+                    {
+                        Name = name,
+                        AccountId = accountId,
+                        IsDeleted = false,
+                        CreationTime = DateTime.UtcNow,
+                    };
+                    _dbContext.Supplier.Add(supplier);
+                    await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+                }
+
+                product.SupplierId = supplier.Id;
+            }
+            else
+            {
+                product.SupplierId = null;
             }
 
             // Map weight config
