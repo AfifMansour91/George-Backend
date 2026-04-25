@@ -22,7 +22,7 @@ public class CustomerStorage : StorageBase
 
     private IQueryable<Customer> CustomerSet => _dbContext.Set<Customer>().Where(c => !c.IsDeleted);
 
-    /// <summary>Find customer for this site by normalized phone, or create if not found. Used when creating an order so every order has a linked customer. When marketingSms is provided, it is set on create or update so the customer record reflects consent. Structured delivery fields are persisted when non-null (same semantics as city/defaultAddress).</summary>
+    /// <summary>Find customer for this site by normalized phone (including soft-deleted rows—reactivates if needed), or create if not found. Used when creating an order so every order has a linked customer. When marketingSms is provided, it is set on create or update so the customer record reflects consent. Structured delivery fields are persisted when non-null (same semantics as city/defaultAddress).</summary>
     public async Task<Customer> GetOrCreateCustomerByPhoneAsync(
         int siteId,
         int accountId,
@@ -41,16 +41,22 @@ public class CustomerStorage : StorageBase
     {
         var normalized = NormalizePhone(phone);
 
-        // Look up existing customer for this site + phone (unless phone too short to match)
+        // Look up row for this site + phone including soft-deleted (unique index is on SiteId+NormalizedPhone).
+        // If the customer was deleted, reactivate instead of inserting a duplicate.
         if (normalized.Length >= 4)
         {
             var existing = await _dbContext.Set<Customer>()
-                .FirstOrDefaultAsync(c => !c.IsDeleted && c.SiteId == siteId && c.NormalizedPhone == normalized, cancelToken)
+                .FirstOrDefaultAsync(c => c.SiteId == siteId && c.NormalizedPhone == normalized, cancelToken)
                 .ConfigureAwait(false);
 
             if (existing != null)
             {
                 var updated = false;
+                if (existing.IsDeleted)
+                {
+                    existing.IsDeleted = false;
+                    updated = true;
+                }
                 if (!string.IsNullOrWhiteSpace(name) && existing.Name != name) { existing.Name = name; updated = true; }
                 if (email != null && existing.Email != email) { existing.Email = email; updated = true; }
                 if (city != null && existing.City != city) { existing.City = city; updated = true; }
