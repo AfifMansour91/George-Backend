@@ -2413,10 +2413,7 @@ namespace George.Services
                 }
 
                 var bodyJson = await response.Content.ReadAsStringAsync(cancelToken);
-                var pageItems = JsonSerializer.Deserialize<List<T>>(bodyJson, new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                }) ?? new List<T>();
+                var pageItems = TryDeserializeFromResponse<List<T>>(bodyJson, url, "GET") ?? new List<T>();
 
                 if (pageItems.Count == 0)
                     break;
@@ -2429,6 +2426,45 @@ namespace George.Services
             return items;
         }
 
+        /// <summary>Stable key for matching local categories to Woo rows by parent + name (same name under different parents must not collide).</summary>
+        private static string WooImportCategoryCompositeKey(int? parentCategoryId, string nameTrimmed) =>
+            $"{(parentCategoryId?.ToString(CultureInfo.InvariantCulture) ?? "root")}\x1e{(nameTrimmed ?? "").Trim()}";
+
+        /// <summary>Parents before children so <see cref="map"/> always contains the Woo parent id when resolving composite keys.</summary>
+        private static List<WooImportCategoryItem> OrderWooCategoriesForUpsert(List<WooImportCategoryItem> input)
+        {
+            var items = input.Where(x => x.id > 0).ToList();
+            var idSet = items.Select(x => x.id).ToHashSet();
+            var remaining = new HashSet<int>(idSet);
+            var result = new List<WooImportCategoryItem>(items.Count);
+
+            while (remaining.Count > 0)
+            {
+                var batch = items
+                    .Where(x =>
+                        remaining.Contains(x.id) &&
+                        (x.parent <= 0 || !idSet.Contains(x.parent) || !remaining.Contains(x.parent)))
+                    .OrderBy(x => x.id)
+                    .ToList();
+
+                if (batch.Count == 0)
+                {
+                    var id = remaining.Min();
+                    result.Add(items.First(x => x.id == id));
+                    remaining.Remove(id);
+                    continue;
+                }
+
+                foreach (var x in batch)
+                {
+                    result.Add(x);
+                    remaining.Remove(x.id);
+                }
+            }
+
+            return result;
+        }
+
         private async Task<Dictionary<int, int>> UpsertCategoriesFromWooAsync(
             GeorgeDBContext db,
             Site site,
@@ -2438,9 +2474,12 @@ namespace George.Services
         {
             var siteId = site.Id;
             var accountId = site.AccountId;
+            // IMPORTANT: unique index is account-wide (Account + Parent + Name), not site-scoped.
+            // We must match against all account categories to avoid duplicate-key violations when the
+            // same category already exists in the account but is not yet linked to this site.
             var existingCategories = await db.Category
                 .Include(c => c.Site)
-                .Where(c => !c.IsDeleted && c.AccountId == accountId && c.Site.Any(s => s.Id == siteId))
+                .Where(c => !c.IsDeleted && c.AccountId == accountId)
                 .ToListAsync(cancelToken);
 
             var byWooId = existingCategories
@@ -2448,21 +2487,33 @@ namespace George.Services
                 .GroupBy(c => c.WooCommerceId!.Value)
                 .ToDictionary(g => g.Key, g => g.First());
 
-            var byName = existingCategories
-                .GroupBy(c => (c.Name ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            var byComposite = new Dictionary<string, Category>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in existingCategories)
+            {
+                var key = WooImportCategoryCompositeKey(c.ParentCategoryId, (c.Name ?? string.Empty).Trim());
+                if (!byComposite.ContainsKey(key))
+                    byComposite[key] = c;
+            }
+
+            var orderedWoo = OrderWooCategoriesForUpsert(wooCategories);
 
             var map = new Dictionary<int, int>();
-            foreach (var wc in wooCategories.OrderBy(c => c.parent))
+            foreach (var wc in orderedWoo)
             {
                 if (wc.id <= 0 || string.IsNullOrWhiteSpace(wc.name))
                     continue;
 
+                int? parentLocalId = null;
+                if (wc.parent > 0 && map.TryGetValue(wc.parent, out var pLocal))
+                    parentLocalId = pLocal;
+
+                var compositeKey = WooImportCategoryCompositeKey(parentLocalId, wc.name.Trim());
+
                 Category? category = null;
                 if (byWooId.TryGetValue(wc.id, out var existingByWoo))
                     category = existingByWoo;
-                else if (byName.TryGetValue(wc.name.Trim(), out var existingByName))
-                    category = existingByName;
+                else if (byComposite.TryGetValue(compositeKey, out var existingByComposite))
+                    category = existingByComposite;
 
                 if (category == null)
                 {
@@ -2470,6 +2521,7 @@ namespace George.Services
                     {
                         AccountId = accountId,
                         Name = wc.name.Trim(),
+                        ParentCategoryId = parentLocalId,
                         Description = wc.description,
                         WooCommerceId = wc.id,
                         IsActive = true,
@@ -2484,6 +2536,7 @@ namespace George.Services
                 else
                 {
                     category.Name = wc.name.Trim();
+                    category.ParentCategoryId = parentLocalId;
                     category.Description = wc.description;
                     category.WooCommerceId = wc.id;
                     category.IsDeleted = false;
@@ -2496,7 +2549,7 @@ namespace George.Services
                 await db.SaveChangesAsync(cancelToken);
                 map[wc.id] = category.Id;
                 byWooId[wc.id] = category;
-                byName[category.Name.Trim()] = category;
+                byComposite[compositeKey] = category;
             }
 
             foreach (var wc in wooCategories)
@@ -2704,6 +2757,28 @@ namespace George.Services
 
                     await db.SaveChangesAsync(cancelToken);
 
+                    // WooCommerce variable products usually omit parent regular_price; UI and list need a parent price.
+                    if (wooVariations.Count > 0)
+                    {
+                        var variationRegular = wooVariations
+                            .Select(v => ParseNullableDecimal(v.regular_price))
+                            .Where(p => p.HasValue)
+                            .Select(p => p!.Value)
+                            .ToList();
+                        if (variationRegular.Count > 0 && product.Price == null)
+                            product.Price = variationRegular.Min();
+
+                        var variationSale = wooVariations
+                            .Select(v => ParseNullableDecimal(v.sale_price))
+                            .Where(p => p.HasValue && p.Value > 0)
+                            .Select(p => p!.Value)
+                            .ToList();
+                        if (variationSale.Count > 0 && product.SalePrice == null)
+                            product.SalePrice = variationSale.Min();
+                    }
+
+                    await db.SaveChangesAsync(cancelToken);
+
                     await ApplyWooImportProductExtensionsAsync(db, product, wp, accountId, importLookups, cancelToken);
 
                     byWooId[wp.id] = product;
@@ -2757,6 +2832,53 @@ namespace George.Services
             public List<string>? options { get; set; }
         }
 
+        /// <summary>
+        /// WooCommerce may return manage_stock as bool, number, or string values like "yes"/"no"/"parent".
+        /// Keep import resilient by accepting these variants.
+        /// </summary>
+        private sealed class FlexibleNullableBoolConverter : JsonConverter<bool?>
+        {
+            public override bool? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+            {
+                if (reader.TokenType == JsonTokenType.Null) return null;
+                if (reader.TokenType == JsonTokenType.True) return true;
+                if (reader.TokenType == JsonTokenType.False) return false;
+
+                if (reader.TokenType == JsonTokenType.Number)
+                {
+                    if (reader.TryGetInt32(out var n)) return n != 0;
+                    return null;
+                }
+
+                if (reader.TokenType == JsonTokenType.String)
+                {
+                    var s = reader.GetString()?.Trim();
+                    if (string.IsNullOrEmpty(s)) return null;
+
+                    if (string.Equals(s, "true", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(s, "yes", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(s, "1", StringComparison.OrdinalIgnoreCase))
+                        return true;
+
+                    if (string.Equals(s, "false", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(s, "no", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(s, "0", StringComparison.OrdinalIgnoreCase))
+                        return false;
+
+                    if (string.Equals(s, "parent", StringComparison.OrdinalIgnoreCase))
+                        return null;
+                }
+
+                return null;
+            }
+
+            public override void Write(Utf8JsonWriter writer, bool? value, JsonSerializerOptions options)
+            {
+                if (value.HasValue) writer.WriteBooleanValue(value.Value);
+                else writer.WriteNullValue();
+            }
+        }
+
         private class WooImportProductItem
         {
             public int id { get; set; }
@@ -2777,6 +2899,7 @@ namespace George.Services
             public string? date_on_sale_to { get; set; }
             public string? date_on_sale_to_gmt { get; set; }
             public string? weight { get; set; }
+            [JsonConverter(typeof(FlexibleNullableBoolConverter))]
             public bool? manage_stock { get; set; }
             public decimal? stock_quantity { get; set; }
             public List<WooImportProductCategoryItem>? categories { get; set; }
@@ -2804,6 +2927,7 @@ namespace George.Services
             public string? regular_price { get; set; }
             public string? sale_price { get; set; }
             public string? weight { get; set; }
+            [JsonConverter(typeof(FlexibleNullableBoolConverter))]
             public bool? manage_stock { get; set; }
             public decimal? stock_quantity { get; set; }
             public WooImportImageItem? image { get; set; }
