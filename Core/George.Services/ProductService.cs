@@ -216,15 +216,15 @@ namespace George.Services
                 product = await _productStorage.GetProductAsync(product.Id, cancelToken);
                 response.Data = MapProductToRes(product!);
                 
-                // Sync to WooCommerce only for the product's assigned sites (fire-and-forget to avoid blocking the response)
-                if (product != null && req.SiteIds != null && req.SiteIds.Any())
+                // Sync to WooCommerce for assigned sites. Prefer request SiteIds; if omitted or empty, use sites on the reloaded product (inventory-only saves still push to Woo).
+                if (product != null)
                 {
-                    var productIdForSync = product.Id;
-                    // Use the site IDs from the request (the sites the product is actually assigned to)
-                    var assignedSiteIds = req.SiteIds.ToList();
-                    
-                    if (assignedSiteIds.Any())
+                    var assignedSiteIds = (req.SiteIds != null && req.SiteIds.Any())
+                        ? req.SiteIds.ToList()
+                        : (product.Site?.Select(s => s.Id).ToList() ?? new List<int>());
+                    if (assignedSiteIds.Count > 0)
                     {
+                        var productIdForSync = product.Id;
                         _ = Task.Run(async () =>
                         {
                             await SyncProductToWooCommerceForAssignedSitesAsync(productIdForSync, assignedSiteIds, CancellationToken.None);
@@ -306,15 +306,15 @@ namespace George.Services
                 product = await _productStorage.GetProductAsync(productId, cancelToken);
                 response.Data = MapProductToRes(product!);
                 
-                // Sync to WooCommerce only for the product's assigned sites (fire-and-forget to avoid blocking the response)
-                if (product != null && req.SiteIds != null && req.SiteIds.Any())
+                // Sync to WooCommerce for assigned sites. Prefer request SiteIds; if omitted or empty, use sites on the reloaded product.
+                if (product != null)
                 {
-                    var productIdForSync = product.Id;
-                    // Use the site IDs from the request (the sites the product is actually assigned to)
-                    var assignedSiteIds = req.SiteIds.ToList();
-                    
-                    if (assignedSiteIds.Any())
+                    var assignedSiteIds = (req.SiteIds != null && req.SiteIds.Any())
+                        ? req.SiteIds.ToList()
+                        : (product.Site?.Select(s => s.Id).ToList() ?? new List<int>());
+                    if (assignedSiteIds.Count > 0)
                     {
+                        var productIdForSync = product.Id;
                         _ = Task.Run(async () =>
                         {
                             await SyncProductToWooCommerceForAssignedSitesAsync(productIdForSync, assignedSiteIds, CancellationToken.None);

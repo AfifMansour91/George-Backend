@@ -2049,7 +2049,6 @@ namespace George.Services
                     var wooVariation = new Dictionary<string, object>
                     {
                         ["regular_price"] = variant.Price?.ToString() ?? product.Price?.ToString() ?? "0",
-                        ["sale_price"] = variant.SalePrice?.ToString() ?? "",
                         ["sku"] = variantWooSku,
                         ["manage_stock"] = manageVariationStockInWoo,
                         ["stock_status"] = variantStockStatus,
@@ -2057,6 +2056,9 @@ namespace George.Services
                         ["weight"] = variant.Weight?.ToString() ?? "",
                         ["attributes"] = variationAttributesList
                     };
+                    // Omit sale_price when absent so Woo does not reject the payload; send only when there is a positive sale.
+                    if (variant.SalePrice.HasValue && variant.SalePrice.Value > 0)
+                        wooVariation["sale_price"] = variant.SalePrice.Value.ToString(CultureInfo.InvariantCulture);
                     if (manageVariationStockInWoo)
                         wooVariation["stock_quantity"] = variationTrackQuantity
                             ? variant.StockQuantity ?? 0
@@ -2078,6 +2080,13 @@ namespace George.Services
                                 await updateResponse.Content.ReadAsStreamAsync(cancelToken),
                                 cancellationToken: cancelToken);
                             wooVariationId = updated?.id;
+                        }
+                        else
+                        {
+                            var err = await updateResponse.Content.ReadAsStringAsync(cancelToken);
+                            _logger.LogWarning(
+                                "WooCommerce variation PUT failed ({Status}) product {ProductId} variation {WooVariationId}: {Error}",
+                                (int)updateResponse.StatusCode, product.Id, wooVariationIdToUse.Value, err);
                         }
                     }
 

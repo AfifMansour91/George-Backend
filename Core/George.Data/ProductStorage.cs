@@ -388,19 +388,17 @@ namespace George.Data
             dbProduct.UpdatedDate = DateTime.UtcNow;
             dbProduct.UpdateUserId = updated.UpdateUserId;
 
-            // Update sites
-            if (siteIds != null)
+            // Update sites only when the caller sends one or more site IDs.
+            // Null or empty list means "leave site assignment unchanged" (partial updates and clients that omit site_ids).
+            if (siteIds != null && siteIds.Any())
             {
                 dbProduct.Site.Clear();
-                if (siteIds.Any())
+                var sites = await _dbContext.Site
+                    .Where(s => siteIds.Contains(s.Id))
+                    .ToListAsync(cancelToken);
+                foreach (var site in sites)
                 {
-                    var sites = await _dbContext.Site
-                        .Where(s => siteIds.Contains(s.Id))
-                        .ToListAsync(cancelToken);
-                    foreach (var site in sites)
-                    {
-                        dbProduct.Site.Add(site);
-                    }
+                    dbProduct.Site.Add(site);
                 }
             }
 

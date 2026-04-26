@@ -70,7 +70,8 @@ namespace George.Services.Request
         public WeightConfigReq? WeightConfig { get; set; }
         public bool? ShowAsMl { get; set; }
         public string? WeightUnit { get; set; }
-        public List<int>? SiteIds { get; set; } // Empty = all sites
+        /// <summary>Site assignment. Null or empty = do not change which sites the product is on (update); Woo sync falls back to existing sites on the product.</summary>
+        public List<int>? SiteIds { get; set; }
         public int? AccountId { get; set; }
         /// <summary>List sort order (ascending). When omitted on create, defaults to 0 in storage.</summary>
         public int? DisplayOrder { get; set; }
