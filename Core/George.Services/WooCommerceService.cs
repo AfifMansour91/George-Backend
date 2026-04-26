@@ -1980,9 +1980,11 @@ namespace George.Services
 
             var usedWooVariationIds = new HashSet<int>();
 
-            // Per-variation quantity in Woo only when "מלאי לפי וריאציה" (VariationStockByQuantity). Otherwise do not derive status from variant.StockQuantity — those columns are unused and are often zero, which wrongly marked all variations out of stock.
+            // Per-variation stock in Woo whenever George uses stock_management_type "variation" (qty or binary in/out).
+            // When VariationStockByQuantity is false, each variant still uses StockQuantity as 0/1 for in/out — we must not send parent stock_status for every line or Woo never reflects per-variation toggles.
             var stockManagedPerVariation = string.Equals(product.StockManagementType?.Name, "variation", StringComparison.OrdinalIgnoreCase);
             var variationTrackQuantity = stockManagedPerVariation && product.VariationStockByQuantity == true;
+            var manageVariationStockInWoo = stockManagedPerVariation;
             var productStockStatus = "instock";
             if (product.StockStatus?.Name == "out_of_stock" || product.Status?.Name == "outOfStock")
                 productStockStatus = "outofstock";
@@ -1993,7 +1995,7 @@ namespace George.Services
             {
                 try
                 {
-                    var variantStockStatus = variationTrackQuantity
+                    var variantStockStatus = manageVariationStockInWoo
                         ? ((variant.StockQuantity ?? 0) > 0 ? "instock" : "outofstock")
                         : productStockStatus;
 
@@ -2049,14 +2051,16 @@ namespace George.Services
                         ["regular_price"] = variant.Price?.ToString() ?? product.Price?.ToString() ?? "0",
                         ["sale_price"] = variant.SalePrice?.ToString() ?? "",
                         ["sku"] = variantWooSku,
-                        ["manage_stock"] = variationTrackQuantity,
+                        ["manage_stock"] = manageVariationStockInWoo,
                         ["stock_status"] = variantStockStatus,
                         //["weight"] = variationWeightForWoo,
                         ["weight"] = variant.Weight?.ToString() ?? "",
                         ["attributes"] = variationAttributesList
                     };
-                    if (variationTrackQuantity)
-                        wooVariation["stock_quantity"] = variant.StockQuantity ?? 0;
+                    if (manageVariationStockInWoo)
+                        wooVariation["stock_quantity"] = variationTrackQuantity
+                            ? variant.StockQuantity ?? 0
+                            : ((variant.StockQuantity ?? 0) > 0 ? 1m : 0m);
                     if (!string.IsNullOrEmpty(variant.ImageUrl))
                         wooVariation["image"] = new { src = variant.ImageUrl };
 
