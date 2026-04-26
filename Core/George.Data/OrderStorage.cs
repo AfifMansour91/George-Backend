@@ -158,6 +158,59 @@ namespace George.Data
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// After ordered quantities were deducted from catalog (Woo ingest or internal create), set <see cref="OrderItem.PickedQuantity"/> to <see cref="OrderItem.Quantity"/>
+        /// so picking deltas are only the adjustment beyond what was ordered (avoids double-deduct when the order later completes).
+        /// Sets <see cref="Order.CompletionInventoryApplied"/> so completion-time stock does not run again for the same consumption.
+        /// </summary>
+        public async Task SetOrderedCatalogConsumedAndBaselinePickingAsync(int orderId, CancellationToken cancelToken)
+        {
+            var db = await _dbContext.Order
+                .Include(o => o.OrderItem)
+                .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken)
+                .ConfigureAwait(false);
+            if (db == null) return;
+            db.CompletionInventoryApplied = true;
+            foreach (var item in db.OrderItem.Where(i => !i.IsDeleted))
+            {
+                if (item.ProductId is > 0 && item.Quantity > 0m)
+                    item.PickedQuantity = item.Quantity;
+            }
+            db.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Sets <see cref="OrderItem.PickedQuantity"/> = <see cref="OrderItem.Quantity"/> only for the given line ids (e.g. lines just added via AddItems).
+        /// Does not change <see cref="Order.CompletionInventoryApplied"/> or other order lines.
+        /// </summary>
+        public async Task SetPickedQuantityBaselineForOrderItemIdsAsync(
+            int orderId,
+            IReadOnlyCollection<int> orderItemIds,
+            CancellationToken cancelToken)
+        {
+            if (orderItemIds == null || orderItemIds.Count == 0) return;
+            var idSet = orderItemIds.Where(id => id > 0).ToHashSet();
+            if (idSet.Count == 0) return;
+            var db = await _dbContext.Order
+                .Include(o => o.OrderItem)
+                .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken)
+                .ConfigureAwait(false);
+            if (db == null) return;
+            var touched = false;
+            foreach (var item in db.OrderItem.Where(i => !i.IsDeleted && idSet.Contains(i.Id)))
+            {
+                if (item.ProductId is > 0 && item.Quantity > 0m)
+                {
+                    item.PickedQuantity = item.Quantity;
+                    touched = true;
+                }
+            }
+            if (!touched) return;
+            db.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+        }
+
         /// <summary>Add line items to an existing order (e.g. from picking "הוסף פריט").</summary>
         public async Task<Order?> AddOrderItemsAsync(int orderId, List<OrderItem> newItems, CancellationToken cancelToken)
         {

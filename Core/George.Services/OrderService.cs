@@ -160,10 +160,12 @@ namespace George.Services
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken);
             var loaded = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken);
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loaded, cancelToken).ConfigureAwait(false);
-            await TrySendNewOrderCustomerSmsAsync(loaded!, cancelToken).ConfigureAwait(false);
-            if (loaded != null)
-                await TryEnqueueNewOrderAutoPrintAsync(loaded, cancelToken).ConfigureAwait(false);
-            response.Data = _mapper.Map<OrderRes>(loaded);
+            await TryApplyInternalOrderCatalogOnCreateAsync(loaded!, cancelToken).ConfigureAwait(false);
+            var loadedAfterStock = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false) ?? loaded;
+            await TrySendNewOrderCustomerSmsAsync(loadedAfterStock!, cancelToken).ConfigureAwait(false);
+            if (loadedAfterStock != null)
+                await TryEnqueueNewOrderAutoPrintAsync(loadedAfterStock, cancelToken).ConfigureAwait(false);
+            response.Data = _mapper.Map<OrderRes>(loadedAfterStock);
             return response;
         }
 
@@ -448,6 +450,19 @@ namespace George.Services
         public async Task<IApiResponse<OrderRes?>> CancelOrderAsync(int orderId, bool softDelete = true, CancellationToken cancelToken = default)
         {
             var response = new ApiResponse<OrderRes?>();
+            var beforeCancel = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
+            if (beforeCancel == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
+            if (!string.Equals(beforeCancel.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+            {
+                var restoredProductIds = await TryRestoreCatalogStockOnOrderCancelAsync(beforeCancel, cancelToken).ConfigureAwait(false);
+                if (restoredProductIds.Count > 0)
+                    await ScheduleWooCommerceCatalogStockPushForProductsAsync(
+                        beforeCancel.SiteId,
+                        restoredProductIds,
+                        "order cancel (catalog restored)",
+                        cancelToken).ConfigureAwait(false);
+            }
             var order = await _orderStorage.CancelOrderAsync(orderId, AuthUser.Id, softDelete, cancelToken);
             if (order == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
@@ -520,6 +535,35 @@ namespace George.Services
             var updated = await _orderStorage.AddOrderItemsAsync(orderId, newOrderItems, cancelToken);
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
+
+            var stockPushProductIds = new List<int>();
+            var newLineIdsForBaseline = new List<int>();
+            foreach (var oi in newOrderItems)
+            {
+                if (oi.ProductId is not > 0 || oi.Quantity <= 0m) continue;
+                await _productStorage
+                    .ApplyPickingConsumptionDeltaAsync(
+                        oi.ProductId.Value,
+                        oi.ProductVariantId,
+                        oi.Quantity,
+                        cancelToken)
+                    .ConfigureAwait(false);
+                stockPushProductIds.Add(oi.ProductId.Value);
+                if (oi.Id > 0)
+                    newLineIdsForBaseline.Add(oi.Id);
+            }
+            if (newLineIdsForBaseline.Count > 0)
+                await _orderStorage
+                    .SetPickedQuantityBaselineForOrderItemIdsAsync(orderId, newLineIdsForBaseline, cancelToken)
+                    .ConfigureAwait(false);
+
+            if (stockPushProductIds.Count > 0)
+                await ScheduleWooCommerceCatalogStockPushForProductsAsync(
+                    updated.SiteId,
+                    stockPushProductIds,
+                    "add order items",
+                    cancelToken).ConfigureAwait(false);
+
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             if (loaded != null)
                 await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, loaded, "add items", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
@@ -554,6 +598,11 @@ namespace George.Services
                         -restorePicked.Value,
                         cancelToken)
                     .ConfigureAwait(false);
+                await ScheduleWooCommerceCatalogStockPushForProductsAsync(
+                    updated.SiteId,
+                    new List<int> { restoreProductId.Value },
+                    "remove item (stock restored)",
+                    cancelToken).ConfigureAwait(false);
             }
 
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "remove item", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
@@ -583,6 +632,7 @@ namespace George.Services
             var updated = await _orderStorage.UpdatePickingAsync(orderId, updates, cancelToken);
             if (updated == null) return CreateResponse(response, StatusCode.ItemNotFound);
 
+            var stockPushProductIds = new List<int>();
             foreach (var (orderItemId, newPicked, _) in updates)
             {
                 var line = orderCheck.OrderItem?.FirstOrDefault(i => i.Id == orderItemId && !i.IsDeleted);
@@ -598,7 +648,14 @@ namespace George.Services
                         consumptionDelta,
                         cancelToken)
                     .ConfigureAwait(false);
+                stockPushProductIds.Add(line.ProductId.Value);
             }
+            if (stockPushProductIds.Count > 0)
+                await ScheduleWooCommerceCatalogStockPushForProductsAsync(
+                    orderCheck.SiteId,
+                    stockPushProductIds,
+                    "picking update",
+                    cancelToken).ConfigureAwait(false);
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             var forResponse = loaded ?? updated;
             if (forResponse != null)
@@ -639,6 +696,45 @@ namespace George.Services
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "WooCommerce/oc-storeos order sync failed for order {OrderId}", orderIdCapture);
+                }
+            }, CancellationToken.None);
+        }
+
+        /// <summary>
+        /// Pushes Store catalog stock for the given products to WooCommerce (REST product sync). Best-effort background work.
+        /// Use after picking / completion / line removal so Woo reflects the same quantities as StoreOS.
+        /// </summary>
+        private async Task ScheduleWooCommerceCatalogStockPushForProductsAsync(
+            int siteId,
+            IReadOnlyList<int> productIds,
+            string logReason,
+            CancellationToken cancelToken)
+        {
+            var ids = productIds.Where(id => id > 0).Distinct().ToList();
+            if (ids.Count == 0) return;
+            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken).ConfigureAwait(false);
+            if (site?.WooCommerceEnabled != true) return;
+            var siteIdCapture = siteId;
+            var idsCapture = ids;
+            _logger.LogInformation(
+                "WooCommerce catalog stock push scheduled ({Reason}). siteId={SiteId}, productCount={Count}",
+                logReason, siteIdCapture, idsCapture.Count);
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await using var scope = _serviceScopeFactory.CreateAsyncScope();
+                    var wooCommerceService = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
+                    var req = new WooCommerceSyncReq { SiteId = siteIdCapture, ProductIds = idsCapture };
+                    await wooCommerceService.SyncToWooCommerceAsync(req, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(
+                        ex,
+                        "WooCommerce catalog stock push failed ({Reason}). siteId={SiteId}",
+                        logReason,
+                        siteIdCapture);
                 }
             }, CancellationToken.None);
         }
@@ -1423,6 +1519,7 @@ namespace George.Services
             }
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken).ConfigureAwait(false);
             var loadedOrder = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false);
+            await TryApplyWooIncomingOrderCatalogAndBaselinePickingAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loadedOrder, cancelToken).ConfigureAwait(false);
             await TrySendNewOrderCustomerSmsAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
             if (loadedOrder != null)
@@ -2040,19 +2137,127 @@ namespace George.Services
             if (string.Equals(previousStatus, "Completed", StringComparison.OrdinalIgnoreCase))
                 return;
 
-            var adjustedLines = await ApplyOrderedQuantityToCatalogForUnpickedLinesAsync(orderWithItems, cancelToken).ConfigureAwait(false);
+            var adjustedProductIds = await ApplyOrderedQuantityToCatalogForUnpickedLinesAsync(orderWithItems, cancelToken).ConfigureAwait(false);
             await _orderStorage.SetOrderCompletionInventoryAppliedAsync(orderId, true, cancelToken).ConfigureAwait(false);
-            if (adjustedLines > 0)
+            if (adjustedProductIds.Count > 0)
             {
                 _logger.LogInformation(
                     "Catalog stock adjusted on order completion (ordered qty for lines without picking). orderId={OrderId}, lines={LineCount}",
-                    orderId, adjustedLines);
+                    orderId, adjustedProductIds.Count);
+                await ScheduleWooCommerceCatalogStockPushForProductsAsync(
+                    orderWithItems.SiteId,
+                    adjustedProductIds,
+                    "order completion (unpicked lines)",
+                    cancelToken).ConfigureAwait(false);
             }
         }
 
-        private async Task<int> ApplyOrderedQuantityToCatalogForUnpickedLinesAsync(Order order, CancellationToken cancelToken)
+        /// <summary>
+        /// New WooCommerce orders: reduce Store catalog by ordered line quantities (Woo already reduced on the site),
+        /// then set each line's picked qty baseline to ordered qty so further picking adjusts only the delta.
+        /// Skips when order is already Completed (completion handler applies) or when completion flag was set earlier.
+        /// </summary>
+        private async Task TryApplyWooIncomingOrderCatalogAndBaselinePickingAsync(Order order, CancellationToken cancelToken)
         {
-            var n = 0;
+            if (!string.Equals(order.Source, "WooCommerce", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (string.Equals(order.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (order.CompletionInventoryApplied)
+                return;
+            var lines = order.OrderItem?.Where(i => !i.IsDeleted).ToList() ?? new List<OrderItem>();
+            if (lines.Count == 0) return;
+            var productIds = new List<int>();
+            foreach (var line in lines)
+            {
+                if (line.ProductId is not > 0 || line.Quantity <= 0m) continue;
+                await _productStorage
+                    .ApplyPickingConsumptionDeltaAsync(
+                        line.ProductId.Value,
+                        line.ProductVariantId,
+                        line.Quantity,
+                        cancelToken)
+                    .ConfigureAwait(false);
+                productIds.Add(line.ProductId.Value);
+            }
+            if (productIds.Count == 0) return;
+            await _orderStorage.SetOrderedCatalogConsumedAndBaselinePickingAsync(order.Id, cancelToken).ConfigureAwait(false);
+            await ScheduleWooCommerceCatalogStockPushForProductsAsync(
+                order.SiteId,
+                productIds,
+                "Woo order ingest (align Store catalog with ordered qty)",
+                cancelToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Phone/Kiosk/Website orders: reduce Store catalog by ordered line quantities at creation, baseline <see cref="OrderItem.PickedQuantity"/>
+        /// so picking adjusts only the delta. Skips WooCommerce (handled by <see cref="TryApplyWooIncomingOrderCatalogAndBaselinePickingAsync"/>).
+        /// </summary>
+        private async Task TryApplyInternalOrderCatalogOnCreateAsync(Order order, CancellationToken cancelToken)
+        {
+            if (string.Equals(order.Source, "WooCommerce", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (string.Equals(order.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (order.CompletionInventoryApplied)
+                return;
+            var lines = order.OrderItem?.Where(i => !i.IsDeleted).ToList() ?? new List<OrderItem>();
+            if (lines.Count == 0) return;
+            var productIds = new List<int>();
+            foreach (var line in lines)
+            {
+                if (line.ProductId is not > 0 || line.Quantity <= 0m) continue;
+                await _productStorage
+                    .ApplyPickingConsumptionDeltaAsync(
+                        line.ProductId.Value,
+                        line.ProductVariantId,
+                        line.Quantity,
+                        cancelToken)
+                    .ConfigureAwait(false);
+                productIds.Add(line.ProductId.Value);
+            }
+            if (productIds.Count == 0) return;
+            await _orderStorage.SetOrderedCatalogConsumedAndBaselinePickingAsync(order.Id, cancelToken).ConfigureAwait(false);
+            await ScheduleWooCommerceCatalogStockPushForProductsAsync(
+                order.SiteId,
+                productIds,
+                "internal order create (ordered qty)",
+                cancelToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Restores catalog stock when an order is cancelled: reverses picked consumption and/or completion-only line consumption.
+        /// PickedQuantity &gt; 0 means that much was net-consumed via create+baseline and picking; unpicked completion used Quantity with PickedQuantity unset.
+        /// </summary>
+        private async Task<List<int>> TryRestoreCatalogStockOnOrderCancelAsync(Order order, CancellationToken cancelToken)
+        {
+            var pushIds = new List<int>();
+            var lines = order.OrderItem?.Where(i => !i.IsDeleted).ToList() ?? new List<OrderItem>();
+            foreach (var line in lines)
+            {
+                if (line.ProductId is not > 0) continue;
+                decimal restoreQty = 0m;
+                if (line.PickedQuantity.HasValue && line.PickedQuantity.Value > 0m)
+                    restoreQty = line.PickedQuantity.Value;
+                else if (!line.PickedQuantity.HasValue && order.CompletionInventoryApplied && line.Quantity > 0m)
+                    restoreQty = line.Quantity;
+                else
+                    continue;
+                await _productStorage
+                    .ApplyPickingConsumptionDeltaAsync(
+                        line.ProductId.Value,
+                        line.ProductVariantId,
+                        -restoreQty,
+                        cancelToken)
+                    .ConfigureAwait(false);
+                pushIds.Add(line.ProductId.Value);
+            }
+            return pushIds.Distinct().ToList();
+        }
+
+        private async Task<List<int>> ApplyOrderedQuantityToCatalogForUnpickedLinesAsync(Order order, CancellationToken cancelToken)
+        {
+            var productIds = new List<int>();
             foreach (var line in order.OrderItem?.Where(i => !i.IsDeleted) ?? Enumerable.Empty<OrderItem>())
             {
                 if (line.ProductId is not > 0) continue;
@@ -2066,10 +2271,10 @@ namespace George.Services
                         line.Quantity,
                         cancelToken)
                     .ConfigureAwait(false);
-                n++;
+                productIds.Add(line.ProductId.Value);
             }
 
-            return n;
+            return productIds.Distinct().ToList();
         }
 
         private static string MapWooCommerceStatusToOurs(string? wc)
