@@ -2734,7 +2734,7 @@ namespace George.Services
                             Price = ParseNullableDecimal(vv.regular_price),
                             SalePrice = ParseNullableDecimal(vv.sale_price),
                             Weight = ParseNullableDecimal(vv.weight),
-                            StockQuantity = vv.manage_stock == true ? vv.stock_quantity : null,
+                            StockQuantity = ResolveImportedVariantStockQuantity(vv),
                             ImageUrl = vv.image?.src,
                             IsDeleted = false
                         };
@@ -2754,6 +2754,18 @@ namespace George.Services
                         }
                     }
                     stats.Variations.Updated += wooVariations.Count;
+
+                    // George UI: sum/qty column only when VariationStockByQuantity is true (matches Woo per-variation manage_stock / qty).
+                    if (wooVariations.Count > 0)
+                    {
+                        product.VariationStockByQuantity = wooVariations.Any(v =>
+                            v.manage_stock == true
+                            || (v.stock_quantity.HasValue && v.stock_quantity.Value > 0));
+                    }
+                    else
+                    {
+                        product.VariationStockByQuantity = null;
+                    }
 
                     await db.SaveChangesAsync(cancelToken);
 
@@ -2780,6 +2792,23 @@ namespace George.Services
                     await db.SaveChangesAsync(cancelToken);
 
                     await ApplyWooImportProductExtensionsAsync(db, product, wp, accountId, importLookups, cancelToken);
+
+                    // Woo variable parent can be "out of stock" in REST while each variation is instock without manage_stock.
+                    if (wooVariations.Count > 0)
+                    {
+                        var outStockId = ResolveStockStatusId(importLookups, "outofstock");
+                        var inStockId = ResolveStockStatusId(importLookups, "instock");
+                        var anySalable = wooVariations.Any(v =>
+                        {
+                            var q = ResolveImportedVariantStockQuantity(v);
+                            return q.HasValue && q.Value > 0;
+                        });
+                        if (anySalable && inStockId.HasValue && outStockId.HasValue && product.StockStatusId == outStockId.Value)
+                        {
+                            product.StockStatusId = inStockId.Value;
+                            await db.SaveChangesAsync(cancelToken);
+                        }
+                    }
 
                     byWooId[wp.id] = product;
                     if (!string.IsNullOrWhiteSpace(product.Sku))
@@ -2930,6 +2959,8 @@ namespace George.Services
             [JsonConverter(typeof(FlexibleNullableBoolConverter))]
             public bool? manage_stock { get; set; }
             public decimal? stock_quantity { get; set; }
+            /// <summary>WooCommerce: instock | outofstock | onbackorder (hyphenated in some payloads).</summary>
+            public string? stock_status { get; set; }
             public WooImportImageItem? image { get; set; }
             public List<WooImportVariationAttributeItem>? attributes { get; set; }
         }

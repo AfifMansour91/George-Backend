@@ -222,6 +222,23 @@ public partial class WooCommerceService
         return null;
     }
 
+    /// <summary>
+    /// George treats variation salability as <c>StockQuantity &gt; 0</c> (binary or summed qty in UI).
+    /// WooCommerce often leaves <c>manage_stock</c> false while still returning <c>stock_status</c> per variation.
+    /// </summary>
+    private static decimal? ResolveImportedVariantStockQuantity(WooImportVariationItem vv)
+    {
+        if (vv.manage_stock == true && vv.stock_quantity.HasValue)
+            return vv.stock_quantity.Value;
+
+        var st = (vv.stock_status ?? string.Empty).Trim().ToLowerInvariant().Replace("-", "").Replace("_", "");
+        if (st is "instock" or "onbackorder")
+            return 1m;
+        if (st is "outofstock")
+            return 0m;
+        return null;
+    }
+
     private async Task ApplyWooImportProductExtensionsAsync(
         GeorgeDBContext db,
         Product product,
