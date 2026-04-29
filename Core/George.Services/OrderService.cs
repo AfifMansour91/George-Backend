@@ -1611,12 +1611,21 @@ namespace George.Services
             sb.AppendLine("  <meta charset=\"utf-8\">");
             sb.AppendLine("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />");
             sb.AppendLine($"  <title>בון הזמנה {EscapeHtml(orderNo)}</title>");
+            var pw = VoucherPrintHtml.PaperWidthMm;
             sb.AppendLine("  <style>");
             sb.AppendLine("    html, body { margin: 0; padding: 0; background: #fff; overflow: visible; overflow-x: visible; }");
-            sb.AppendLine($"    body {{ max-width: {VoucherPrintHtml.PaperWidthMm}mm; width: 100%; margin: 0 auto; box-sizing: border-box; }}");
+            sb.AppendLine("    body {");
+            sb.AppendLine("      display: flex;");
+            sb.AppendLine("      flex-direction: column;");
+            sb.AppendLine("      align-items: center;");
+            sb.AppendLine("      width: 100%;");
+            sb.AppendLine("      box-sizing: border-box;");
+            sb.AppendLine("    }");
             sb.AppendLine($"    #voucher-root {{");
-            sb.AppendLine($"      max-width: {VoucherPrintHtml.ContentWidthMm}mm;");
-            sb.AppendLine("      width: 100%; min-width: 0; margin: 0 auto;");
+            sb.AppendLine($"      max-width: {pw}mm;");
+            sb.AppendLine($"      width: {pw}mm;");
+            sb.AppendLine("      min-width: 0;");
+            sb.AppendLine("      margin: 0;");
             sb.AppendLine($"      padding: {VoucherPrintHtml.InnerPadding};");
             sb.AppendLine("      box-sizing: border-box; font-family: Arial, sans-serif; color: #000; background: #fff;");
             sb.AppendLine("      font-size: 14px; overflow: visible; overflow-wrap: anywhere; word-break: break-word; line-break: anywhere;");
@@ -1629,15 +1638,29 @@ namespace George.Services
             sb.AppendLine("    .bold { font-weight: bold; }");
             sb.AppendLine("    .large { font-size: 1.25rem; font-weight: 900; margin: 8px 0; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; color: #111; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }");
             sb.AppendLine("    #voucher-root img { max-width: 100%; height: auto; }");
+            sb.AppendLine("    .voucher-top {");
+            sb.AppendLine("      direction: ltr;");
+            sb.AppendLine("      unicode-bidi: isolate;");
+            sb.AppendLine("      display: flex;");
+            sb.AppendLine("      flex-direction: column;");
+            sb.AppendLine("      align-items: center;");
+            sb.AppendLine("      width: 100%;");
+            sb.AppendLine("      max-width: 100%;");
+            sb.AppendLine("      box-sizing: border-box;");
+            sb.AppendLine("      text-align: center;");
+            sb.AppendLine("    }");
+            sb.AppendLine("    .voucher-top > div { width: 100%; max-width: 100%; box-sizing: border-box; text-align: center; }");
             sb.AppendLine("    .voucher-product-row { border-bottom: 1px solid #000 !important; }");
             sb.AppendLine("    .voucher-ship { min-width: 0; }");
             sb.AppendLine("    @media print {");
-            sb.AppendLine("      #voucher-root { padding: 2mm 2.5mm; -webkit-print-color-adjust: exact; print-color-adjust: exact; }");
+            sb.AppendLine($"      @page {{ size: {pw}mm auto; margin: 0; }}");
+            sb.AppendLine($"      #voucher-root {{ width: {pw}mm; max-width: {pw}mm; padding: 2mm 2mm; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}");
             sb.AppendLine("    }");
             sb.AppendLine("  </style>");
             sb.AppendLine("</head>");
             sb.AppendLine("<body>");
             sb.AppendLine("<div id=\"voucher-root\">");
+            sb.AppendLine("  <div class=\"voucher-top\" dir=\"ltr\" style=\"margin-bottom:12px;\">");
             sb.AppendLine("  <div style=\"text-align:center;margin-bottom:8px;\">");
             sb.AppendLine("    <div class=\"muted\" style=\"font-size:12px;\">כניסת הזמנה</div>");
             sb.AppendLine($"    <div style=\"font-size:14px;font-weight:500;\">{EscapeHtml(created)}</div>");
@@ -1650,8 +1673,10 @@ namespace George.Services
             sb.AppendLine(
                 $"    <div style=\"font-size:22px;font-weight:800;line-height:1.15;{tw}\">{EscapeHtml(orderNo)}</div>");
             sb.AppendLine("  </div>");
-            sb.AppendLine($"  <div style=\"margin:12px 0;\">{qrImg}</div>");
-            sb.AppendLine("  <div style=\"text-align:center;font-size:10px;color:#666;margin-bottom:12px;\">סריקה לפתיחת מסך הליקוט</div>");
+            sb.AppendLine(
+                $"  <div style=\"display:flex;justify-content:center;width:100%;margin:12px 0;box-sizing:border-box;\">{qrImg}</div>");
+            sb.AppendLine("  <div style=\"text-align:center;font-size:10px;color:#666;\">סריקה לפתיחת מסך הליקוט</div>");
+            sb.AppendLine("  </div>");
             if (!string.IsNullOrWhiteSpace(deliveryMethod))
                 sb.AppendLine(
                     $"  <div style=\"margin-bottom:4px;{tw}\"><span class=\"muted\">שיטת אספקה: </span><span class=\"bold\">{EscapeHtml(deliveryMethod)}</span></div>");
@@ -1752,7 +1777,10 @@ namespace George.Services
                 sb.AppendLine($"  <div style=\"text-align:center;font-size:15px;font-weight:600;margin:8px 0;{tw}\">משלוח: ₪{shippingCost:0.00}</div>");
             if (!newVoucher && grandTotal.HasValue)
                 sb.AppendLine(
-                    $"  <div style=\"text-align:center;margin:12px 0;padding:12px;border:2px solid #1f2937;border-radius:8px;background:#f9fafb;{tw}\"><div style=\"font-size:11px;color:#000;margin-bottom:4px;{tw}\">סה\"כ לתשלום</div><div style=\"font-size:22px;font-weight:bold;{tw}\">₪{grandTotal.Value:0.00}</div></div>");
+                    "  <div style=\"display:flex;justify-content:center;margin:12px 0;width:100%;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;\">" +
+                    "<div style=\"display:inline-block;padding:10px 14px;border:2px solid #1f2937;border-radius:8px;background:#f9fafb;text-align:center;box-sizing:border-box;max-width:min(100%,14rem);-webkit-print-color-adjust:exact;print-color-adjust:exact;\">" +
+                    "<div style=\"font-size:11px;color:#000;margin-bottom:4px;\">סה\"כ לתשלום</div>" +
+                    $"<div style=\"font-size:22px;font-weight:bold;direction:ltr;unicode-bidi:embed;\">₪{grandTotal.Value:0.00}</div></div></div>");
             sb.AppendLine("</div>");
             sb.AppendLine("</body>");
             sb.AppendLine("</html>");

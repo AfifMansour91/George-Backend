@@ -6,9 +6,10 @@ namespace George.Services;
 /// </summary>
 public static class VoucherPrintHtml
 {
+    /// <summary>Logical print width (mm); match driver "printing width" on 80mm roll (~72mm).</summary>
     public const int PaperWidthMm = 72;
-    public const int ContentWidthMm = 60;
-    public const string InnerPadding = "2.5mm 3mm";
+
+    public const string InnerPadding = "2.5mm 2.5mm";
 
     public const int QrSizePx = 120;
 
