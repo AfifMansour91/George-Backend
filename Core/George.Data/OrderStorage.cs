@@ -159,6 +159,17 @@ namespace George.Data
         }
 
         /// <summary>
+        /// For lines where the picking UI stores <strong>kg</strong> in <see cref="OrderItem.PickedQuantity"/>, do not baseline it to
+        /// <see cref="OrderItem.Quantity"/> (piece count). That made vouchers show a fake "after pick" weight (e.g. 2 ק"ג for 2 יח').
+        /// Piece-only lines still baseline to quantity for inventory delta accounting.
+        /// </summary>
+        private static bool SkipPickedQuantityBaselineBecausePickIsWeightKg(OrderItem item)
+        {
+            if (item.UnitWeightGrams is > 0m) return true;
+            return string.Equals(item.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
         /// After ordered quantities were deducted from catalog (Woo ingest or internal create), set <see cref="OrderItem.PickedQuantity"/> to <see cref="OrderItem.Quantity"/>
         /// so picking deltas are only the adjustment beyond what was ordered (avoids double-deduct when the order later completes).
         /// Sets <see cref="Order.CompletionInventoryApplied"/> so completion-time stock does not run again for the same consumption.
@@ -173,7 +184,7 @@ namespace George.Data
             db.CompletionInventoryApplied = true;
             foreach (var item in db.OrderItem.Where(i => !i.IsDeleted))
             {
-                if (item.ProductId is > 0 && item.Quantity > 0m)
+                if (item.ProductId is > 0 && item.Quantity > 0m && !SkipPickedQuantityBaselineBecausePickIsWeightKg(item))
                     item.PickedQuantity = item.Quantity;
             }
             db.UpdatedDate = DateTime.UtcNow;
@@ -200,7 +211,7 @@ namespace George.Data
             var touched = false;
             foreach (var item in db.OrderItem.Where(i => !i.IsDeleted && idSet.Contains(i.Id)))
             {
-                if (item.ProductId is > 0 && item.Quantity > 0m)
+                if (item.ProductId is > 0 && item.Quantity > 0m && !SkipPickedQuantityBaselineBecausePickIsWeightKg(item))
                 {
                     item.PickedQuantity = item.Quantity;
                     touched = true;

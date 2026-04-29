@@ -5,6 +5,13 @@ using George.DB;
 
 namespace George.Services;
 
+/// <summary>Optional display tweaks; keep in sync with TS <c>OrderItemAttributeDisplayOptions</c>.</summary>
+public readonly record struct OrderItemAttributeDisplayOptions
+{
+    /// <summary>Omit <see cref="OrderItem.OrderLineSizeLabel"/> from attribute segments (voucher / compact surfaces).</summary>
+    public bool OmitOrderLineSizeLabel { get; init; }
+}
+
 /// <summary>
 /// Port of shop-manager <c>src/lib/orderItemLineDisplay.ts</c> for voucher / list parity (quantity badge, product name, attribute line).
 /// Keep in sync when TS display rules change. See <c>docs/ORDER_ITEM_LINE_DISPLAY_PARITY.md</c> and <c>George.Services.Tests</c>.
@@ -423,9 +430,11 @@ public static class OrderItemLineDisplay
         return null;
     }
 
-    public static IReadOnlyList<string> GetOrderItemAttributeSegments(OrderItem item)
+    public static IReadOnlyList<string> GetOrderItemAttributeSegments(
+        OrderItem item,
+        OrderItemAttributeDisplayOptions options = default)
     {
-        var size = item.OrderLineSizeLabel?.Trim();
+        var size = options.OmitOrderLineSizeLabel ? null : item.OrderLineSizeLabel?.Trim();
         var perRaw = item.OrderLinePerUnitWeightLabel?.Trim() ?? InferredPerUnitWeightLabel(item);
         var per = !string.IsNullOrEmpty(perRaw) ? SanitizePerUnitWeightLabelIfGramsShownAsKg(item, perRaw) : null;
         var cut = item.OrderLineCuttingLabel?.Trim();
@@ -476,9 +485,11 @@ public static class OrderItemLineDisplay
         return "–";
     }
 
-    public static string? GetOrderItemAttributeSummaryLine(OrderItem item)
+    public static string? GetOrderItemAttributeSummaryLine(
+        OrderItem item,
+        OrderItemAttributeDisplayOptions options = default)
     {
-        var segs = GetOrderItemAttributeSegments(item);
+        var segs = GetOrderItemAttributeSegments(item, options);
         var line = string.Join(" | ", segs).Trim();
         return line.Length > 0 ? line : null;
     }

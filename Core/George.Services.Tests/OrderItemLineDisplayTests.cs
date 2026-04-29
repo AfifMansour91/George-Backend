@@ -93,4 +93,24 @@ public class OrderItemLineDisplayTests
         Assert.Contains("גדול", line, StringComparison.Ordinal);
         Assert.Contains("פרוס", line, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Attribute_line_omits_size_when_OmitOrderLineSizeLabel()
+    {
+        var item = new OrderItem
+        {
+            Title = "Product",
+            OrderLineSizeLabel = "גדול",
+            OrderLineCuttingLabel = "פרוס",
+            OrderLineQuantityMode = "units",
+            Quantity = 2,
+            UnitWeightGrams = 800,
+        };
+        var line = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(
+            item,
+            new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true });
+        Assert.NotNull(line);
+        Assert.DoesNotContain("גדול", line, StringComparison.Ordinal);
+        Assert.Contains("פרוס", line, StringComparison.Ordinal);
+    }
 }

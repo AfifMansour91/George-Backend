@@ -1687,7 +1687,9 @@ namespace George.Services
                 sb.Append(' ');
                 sb.Append(title);
                 sb.Append("</span></div>");
-                var attrLine = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(it);
+                var attrLine = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(
+                    it,
+                    new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true });
                 if (!string.IsNullOrWhiteSpace(attrLine))
                 {
                     sb.Append("<div style=\"font-size:11px;font-weight:600;color:#000;margin-top:3px;line-height:1.35;");
