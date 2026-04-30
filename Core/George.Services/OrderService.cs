@@ -39,6 +39,14 @@ namespace George.Services
             ["Kiosk"] = "קיוסק",
             ["Phone"] = "טלפוני",
         };
+        private const string VoucherQrCaption = "פתיחת הזמנה";
+        private const string VoucherDateLabel = "תאריך אספקה:";
+        private const string VoucherTimeLabel = "שעה:";
+        private const string VoucherShippingLabel = "משלוח";
+        private const string VoucherItemsTitle = "מוצרים בהזמנה";
+        private const string VoucherNotesLabel = "הערות:";
+        private const string VoucherVatIncludedLabel = "כולל מע״מ";
+        private const string VoucherBrandFooter = "StoreOS";
 
         public OrderService(
             ILogger<OrderService> logger,
@@ -1584,13 +1592,17 @@ namespace George.Services
             var created = FormatOrderDateTime(order.CreationTime);
             var sourceLabel = VoucherSourceLabels.TryGetValue(order.Source ?? "", out var label) ? label : (order.Source ?? "");
             var sourceTop = string.IsNullOrWhiteSpace(sourceLabel) ? "" : $"מקור: {sourceLabel}";
-            var deliveryDate = string.Equals(order.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase)
+            var isShipping = IsVoucherShipping(order);
+            var deliveryDate = isShipping
                 ? order.DeliveryDate
                 : order.PickupDate;
-            var deliveryTime = string.Equals(order.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase)
+            var deliveryTime = isShipping
                 ? order.DeliveryTime
                 : order.PickupTime;
             var newVoucher = string.Equals(order.Status, "New", StringComparison.OrdinalIgnoreCase);
+            var pickingVoucher = string.Equals(order.Status, "InTreatment", StringComparison.OrdinalIgnoreCase);
+            var showTopQr = newVoucher || pickingVoucher;
+            var showBottomQr = !showTopQr;
             var orderNotes = CombineOrderLevelNotes(order);
             var grandTotal = ComputeVoucherGrandTotal(order);
             var qrDataUrl = GenerateVoucherQrDataUrl(order, _publicAppBaseUrl);
@@ -1602,14 +1614,14 @@ namespace George.Services
                 "<div dir=\"ltr\" style=\"display:flex;flex-direction:column;align-items:center;\">" +
                 $"<div style=\"width:{VoucherPrintHtml.QrFramePx}px;height:{VoucherPrintHtml.QrFramePx}px;border:2px solid #000;box-sizing:border-box;display:flex;align-items:center;justify-content:center;background:#fff;\">" +
                 qrInner +
-                "</div><div style=\"margin-top:2px;text-align:center;font-size:10px;line-height:13px;color:#000;\">סריקה לפתיחת מסך הליקוט</div></div>";
+                $"</div><div style=\"margin-top:2px;text-align:center;font-size:10px;line-height:13px;color:#000;\">{VoucherQrCaption}</div></div>";
             var headerShort = VoucherHeaderDeliveryShort(order);
             var headerCity = VoucherHeaderCityLine(order);
-            var showHeaderCity = string.Equals(order.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase);
-            var dateLabel = string.Equals(order.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase) ? "תאריך אספקה:" : "תאריך איסוף:";
-            var timeLabel = string.Equals(order.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase) ? "שעה:" : "שעת איסוף:";
+            var showHeaderCity = isShipping;
+            var dateLabel = VoucherDateLabel;
+            var timeLabel = VoucherTimeLabel;
             var itemCount = items.Count;
-            var payLine = EscapeHtml(VoucherPaymentHeadline(order));
+            var payLine = EscapeHtml(VoucherPaymentHeadline(order, !pickingVoucher));
 
             sb.AppendLine("<!DOCTYPE html>");
             sb.AppendLine("<html dir=\"rtl\" lang=\"he\">");
@@ -1631,29 +1643,27 @@ namespace George.Services
             sb.AppendLine("</head>");
             sb.AppendLine("<body>");
             sb.AppendLine("<div id=\"voucher-root\">");
-            sb.Append("  <div style=\"display:flex;flex-direction:row-reverse;justify-content:space-between;align-items:flex-end;padding-bottom:8px;font-size:12px;line-height:13px;\">");
-            sb.Append($"<span style=\"font-weight:700;\">{EscapeHtml(sourceTop)}</span>");
+            sb.Append("  <div style=\"display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:8px;font-size:12px;line-height:13px;\">");
             sb.Append($"<span style=\"font-weight:400;\">{EscapeHtml(created)}</span>");
+            sb.Append($"<span style=\"font-weight:700;\">{EscapeHtml(sourceTop)}</span>");
             sb.AppendLine("</div>");
 
-            const string headerBar =
-                "<div style=\"text-align:right;\"><div style=\"display:inline-block;width:56px;height:6px;background:#000;margin-top:4px;\"></div></div>";
             var headerCityBlock = showHeaderCity
                 ? $"<div style=\"margin-top:8px;font-size:28px;font-weight:900;line-height:31px;letter-spacing:-0.5px;\">{EscapeHtml(string.IsNullOrEmpty(headerCity) ? "—" : headerCity)}</div>"
                 : "";
             var headerCore =
                 $"<div style=\"font-size:28px;font-weight:900;line-height:32px;\">#{EscapeHtml(orderNo)}</div>" +
                 $"<div style=\"font-size:32px;font-weight:900;line-height:36px;letter-spacing:-0.5px;\">{EscapeHtml(headerShort)}</div>" +
-                headerBar +
                 headerCityBlock;
 
-            if (newVoucher)
+            if (showTopQr)
             {
-                sb.Append("  <div style=\"display:flex;flex-direction:row-reverse;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;padding-bottom:16px;border-bottom:1px solid #000;\">");
-                sb.Append(qrFrame);
+                sb.Append("  <div style=\"display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;padding-bottom:16px;border-bottom:1px solid #000;\">");
                 sb.Append("<div style=\"flex:1;min-width:0;text-align:right;\">");
                 sb.Append(headerCore);
-                sb.AppendLine("</div></div>");
+                sb.Append("</div>");
+                sb.Append(qrFrame);
+                sb.AppendLine("</div>");
             }
             else
             {
@@ -1665,9 +1675,9 @@ namespace George.Services
             if (deliveryDate.HasValue || !string.IsNullOrWhiteSpace(deliveryTime))
             {
                 sb.Append("  <div style=\"margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #000;\">");
-                sb.Append("<div style=\"display:flex;flex-direction:row-reverse;justify-content:space-between;font-size:13px;line-height:18px;margin-bottom:4px;\">");
+                sb.Append("<div style=\"display:flex;justify-content:space-between;font-size:13px;line-height:18px;margin-bottom:4px;\">");
                 sb.Append($"<span>{EscapeHtml(dateLabel)}</span><span>{EscapeHtml(timeLabel)}</span></div>");
-                sb.Append("<div style=\"display:flex;flex-direction:row-reverse;justify-content:space-between;align-items:center;gap:8px;\">");
+                sb.Append("<div style=\"display:flex;justify-content:space-between;align-items:center;gap:8px;\">");
                 sb.Append(deliveryDate.HasValue
                     ? $"<span style=\"font-size:20px;font-weight:700;line-height:24px;\">{EscapeHtml(FormatVoucherDateWithWeekday(deliveryDate.Value))}</span>"
                     : "<span style=\"font-size:20px;font-weight:700;\">—</span>");
@@ -1677,28 +1687,27 @@ namespace George.Services
                 sb.AppendLine("</div></div>");
             }
 
-            sb.Append("  <div style=\"display:flex;flex-direction:row-reverse;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:12px;\">");
+            sb.Append("  <div style=\"display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:12px;\">");
             sb.Append($"<div style=\"flex:1;min-width:0;text-align:right;font-size:28px;font-weight:900;line-height:35px;letter-spacing:-0.5px;\">{EscapeHtml(customerName)}</div>");
             sb.Append($"<div dir=\"ltr\" style=\"flex-shrink:0;padding-top:4px;font-size:16px;font-weight:500;line-height:20px;\">{EscapeHtml(customerPhone)}</div>");
             sb.AppendLine("</div>");
 
             if (!string.IsNullOrWhiteSpace(orderNotes))
-                sb.AppendLine($"  <div style=\"margin-bottom:12px;font-size:14px;font-weight:bold;line-height:1.45;\">הערות: {EscapeHtml(orderNotes)}</div>");
+                sb.AppendLine($"  <div style=\"margin-bottom:12px;font-size:14px;font-weight:bold;line-height:1.45;\">{VoucherNotesLabel} {EscapeHtml(orderNotes)}</div>");
 
-            AppendVoucherShippingAddressHtml(sb, order, pa);
+            if (isShipping) AppendVoucherShippingAddressHtml(sb, order, pa);
 
-            sb.AppendLine("  <div style=\"margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #000;text-align:right;\">");
-            sb.AppendLine($"    <span style=\"font-size:20px;font-weight:800;line-height:24px;\">מוצרים בהזמנה ({itemCount})</span>");
+            sb.AppendLine("  <div style=\"margin-bottom:8px;padding:8px 0;border-bottom:1px solid #000;text-align:center;\">");
+            sb.AppendLine($"    <span style=\"font-size:20px;font-weight:800;line-height:24px;\">{VoucherItemsTitle} ({itemCount})</span>");
             sb.AppendLine("  </div>");
 
-            var marker = EscapeHtml(VoucherPrintHtml.ProductBullet);
             var attrOpts = new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true };
             foreach (var it in items)
             {
                 var title = EscapeHtml(OrderItemLineDisplay.GetOrderItemProductName(it));
                 var qtyStr = EscapeHtml(OrderItemLineDisplay.FormatOrderItemQuantityBadge(it));
-                sb.Append("  <div style=\"display:flex;flex-direction:row-reverse;justify-content:space-between;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px dashed #000;\">");
-                sb.Append($"<div dir=\"ltr\" style=\"flex-shrink:0;white-space:nowrap;padding-top:2px;text-align:left;font-size:17px;font-weight:900;line-height:22px;\">{marker} {qtyStr}</div>");
+                sb.Append("  <div style=\"display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px dashed #000;\">");
+                sb.Append($"<div style=\"flex-shrink:0;white-space:nowrap;padding-top:2px;text-align:right;font-size:17px;font-weight:900;line-height:22px;\">{qtyStr}</div>");
                 sb.Append("<div style=\"flex:1;min-width:0;text-align:right;\">");
                 sb.Append($"<div style=\"font-size:17px;font-weight:700;line-height:19px;\">{title}</div>");
                 foreach (var seg in OrderItemLineDisplay.GetOrderItemAttributeSegments(it, attrOpts))
@@ -1734,7 +1743,7 @@ namespace George.Services
                     sb.Append("</div>");
                 }
 
-                sb.AppendLine("</div></div>");
+                sb.Append("</div></div>");
             }
 
             if (!newVoucher && grandTotal.HasValue)
@@ -1742,23 +1751,20 @@ namespace George.Services
                 sb.AppendLine("  <div style=\"margin-bottom:12px;padding-bottom:12px;border-bottom:1px dashed #000;text-align:center;\">");
                 sb.AppendLine($"    <div style=\"font-size:15px;font-weight:700;line-height:19px;\">{payLine}</div>");
                 sb.AppendLine($"    <div style=\"margin-top:4px;font-size:24px;font-weight:700;line-height:19px;direction:ltr;unicode-bidi:embed;\">₪{grandTotal.Value.ToString("0.00", CultureInfo.InvariantCulture)}</div>");
-                sb.AppendLine("    <div style=\"margin-top:4px;font-size:11px;font-weight:400;line-height:19px;\">כולל מע״מ</div>");
+                sb.AppendLine($"    <div style=\"margin-top:4px;font-size:11px;font-weight:400;line-height:19px;\">{VoucherVatIncludedLabel}</div>");
                 sb.AppendLine("  </div>");
             }
 
-            if (!newVoucher)
+            if (showBottomQr)
             {
                 sb.Append("  <div style=\"margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #000;display:flex;justify-content:center;\">");
                 sb.Append(qrFrame);
                 sb.AppendLine("</div>");
             }
 
-            if (!string.IsNullOrWhiteSpace(order.ShippingStoreName))
-            {
-                sb.AppendLine("  <div style=\"padding-top:8px;text-align:center;font-size:15px;font-weight:700;letter-spacing:0.2em;\">");
-                sb.AppendLine(EscapeHtml(order.ShippingStoreName.Trim()));
-                sb.AppendLine("  </div>");
-            }
+            sb.AppendLine("  <div style=\"padding-top:8px;text-align:center;font-size:30px;font-weight:900;line-height:32px;letter-spacing:0.12em;\">");
+            sb.AppendLine(EscapeHtml(string.IsNullOrWhiteSpace(order.ShippingStoreName) ? VoucherBrandFooter : order.ShippingStoreName.Trim()));
+            sb.AppendLine("  </div>");
 
             sb.AppendLine("</div>");
             sb.AppendLine("</body>");
@@ -1784,7 +1790,7 @@ namespace George.Services
         {
             var local = creationTime.ToLocalTime();
             var time = local.ToString("HH:mm", CultureInfo.InvariantCulture);
-            return $"{time} {FormatVoucherDateWithWeekday(local)}";
+            return $"{FormatVoucherDateWithWeekday(local)} {time}";
         }
 
         private static string CombineOrderLevelNotes(Order order)
@@ -1814,7 +1820,7 @@ namespace George.Services
         /// <summary>Match <c>getShippingAddressPartsForVoucher</c> for auto-print HTML.</summary>
         private static ShippingVoucherParts? TryGetShippingAddressPartsForVoucher(Order order)
         {
-            if (!string.Equals(order.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase))
+            if (!IsVoucherShipping(order))
                 return null;
 
             var apt = order.DeliveryApartment?.Trim();
@@ -1891,7 +1897,7 @@ namespace George.Services
             var extras = FormatShippingExtrasCommaLine(ship);
             sb.Append("  <div style=\"margin-bottom:12px;border-bottom:1px solid #000;padding-bottom:12px;text-align:right;");
             sb.Append(pa);
-            sb.Append("\"><div style=\"font-size:13px;font-weight:400;line-height:18px;letter-spacing:0.325px;\">משלוח</div>");
+            sb.Append($"\"><div style=\"font-size:13px;font-weight:400;line-height:18px;letter-spacing:0.325px;\">{VoucherShippingLabel}</div>");
             if (!string.IsNullOrEmpty(ship.Main))
             {
                 sb.Append("<div style=\"margin-top:4px;font-size:15px;font-weight:700;line-height:20px;");
@@ -1924,9 +1930,26 @@ namespace George.Services
 
         private static string VoucherHeaderDeliveryShort(Order order)
         {
-            if (string.Equals(order.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase)) return "משלוח";
-            if (string.Equals(order.DeliveryType, "Pickup", StringComparison.OrdinalIgnoreCase)) return "איסוף";
+            if (IsVoucherShipping(order)) return "משלוח";
+            if (IsVoucherPickup(order)) return "איסוף עצמי";
             return order.DeliveryType?.Trim() ?? "";
+        }
+
+        private static bool IsVoucherShipping(Order order)
+        {
+            var d = order.DeliveryType?.Trim() ?? "";
+            if (string.IsNullOrEmpty(d)) return false;
+            return string.Equals(d, "Shipping", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(d, "Express", StringComparison.OrdinalIgnoreCase)
+                || d.Contains("משלוח", StringComparison.Ordinal);
+        }
+
+        private static bool IsVoucherPickup(Order order)
+        {
+            var d = order.DeliveryType?.Trim() ?? "";
+            if (string.IsNullOrEmpty(d)) return false;
+            return string.Equals(d, "Pickup", StringComparison.OrdinalIgnoreCase)
+                || d.Contains("איסוף", StringComparison.Ordinal);
         }
 
         private static string VoucherHeaderCityLine(Order order)
@@ -1940,17 +1963,18 @@ namespace George.Services
             return order.ShippingStoreName?.Trim() ?? "";
         }
 
-        private static string VoucherPaymentHeadline(Order order)
+        private static string VoucherPaymentHeadline(Order order, bool settled = true)
         {
             var m = order.PaymentMethod?.Trim() ?? "";
-            if (string.IsNullOrEmpty(m)) return "לתשלום";
-            if (string.Equals(m, "Cash", StringComparison.OrdinalIgnoreCase) || m == "מזומן") return "שולם במזומן";
+            if (string.IsNullOrEmpty(m)) return settled ? "שולם" : "לתשלום";
+            if (string.Equals(m, "Cash", StringComparison.OrdinalIgnoreCase) || m == "מזומן")
+                return settled ? "שולם במזומן" : "תשלום במזומן";
             var lower = m.ToLowerInvariant();
             if (lower.Contains("card", StringComparison.Ordinal) || lower.Contains("credit", StringComparison.Ordinal) ||
                 string.Equals(m, "SavedCard", StringComparison.OrdinalIgnoreCase) ||
                 m.Contains("אשראי", StringComparison.Ordinal))
-                return "שולם באשראי";
-            return $"שולם ({m})";
+                return settled ? "שולם באשראי" : "תשלום באשראי";
+            return settled ? $"שולם ({m})" : $"תשלום ({m})";
         }
 
         private static string? BuildVoucherLoketLine(OrderItem it, decimal? lineAmt)
