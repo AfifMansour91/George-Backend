@@ -296,6 +296,7 @@ namespace George.Data
                 if (!itemMap.TryGetValue(orderItemId, out var item)) continue;
                 item.PickedQuantity = pickedQty;
                 item.TotalPrice = totalPrice;
+                item.PickingUserConfirmed = true;
             }
             RecalculateOrderHeaderTotalsFromLines(db);
             db.UpdatedDate = DateTime.UtcNow;

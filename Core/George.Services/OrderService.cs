@@ -2173,6 +2173,7 @@ namespace George.Services
                     continue;
                 line.PickedQuantity = prev.PickedQuantity;
                 line.TotalPrice = prev.TotalPrice;
+                line.PickingUserConfirmed = prev.PickingUserConfirmed;
             }
         }
 
