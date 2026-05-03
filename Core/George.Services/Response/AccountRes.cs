@@ -54,6 +54,9 @@ namespace George.Services.Response
 
         /// <summary>Default low-stock threshold for unit-count products. Null = use frontend fallback (5).</summary>
         public decimal? DefaultLowStockThresholdUnits { get; set; }
+
+        /// <summary>Default duration in days for the &quot;חדש&quot; product label when enabled.</summary>
+        public int DefaultNewLabelDays { get; set; } = 7;
     }
 
     //public class AccountRes

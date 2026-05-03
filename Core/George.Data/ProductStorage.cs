@@ -383,6 +383,13 @@ namespace George.Data
             dbProduct.SeoTitle = updated.SeoTitle;
             dbProduct.SeoDescription = updated.SeoDescription;
             dbProduct.LowStockThreshold = updated.LowStockThreshold;
+            dbProduct.LabelFrozen = updated.LabelFrozen;
+            dbProduct.LabelGlutenFree = updated.LabelGlutenFree;
+            dbProduct.LabelNotKosher = updated.LabelNotKosher;
+            dbProduct.LabelKosherForPassover = updated.LabelKosherForPassover;
+            dbProduct.LabelKosherForPassoverEndDate = updated.LabelKosherForPassoverEndDate;
+            dbProduct.LabelNew = updated.LabelNew;
+            dbProduct.LabelNewEndDate = updated.LabelNewEndDate;
             if (updated.DisplayOrder.HasValue)
                 dbProduct.DisplayOrder = updated.DisplayOrder;
             dbProduct.UpdatedDate = DateTime.UtcNow;

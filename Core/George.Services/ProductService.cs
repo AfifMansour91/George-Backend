@@ -160,6 +160,7 @@ namespace George.Services
 
             // Map request to DB model
             var product = MapReqToProduct(req);
+            ClearExpiredTimedLabels(product);
             product.CreationUserId = AuthUser.Id;
             product.CreationTime = DateTime.UtcNow;
             product.IsActive = true;
@@ -246,6 +247,7 @@ namespace George.Services
 
             // Merge request with existing product: if a property is null in req, keep the value from DB (partial update support for table quick-edit)
             var product = MergeReqWithExistingProduct(req, existingProduct);
+            ClearExpiredTimedLabels(product);
             product.Id = productId;
             product.UpdateUserId = AuthUser.Id;
 
@@ -848,6 +850,22 @@ namespace George.Services
 
         // Helper methods
 
+        /// <summary>Remove timed labels whose end date has passed (persisted cleanup on save).</summary>
+        private static void ClearExpiredTimedLabels(Product p)
+        {
+            var now = DateTime.UtcNow;
+            if (p.LabelKosherForPassover && p.LabelKosherForPassoverEndDate.HasValue && p.LabelKosherForPassoverEndDate.Value <= now)
+            {
+                p.LabelKosherForPassover = false;
+                p.LabelKosherForPassoverEndDate = null;
+            }
+            if (p.LabelNew && p.LabelNewEndDate.HasValue && p.LabelNewEndDate.Value <= now)
+            {
+                p.LabelNew = false;
+                p.LabelNewEndDate = null;
+            }
+        }
+
         /// <summary>
         /// Apply IsWeighted from SetupType when not explicitly set (same logic as WooCommerce sync and frontend edit form).
         /// by_weight, by_unit, by_unit_and_weight => treat as weighted when IsWeighted is not false.
@@ -862,6 +880,8 @@ namespace George.Services
 
         private Product MapReqToProduct(ProductReq req)
         {
+            var labelNew = req.LabelNew ?? false;
+            var labelPassover = req.LabelKosherForPassover ?? false;
             return new Product
             {
                 Name = req.Name,
@@ -883,7 +903,14 @@ namespace George.Services
                 SeoTitle = req.SeoTitle,
                 SeoDescription = req.SeoDescription,
                 ShowAsMl = req.ShowAsMl ?? (req.WeightUnit == "ml" ? true : null),
-                WeightUnit = req.WeightUnit ?? (req.ShowAsMl == true ? "ml" : null)
+                WeightUnit = req.WeightUnit ?? (req.ShowAsMl == true ? "ml" : null),
+                LabelFrozen = req.LabelFrozen ?? false,
+                LabelGlutenFree = req.LabelGlutenFree ?? false,
+                LabelNotKosher = req.LabelNotKosher ?? false,
+                LabelKosherForPassover = labelPassover,
+                LabelKosherForPassoverEndDate = !labelPassover ? null : req.LabelKosherForPassoverEndDate,
+                LabelNew = labelNew,
+                LabelNewEndDate = !labelNew ? null : req.LabelNewEndDate,
             };
         }
 
@@ -893,6 +920,8 @@ namespace George.Services
         /// </summary>
         private static Product MergeReqWithExistingProduct(UpdateProductReq req, Product existing)
         {
+            var labelPassover = req.LabelKosherForPassover ?? existing.LabelKosherForPassover;
+            var labelNew = req.LabelNew ?? existing.LabelNew;
             return new Product
             {
                 Id = existing.Id,
@@ -923,6 +952,13 @@ namespace George.Services
                 LowStockThreshold = req.LowStockThreshold.HasValue
                     ? (req.LowStockThreshold.Value <= 0 ? (decimal?)null : req.LowStockThreshold.Value)
                     : existing.LowStockThreshold,
+                LabelFrozen = req.LabelFrozen ?? existing.LabelFrozen,
+                LabelGlutenFree = req.LabelGlutenFree ?? existing.LabelGlutenFree,
+                LabelNotKosher = req.LabelNotKosher ?? existing.LabelNotKosher,
+                LabelKosherForPassover = labelPassover,
+                LabelKosherForPassoverEndDate = !labelPassover ? null : (req.LabelKosherForPassoverEndDate ?? existing.LabelKosherForPassoverEndDate),
+                LabelNew = labelNew,
+                LabelNewEndDate = !labelNew ? null : (req.LabelNewEndDate ?? existing.LabelNewEndDate),
                 // Preserve lookup IDs from existing; MapLookupsAsync will overwrite only when req has values
                 BrandId = existing.BrandId,
                 SupplierId = existing.SupplierId,
@@ -966,7 +1002,14 @@ namespace George.Services
                 WeightUnit = product.WeightUnit,
                 SeoTitle = product.SeoTitle,
                 SeoDescription = product.SeoDescription,
-                LowStockThreshold = product.LowStockThreshold
+                LowStockThreshold = product.LowStockThreshold,
+                LabelFrozen = product.LabelFrozen,
+                LabelGlutenFree = product.LabelGlutenFree,
+                LabelNotKosher = product.LabelNotKosher,
+                LabelKosherForPassover = product.LabelKosherForPassover,
+                LabelKosherForPassoverEndDate = product.LabelKosherForPassoverEndDate,
+                LabelNew = product.LabelNew,
+                LabelNewEndDate = product.LabelNewEndDate,
             };
 
             // Map images

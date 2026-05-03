@@ -1617,6 +1617,19 @@ namespace George.Services
                     await SyncProductVariantsAsync(baseUrl, siteId, wooCommerceId.Value, product, attributeMap, attributeSlugMap, httpClient, cancelToken);
                 }
 
+                // Store label ACF flags via custom REST namespace ed/v1 (no WooCommerce Basic auth per site plugin).
+                if (wooCommerceId.HasValue)
+                {
+                    try
+                    {
+                        await SyncProductEdAcfStoreLabelsAsync(baseUrl, wooCommerceId.Value, product, cancelToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "ED/v1 ACF label sync failed for product {ProductId} Woo id {WooId}; main WooCommerce product sync succeeded.", product.Id, wooCommerceId.Value);
+                    }
+                }
+
                 // Only count as success when we actually got a WooCommerce ID (created or updated)
                 var isSuccess = wooCommerceId.HasValue;
                 if (!isSuccess)
@@ -1642,6 +1655,44 @@ namespace George.Services
                     Error = ex.Message
                 };
             }
+        }
+
+        /// <summary>
+        /// POSTs boolean ACF-backed flags to <c>{site}/wp-json/ed/v1/...</c> (Omer's endpoints). Uses a separate HTTP client without WooCommerce REST credentials.
+        /// </summary>
+        private async Task SyncProductEdAcfStoreLabelsAsync(string wcV3BaseUrl, int wooProductId, Product product, CancellationToken cancelToken)
+        {
+            var idx = wcV3BaseUrl.IndexOf("/wp-json", StringComparison.OrdinalIgnoreCase);
+            var siteRoot = idx > 0 ? wcV3BaseUrl.Substring(0, idx).TrimEnd('/') : wcV3BaseUrl.TrimEnd('/');
+            var now = DateTime.UtcNow;
+            var passoverEffective = product.LabelKosherForPassover &&
+                                    (!product.LabelKosherForPassoverEndDate.HasValue || product.LabelKosherForPassoverEndDate.Value > now);
+
+            using var http = _httpClientFactory.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(60);
+            http.DefaultRequestHeaders.Clear();
+
+            async Task PostBool(string path, string fieldKey, bool value)
+            {
+                var url = $"{siteRoot}/wp-json/ed/v1/{path}";
+                var json = JsonSerializer.Serialize(new Dictionary<string, object>
+                {
+                    ["product_id"] = wooProductId,
+                    [fieldKey] = value
+                });
+                using var content = new StringContent(json, Encoding.UTF8, "application/json");
+                var resp = await http.PostAsync(url, content, cancelToken).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var err = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+                    _logger.LogWarning("ED/v1 POST {Path} failed for Woo product {WooId}: {Status} {Body}", path, wooProductId, (int)resp.StatusCode, err);
+                }
+            }
+
+            await PostBool("product-frozen", "frozen", product.LabelFrozen).ConfigureAwait(false);
+            await PostBool("product-gluten-free", "gluten_free", product.LabelGlutenFree).ConfigureAwait(false);
+            await PostBool("product-not-kosher", "not_kosher", product.LabelNotKosher).ConfigureAwait(false);
+            await PostBool("product-kosher-for-passover", "kosher_for_passover", passoverEffective).ConfigureAwait(false);
         }
 
         /// <summary>

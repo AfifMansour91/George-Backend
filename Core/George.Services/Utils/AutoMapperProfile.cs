@@ -105,6 +105,7 @@ namespace George.Services
                         : null;
                     dest.DefaultLowStockThresholdWeighted = src.DefaultLowStockThresholdWeighted;
                     dest.DefaultLowStockThresholdUnits = src.DefaultLowStockThresholdUnits;
+                    dest.DefaultNewLabelDays = src.DefaultNewLabelDays > 0 ? src.DefaultNewLabelDays : 7;
                 });
             CreateMap<KioskSettings, KioskSettingsRes>()
                 .ForMember(dest => dest.HomeVideoUrl, opt => opt.Ignore())

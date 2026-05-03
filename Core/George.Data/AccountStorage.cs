@@ -151,6 +151,7 @@ namespace George.Data
             // Update low-stock threshold defaults (null = keep existing, already resolved in service)
             dbAcc.DefaultLowStockThresholdWeighted = updated.DefaultLowStockThresholdWeighted;
             dbAcc.DefaultLowStockThresholdUnits = updated.DefaultLowStockThresholdUnits;
+            dbAcc.DefaultNewLabelDays = updated.DefaultNewLabelDays > 0 ? updated.DefaultNewLabelDays : 7;
 
             await _dbContext.SaveChangesAsync(cancelToken);
             return dbAcc;

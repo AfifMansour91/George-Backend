@@ -254,6 +254,9 @@ namespace George.Common.Request
 
         /// <summary>Default low-stock threshold for unit-count products. Null = keep existing.</summary>
         public decimal? DefaultLowStockThresholdUnits { get; set; }
+
+        /// <summary>Default duration in days for the &quot;חדש&quot; product label (placeholder / suggested end date). Null = keep existing.</summary>
+        public int? DefaultNewLabelDays { get; set; }
     }
 
     /// <summary>Sprint 2: Notification settings request (relational, no JSON).</summary>

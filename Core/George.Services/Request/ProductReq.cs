@@ -86,6 +86,25 @@ namespace George.Services.Request
 
         /// <summary>Per-product low-stock threshold. When set overrides the account default. Null clears the override.</summary>
         public decimal? LowStockThreshold { get; set; }
+
+        /// <summary>קפוא</summary>
+        public bool? LabelFrozen { get; set; }
+
+        /// <summary>ללא גלוטן</summary>
+        public bool? LabelGlutenFree { get; set; }
+
+        /// <summary>לא כשר</summary>
+        public bool? LabelNotKosher { get; set; }
+
+        /// <summary>כשר לפסח</summary>
+        public bool? LabelKosherForPassover { get; set; }
+
+        public DateTime? LabelKosherForPassoverEndDate { get; set; }
+
+        /// <summary>חדש</summary>
+        public bool? LabelNew { get; set; }
+
+        public DateTime? LabelNewEndDate { get; set; }
     }
 
     public class CreateProductReq : ProductReq
