@@ -74,6 +74,18 @@ namespace George.Services
             _publicAppBaseUrl = ResolvePublicAppBaseUrl(configuration);
         }
 
+        /// <summary>Catalog line: <see cref="CreateOrderItemReq.ProductId"/> &gt; 0. Generic (phone) line: title + price + qty without product.</summary>
+        private static bool IsValidCreateOrderLineItem(CreateOrderItemReq i)
+        {
+            if (i.ProductId is > 0)
+                return true;
+            if (string.IsNullOrWhiteSpace(i.Title))
+                return false;
+            if (i.PricePerUnit is null || i.PricePerUnit <= 0m)
+                return false;
+            return i.Quantity > 0m;
+        }
+
         public async Task<IApiResponse<ApiListResponse<OrderRes>>> GetOrdersAsync(
             ApiListReq<OrderFilter> request,
             CancellationToken cancelToken = default)
@@ -108,8 +120,8 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required.");
             if (req.Items == null || req.Items.Count == 0)
                 return CreateResponse(response, StatusCode.InvalidRequest, "At least one order item is required.");
-            if (req.Items.Any(i => (i.ProductId ?? 0) <= 0))
-                return CreateResponse(response, StatusCode.InvalidRequest, "Each order item must have a valid ProductId.");
+            if (req.Items.Any(i => !IsValidCreateOrderLineItem(i)))
+                return CreateResponse(response, StatusCode.InvalidRequest, "Each line needs a catalog ProductId, or a generic line with Title, PricePerUnit and Quantity.");
             if (string.IsNullOrWhiteSpace(req.CustomerName))
                 return CreateResponse(response, StatusCode.InvalidRequest, "CustomerName is required.");
             if (string.IsNullOrWhiteSpace(req.CustomerPhone))
@@ -515,8 +527,8 @@ namespace George.Services
             var response = new ApiResponse<OrderRes>();
             if (items == null || items.Count == 0)
                 return CreateResponse(response, StatusCode.InvalidRequest, "At least one order item is required.");
-            if (items.Any(i => (i.ProductId ?? 0) <= 0))
-                return CreateResponse(response, StatusCode.InvalidRequest, "Each order item must have a valid ProductId.");
+            if (items.Any(i => !IsValidCreateOrderLineItem(i)))
+                return CreateResponse(response, StatusCode.InvalidRequest, "Each line needs a catalog ProductId, or a generic line with Title, PricePerUnit and Quantity.");
 
             var order = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
             if (order == null)
