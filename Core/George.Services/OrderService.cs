@@ -1655,6 +1655,17 @@ namespace George.Services
             sb.AppendLine("</head>");
             sb.AppendLine("<body>");
             sb.AppendLine("<div id=\"voucher-root\">");
+            if (!newVoucher)
+            {
+                var siteDisplay = order.Account?.Name?.Trim();
+                if (!string.IsNullOrEmpty(siteDisplay))
+                {
+                    sb.Append("  <div style=\"margin-bottom:8px;border-bottom:1px solid #000;padding-bottom:8px;text-align:center;font-size:15px;font-weight:700;line-height:19px;\">");
+                    sb.Append(EscapeHtml(siteDisplay));
+                    sb.AppendLine("</div>");
+                }
+            }
+
             sb.Append("  <div style=\"display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:8px;font-size:12px;line-height:13px;\">");
             sb.Append($"<span style=\"font-weight:400;\">{EscapeHtml(created)}</span>");
             sb.Append($"<span style=\"font-weight:700;\">{EscapeHtml(sourceTop)}</span>");
@@ -1774,7 +1785,7 @@ namespace George.Services
                 sb.AppendLine("</div>");
             }
 
-            sb.AppendLine("  <div style=\"padding-top:8px;text-align:center;font-size:30px;font-weight:900;line-height:32px;letter-spacing:0.12em;\">");
+            sb.AppendLine("  <div style=\"padding-top:8px;text-align:center;font-size:13px;font-weight:700;line-height:16px;letter-spacing:normal;\">");
             sb.AppendLine(EscapeHtml(string.IsNullOrWhiteSpace(order.ShippingStoreName) ? VoucherBrandFooter : order.ShippingStoreName.Trim()));
             sb.AppendLine("  </div>");
 

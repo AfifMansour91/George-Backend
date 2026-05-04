@@ -21,6 +21,8 @@ namespace George.Data
             var res = new DataListResult<Order>();
             var query = _dbContext.Order
                 .Where(o => !o.IsDeleted)
+                .Include(o => o.Site)
+                .Include(o => o.Account)
                 .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
                 .AsNoTracking();
 
@@ -89,6 +91,8 @@ namespace George.Data
         public async Task<Order?> GetOrderByIdAsync(int orderId, CancellationToken cancelToken)
         {
             return await _dbContext.Order
+                .Include(o => o.Site)
+                .Include(o => o.Account)
                 .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
                 .AsNoTracking()
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
@@ -99,6 +103,8 @@ namespace George.Data
         {
             if (string.IsNullOrWhiteSpace(externalOrderId)) return null;
             return await _dbContext.Order
+                .Include(o => o.Site)
+                .Include(o => o.Account)
                 .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
                 .FirstOrDefaultAsync(o => !o.IsDeleted && o.SiteId == siteId && o.ExternalOrderId == externalOrderId, cancelToken);
         }
@@ -141,6 +147,8 @@ namespace George.Data
         {
             var db = await _dbContext.Order
                 .Include(o => o.OrderItem)
+                .Include(o => o.Site)
+                .Include(o => o.Account)
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
             if (db == null) return null;
             apply(db);
@@ -277,6 +285,8 @@ namespace George.Data
                 order.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
             return await _dbContext.Order
+                .Include(o => o.Site)
+                .Include(o => o.Account)
                 .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
                 .AsNoTracking()
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
@@ -422,6 +432,8 @@ namespace George.Data
             if (lastOrderId == null) return null;
 
             return await _dbContext.Order
+                .Include(o => o.Site)
+                .Include(o => o.Account)
                 .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
                 .AsNoTracking()
                 .FirstOrDefaultAsync(o => o.Id == lastOrderId.Value && !o.IsDeleted, cancelToken).ConfigureAwait(false);

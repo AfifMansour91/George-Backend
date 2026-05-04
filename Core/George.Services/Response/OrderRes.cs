@@ -11,6 +11,8 @@ public class OrderRes
     public int? UpdateUserId { get; set; }
     public int AccountId { get; set; }
     public int SiteId { get; set; }
+    /// <summary>Account display name (from Account.Name). Used by voucher header when client does not pass an override.</summary>
+    public string? AccountName { get; set; }
     public string OrderNumber { get; set; } = null!;
     public string Source { get; set; } = null!;
     public string Status { get; set; } = "New";

@@ -187,6 +187,7 @@ namespace George.Services
                     dest.UpdatedDate = src.UpdatedDate.HasValue ? SpecifyUtc(src.UpdatedDate.Value) : null;
                     dest.DeliveryDate = ToUnspecifiedCalendarDate(src.DeliveryDate);
                     dest.PickupDate = ToUnspecifiedCalendarDate(src.PickupDate);
+                    dest.AccountName = src.Account?.Name;
                 });
             CreateMap<OrderItem, OrderItemRes>();
             CreateMap<CreateOrderReq, Order>()
