@@ -233,6 +233,8 @@ namespace George.Data
                 .Include(p => p.Tag)
                 .Include(p => p.ProductCategory)
                     .ThenInclude(pc => pc.Category)
+                .Include(p => p.ProductBrand)
+                    .ThenInclude(pb => pb.Brand)
                 .Include(p => p.ProductImage)
                     .ThenInclude(pi => pi.Media)
                 .Include(p => p.ProductOption)

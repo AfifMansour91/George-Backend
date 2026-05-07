@@ -245,6 +245,44 @@ namespace George.Services
                     // Sites will be handled separately in storage
                 });
 
+            ////////////////////////// Brand
+            // BrandService manually maps Brand -> BrandRes (needs SiteIds + ProductCount post-process),
+            // so only req -> entity mappings are registered here.
+            CreateMap<CreateBrandReq, Brand>()
+                .ForMember(dest => dest.Id, opt => opt.Ignore())
+                .ForMember(dest => dest.IsDeleted, opt => opt.Ignore())
+                .ForMember(dest => dest.CreationTime, opt => opt.Ignore())
+                .ForMember(dest => dest.UpdatedDate, opt => opt.Ignore())
+                .ForMember(dest => dest.CreationUserId, opt => opt.Ignore())
+                .ForMember(dest => dest.UpdateUserId, opt => opt.Ignore())
+                .ForMember(dest => dest.Site, opt => opt.Ignore())
+                .ForMember(dest => dest.ProductBrand, opt => opt.Ignore())
+                .ForMember(dest => dest.Product, opt => opt.Ignore())
+                .ForMember(dest => dest.TemplateProduct, opt => opt.Ignore())
+                .ForMember(dest => dest.InverseParentBrand, opt => opt.Ignore())
+                .ForMember(dest => dest.ParentBrand, opt => opt.Ignore())
+                .ForMember(dest => dest.SourceGlobalBrand, opt => opt.Ignore())
+                .ForMember(dest => dest.Account, opt => opt.Ignore())
+                .ForMember(dest => dest.CreationUser, opt => opt.Ignore())
+                .ForMember(dest => dest.UpdateUser, opt => opt.Ignore());
+
+            CreateMap<UpdateBrandReq, Brand>()
+                .ForMember(dest => dest.IsDeleted, opt => opt.Ignore())
+                .ForMember(dest => dest.CreationTime, opt => opt.Ignore())
+                .ForMember(dest => dest.UpdatedDate, opt => opt.Ignore())
+                .ForMember(dest => dest.CreationUserId, opt => opt.Ignore())
+                .ForMember(dest => dest.UpdateUserId, opt => opt.Ignore())
+                .ForMember(dest => dest.Site, opt => opt.Ignore())
+                .ForMember(dest => dest.ProductBrand, opt => opt.Ignore())
+                .ForMember(dest => dest.Product, opt => opt.Ignore())
+                .ForMember(dest => dest.TemplateProduct, opt => opt.Ignore())
+                .ForMember(dest => dest.InverseParentBrand, opt => opt.Ignore())
+                .ForMember(dest => dest.ParentBrand, opt => opt.Ignore())
+                .ForMember(dest => dest.SourceGlobalBrand, opt => opt.Ignore())
+                .ForMember(dest => dest.Account, opt => opt.Ignore())
+                .ForMember(dest => dest.CreationUser, opt => opt.Ignore())
+                .ForMember(dest => dest.UpdateUser, opt => opt.Ignore());
+
 
             ////////////////////////// Profile
             CreateMap<User, ProfileRes>()

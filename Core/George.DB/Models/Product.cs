@@ -142,6 +142,9 @@ public partial class Product
     public virtual User? CreationUser { get; set; }
 
     [InverseProperty("Product")]
+    public virtual ICollection<ProductBrand> ProductBrand { get; set; } = new List<ProductBrand>();
+
+    [InverseProperty("Product")]
     public virtual ICollection<ProductCategory> ProductCategory { get; set; } = new List<ProductCategory>();
 
     [InverseProperty("Product")]

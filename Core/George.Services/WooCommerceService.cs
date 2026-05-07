@@ -41,6 +41,7 @@ namespace George.Services
         private readonly ProductStorage _productStorage;
         private readonly AttributeStorage _attributeStorage;
         private readonly OrderStorage _orderStorage;
+        private readonly BrandStorage _brandStorage;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IServiceScopeFactory _scopeFactory;
 
@@ -53,6 +54,7 @@ namespace George.Services
             ProductStorage productStorage,
             AttributeStorage attributeStorage,
             OrderStorage orderStorage,
+            BrandStorage brandStorage,
             IHttpClientFactory httpClientFactory,
             IServiceScopeFactory scopeFactory
         ) : base(logger, mapper, cache)
@@ -62,6 +64,7 @@ namespace George.Services
             _productStorage = productStorage;
             _attributeStorage = attributeStorage;
             _orderStorage = orderStorage;
+            _brandStorage = brandStorage;
             _httpClientFactory = httpClientFactory;
             _scopeFactory = scopeFactory;
         }
@@ -290,10 +293,17 @@ namespace George.Services
                 var categoryMap = await UpsertCategoriesFromWooAsync(db, siteForImport, wooCategories, response.Data, cancelToken);
                 importProgress?.Report(new WooCommerceImportProgress { Phase = "categories", Total = wooCategories.Count, Completed = wooCategories.Count });
 
-                await UpsertProductsFromWooAsync(db, siteForImport, baseUrl, httpClient, wooProducts, categoryMap, importLookups, response.Data, importProgress, cancelToken);
+                // Brands: pulled in their own pass so each product can lookup local brand ids by Woo id.
+                // Returns empty map (and no-ops) on stores running pre-9.6 WooCommerce; the legacy
+                // _brand meta-key path keeps working as a fallback inside ApplyWooImportProductExtensionsAsync.
+                importProgress?.Report(new WooCommerceImportProgress { Phase = "brands", Total = 1, Completed = 0 });
+                var brandMap = await UpsertBrandsFromWooAsync(db, siteForImport, siteForImport.AccountId, httpClient, baseUrl, response.Data, cancelToken);
+                importProgress?.Report(new WooCommerceImportProgress { Phase = "brands", Total = 1, Completed = 1 });
+
+                await UpsertProductsFromWooAsync(db, siteForImport, baseUrl, httpClient, wooProducts, categoryMap, brandMap, importLookups, response.Data, importProgress, cancelToken);
 
                 await tx.CommitAsync(cancelToken);
-                response.Data.Message = $"Imported from WooCommerce: {wooCategories.Count} categories and {wooProducts.Count} products processed.";
+                response.Data.Message = $"Imported from WooCommerce: {wooCategories.Count} categories, {brandMap.Count} brands, and {wooProducts.Count} products processed.";
                 return response;
             }
             catch (Exception ex)
@@ -1433,6 +1443,25 @@ namespace George.Services
                     ["status"] = wooStatus,
                     ["meta_data"] = metaData
                 };
+
+                // Brand assignment — flat array of WooCommerce brand IDs (NOT [{"id":...}]) per spec §5.7.
+                // Aggregate IDs from both the legacy single Brand FK and the new ProductBrand join.
+                // Only include the "brands" key when at least one brand is synced; otherwise leave the
+                // existing Woo-side assignment alone (avoids accidentally clearing brands when our local
+                // brands haven't been pushed yet).
+                var brandIds = new List<int>();
+                if (product.Brand?.WooCommerceBrandId.HasValue == true)
+                    brandIds.Add(product.Brand.WooCommerceBrandId.Value);
+                if (product.ProductBrand != null)
+                {
+                    foreach (var pb in product.ProductBrand)
+                    {
+                        if (pb.Brand?.WooCommerceBrandId.HasValue == true && !brandIds.Contains(pb.Brand.WooCommerceBrandId.Value))
+                            brandIds.Add(pb.Brand.WooCommerceBrandId.Value);
+                    }
+                }
+                if (brandIds.Count > 0)
+                    wooProduct["brands"] = brandIds;
 
                 // For variable products, ensure global attributes exist and use their IDs + actual slugs from WooCommerce
                 var attributeMap = new Dictionary<string, int?>();   // attribute name -> WooCommerce ID
@@ -2632,6 +2661,7 @@ namespace George.Services
             HttpClient httpClient,
             List<WooImportProductItem> wooProducts,
             Dictionary<int, int> categoryMap,
+            Dictionary<int, int> brandMap,
             WooImportCatalogLookups importLookups,
             WooCommerceImportFromWooRes stats,
             IProgress<WooCommerceImportProgress>? importProgress,
@@ -2849,7 +2879,7 @@ namespace George.Services
 
                     await db.SaveChangesAsync(cancelToken);
 
-                    await ApplyWooImportProductExtensionsAsync(db, product, wp, accountId, importLookups, cancelToken);
+                    await ApplyWooImportProductExtensionsAsync(db, product, wp, accountId, importLookups, brandMap, cancelToken);
 
                     // Woo variable parent can be "out of stock" in REST while each variation is instock without manage_stock.
                     if (wooVariations.Count > 0)
@@ -2994,6 +3024,20 @@ namespace George.Services
             public List<WooImportMetaEntry>? meta_data { get; set; }
             public List<WooImportImageListItem>? images { get; set; }
             public List<WooImportTagItem>? tags { get; set; }
+            /// <summary>
+            /// WooCommerce 9.6+ brands taxonomy on the product. Read shape is an array of objects
+            /// (id/name/slug) — same as categories. WRITES use a flat ID array; see
+            /// WooCommerceService.Brands.cs.
+            /// </summary>
+            public List<WooImportProductBrandItem>? brands { get; set; }
+        }
+
+        /// <summary>One entry inside the product's brands[] array on read.</summary>
+        private class WooImportProductBrandItem
+        {
+            public int id { get; set; }
+            public string? name { get; set; }
+            public string? slug { get; set; }
         }
 
         private class WooImportImageItem

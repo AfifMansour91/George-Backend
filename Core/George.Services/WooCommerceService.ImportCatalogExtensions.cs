@@ -245,6 +245,7 @@ public partial class WooCommerceService
         WooImportProductItem wp,
         int accountId,
         WooImportCatalogLookups lk,
+        IReadOnlyDictionary<int, int> brandMap,
         CancellationToken cancelToken)
     {
         var meta = wp.meta_data;
@@ -290,25 +291,39 @@ public partial class WooCommerceService
             product.WeightUnit = product.ShowAsMl == true ? "ml" : product.WeightUnit;
         }
 
-        var brandName = MetaStringAny(meta, "_brand");
-        if (!string.IsNullOrWhiteSpace(brandName))
+        // Brand assignment. Two paths, in priority order:
+        //   1) WooCommerce 9.6+ has Brands as a core taxonomy and includes wp.brands on products.
+        //      We prefer this when present and reconcile against the local Brand table via the
+        //      brandMap built earlier in the import (Woo brand id → local brand id).
+        //   2) Pre-9.6 stores still use the _brand meta key carrying the brand name. This is
+        //      the legacy path; kept as a fallback when wp.brands is missing/empty.
+        if (wp.brands != null && wp.brands.Count > 0)
         {
-            var bn = brandName.Trim();
-            var b = await db.Brand.FirstOrDefaultAsync(
-                x => !x.IsDeleted && x.AccountId == accountId && x.Name == bn, cancelToken);
-            if (b == null)
+            var wooBrandIds = wp.brands.Select(b => b.id).ToList();
+            await WooCommerceService.SetProductBrandsFromWooAsync(db, product, wooBrandIds, brandMap, cancelToken);
+        }
+        else
+        {
+            var brandName = MetaStringAny(meta, "_brand");
+            if (!string.IsNullOrWhiteSpace(brandName))
             {
-                b = new Brand
+                var bn = brandName.Trim();
+                var b = await db.Brand.FirstOrDefaultAsync(
+                    x => !x.IsDeleted && x.AccountId == accountId && x.Name == bn, cancelToken);
+                if (b == null)
                 {
-                    Name = bn,
-                    AccountId = accountId,
-                    CreationTime = DateTime.UtcNow,
-                    IsDeleted = false
-                };
-                db.Brand.Add(b);
-                await db.SaveChangesAsync(cancelToken);
+                    b = new Brand
+                    {
+                        Name = bn,
+                        AccountId = accountId,
+                        CreationTime = DateTime.UtcNow,
+                        IsDeleted = false
+                    };
+                    db.Brand.Add(b);
+                    await db.SaveChangesAsync(cancelToken);
+                }
+                product.BrandId = b.Id;
             }
-            product.BrandId = b.Id;
         }
 
         var supplierName = MetaStringAny(meta, "_supplier");

@@ -121,6 +121,12 @@ public partial class User
     public virtual User? CreationUser { get; set; }
 
     [InverseProperty("CreationUser")]
+    public virtual ICollection<GlobalBrand> GlobalBrandCreationUser { get; set; } = new List<GlobalBrand>();
+
+    [InverseProperty("UpdateUser")]
+    public virtual ICollection<GlobalBrand> GlobalBrandUpdateUser { get; set; } = new List<GlobalBrand>();
+
+    [InverseProperty("CreationUser")]
     public virtual ICollection<GlobalCategory> GlobalCategoryCreationUser { get; set; } = new List<GlobalCategory>();
 
     [InverseProperty("UpdateUser")]
