@@ -1867,18 +1867,12 @@ namespace George.Services
                 DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
             };
             var body = JsonSerializer.Serialize(payload, jsonOptions);
-            var useBasicAuth = !string.IsNullOrWhiteSpace(site.WooCommerceKey) && !string.IsNullOrWhiteSpace(site.WooCommerceSecret);
             _logger.LogInformation(
-                "oc-storeos POST /orders starting. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}, mappedStatus={MappedStatus}, itemCount={ItemCount}, basicAuth={BasicAuth}, bodyChars={BodyChars}",
-                siteId, orderId, order.ExternalOrderId, wcStatus ?? "pending", items.Count, useBasicAuth, body.Length);
+                "oc-storeos POST /orders starting. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}, mappedStatus={MappedStatus}, itemCount={ItemCount}, auth=None, bodyChars={BodyChars}",
+                siteId, orderId, order.ExternalOrderId, wcStatus ?? "pending", items.Count, body.Length);
             using var httpClient = _httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(30);
             httpClient.DefaultRequestHeaders.Clear();
-            if (useBasicAuth)
-            {
-                var basic = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey!.Trim()}:{site.WooCommerceSecret!.Trim()}"));
-                httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", basic);
-            }
             using var content = new StringContent(body, Encoding.UTF8, "application/json");
             var url = $"{ocV1Base}/orders";
             var response = await httpClient.PostAsync(url, content, cancelToken);
