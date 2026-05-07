@@ -15,6 +15,9 @@ public class OrderItemRes
     public decimal? TotalPrice { get; set; }
     /// <summary>Picked quantity/weight from picking flow; null when not yet picked.</summary>
     public decimal? PickedQuantity { get; set; }
+
+    /// <summary>True after ליקוט explicitly saved this line; false when quantity is only DB baseline for inventory.</summary>
+    public bool PickingUserConfirmed { get; set; }
     public string? Notes { get; set; }
     public string? SaleUnits { get; set; }
     public string? SaleTotalWeight { get; set; }

@@ -39,6 +39,14 @@ namespace George.Services
             ["Kiosk"] = "קיוסק",
             ["Phone"] = "טלפוני",
         };
+        private const string VoucherQrCaption = "פתיחת הזמנה";
+        private const string VoucherDateLabel = "תאריך אספקה:";
+        private const string VoucherTimeLabel = "שעה:";
+        private const string VoucherShippingLabel = "משלוח";
+        private const string VoucherItemsTitle = "מוצרים בהזמנה";
+        private const string VoucherNotesLabel = "הערות:";
+        private const string VoucherVatIncludedLabel = "כולל מע״מ";
+        private const string VoucherBrandFooter = "StoreOS";
 
         public OrderService(
             ILogger<OrderService> logger,
@@ -64,6 +72,18 @@ namespace George.Services
             _serviceScopeFactory = serviceScopeFactory;
             _printJobService = printJobService;
             _publicAppBaseUrl = ResolvePublicAppBaseUrl(configuration);
+        }
+
+        /// <summary>Catalog line: <see cref="CreateOrderItemReq.ProductId"/> &gt; 0. Generic (phone) line: title + price + qty without product.</summary>
+        private static bool IsValidCreateOrderLineItem(CreateOrderItemReq i)
+        {
+            if (i.ProductId is > 0)
+                return true;
+            if (string.IsNullOrWhiteSpace(i.Title))
+                return false;
+            if (i.PricePerUnit is null || i.PricePerUnit <= 0m)
+                return false;
+            return i.Quantity > 0m;
         }
 
         public async Task<IApiResponse<ApiListResponse<OrderRes>>> GetOrdersAsync(
@@ -100,8 +120,8 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required.");
             if (req.Items == null || req.Items.Count == 0)
                 return CreateResponse(response, StatusCode.InvalidRequest, "At least one order item is required.");
-            if (req.Items.Any(i => (i.ProductId ?? 0) <= 0))
-                return CreateResponse(response, StatusCode.InvalidRequest, "Each order item must have a valid ProductId.");
+            if (req.Items.Any(i => !IsValidCreateOrderLineItem(i)))
+                return CreateResponse(response, StatusCode.InvalidRequest, "Each line needs a catalog ProductId, or a generic line with Title, PricePerUnit and Quantity.");
             if (string.IsNullOrWhiteSpace(req.CustomerName))
                 return CreateResponse(response, StatusCode.InvalidRequest, "CustomerName is required.");
             if (string.IsNullOrWhiteSpace(req.CustomerPhone))
@@ -160,10 +180,12 @@ namespace George.Services
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken);
             var loaded = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken);
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loaded, cancelToken).ConfigureAwait(false);
-            await TrySendNewOrderCustomerSmsAsync(loaded!, cancelToken).ConfigureAwait(false);
-            if (loaded != null)
-                await TryEnqueueNewOrderAutoPrintAsync(loaded, cancelToken).ConfigureAwait(false);
-            response.Data = _mapper.Map<OrderRes>(loaded);
+            await TryApplyInternalOrderCatalogOnCreateAsync(loaded!, cancelToken).ConfigureAwait(false);
+            var loadedAfterStock = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false) ?? loaded;
+            await TrySendNewOrderCustomerSmsAsync(loadedAfterStock!, cancelToken).ConfigureAwait(false);
+            if (loadedAfterStock != null)
+                await TryEnqueueNewOrderAutoPrintAsync(loadedAfterStock, cancelToken).ConfigureAwait(false);
+            response.Data = _mapper.Map<OrderRes>(loadedAfterStock);
             return response;
         }
 
@@ -448,6 +470,19 @@ namespace George.Services
         public async Task<IApiResponse<OrderRes?>> CancelOrderAsync(int orderId, bool softDelete = true, CancellationToken cancelToken = default)
         {
             var response = new ApiResponse<OrderRes?>();
+            var beforeCancel = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
+            if (beforeCancel == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
+            if (!string.Equals(beforeCancel.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+            {
+                var restoredProductIds = await TryRestoreCatalogStockOnOrderCancelAsync(beforeCancel, cancelToken).ConfigureAwait(false);
+                if (restoredProductIds.Count > 0)
+                    await ScheduleWooCommerceCatalogStockPushForProductsAsync(
+                        beforeCancel.SiteId,
+                        restoredProductIds,
+                        "order cancel (catalog restored)",
+                        cancelToken).ConfigureAwait(false);
+            }
             var order = await _orderStorage.CancelOrderAsync(orderId, AuthUser.Id, softDelete, cancelToken);
             if (order == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
@@ -492,8 +527,8 @@ namespace George.Services
             var response = new ApiResponse<OrderRes>();
             if (items == null || items.Count == 0)
                 return CreateResponse(response, StatusCode.InvalidRequest, "At least one order item is required.");
-            if (items.Any(i => (i.ProductId ?? 0) <= 0))
-                return CreateResponse(response, StatusCode.InvalidRequest, "Each order item must have a valid ProductId.");
+            if (items.Any(i => !IsValidCreateOrderLineItem(i)))
+                return CreateResponse(response, StatusCode.InvalidRequest, "Each line needs a catalog ProductId, or a generic line with Title, PricePerUnit and Quantity.");
 
             var order = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
             if (order == null)
@@ -520,6 +555,35 @@ namespace George.Services
             var updated = await _orderStorage.AddOrderItemsAsync(orderId, newOrderItems, cancelToken);
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
+
+            var stockPushProductIds = new List<int>();
+            var newLineIdsForBaseline = new List<int>();
+            foreach (var oi in newOrderItems)
+            {
+                if (oi.ProductId is not > 0 || oi.Quantity <= 0m) continue;
+                await _productStorage
+                    .ApplyPickingConsumptionDeltaAsync(
+                        oi.ProductId.Value,
+                        oi.ProductVariantId,
+                        oi.Quantity,
+                        cancelToken)
+                    .ConfigureAwait(false);
+                stockPushProductIds.Add(oi.ProductId.Value);
+                if (oi.Id > 0)
+                    newLineIdsForBaseline.Add(oi.Id);
+            }
+            if (newLineIdsForBaseline.Count > 0)
+                await _orderStorage
+                    .SetPickedQuantityBaselineForOrderItemIdsAsync(orderId, newLineIdsForBaseline, cancelToken)
+                    .ConfigureAwait(false);
+
+            if (stockPushProductIds.Count > 0)
+                await ScheduleWooCommerceCatalogStockPushForProductsAsync(
+                    updated.SiteId,
+                    stockPushProductIds,
+                    "add order items",
+                    cancelToken).ConfigureAwait(false);
+
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             if (loaded != null)
                 await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, loaded, "add items", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
@@ -554,6 +618,11 @@ namespace George.Services
                         -restorePicked.Value,
                         cancelToken)
                     .ConfigureAwait(false);
+                await ScheduleWooCommerceCatalogStockPushForProductsAsync(
+                    updated.SiteId,
+                    new List<int> { restoreProductId.Value },
+                    "remove item (stock restored)",
+                    cancelToken).ConfigureAwait(false);
             }
 
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "remove item", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
@@ -583,6 +652,7 @@ namespace George.Services
             var updated = await _orderStorage.UpdatePickingAsync(orderId, updates, cancelToken);
             if (updated == null) return CreateResponse(response, StatusCode.ItemNotFound);
 
+            var stockPushProductIds = new List<int>();
             foreach (var (orderItemId, newPicked, _) in updates)
             {
                 var line = orderCheck.OrderItem?.FirstOrDefault(i => i.Id == orderItemId && !i.IsDeleted);
@@ -598,7 +668,14 @@ namespace George.Services
                         consumptionDelta,
                         cancelToken)
                     .ConfigureAwait(false);
+                stockPushProductIds.Add(line.ProductId.Value);
             }
+            if (stockPushProductIds.Count > 0)
+                await ScheduleWooCommerceCatalogStockPushForProductsAsync(
+                    orderCheck.SiteId,
+                    stockPushProductIds,
+                    "picking update",
+                    cancelToken).ConfigureAwait(false);
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             var forResponse = loaded ?? updated;
             if (forResponse != null)
@@ -639,6 +716,45 @@ namespace George.Services
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "WooCommerce/oc-storeos order sync failed for order {OrderId}", orderIdCapture);
+                }
+            }, CancellationToken.None);
+        }
+
+        /// <summary>
+        /// Pushes Store catalog stock for the given products to WooCommerce (REST product sync). Best-effort background work.
+        /// Use after picking / completion / line removal so Woo reflects the same quantities as StoreOS.
+        /// </summary>
+        private async Task ScheduleWooCommerceCatalogStockPushForProductsAsync(
+            int siteId,
+            IReadOnlyList<int> productIds,
+            string logReason,
+            CancellationToken cancelToken)
+        {
+            var ids = productIds.Where(id => id > 0).Distinct().ToList();
+            if (ids.Count == 0) return;
+            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken).ConfigureAwait(false);
+            if (site?.WooCommerceEnabled != true) return;
+            var siteIdCapture = siteId;
+            var idsCapture = ids;
+            _logger.LogInformation(
+                "WooCommerce catalog stock push scheduled ({Reason}). siteId={SiteId}, productCount={Count}",
+                logReason, siteIdCapture, idsCapture.Count);
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await using var scope = _serviceScopeFactory.CreateAsyncScope();
+                    var wooCommerceService = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
+                    var req = new WooCommerceSyncReq { SiteId = siteIdCapture, ProductIds = idsCapture };
+                    await wooCommerceService.SyncToWooCommerceAsync(req, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(
+                        ex,
+                        "WooCommerce catalog stock push failed ({Reason}). siteId={SiteId}",
+                        logReason,
+                        siteIdCapture);
                 }
             }, CancellationToken.None);
         }
@@ -1423,6 +1539,7 @@ namespace George.Services
             }
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken).ConfigureAwait(false);
             var loadedOrder = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false);
+            await TryApplyWooIncomingOrderCatalogAndBaselinePickingAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loadedOrder, cancelToken).ConfigureAwait(false);
             await TrySendNewOrderCustomerSmsAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
             if (loadedOrder != null)
@@ -1486,27 +1603,37 @@ namespace George.Services
             var orderNo = order.OrderNumber ?? order.Id.ToString(CultureInfo.InvariantCulture);
             var created = FormatOrderDateTime(order.CreationTime);
             var sourceLabel = VoucherSourceLabels.TryGetValue(order.Source ?? "", out var label) ? label : (order.Source ?? "");
-            var deliveryMethod = string.Equals(order.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase)
-                ? "משלוח עד הבית"
-                : string.Equals(order.DeliveryType, "Pickup", StringComparison.OrdinalIgnoreCase)
-                    ? "איסוף עצמי"
-                    : (order.DeliveryType ?? "");
-            var deliveryDate = string.Equals(order.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase)
+            var sourceTop = string.IsNullOrWhiteSpace(sourceLabel) ? "" : $"מקור: {sourceLabel}";
+            var isShipping = IsVoucherShipping(order);
+            var deliveryDate = isShipping
                 ? order.DeliveryDate
                 : order.PickupDate;
-            var deliveryTime = string.Equals(order.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase)
+            var deliveryTime = isShipping
                 ? order.DeliveryTime
                 : order.PickupTime;
             var newVoucher = string.Equals(order.Status, "New", StringComparison.OrdinalIgnoreCase);
+            var pickingVoucher = string.Equals(order.Status, "InTreatment", StringComparison.OrdinalIgnoreCase);
+            var showTopQr = newVoucher || pickingVoucher;
+            var showBottomQr = !showTopQr;
             var orderNotes = CombineOrderLevelNotes(order);
-            var shippingCost = order.ShippingCost ?? 0m;
             var grandTotal = ComputeVoucherGrandTotal(order);
             var qrDataUrl = GenerateVoucherQrDataUrl(order, _publicAppBaseUrl);
-            var tw = VoucherPrintHtml.TextWrap;
             var pa = "-webkit-print-color-adjust:exact;print-color-adjust:exact;";
-            var qrImg = !string.IsNullOrWhiteSpace(qrDataUrl)
-                ? $"<img src=\"{qrDataUrl}\" alt=\"QR\" width=\"{VoucherPrintHtml.QrSizePx}\" height=\"{VoucherPrintHtml.QrSizePx}\" style=\"display:block;margin:0 auto;\" />"
-                : $"<div style=\"width:{VoucherPrintHtml.QrSizePx}px;height:{VoucherPrintHtml.QrSizePx}px;background:#f3f4f6;margin:0 auto;\"></div>";
+            var qrInner = !string.IsNullOrWhiteSpace(qrDataUrl)
+                ? $"<img src=\"{EscapeHtmlAttr(qrDataUrl)}\" alt=\"QR\" width=\"{VoucherPrintHtml.QrSizePx}\" height=\"{VoucherPrintHtml.QrSizePx}\" style=\"display:block;\" />"
+                : $"<div style=\"width:{VoucherPrintHtml.QrSizePx}px;height:{VoucherPrintHtml.QrSizePx}px;background:#f3f4f6;\"></div>";
+            var qrFrame =
+                "<div dir=\"ltr\" style=\"display:flex;flex-direction:column;align-items:center;\">" +
+                $"<div style=\"width:{VoucherPrintHtml.QrFramePx}px;height:{VoucherPrintHtml.QrFramePx}px;border:2px solid #000;box-sizing:border-box;display:flex;align-items:center;justify-content:center;background:#fff;\">" +
+                qrInner +
+                $"</div><div style=\"margin-top:2px;text-align:center;font-size:10px;line-height:13px;color:#000;\">{VoucherQrCaption}</div></div>";
+            var headerShort = VoucherHeaderDeliveryShort(order);
+            var headerCity = VoucherHeaderCityLine(order);
+            var showHeaderCity = isShipping;
+            var dateLabel = VoucherDateLabel;
+            var timeLabel = VoucherTimeLabel;
+            var itemCount = items.Count;
+            var payLine = EscapeHtml(VoucherPaymentHeadline(order, !pickingVoucher));
 
             sb.AppendLine("<!DOCTYPE html>");
             sb.AppendLine("<html dir=\"rtl\" lang=\"he\">");
@@ -1514,122 +1641,119 @@ namespace George.Services
             sb.AppendLine("  <meta charset=\"utf-8\">");
             sb.AppendLine("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />");
             sb.AppendLine($"  <title>בון הזמנה {EscapeHtml(orderNo)}</title>");
+            sb.AppendLine("  <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\" />");
+            sb.AppendLine("  <link href=\"https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800;900&display=swap\" rel=\"stylesheet\" />");
+            var pw = VoucherPrintHtml.PaperWidthMm;
             sb.AppendLine("  <style>");
             sb.AppendLine("    html, body { margin: 0; padding: 0; background: #fff; overflow: visible; overflow-x: visible; }");
-            sb.AppendLine($"    body {{ max-width: {VoucherPrintHtml.PaperWidthMm}mm; width: 100%; margin: 0 auto; box-sizing: border-box; }}");
-            sb.AppendLine($"    #voucher-root {{");
-            sb.AppendLine($"      max-width: {VoucherPrintHtml.ContentWidthMm}mm;");
-            sb.AppendLine("      width: 100%; min-width: 0; margin: 0 auto;");
-            sb.AppendLine($"      padding: {VoucherPrintHtml.InnerPadding};");
-            sb.AppendLine("      box-sizing: border-box; font-family: Arial, sans-serif; color: #000; background: #fff;");
-            sb.AppendLine("      font-size: 14px; overflow: visible; overflow-wrap: anywhere; word-break: break-word; line-break: anywhere;");
-            sb.AppendLine("      -webkit-print-color-adjust: exact; print-color-adjust: exact;");
-            sb.AppendLine("    }");
-            sb.AppendLine("    #voucher-root *:not(img):not(svg):not(canvas) {");
-            sb.AppendLine("      overflow-wrap: anywhere; word-break: break-word; line-break: anywhere; max-width: 100%; min-width: 0;");
-            sb.AppendLine("    }");
-            sb.AppendLine("    .muted { color: #666; }");
-            sb.AppendLine("    .bold { font-weight: bold; }");
-            sb.AppendLine("    .large { font-size: 1.25rem; font-weight: 900; margin: 8px 0; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; color: #111; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }");
+            sb.AppendLine("    body { display: flex; flex-direction: column; align-items: center; width: 100%; box-sizing: border-box; }");
+            sb.AppendLine($"    #voucher-root {{ max-width: {pw}mm; width: {pw}mm; min-width: 0; margin: 0; padding: {VoucherPrintHtml.InnerPadding}; box-sizing: border-box; font-family: Heebo, Arial, sans-serif; color: #000; background: #fff; font-size: 14px; overflow: visible; overflow-wrap: anywhere; word-break: break-word; line-break: anywhere; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}");
+            sb.AppendLine("    #voucher-root *:not(img):not(svg):not(canvas) { overflow-wrap: anywhere; word-break: break-word; line-break: anywhere; max-width: 100%; min-width: 0; }");
             sb.AppendLine("    #voucher-root img { max-width: 100%; height: auto; }");
-            sb.AppendLine("    .voucher-product-row { border-bottom: 1px solid #000 !important; }");
-            sb.AppendLine("    .voucher-ship { min-width: 0; }");
-            sb.AppendLine("    @media print {");
-            sb.AppendLine("      #voucher-root { padding: 2mm 2.5mm; -webkit-print-color-adjust: exact; print-color-adjust: exact; }");
-            sb.AppendLine("    }");
+            sb.AppendLine($"    @media print {{ @page {{ size: {pw}mm auto; margin: 0; }} #voucher-root {{ width: {pw}mm; max-width: {pw}mm; padding: 2mm 2mm; -webkit-print-color-adjust: exact; print-color-adjust: exact; }} }}");
             sb.AppendLine("  </style>");
             sb.AppendLine("</head>");
             sb.AppendLine("<body>");
             sb.AppendLine("<div id=\"voucher-root\">");
-            sb.AppendLine("  <div style=\"text-align:center;margin-bottom:8px;\">");
-            sb.AppendLine("    <div class=\"muted\" style=\"font-size:12px;\">כניסת הזמנה</div>");
-            sb.AppendLine($"    <div style=\"font-size:14px;font-weight:500;\">{EscapeHtml(created)}</div>");
-            sb.AppendLine("  </div>");
-            if (!string.IsNullOrWhiteSpace(sourceLabel))
-                sb.AppendLine(
-                    $"  <div style=\"text-align:center;font-size:12px;margin-bottom:4px;\"><span class=\"muted\">מקור הזמנה: </span>{EscapeHtml(sourceLabel)}</div>");
-            sb.AppendLine("  <div style=\"text-align:center;margin-bottom:8px;\">");
-            sb.AppendLine("    <div class=\"muted\" style=\"font-size:12px;\">מספר הזמנה</div>");
-            sb.AppendLine(
-                $"    <div style=\"font-size:22px;font-weight:800;line-height:1.15;{tw}\">{EscapeHtml(orderNo)}</div>");
-            sb.AppendLine("  </div>");
-            sb.AppendLine($"  <div style=\"margin:12px 0;\">{qrImg}</div>");
-            sb.AppendLine("  <div style=\"text-align:center;font-size:10px;color:#666;margin-bottom:12px;\">סריקה לפתיחת מסך הליקוט</div>");
-            if (!string.IsNullOrWhiteSpace(deliveryMethod))
-                sb.AppendLine(
-                    $"  <div style=\"margin-bottom:4px;{tw}\"><span class=\"muted\">שיטת אספקה: </span><span class=\"bold\">{EscapeHtml(deliveryMethod)}</span></div>");
-            if (deliveryDate.HasValue)
-                sb.AppendLine(
-                    $"  <div style=\"margin-bottom:4px;{tw}\"><span class=\"muted\">תאריך אספקה: </span>{EscapeHtml(FormatVoucherDateWithWeekday(deliveryDate.Value))}</div>");
-            if (!string.IsNullOrWhiteSpace(deliveryTime))
-                sb.AppendLine(
-                    $"  <div style=\"margin-bottom:8px;{tw}\"><span class=\"muted\">שעת אספקה: </span>{EscapeHtml(deliveryTime)}</div>");
-            sb.AppendLine(
-                $"  <div class=\"large\" style=\"font-size:24px;font-weight:900;line-height:1.25;{tw}\">{EscapeHtml(customerName)}</div>");
-            sb.AppendLine($"  <div style=\"margin-bottom:4px;{tw}\"><span class=\"muted\">טלפון: </span>{EscapeHtml(customerPhone)}</div>");
+            if (!newVoucher)
+            {
+                var siteDisplay = order.Account?.Name?.Trim();
+                if (!string.IsNullOrEmpty(siteDisplay))
+                {
+                    sb.Append("  <div style=\"margin-bottom:8px;border-bottom:1px solid #000;padding-bottom:8px;text-align:center;font-size:15px;font-weight:700;line-height:19px;\">");
+                    sb.Append(EscapeHtml(siteDisplay));
+                    sb.AppendLine("</div>");
+                }
+            }
+
+            sb.Append("  <div style=\"display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:8px;font-size:12px;line-height:13px;\">");
+            sb.Append($"<span style=\"font-weight:400;\">{EscapeHtml(created)}</span>");
+            sb.Append($"<span style=\"font-weight:700;\">{EscapeHtml(sourceTop)}</span>");
+            sb.AppendLine("</div>");
+
+            var headerCityBlock = showHeaderCity
+                ? $"<div style=\"margin-top:8px;font-size:28px;font-weight:900;line-height:31px;letter-spacing:-0.5px;\">{EscapeHtml(string.IsNullOrEmpty(headerCity) ? "—" : headerCity)}</div>"
+                : "";
+            var headerCore =
+                $"<div style=\"font-size:28px;font-weight:900;line-height:32px;\">#{EscapeHtml(orderNo)}</div>" +
+                $"<div style=\"font-size:32px;font-weight:900;line-height:36px;letter-spacing:-0.5px;\">{EscapeHtml(headerShort)}</div>" +
+                headerCityBlock;
+
+            if (showTopQr)
+            {
+                sb.Append("  <div style=\"display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;padding-bottom:16px;border-bottom:1px solid #000;\">");
+                sb.Append("<div style=\"flex:1;min-width:0;text-align:right;\">");
+                sb.Append(headerCore);
+                sb.Append("</div>");
+                sb.Append(qrFrame);
+                sb.AppendLine("</div>");
+            }
+            else
+            {
+                sb.Append("  <div style=\"margin-bottom:12px;padding-bottom:16px;border-bottom:1px solid #000;text-align:right;\">");
+                sb.Append(headerCore);
+                sb.AppendLine("</div>");
+            }
+
+            if (deliveryDate.HasValue || !string.IsNullOrWhiteSpace(deliveryTime))
+            {
+                sb.Append("  <div style=\"margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #000;\">");
+                sb.Append("<div style=\"display:flex;justify-content:space-between;font-size:13px;line-height:18px;margin-bottom:4px;\">");
+                sb.Append($"<span>{EscapeHtml(dateLabel)}</span><span>{EscapeHtml(timeLabel)}</span></div>");
+                sb.Append("<div style=\"display:flex;justify-content:space-between;align-items:center;gap:8px;\">");
+                sb.Append(deliveryDate.HasValue
+                    ? $"<span style=\"font-size:20px;font-weight:700;line-height:24px;\">{EscapeHtml(FormatVoucherDateWithWeekday(deliveryDate.Value))}</span>"
+                    : "<span style=\"font-size:20px;font-weight:700;\">—</span>");
+                sb.Append(!string.IsNullOrWhiteSpace(deliveryTime)
+                    ? $"<span style=\"font-size:20px;font-weight:700;line-height:24px;\">{EscapeHtml(deliveryTime!)}</span>"
+                    : "<span style=\"font-size:20px;font-weight:700;\">—</span>");
+                sb.AppendLine("</div></div>");
+            }
+
+            sb.Append("  <div style=\"display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:12px;\">");
+            sb.Append($"<div style=\"flex:1;min-width:0;text-align:right;font-size:28px;font-weight:900;line-height:35px;letter-spacing:-0.5px;\">{EscapeHtml(customerName)}</div>");
+            sb.Append($"<div dir=\"ltr\" style=\"flex-shrink:0;padding-top:4px;font-size:16px;font-weight:500;line-height:20px;\">{EscapeHtml(customerPhone)}</div>");
+            sb.AppendLine("</div>");
+
             if (!string.IsNullOrWhiteSpace(orderNotes))
-                sb.AppendLine(
-                    $"  <div style=\"margin:10px 0;font-size:14px;font-weight:bold;line-height:1.45;{tw}\">הערות: {EscapeHtml(orderNotes)}</div>");
-            AppendVoucherShippingAddressHtml(sb, order, tw, pa);
-            sb.AppendLine($"  <div style=\"font-weight:600;margin-bottom:4px;{tw}\">מוצרים:</div>");
-            sb.AppendLine("  <div style=\"margin-bottom:8px;\">");
-            var marker = EscapeHtml(VoucherPrintHtml.ProductBullet);
+                sb.AppendLine($"  <div style=\"margin-bottom:12px;font-size:14px;font-weight:bold;line-height:1.45;\">{VoucherNotesLabel} {EscapeHtml(orderNotes)}</div>");
+
+            if (isShipping) AppendVoucherShippingAddressHtml(sb, order, pa);
+
+            sb.AppendLine("  <div style=\"margin-bottom:8px;padding:8px 0;border-bottom:1px solid #000;text-align:center;\">");
+            sb.AppendLine($"    <span style=\"font-size:20px;font-weight:800;line-height:24px;\">{VoucherItemsTitle} ({itemCount})</span>");
+            sb.AppendLine("  </div>");
+
+            var attrOpts = new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true };
             foreach (var it in items)
             {
                 var title = EscapeHtml(OrderItemLineDisplay.GetOrderItemProductName(it));
                 var qtyStr = EscapeHtml(OrderItemLineDisplay.FormatOrderItemQuantityBadge(it));
-                sb.Append("<div class=\"voucher-product-row\" style=\"border-bottom:1px solid #000;padding-bottom:6px;margin-bottom:6px;");
-                sb.Append(tw);
-                sb.Append(pa);
-                sb.Append("\"><div style=\"display:flex;flex-direction:row;align-items:flex-start;gap:8px;font-weight:700;color:#000;");
-                sb.Append(tw);
-                sb.Append("\"><span style=\"flex-shrink:0;font-weight:900;padding-top:2px;\" aria-hidden=\"true\">");
-                sb.Append(marker);
-                sb.Append("</span><span style=\"min-width:0;flex:1;\">");
-                sb.Append(qtyStr);
-                sb.Append(' ');
-                sb.Append(title);
-                sb.Append("</span></div>");
-                var attrLine = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(it);
-                if (!string.IsNullOrWhiteSpace(attrLine))
+                sb.Append("  <div style=\"display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px dashed #000;\">");
+                sb.Append($"<div style=\"flex-shrink:0;white-space:nowrap;padding-top:2px;text-align:right;font-size:17px;font-weight:900;line-height:22px;\">{qtyStr}</div>");
+                sb.Append("<div style=\"flex:1;min-width:0;text-align:right;\">");
+                sb.Append($"<div style=\"font-size:17px;font-weight:700;line-height:19px;\">{title}</div>");
+                foreach (var seg in OrderItemLineDisplay.GetOrderItemAttributeSegments(it, attrOpts))
                 {
-                    sb.Append("<div style=\"font-size:11px;font-weight:600;color:#000;margin-top:3px;line-height:1.35;");
-                    sb.Append(tw);
-                    sb.Append(pa);
-                    sb.Append("\">");
-                    sb.Append(EscapeHtml(attrLine));
+                    sb.Append("<div style=\"padding-right:12px;font-size:11px;font-weight:400;line-height:15px;\">• ");
+                    sb.Append(EscapeHtml(seg));
                     sb.Append("</div>");
                 }
 
-                if (it.PickedQuantity.HasValue && it.PickedQuantity.Value > 0m)
+                var lineAmt = GetVoucherPickedLineAmount(it);
+                var loket = BuildVoucherLoketLine(it, lineAmt);
+                if (!string.IsNullOrEmpty(loket))
                 {
-                    var picked = OrderItemLineDisplay.FormatVoucherPickedDisplay(it);
-                    sb.Append("<div style=\"font-size:12px;font-weight:700;color:#000;margin-top:3px;");
-                    sb.Append(tw);
-                    sb.Append(pa);
-                    sb.Append("\">אחרי ליקוט: ");
-                    sb.Append(EscapeHtml(picked));
+                    sb.Append("<div style=\"padding-right:12px;font-size:11px;font-weight:700;line-height:15px;\">");
+                    sb.Append(EscapeHtml(loket));
                     sb.Append("</div>");
-                    var lineAmt = GetVoucherPickedLineAmount(it);
-                    if (lineAmt.HasValue)
-                    {
-                        sb.Append("<div style=\"font-size:12px;font-weight:800;color:#000;margin-top:2px;direction:ltr;text-align:right;");
-                        sb.Append(tw);
-                        sb.Append(pa);
-                        sb.Append("\">₪");
-                        sb.Append(lineAmt.Value.ToString("0.00", CultureInfo.InvariantCulture));
-                        sb.Append("</div>");
-                    }
                 }
                 else
                 {
                     var legacyHint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(it, newVoucher);
                     if (!string.IsNullOrWhiteSpace(legacyHint))
                     {
-                        sb.Append("<div style=\"font-size:11px;font-weight:600;color:#000;margin-top:2px;line-height:1.35;");
-                        sb.Append(tw);
-                        sb.Append(pa);
-                        sb.Append("\">");
+                        sb.Append("<div style=\"padding-right:12px;font-size:11px;font-weight:400;line-height:15px;\">");
                         sb.Append(EscapeHtml(legacyHint));
                         sb.Append("</div>");
                     }
@@ -1637,23 +1761,34 @@ namespace George.Services
 
                 if (!string.IsNullOrWhiteSpace(it.Notes))
                 {
-                    sb.Append("<div style=\"font-size:14px;font-weight:700;color:#000;margin-top:6px;");
-                    sb.Append(tw);
-                    sb.Append(pa);
-                    sb.Append("\">הערה: ");
+                    sb.Append("<div style=\"padding-right:12px;font-size:11px;font-weight:700;line-height:15px;\">הערה: ");
                     sb.Append(EscapeHtml(it.Notes!));
                     sb.Append("</div>");
                 }
 
+                sb.Append("</div></div>");
+            }
+
+            if (!newVoucher && grandTotal.HasValue)
+            {
+                sb.AppendLine("  <div style=\"margin-bottom:12px;padding-bottom:12px;border-bottom:1px dashed #000;text-align:center;\">");
+                sb.AppendLine($"    <div style=\"font-size:15px;font-weight:700;line-height:19px;\">{payLine}</div>");
+                sb.AppendLine($"    <div style=\"margin-top:4px;font-size:24px;font-weight:700;line-height:19px;direction:ltr;unicode-bidi:embed;\">₪{grandTotal.Value.ToString("0.00", CultureInfo.InvariantCulture)}</div>");
+                sb.AppendLine($"    <div style=\"margin-top:4px;font-size:11px;font-weight:400;line-height:19px;\">{VoucherVatIncludedLabel}</div>");
+                sb.AppendLine("  </div>");
+            }
+
+            if (showBottomQr)
+            {
+                sb.Append("  <div style=\"margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #000;display:flex;justify-content:center;\">");
+                sb.Append(qrFrame);
                 sb.AppendLine("</div>");
             }
 
+            sb.AppendLine("  <div style=\"padding-top:8px;text-align:center;font-size:13px;font-weight:700;line-height:16px;letter-spacing:normal;\">");
+            sb.AppendLine(EscapeHtml(string.IsNullOrWhiteSpace(order.ShippingStoreName) ? VoucherBrandFooter : order.ShippingStoreName.Trim()));
             sb.AppendLine("  </div>");
-            if (!newVoucher && shippingCost > 0)
-                sb.AppendLine($"  <div style=\"text-align:center;font-size:15px;font-weight:600;margin:8px 0;{tw}\">משלוח: ₪{shippingCost:0.00}</div>");
-            if (!newVoucher && grandTotal.HasValue)
-                sb.AppendLine(
-                    $"  <div style=\"text-align:center;margin:12px 0;padding:12px;border:2px solid #1f2937;border-radius:8px;background:#f9fafb;{tw}\"><div style=\"font-size:11px;color:#000;margin-bottom:4px;{tw}\">סה\"כ לתשלום</div><div style=\"font-size:22px;font-weight:bold;{tw}\">₪{grandTotal.Value:0.00}</div></div>");
+
             sb.AppendLine("</div>");
             sb.AppendLine("</body>");
             sb.AppendLine("</html>");
@@ -1678,7 +1813,7 @@ namespace George.Services
         {
             var local = creationTime.ToLocalTime();
             var time = local.ToString("HH:mm", CultureInfo.InvariantCulture);
-            return $"{time} {FormatVoucherDateWithWeekday(local)}";
+            return $"{FormatVoucherDateWithWeekday(local)} {time}";
         }
 
         private static string CombineOrderLevelNotes(Order order)
@@ -1708,7 +1843,7 @@ namespace George.Services
         /// <summary>Match <c>getShippingAddressPartsForVoucher</c> for auto-print HTML.</summary>
         private static ShippingVoucherParts? TryGetShippingAddressPartsForVoucher(Order order)
         {
-            if (!string.Equals(order.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase))
+            if (!IsVoucherShipping(order))
                 return null;
 
             var apt = order.DeliveryApartment?.Trim();
@@ -1772,7 +1907,7 @@ namespace George.Services
             return new ShippingVoucherParts { Main = legacySource };
         }
 
-        private static void AppendVoucherShippingAddressHtml(StringBuilder sb, Order order, string tw, string pa)
+        private static void AppendVoucherShippingAddressHtml(StringBuilder sb, Order order, string pa)
         {
             var ship = TryGetShippingAddressPartsForVoucher(order);
             if (ship == null
@@ -1782,52 +1917,101 @@ namespace George.Services
                     && string.IsNullOrEmpty(ship.EntranceCode)))
                 return;
 
-            sb.Append("  <div class=\"voucher-ship\" style=\"margin-bottom:12px;");
-            sb.Append(tw);
+            var extras = FormatShippingExtrasCommaLine(ship);
+            sb.Append("  <div style=\"margin-bottom:12px;border-bottom:1px solid #000;padding-bottom:12px;text-align:right;");
             sb.Append(pa);
-            sb.Append("\">");
+            sb.Append($"\"><div style=\"font-size:13px;font-weight:400;line-height:18px;letter-spacing:0.325px;\">{VoucherShippingLabel}</div>");
             if (!string.IsNullOrEmpty(ship.Main))
             {
-                sb.Append("<div class=\"muted\" style=\"font-size:12px;font-weight:700;\">כתובת:</div>");
-                sb.Append("<div style=\"font-size:14px;line-height:1.35;font-weight:700;color:#000;");
-                sb.Append(tw);
+                sb.Append("<div style=\"margin-top:4px;font-size:15px;font-weight:700;line-height:20px;");
                 sb.Append(pa);
                 sb.Append("\">");
                 sb.Append(EscapeHtml(ship.Main));
                 sb.Append("</div>");
             }
 
-            if (!string.IsNullOrEmpty(ship.Apartment))
+            if (!string.IsNullOrEmpty(extras))
             {
-                sb.Append("<div style=\"margin-top:4px;font-size:12px;line-height:1.35;font-weight:600;color:#000;");
-                sb.Append(tw);
+                sb.Append("<div style=\"margin-top:4px;font-size:15px;font-weight:400;line-height:20px;");
                 sb.Append(pa);
-                sb.Append("\">דירה: ");
-                sb.Append(EscapeHtml(ship.Apartment));
-                sb.Append("</div>");
-            }
-
-            if (!string.IsNullOrEmpty(ship.Floor))
-            {
-                sb.Append("<div style=\"margin-top:2px;font-size:12px;line-height:1.35;font-weight:600;color:#000;");
-                sb.Append(tw);
-                sb.Append(pa);
-                sb.Append("\">קומה: ");
-                sb.Append(EscapeHtml(ship.Floor));
-                sb.Append("</div>");
-            }
-
-            if (!string.IsNullOrEmpty(ship.EntranceCode))
-            {
-                sb.Append("<div style=\"margin-top:2px;font-size:12px;line-height:1.35;font-weight:600;color:#000;");
-                sb.Append(tw);
-                sb.Append(pa);
-                sb.Append("\">קוד כניסה: ");
-                sb.Append(EscapeHtml(ship.EntranceCode));
+                sb.Append("\">");
+                sb.Append(EscapeHtml(extras));
                 sb.Append("</div>");
             }
 
             sb.AppendLine("</div>");
+        }
+
+        private static string FormatShippingExtrasCommaLine(ShippingVoucherParts ship)
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(ship.Apartment)) parts.Add($"דירה {ship.Apartment}");
+            if (!string.IsNullOrEmpty(ship.Floor)) parts.Add($"קומה {ship.Floor}");
+            if (!string.IsNullOrEmpty(ship.EntranceCode)) parts.Add($"קוד כניסה {ship.EntranceCode}");
+            return string.Join(", ", parts);
+        }
+
+        private static string VoucherHeaderDeliveryShort(Order order)
+        {
+            if (IsVoucherShipping(order)) return "משלוח";
+            if (IsVoucherPickup(order)) return "איסוף עצמי";
+            return order.DeliveryType?.Trim() ?? "";
+        }
+
+        private static bool IsVoucherShipping(Order order)
+        {
+            var d = order.DeliveryType?.Trim() ?? "";
+            if (string.IsNullOrEmpty(d)) return false;
+            return string.Equals(d, "Shipping", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(d, "Express", StringComparison.OrdinalIgnoreCase)
+                || d.Contains("משלוח", StringComparison.Ordinal);
+        }
+
+        private static bool IsVoucherPickup(Order order)
+        {
+            var d = order.DeliveryType?.Trim() ?? "";
+            if (string.IsNullOrEmpty(d)) return false;
+            return string.Equals(d, "Pickup", StringComparison.OrdinalIgnoreCase)
+                || d.Contains("איסוף", StringComparison.Ordinal);
+        }
+
+        private static string VoucherHeaderCityLine(Order order)
+        {
+            var c = order.DeliveryCity?.Trim();
+            if (!string.IsNullOrEmpty(c)) return c;
+            var main = GetDeliveryMainLineForVoucher(order);
+            if (string.IsNullOrEmpty(main)) return order.ShippingStoreName?.Trim() ?? "";
+            var parts = main.Split(new[] { ", " }, StringSplitOptions.None).Select(p => p.Trim()).Where(p => p.Length > 0).ToList();
+            if (parts.Count >= 2) return parts[^1];
+            return order.ShippingStoreName?.Trim() ?? "";
+        }
+
+        private static string VoucherPaymentHeadline(Order order, bool settled = true)
+        {
+            var m = order.PaymentMethod?.Trim() ?? "";
+            if (string.IsNullOrEmpty(m)) return settled ? "שולם" : "לתשלום";
+            if (string.Equals(m, "Cash", StringComparison.OrdinalIgnoreCase) || m == "מזומן")
+                return settled ? "שולם במזומן" : "תשלום במזומן";
+            var lower = m.ToLowerInvariant();
+            if (lower.Contains("card", StringComparison.Ordinal) || lower.Contains("credit", StringComparison.Ordinal) ||
+                string.Equals(m, "SavedCard", StringComparison.OrdinalIgnoreCase) ||
+                m.Contains("אשראי", StringComparison.Ordinal))
+                return settled ? "שולם באשראי" : "תשלום באשראי";
+            return settled ? $"שולם ({m})" : $"תשלום ({m})";
+        }
+
+        private static string? BuildVoucherLoketLine(OrderItem it, decimal? lineAmt)
+        {
+            if (!it.PickedQuantity.HasValue || it.PickedQuantity.Value <= 0m) return null;
+            var qty = OrderItemLineDisplay.FormatVoucherPickedDisplay(it);
+            if (lineAmt.HasValue) return $"לוקט: {qty} | ₪{lineAmt.Value.ToString("0.00", CultureInfo.InvariantCulture)}";
+            return $"לוקט: {qty}";
+        }
+
+        private static string EscapeHtmlAttr(string? s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s.Replace("&", "&amp;", StringComparison.Ordinal).Replace("\"", "&quot;", StringComparison.Ordinal);
         }
 
         private sealed class ShippingVoucherParts
@@ -2012,6 +2196,7 @@ namespace George.Services
                     continue;
                 line.PickedQuantity = prev.PickedQuantity;
                 line.TotalPrice = prev.TotalPrice;
+                line.PickingUserConfirmed = prev.PickingUserConfirmed;
             }
         }
 
@@ -2040,19 +2225,127 @@ namespace George.Services
             if (string.Equals(previousStatus, "Completed", StringComparison.OrdinalIgnoreCase))
                 return;
 
-            var adjustedLines = await ApplyOrderedQuantityToCatalogForUnpickedLinesAsync(orderWithItems, cancelToken).ConfigureAwait(false);
+            var adjustedProductIds = await ApplyOrderedQuantityToCatalogForUnpickedLinesAsync(orderWithItems, cancelToken).ConfigureAwait(false);
             await _orderStorage.SetOrderCompletionInventoryAppliedAsync(orderId, true, cancelToken).ConfigureAwait(false);
-            if (adjustedLines > 0)
+            if (adjustedProductIds.Count > 0)
             {
                 _logger.LogInformation(
                     "Catalog stock adjusted on order completion (ordered qty for lines without picking). orderId={OrderId}, lines={LineCount}",
-                    orderId, adjustedLines);
+                    orderId, adjustedProductIds.Count);
+                await ScheduleWooCommerceCatalogStockPushForProductsAsync(
+                    orderWithItems.SiteId,
+                    adjustedProductIds,
+                    "order completion (unpicked lines)",
+                    cancelToken).ConfigureAwait(false);
             }
         }
 
-        private async Task<int> ApplyOrderedQuantityToCatalogForUnpickedLinesAsync(Order order, CancellationToken cancelToken)
+        /// <summary>
+        /// New WooCommerce orders: reduce Store catalog by ordered line quantities (Woo already reduced on the site),
+        /// then set each line's picked qty baseline to ordered qty so further picking adjusts only the delta.
+        /// Skips when order is already Completed (completion handler applies) or when completion flag was set earlier.
+        /// </summary>
+        private async Task TryApplyWooIncomingOrderCatalogAndBaselinePickingAsync(Order order, CancellationToken cancelToken)
         {
-            var n = 0;
+            if (!string.Equals(order.Source, "WooCommerce", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (string.Equals(order.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (order.CompletionInventoryApplied)
+                return;
+            var lines = order.OrderItem?.Where(i => !i.IsDeleted).ToList() ?? new List<OrderItem>();
+            if (lines.Count == 0) return;
+            var productIds = new List<int>();
+            foreach (var line in lines)
+            {
+                if (line.ProductId is not > 0 || line.Quantity <= 0m) continue;
+                await _productStorage
+                    .ApplyPickingConsumptionDeltaAsync(
+                        line.ProductId.Value,
+                        line.ProductVariantId,
+                        line.Quantity,
+                        cancelToken)
+                    .ConfigureAwait(false);
+                productIds.Add(line.ProductId.Value);
+            }
+            if (productIds.Count == 0) return;
+            await _orderStorage.SetOrderedCatalogConsumedAndBaselinePickingAsync(order.Id, cancelToken).ConfigureAwait(false);
+            await ScheduleWooCommerceCatalogStockPushForProductsAsync(
+                order.SiteId,
+                productIds,
+                "Woo order ingest (align Store catalog with ordered qty)",
+                cancelToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Phone/Kiosk/Website orders: reduce Store catalog by ordered line quantities at creation, baseline <see cref="OrderItem.PickedQuantity"/>
+        /// so picking adjusts only the delta. Skips WooCommerce (handled by <see cref="TryApplyWooIncomingOrderCatalogAndBaselinePickingAsync"/>).
+        /// </summary>
+        private async Task TryApplyInternalOrderCatalogOnCreateAsync(Order order, CancellationToken cancelToken)
+        {
+            if (string.Equals(order.Source, "WooCommerce", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (string.Equals(order.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (order.CompletionInventoryApplied)
+                return;
+            var lines = order.OrderItem?.Where(i => !i.IsDeleted).ToList() ?? new List<OrderItem>();
+            if (lines.Count == 0) return;
+            var productIds = new List<int>();
+            foreach (var line in lines)
+            {
+                if (line.ProductId is not > 0 || line.Quantity <= 0m) continue;
+                await _productStorage
+                    .ApplyPickingConsumptionDeltaAsync(
+                        line.ProductId.Value,
+                        line.ProductVariantId,
+                        line.Quantity,
+                        cancelToken)
+                    .ConfigureAwait(false);
+                productIds.Add(line.ProductId.Value);
+            }
+            if (productIds.Count == 0) return;
+            await _orderStorage.SetOrderedCatalogConsumedAndBaselinePickingAsync(order.Id, cancelToken).ConfigureAwait(false);
+            await ScheduleWooCommerceCatalogStockPushForProductsAsync(
+                order.SiteId,
+                productIds,
+                "internal order create (ordered qty)",
+                cancelToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Restores catalog stock when an order is cancelled: reverses picked consumption and/or completion-only line consumption.
+        /// PickedQuantity &gt; 0 means that much was net-consumed via create+baseline and picking; unpicked completion used Quantity with PickedQuantity unset.
+        /// </summary>
+        private async Task<List<int>> TryRestoreCatalogStockOnOrderCancelAsync(Order order, CancellationToken cancelToken)
+        {
+            var pushIds = new List<int>();
+            var lines = order.OrderItem?.Where(i => !i.IsDeleted).ToList() ?? new List<OrderItem>();
+            foreach (var line in lines)
+            {
+                if (line.ProductId is not > 0) continue;
+                decimal restoreQty = 0m;
+                if (line.PickedQuantity.HasValue && line.PickedQuantity.Value > 0m)
+                    restoreQty = line.PickedQuantity.Value;
+                else if (!line.PickedQuantity.HasValue && order.CompletionInventoryApplied && line.Quantity > 0m)
+                    restoreQty = line.Quantity;
+                else
+                    continue;
+                await _productStorage
+                    .ApplyPickingConsumptionDeltaAsync(
+                        line.ProductId.Value,
+                        line.ProductVariantId,
+                        -restoreQty,
+                        cancelToken)
+                    .ConfigureAwait(false);
+                pushIds.Add(line.ProductId.Value);
+            }
+            return pushIds.Distinct().ToList();
+        }
+
+        private async Task<List<int>> ApplyOrderedQuantityToCatalogForUnpickedLinesAsync(Order order, CancellationToken cancelToken)
+        {
+            var productIds = new List<int>();
             foreach (var line in order.OrderItem?.Where(i => !i.IsDeleted) ?? Enumerable.Empty<OrderItem>())
             {
                 if (line.ProductId is not > 0) continue;
@@ -2066,10 +2359,10 @@ namespace George.Services
                         line.Quantity,
                         cancelToken)
                     .ConfigureAwait(false);
-                n++;
+                productIds.Add(line.ProductId.Value);
             }
 
-            return n;
+            return productIds.Distinct().ToList();
         }
 
         private static string MapWooCommerceStatusToOurs(string? wc)

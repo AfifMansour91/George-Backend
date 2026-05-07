@@ -110,6 +110,11 @@ public partial class OrderItem
     [Column(TypeName = "decimal(18, 4)")]
     public decimal? PickedQuantity { get; set; }
 
+    /// <summary>
+    /// True after picking was saved from the ליקוט UI; false when <see cref="PickedQuantity"/> is only the catalog baseline (ordered qty for stock deltas).
+    /// </summary>
+    public bool PickingUserConfirmed { get; set; }
+
     [ForeignKey("OrderId")]
     [InverseProperty("OrderItem")]
     public virtual Order Order { get; set; } = null!;

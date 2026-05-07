@@ -102,6 +102,17 @@ namespace George.Common
         public SearchFilter? Search { get; set; }
     }
 
+    public class BrandFilter
+    {
+        public int? AccountId { get; set; }
+        public int? SiteId { get; set; }
+        public int? ParentBrandId { get; set; }
+        public bool? IsEnabled { get; set; }
+        /// <summary>When true, list response sets BrandRes.ProductCount (extra query, costs perf).</summary>
+        public bool? IncludeProductCount { get; set; }
+        public SearchFilter? Search { get; set; }
+    }
+
     public class MediaFilter
     {
         public int? AccountId { get; set; }
@@ -128,6 +139,12 @@ namespace George.Common
     {
         public int? ParentGlobalCategoryId { get; set; }
         public int? BusinessTypeId { get; set; }
+        public SearchFilter? Search { get; set; }
+    }
+
+    public class GlobalBrandFilter
+    {
+        public int? ParentGlobalBrandId { get; set; }
         public SearchFilter? Search { get; set; }
     }
 

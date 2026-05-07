@@ -35,6 +35,8 @@ public partial class GeorgeDBContextBase : DbContext
 
     public virtual DbSet<ContentOwner> ContentOwner { get; set; }
 
+    public virtual DbSet<GlobalBrand> GlobalBrand { get; set; }
+
     public virtual DbSet<GlobalCategory> GlobalCategory { get; set; }
 
     public virtual DbSet<KioskSettings> KioskSettings { get; set; }
@@ -54,6 +56,8 @@ public partial class GeorgeDBContextBase : DbContext
     public virtual DbSet<PromotionDailyMetric> PromotionDailyMetric { get; set; }
 
     public virtual DbSet<Product> Product { get; set; }
+
+    public virtual DbSet<ProductBrand> ProductBrand { get; set; }
 
     public virtual DbSet<ProductCategory> ProductCategory { get; set; }
 
@@ -96,6 +100,8 @@ public partial class GeorgeDBContextBase : DbContext
     public virtual DbSet<TemplateAttributeValue> TemplateAttributeValue { get; set; }
 
     public virtual DbSet<TemplateProduct> TemplateProduct { get; set; }
+
+    public virtual DbSet<TemplateProductBrand> TemplateProductBrand { get; set; }
 
     public virtual DbSet<TemplateProductCategory> TemplateProductCategory { get; set; }
 
@@ -222,6 +228,13 @@ public partial class GeorgeDBContextBase : DbContext
                 .IsUnique()
                 .HasFilter("([IsDeleted]=(0) AND [AccountId] IS NOT NULL)");
 
+            entity.HasIndex(e => new { e.AccountId, e.Slug }, "UX_Brand_AccountId_Slug_NotDeleted")
+                .IsUnique()
+                .HasFilter("([IsDeleted]=(0) AND [AccountId] IS NOT NULL AND [Slug] IS NOT NULL)");
+
+            entity.HasIndex(e => e.WooCommerceBrandId, "IX_Brand_WooCommerceBrandId")
+                .HasFilter("[WooCommerceBrandId] IS NOT NULL");
+
             entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
 
             entity.HasOne(d => d.Account).WithMany(p => p.Brand).HasConstraintName("FK_Brand_Account");
@@ -229,6 +242,73 @@ public partial class GeorgeDBContextBase : DbContext
             entity.HasOne(d => d.CreationUser).WithMany(p => p.BrandCreationUser).HasConstraintName("FK_Brand_CreationUser");
 
             entity.HasOne(d => d.UpdateUser).WithMany(p => p.BrandUpdateUser).HasConstraintName("FK_Brand_UpdateUser");
+
+            entity.HasOne(d => d.ParentBrand).WithMany(p => p.InverseParentBrand).HasConstraintName("FK_Brand_Parent");
+
+            entity.HasOne(d => d.SourceGlobalBrand).WithMany(p => p.Brand).HasConstraintName("FK_Brand_SourceGlobalBrand");
+
+            // Many-to-many Brand <-> Site via shadow join entity "BrandSite". Mirrors CategorySite.
+            entity.HasMany(d => d.Site).WithMany(p => p.Brand)
+                .UsingEntity<Dictionary<string, object>>(
+                    "BrandSite",
+                    r => r.HasOne<Site>().WithMany()
+                        .HasForeignKey("SiteId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_BrandSite_Site"),
+                    l => l.HasOne<Brand>().WithMany()
+                        .HasForeignKey("BrandId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .HasConstraintName("FK_BrandSite_Brand"),
+                    j =>
+                    {
+                        j.HasKey("BrandId", "SiteId");
+                        j.HasIndex(new[] { "SiteId" }, "IX_BrandSite_SiteId");
+                    });
+        });
+
+        modelBuilder.Entity<GlobalBrand>(entity =>
+        {
+            entity.HasIndex(e => e.Name, "UX_GlobalBrand_Name_NotDeleted")
+                .IsUnique()
+                .HasFilter("([IsDeleted]=(0))");
+
+            entity.HasIndex(e => e.Slug, "UX_GlobalBrand_Slug_NotDeleted")
+                .IsUnique()
+                .HasFilter("([IsDeleted]=(0) AND [Slug] IS NOT NULL)");
+
+            entity.HasIndex(e => e.WooCommerceBrandId, "IX_GlobalBrand_WooCommerceBrandId")
+                .HasFilter("[WooCommerceBrandId] IS NOT NULL");
+
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
+
+            entity.HasOne(d => d.CreationUser).WithMany(p => p.GlobalBrandCreationUser).HasConstraintName("FK_GlobalBrand_CreationUser");
+
+            entity.HasOne(d => d.ParentGlobalBrand).WithMany(p => p.InverseParentGlobalBrand).HasConstraintName("FK_GlobalBrand_Parent");
+
+            entity.HasOne(d => d.UpdateUser).WithMany(p => p.GlobalBrandUpdateUser).HasConstraintName("FK_GlobalBrand_UpdateUser");
+        });
+
+        modelBuilder.Entity<ProductBrand>(entity =>
+        {
+            entity.HasOne(d => d.Brand).WithMany(p => p.ProductBrand)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ProductBrand_Brand");
+
+            entity.HasOne(d => d.Product).WithMany(p => p.ProductBrand)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ProductBrand_Product");
+        });
+
+        modelBuilder.Entity<TemplateProductBrand>(entity =>
+        {
+            entity.HasOne(d => d.GlobalBrand).WithMany(p => p.TemplateProductBrand)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_TemplateProductBrand_GlobalBrand");
+
+            entity.HasOne(d => d.TemplateProduct).WithMany(p => p.TemplateProductBrand)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_TemplateProductBrand_TemplateProduct");
         });
 
         modelBuilder.Entity<BusinessType>(entity =>

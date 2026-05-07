@@ -233,6 +233,8 @@ namespace George.Data
                 .Include(p => p.Tag)
                 .Include(p => p.ProductCategory)
                     .ThenInclude(pc => pc.Category)
+                .Include(p => p.ProductBrand)
+                    .ThenInclude(pb => pb.Brand)
                 .Include(p => p.ProductImage)
                     .ThenInclude(pi => pi.Media)
                 .Include(p => p.ProductOption)
@@ -383,24 +385,29 @@ namespace George.Data
             dbProduct.SeoTitle = updated.SeoTitle;
             dbProduct.SeoDescription = updated.SeoDescription;
             dbProduct.LowStockThreshold = updated.LowStockThreshold;
+            dbProduct.LabelFrozen = updated.LabelFrozen;
+            dbProduct.LabelGlutenFree = updated.LabelGlutenFree;
+            dbProduct.LabelNotKosher = updated.LabelNotKosher;
+            dbProduct.LabelKosherForPassover = updated.LabelKosherForPassover;
+            dbProduct.LabelKosherForPassoverEndDate = updated.LabelKosherForPassoverEndDate;
+            dbProduct.LabelNew = updated.LabelNew;
+            dbProduct.LabelNewEndDate = updated.LabelNewEndDate;
             if (updated.DisplayOrder.HasValue)
                 dbProduct.DisplayOrder = updated.DisplayOrder;
             dbProduct.UpdatedDate = DateTime.UtcNow;
             dbProduct.UpdateUserId = updated.UpdateUserId;
 
-            // Update sites
-            if (siteIds != null)
+            // Update sites only when the caller sends one or more site IDs.
+            // Null or empty list means "leave site assignment unchanged" (partial updates and clients that omit site_ids).
+            if (siteIds != null && siteIds.Any())
             {
                 dbProduct.Site.Clear();
-                if (siteIds.Any())
+                var sites = await _dbContext.Site
+                    .Where(s => siteIds.Contains(s.Id))
+                    .ToListAsync(cancelToken);
+                foreach (var site in sites)
                 {
-                    var sites = await _dbContext.Site
-                        .Where(s => siteIds.Contains(s.Id))
-                        .ToListAsync(cancelToken);
-                    foreach (var site in sites)
-                    {
-                        dbProduct.Site.Add(site);
-                    }
+                    dbProduct.Site.Add(site);
                 }
             }
 
@@ -1007,20 +1014,58 @@ namespace George.Data
                 product.SetupTypeId = st?.Id;
             }
 
-            // Map brand
+            // Map brand — free text from UI: find or create Brand for this account (same idea as TemplateProductStorage).
             if (req.Brand.HasValue())
             {
+                var name = req.Brand.Trim();
+                var accountId = product.AccountId;
                 var brand = await _dbContext.Brand
-                    .FirstOrDefaultAsync(b => b.Name == req.Brand && b.AccountId == product.AccountId, cancelToken);
-                product.BrandId = brand?.Id;
+                    .FirstOrDefaultAsync(b => b.Name == name && b.AccountId == accountId && !b.IsDeleted, cancelToken);
+                if (brand == null)
+                {
+                    brand = new Brand
+                    {
+                        Name = name,
+                        AccountId = accountId,
+                        IsDeleted = false,
+                        CreationTime = DateTime.UtcNow,
+                    };
+                    _dbContext.Brand.Add(brand);
+                    await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+                }
+
+                product.BrandId = brand.Id;
+            }
+            else
+            {
+                product.BrandId = null;
             }
 
-            // Map supplier
+            // Map supplier — find or create Supplier for this account.
             if (req.Supplier.HasValue())
             {
+                var name = req.Supplier.Trim();
+                var accountId = product.AccountId;
                 var supplier = await _dbContext.Supplier
-                    .FirstOrDefaultAsync(s => s.Name == req.Supplier && s.AccountId == product.AccountId, cancelToken);
-                product.SupplierId = supplier?.Id;
+                    .FirstOrDefaultAsync(s => s.Name == name && s.AccountId == accountId && !s.IsDeleted, cancelToken);
+                if (supplier == null)
+                {
+                    supplier = new Supplier
+                    {
+                        Name = name,
+                        AccountId = accountId,
+                        IsDeleted = false,
+                        CreationTime = DateTime.UtcNow,
+                    };
+                    _dbContext.Supplier.Add(supplier);
+                    await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+                }
+
+                product.SupplierId = supplier.Id;
+            }
+            else
+            {
+                product.SupplierId = null;
             }
 
             // Map weight config

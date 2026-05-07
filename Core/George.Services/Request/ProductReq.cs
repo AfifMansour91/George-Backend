@@ -70,7 +70,8 @@ namespace George.Services.Request
         public WeightConfigReq? WeightConfig { get; set; }
         public bool? ShowAsMl { get; set; }
         public string? WeightUnit { get; set; }
-        public List<int>? SiteIds { get; set; } // Empty = all sites
+        /// <summary>Site assignment. Null or empty = do not change which sites the product is on (update); Woo sync falls back to existing sites on the product.</summary>
+        public List<int>? SiteIds { get; set; }
         public int? AccountId { get; set; }
         /// <summary>List sort order (ascending). When omitted on create, defaults to 0 in storage.</summary>
         public int? DisplayOrder { get; set; }
@@ -85,6 +86,25 @@ namespace George.Services.Request
 
         /// <summary>Per-product low-stock threshold. When set overrides the account default. Null clears the override.</summary>
         public decimal? LowStockThreshold { get; set; }
+
+        /// <summary>קפוא</summary>
+        public bool? LabelFrozen { get; set; }
+
+        /// <summary>ללא גלוטן</summary>
+        public bool? LabelGlutenFree { get; set; }
+
+        /// <summary>לא כשר</summary>
+        public bool? LabelNotKosher { get; set; }
+
+        /// <summary>כשר לפסח</summary>
+        public bool? LabelKosherForPassover { get; set; }
+
+        public DateTime? LabelKosherForPassoverEndDate { get; set; }
+
+        /// <summary>חדש</summary>
+        public bool? LabelNew { get; set; }
+
+        public DateTime? LabelNewEndDate { get; set; }
     }
 
     public class CreateProductReq : ProductReq

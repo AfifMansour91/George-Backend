@@ -217,6 +217,9 @@ namespace George.Services
                 // Update WizardStatusId if provided, otherwise preserve existing
                 WizardStatusId = wizardStatusId,
                 WizardTypeId = wizardTypeId,
+                DefaultNewLabelDays = req.DefaultNewLabelDays.HasValue
+                    ? Math.Clamp(req.DefaultNewLabelDays.Value, 1, 365)
+                    : existingAccount.DefaultNewLabelDays,
                 // Handle LogoUrl:
                 // - If LogoUrl is provided (property exists in JSON, even if null or empty), use it
                 // - Empty string or null in request means clear the logo (set to null)

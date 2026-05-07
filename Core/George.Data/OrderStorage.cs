@@ -21,6 +21,8 @@ namespace George.Data
             var res = new DataListResult<Order>();
             var query = _dbContext.Order
                 .Where(o => !o.IsDeleted)
+                .Include(o => o.Site)
+                .Include(o => o.Account)
                 .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
                 .AsNoTracking();
 
@@ -89,6 +91,8 @@ namespace George.Data
         public async Task<Order?> GetOrderByIdAsync(int orderId, CancellationToken cancelToken)
         {
             return await _dbContext.Order
+                .Include(o => o.Site)
+                .Include(o => o.Account)
                 .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
                 .AsNoTracking()
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
@@ -99,6 +103,8 @@ namespace George.Data
         {
             if (string.IsNullOrWhiteSpace(externalOrderId)) return null;
             return await _dbContext.Order
+                .Include(o => o.Site)
+                .Include(o => o.Account)
                 .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
                 .FirstOrDefaultAsync(o => !o.IsDeleted && o.SiteId == siteId && o.ExternalOrderId == externalOrderId, cancelToken);
         }
@@ -141,6 +147,8 @@ namespace George.Data
         {
             var db = await _dbContext.Order
                 .Include(o => o.OrderItem)
+                .Include(o => o.Site)
+                .Include(o => o.Account)
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
             if (db == null) return null;
             apply(db);
@@ -155,6 +163,70 @@ namespace George.Data
             if (o == null) return;
             o.CompletionInventoryApplied = value;
             o.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// For lines where the picking UI stores <strong>kg</strong> in <see cref="OrderItem.PickedQuantity"/>, do not baseline it to
+        /// <see cref="OrderItem.Quantity"/> (piece count). That made vouchers show a fake "after pick" weight (e.g. 2 ק"ג for 2 יח').
+        /// Piece-only lines still baseline to quantity for inventory delta accounting.
+        /// </summary>
+        private static bool SkipPickedQuantityBaselineBecausePickIsWeightKg(OrderItem item)
+        {
+            if (item.UnitWeightGrams is > 0m) return true;
+            return string.Equals(item.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// After ordered quantities were deducted from catalog (Woo ingest or internal create), set <see cref="OrderItem.PickedQuantity"/> to <see cref="OrderItem.Quantity"/>
+        /// so picking deltas are only the adjustment beyond what was ordered (avoids double-deduct when the order later completes).
+        /// Sets <see cref="Order.CompletionInventoryApplied"/> so completion-time stock does not run again for the same consumption.
+        /// </summary>
+        public async Task SetOrderedCatalogConsumedAndBaselinePickingAsync(int orderId, CancellationToken cancelToken)
+        {
+            var db = await _dbContext.Order
+                .Include(o => o.OrderItem)
+                .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken)
+                .ConfigureAwait(false);
+            if (db == null) return;
+            db.CompletionInventoryApplied = true;
+            foreach (var item in db.OrderItem.Where(i => !i.IsDeleted))
+            {
+                if (item.ProductId is > 0 && item.Quantity > 0m && !SkipPickedQuantityBaselineBecausePickIsWeightKg(item))
+                    item.PickedQuantity = item.Quantity;
+            }
+            db.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Sets <see cref="OrderItem.PickedQuantity"/> = <see cref="OrderItem.Quantity"/> only for the given line ids (e.g. lines just added via AddItems).
+        /// Does not change <see cref="Order.CompletionInventoryApplied"/> or other order lines.
+        /// </summary>
+        public async Task SetPickedQuantityBaselineForOrderItemIdsAsync(
+            int orderId,
+            IReadOnlyCollection<int> orderItemIds,
+            CancellationToken cancelToken)
+        {
+            if (orderItemIds == null || orderItemIds.Count == 0) return;
+            var idSet = orderItemIds.Where(id => id > 0).ToHashSet();
+            if (idSet.Count == 0) return;
+            var db = await _dbContext.Order
+                .Include(o => o.OrderItem)
+                .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken)
+                .ConfigureAwait(false);
+            if (db == null) return;
+            var touched = false;
+            foreach (var item in db.OrderItem.Where(i => !i.IsDeleted && idSet.Contains(i.Id)))
+            {
+                if (item.ProductId is > 0 && item.Quantity > 0m && !SkipPickedQuantityBaselineBecausePickIsWeightKg(item))
+                {
+                    item.PickedQuantity = item.Quantity;
+                    touched = true;
+                }
+            }
+            if (!touched) return;
+            db.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
         }
 
@@ -213,6 +285,8 @@ namespace George.Data
                 order.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
             return await _dbContext.Order
+                .Include(o => o.Site)
+                .Include(o => o.Account)
                 .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
                 .AsNoTracking()
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
@@ -232,6 +306,7 @@ namespace George.Data
                 if (!itemMap.TryGetValue(orderItemId, out var item)) continue;
                 item.PickedQuantity = pickedQty;
                 item.TotalPrice = totalPrice;
+                item.PickingUserConfirmed = true;
             }
             RecalculateOrderHeaderTotalsFromLines(db);
             db.UpdatedDate = DateTime.UtcNow;
@@ -357,6 +432,8 @@ namespace George.Data
             if (lastOrderId == null) return null;
 
             return await _dbContext.Order
+                .Include(o => o.Site)
+                .Include(o => o.Account)
                 .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
                 .AsNoTracking()
                 .FirstOrDefaultAsync(o => o.Id == lastOrderId.Value && !o.IsDeleted, cancelToken).ConfigureAwait(false);

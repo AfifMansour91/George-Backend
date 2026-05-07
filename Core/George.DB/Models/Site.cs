@@ -143,6 +143,10 @@ public partial class Site
 
     [ForeignKey("SiteId")]
     [InverseProperty("Site")]
+    public virtual ICollection<Brand> Brand { get; set; } = new List<Brand>();
+
+    [ForeignKey("SiteId")]
+    [InverseProperty("Site")]
     public virtual ICollection<BusinessType> BusinessType { get; set; } = new List<BusinessType>();
 
     [ForeignKey("SiteId")]

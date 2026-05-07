@@ -112,6 +112,27 @@ public partial class Product
     [Column(TypeName = "decimal(18, 4)")]
     public decimal? LowStockThreshold { get; set; }
 
+    /// <summary>Storefront label: קפוא → Woo ed/v1 product-frozen.</summary>
+    public bool LabelFrozen { get; set; }
+
+    /// <summary>Storefront label: ללא גלוטן → Woo ed/v1 product-gluten-free.</summary>
+    public bool LabelGlutenFree { get; set; }
+
+    /// <summary>Storefront label: לא כשר → Woo ed/v1 product-not-kosher.</summary>
+    public bool LabelNotKosher { get; set; }
+
+    /// <summary>Storefront label: כשר לפסח → Woo ed/v1 product-kosher-for-passover (effective until end date).</summary>
+    public bool LabelKosherForPassover { get; set; }
+
+    [Precision(0)]
+    public DateTime? LabelKosherForPassoverEndDate { get; set; }
+
+    /// <summary>Storefront label: חדש (site-only timing; no Woo ACF in current API).</summary>
+    public bool LabelNew { get; set; }
+
+    [Precision(0)]
+    public DateTime? LabelNewEndDate { get; set; }
+
     [ForeignKey("BrandId")]
     [InverseProperty("Product")]
     public virtual Brand? Brand { get; set; }
@@ -119,6 +140,9 @@ public partial class Product
     [ForeignKey("CreationUserId")]
     [InverseProperty("ProductCreationUser")]
     public virtual User? CreationUser { get; set; }
+
+    [InverseProperty("Product")]
+    public virtual ICollection<ProductBrand> ProductBrand { get; set; } = new List<ProductBrand>();
 
     [InverseProperty("Product")]
     public virtual ICollection<ProductCategory> ProductCategory { get; set; } = new List<ProductCategory>();

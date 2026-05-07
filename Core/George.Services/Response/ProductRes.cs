@@ -86,6 +86,20 @@ namespace George.Services.Response
 
         /// <summary>Per-product low-stock threshold. When set (> 0) overrides the account default for low-stock coloring and filtering.</summary>
         public decimal? LowStockThreshold { get; set; }
+
+        public bool LabelFrozen { get; set; }
+
+        public bool LabelGlutenFree { get; set; }
+
+        public bool LabelNotKosher { get; set; }
+
+        public bool LabelKosherForPassover { get; set; }
+
+        public DateTime? LabelKosherForPassoverEndDate { get; set; }
+
+        public bool LabelNew { get; set; }
+
+        public DateTime? LabelNewEndDate { get; set; }
     }
 }
 

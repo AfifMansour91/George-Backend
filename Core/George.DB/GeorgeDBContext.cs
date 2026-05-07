@@ -242,6 +242,7 @@ namespace George.DB
             modelBuilder.Entity<Product>().HasQueryFilter(a => a.IsDeleted == false);
             modelBuilder.Entity<TemplateProduct>().HasQueryFilter(a => a.IsDeleted == false);
             modelBuilder.Entity<GlobalCategory>().HasQueryFilter(a => a.IsDeleted == false);
+            modelBuilder.Entity<GlobalBrand>().HasQueryFilter(a => a.IsDeleted == false);
             modelBuilder.Entity<Media>().HasQueryFilter(a => a.IsDeleted == false);
             modelBuilder.Entity<Promotion>().HasQueryFilter(a => a.IsDeleted == false);
             //modelBuilder.Entity<Account>().HasQueryFilter(ent => EF.Property<bool>(ent, PROP_IS_DELETED) == false);

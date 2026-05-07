@@ -130,6 +130,9 @@ public partial class TemplateProduct
     public virtual Supplier? Supplier { get; set; }
 
     [InverseProperty("TemplateProduct")]
+    public virtual ICollection<TemplateProductBrand> TemplateProductBrand { get; set; } = new List<TemplateProductBrand>();
+
+    [InverseProperty("TemplateProduct")]
     public virtual ICollection<TemplateProductCategory> TemplateProductCategory { get; set; } = new List<TemplateProductCategory>();
 
     [InverseProperty("TemplateProduct")]

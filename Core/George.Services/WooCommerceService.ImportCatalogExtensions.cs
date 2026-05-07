@@ -222,12 +222,30 @@ public partial class WooCommerceService
         return null;
     }
 
+    /// <summary>
+    /// George treats variation salability as <c>StockQuantity &gt; 0</c> (binary or summed qty in UI).
+    /// WooCommerce often leaves <c>manage_stock</c> false while still returning <c>stock_status</c> per variation.
+    /// </summary>
+    private static decimal? ResolveImportedVariantStockQuantity(WooImportVariationItem vv)
+    {
+        if (vv.manage_stock == true && vv.stock_quantity.HasValue)
+            return vv.stock_quantity.Value;
+
+        var st = (vv.stock_status ?? string.Empty).Trim().ToLowerInvariant().Replace("-", "").Replace("_", "");
+        if (st is "instock" or "onbackorder")
+            return 1m;
+        if (st is "outofstock")
+            return 0m;
+        return null;
+    }
+
     private async Task ApplyWooImportProductExtensionsAsync(
         GeorgeDBContext db,
         Product product,
         WooImportProductItem wp,
         int accountId,
         WooImportCatalogLookups lk,
+        IReadOnlyDictionary<int, int> brandMap,
         CancellationToken cancelToken)
     {
         var meta = wp.meta_data;
@@ -273,25 +291,39 @@ public partial class WooCommerceService
             product.WeightUnit = product.ShowAsMl == true ? "ml" : product.WeightUnit;
         }
 
-        var brandName = MetaStringAny(meta, "_brand");
-        if (!string.IsNullOrWhiteSpace(brandName))
+        // Brand assignment. Two paths, in priority order:
+        //   1) WooCommerce 9.6+ has Brands as a core taxonomy and includes wp.brands on products.
+        //      We prefer this when present and reconcile against the local Brand table via the
+        //      brandMap built earlier in the import (Woo brand id → local brand id).
+        //   2) Pre-9.6 stores still use the _brand meta key carrying the brand name. This is
+        //      the legacy path; kept as a fallback when wp.brands is missing/empty.
+        if (wp.brands != null && wp.brands.Count > 0)
         {
-            var bn = brandName.Trim();
-            var b = await db.Brand.FirstOrDefaultAsync(
-                x => !x.IsDeleted && x.AccountId == accountId && x.Name == bn, cancelToken);
-            if (b == null)
+            var wooBrandIds = wp.brands.Select(b => b.id).ToList();
+            await WooCommerceService.SetProductBrandsFromWooAsync(db, product, wooBrandIds, brandMap, cancelToken);
+        }
+        else
+        {
+            var brandName = MetaStringAny(meta, "_brand");
+            if (!string.IsNullOrWhiteSpace(brandName))
             {
-                b = new Brand
+                var bn = brandName.Trim();
+                var b = await db.Brand.FirstOrDefaultAsync(
+                    x => !x.IsDeleted && x.AccountId == accountId && x.Name == bn, cancelToken);
+                if (b == null)
                 {
-                    Name = bn,
-                    AccountId = accountId,
-                    CreationTime = DateTime.UtcNow,
-                    IsDeleted = false
-                };
-                db.Brand.Add(b);
-                await db.SaveChangesAsync(cancelToken);
+                    b = new Brand
+                    {
+                        Name = bn,
+                        AccountId = accountId,
+                        CreationTime = DateTime.UtcNow,
+                        IsDeleted = false
+                    };
+                    db.Brand.Add(b);
+                    await db.SaveChangesAsync(cancelToken);
+                }
+                product.BrandId = b.Id;
             }
-            product.BrandId = b.Id;
         }
 
         var supplierName = MetaStringAny(meta, "_supplier");

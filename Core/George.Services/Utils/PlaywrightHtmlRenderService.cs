@@ -219,7 +219,7 @@ namespace George.Services.Utils
 
         private static string EnsureReceiptCss(string html)
         {
-            // Voucher HTML: body = 72mm sheet, #voucher-root = inner column. Do not force body padding/min-width or it overrides the payload.
+            // Voucher HTML: 72mm logical width; #voucher-root matches PaperWidthMm. Do not force body padding/min-width or it overrides the payload.
             const string extraCss = @"
 <style>
 @page {

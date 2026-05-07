@@ -6,18 +6,17 @@ namespace George.Services;
 /// </summary>
 public static class VoucherPrintHtml
 {
+    /// <summary>Logical print width (mm); match driver "printing width" on 80mm roll (~72mm).</summary>
     public const int PaperWidthMm = 72;
-    public const int ContentWidthMm = 60;
-    public const string InnerPadding = "2.5mm 3mm";
 
-    public const int QrSizePx = 120;
+    public const string InnerPadding = "2.5mm 2.5mm";
 
-    /// <summary>Match TS <c>VOUCHER_TEXT_WRAP</c> for narrow thermal / Playwright PDF.</summary>
-    public const string TextWrap =
-        "display:block;max-width:100%;width:100%;min-width:0;box-sizing:border-box;overflow-wrap:anywhere;word-break:break-word;line-break:anywhere;";
+    public const int QrSizePx = 106;
 
-    /// <summary>Match TS <c>VOUCHER_PRODUCT_MARKER</c>.</summary>
-    public const string ProductBullet = "▪";
+    public const int QrFramePx = 110;
+
+    /// <summary>Match TS <c>VOUCHER_PRODUCT_MARKER</c> (Figma bullet).</summary>
+    public const string ProductBullet = "•";
 
     public const int Caption = 13;
     public const int Small = 11;
@@ -36,5 +35,5 @@ public static class VoucherPrintHtml
     public const int TotalAmount = 26;
 
     /// <summary>Legacy prefix; prefer <see cref="ProductBullet"/> + layout in HTML.</summary>
-    public const string ProductLinePrefix = "▪ ";
+    public const string ProductLinePrefix = "• ";
 }

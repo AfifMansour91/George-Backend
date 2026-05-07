@@ -363,6 +363,7 @@ namespace George.Api.Core
 			services.AddScoped<SiteStorage>();
 			services.AddScoped<ProductStorage>();
 			services.AddScoped<CategoryStorage>();
+			services.AddScoped<BrandStorage>();
 			services.AddScoped<AttributeStorage>();
 			services.AddScoped<MediaStorage>();
 			services.AddScoped<OrderStorage>();
@@ -375,6 +376,7 @@ namespace George.Api.Core
 			services.AddScoped<PrintJobStorage>();
 			services.AddScoped<ClientStorage>();
 			services.AddScoped<GlobalCategoryStorage>();
+			services.AddScoped<GlobalBrandStorage>();
 			services.AddScoped<TemplateAttributeStorage>();
 			services.AddScoped<TemplateProductStorage>();
 
@@ -389,6 +391,7 @@ namespace George.Api.Core
 			services.AddScoped<SiteService>();
 			services.AddScoped<ProductService>();
 			services.AddScoped<CategoryService>();
+			services.AddScoped<BrandService>();
 			services.AddScoped<AttributeService>();
 			services.AddScoped<MediaService>();
 			services.AddScoped<OrderService>();
@@ -402,6 +405,7 @@ namespace George.Api.Core
 			services.AddScoped<PrintJobService>();
 			services.AddScoped<ClientService>();
 			services.AddScoped<GlobalCategoryService>();
+			services.AddScoped<GlobalBrandService>();
 			services.AddScoped<TemplateAttributeService>();
 			services.AddScoped<TemplateProductService>();
 			services.AddScoped<WooCommerceService>();

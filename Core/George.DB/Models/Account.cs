@@ -89,6 +89,9 @@ public partial class Account
     [Column(TypeName = "decimal(18, 4)")]
     public decimal? DefaultLowStockThresholdUnits { get; set; }
 
+    /// <summary>Default duration in days for the &quot;חדש&quot; label end date when enabled (placeholder in product form).</summary>
+    public int DefaultNewLabelDays { get; set; } = 7;
+
     [InverseProperty("Account")]
     public virtual ICollection<AccountMedia> AccountMedia { get; set; } = new List<AccountMedia>();
 
