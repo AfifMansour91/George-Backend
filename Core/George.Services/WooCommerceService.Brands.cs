@@ -151,6 +151,57 @@ namespace George.Services
         }
 
         /// <summary>
+        /// Ensures every brand assigned to <paramref name="product"/> exists on WooCommerce for
+        /// <paramref name="siteId"/> (creates terms when <see cref="Brand.WooCommerceBrandId"/> is null).
+        /// Must run before building the product PUT payload so <c>brands: [ … ]</c> uses real Woo IDs.
+        /// </summary>
+        private async Task EnsureAssignedBrandsSyncedToWooForSiteAsync(int siteId, Product product, CancellationToken cancelToken)
+        {
+            foreach (var bid in GetDistinctBrandIdsForProduct(product).Distinct())
+            {
+                var brand = await _brandStorage.GetBrandAsync(bid, cancelToken).ConfigureAwait(false);
+                if (brand == null || !BrandAppliesToWooSite(brand, siteId)) continue;
+                if (brand.WooCommerceBrandId.HasValue) continue;
+
+                await SyncBrandToWooCommerceAsync(bid, siteId, cancelToken).ConfigureAwait(false);
+            }
+        }
+
+        private static bool BrandAppliesToWooSite(Brand brand, int siteId)
+        {
+            if (brand.Site == null || brand.Site.Count == 0)
+                return true;
+            return brand.Site.Any(s => s.Id == siteId);
+        }
+
+        private static IEnumerable<int> GetDistinctBrandIdsForProduct(Product product)
+        {
+            if (product.BrandId.HasValue)
+                yield return product.BrandId.Value;
+            if (product.ProductBrand == null) yield break;
+            foreach (var pb in product.ProductBrand)
+                yield return pb.BrandId;
+        }
+
+        /// <summary>
+        /// Reads WooCommerce brand term IDs for brands linked to the product (legacy FK + ProductBrand join),
+        /// after <see cref="EnsureAssignedBrandsSyncedToWooForSiteAsync"/> has run.
+        /// </summary>
+        private async Task<List<int>> ResolveWooBrandIdsForProductOnSiteAsync(int siteId, Product product, CancellationToken cancelToken)
+        {
+            var seen = new HashSet<int>();
+            var result = new List<int>();
+            foreach (var bid in GetDistinctBrandIdsForProduct(product).Distinct())
+            {
+                var brand = await _brandStorage.GetBrandAsync(bid, cancelToken).ConfigureAwait(false);
+                if (brand?.WooCommerceBrandId is not int wid || !BrandAppliesToWooSite(brand, siteId)) continue;
+                if (seen.Add(wid))
+                    result.Add(wid);
+            }
+            return result;
+        }
+
+        /// <summary>
         /// Deletes a brand from WooCommerce. Mirrors <see cref="DeleteCategoryFromWooCommerceAsync"/>.
         /// Returns true on 200/204; false on any error (logged).
         /// </summary>

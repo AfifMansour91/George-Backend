@@ -145,6 +145,9 @@ namespace George.Services
             model.Id = brandId;
             model.Name = (req.Name ?? string.Empty).Trim();
             model.Slug = NormalizeSlug(req.Slug, fallbackName: model.Name);
+            // Client updates omit Woo/source IDs — never wipe sync metadata already stored.
+            model.WooCommerceBrandId = req.WooCommerceBrandId ?? existingBrand.WooCommerceBrandId;
+            model.SourceGlobalBrandId = req.SourceGlobalBrandId ?? existingBrand.SourceGlobalBrandId;
             model.UpdateUserId = AuthUser.Id;
 
             var updated = await _brandStorage.UpdateBrandAsync(model, req.SiteIds, cancelToken).ConfigureAwait(false);

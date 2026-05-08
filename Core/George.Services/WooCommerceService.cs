@@ -1234,6 +1234,8 @@ namespace George.Services
         {
             try
             {
+                await EnsureAssignedBrandsSyncedToWooForSiteAsync(siteId, product, cancelToken).ConfigureAwait(false);
+
                 // Map stock status
                 var stockStatus = "instock";
                 if (product.StockStatus?.Name == "out_of_stock" || product.Status?.Name == "outOfStock")
@@ -1445,21 +1447,11 @@ namespace George.Services
                 };
 
                 // Brand assignment — flat array of WooCommerce brand IDs (NOT [{"id":...}]) per spec §5.7.
-                // Aggregate IDs from both the legacy single Brand FK and the new ProductBrand join.
+                // Uses DB state after EnsureAssignedBrandsSyncedToWooForSiteAsync so new brands get IDs first.
                 // Only include the "brands" key when at least one brand is synced; otherwise leave the
                 // existing Woo-side assignment alone (avoids accidentally clearing brands when our local
                 // brands haven't been pushed yet).
-                var brandIds = new List<int>();
-                if (product.Brand?.WooCommerceBrandId.HasValue == true)
-                    brandIds.Add(product.Brand.WooCommerceBrandId.Value);
-                if (product.ProductBrand != null)
-                {
-                    foreach (var pb in product.ProductBrand)
-                    {
-                        if (pb.Brand?.WooCommerceBrandId.HasValue == true && !brandIds.Contains(pb.Brand.WooCommerceBrandId.Value))
-                            brandIds.Add(pb.Brand.WooCommerceBrandId.Value);
-                    }
-                }
+                var brandIds = await ResolveWooBrandIdsForProductOnSiteAsync(siteId, product, cancelToken).ConfigureAwait(false);
                 if (brandIds.Count > 0)
                     wooProduct["brands"] = brandIds;
 
