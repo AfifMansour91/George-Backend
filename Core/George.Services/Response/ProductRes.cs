@@ -100,6 +100,16 @@ namespace George.Services.Response
         public bool LabelNew { get; set; }
 
         public DateTime? LabelNewEndDate { get; set; }
+
+        public bool LabelBestseller { get; set; }
+
+        public bool LabelReadyToCook { get; set; }
+
+        public bool LabelNatural { get; set; }
+
+        public bool LabelSugarFree { get; set; }
+
+        public bool LabelLactoseFree { get; set; }
     }
 }
 

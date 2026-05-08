@@ -388,6 +388,11 @@ namespace George.Data
             dbProduct.LabelFrozen = updated.LabelFrozen;
             dbProduct.LabelGlutenFree = updated.LabelGlutenFree;
             dbProduct.LabelNotKosher = updated.LabelNotKosher;
+            dbProduct.LabelBestseller = updated.LabelBestseller;
+            dbProduct.LabelReadyToCook = updated.LabelReadyToCook;
+            dbProduct.LabelNatural = updated.LabelNatural;
+            dbProduct.LabelSugarFree = updated.LabelSugarFree;
+            dbProduct.LabelLactoseFree = updated.LabelLactoseFree;
             dbProduct.LabelKosherForPassover = updated.LabelKosherForPassover;
             dbProduct.LabelKosherForPassoverEndDate = updated.LabelKosherForPassoverEndDate;
             dbProduct.LabelNew = updated.LabelNew;
@@ -1130,6 +1135,43 @@ namespace George.Data
             var next = cur - consumptionDelta;
             if (next < 0m) next = 0m;
             return next;
+        }
+
+        /// <summary>
+        /// Bulk-clear expired timed storefront labels (חדש / כשר לפסח). Same rules as
+        /// <c>ProductService.ClearExpiredTimedLabels</c>, for background cleanup without opening each product.
+        /// </summary>
+        /// <returns>Row counts updated for passover and new-label columns.</returns>
+        public async Task<(int PassoverRows, int NewLabelRows)> ClearExpiredTimedProductLabelsAsync(CancellationToken cancelToken)
+        {
+            var now = DateTime.UtcNow;
+            var passoverRows = await _dbContext.Product
+                .Where(p =>
+                    !p.IsDeleted
+                    && p.LabelKosherForPassover
+                    && p.LabelKosherForPassoverEndDate != null
+                    && p.LabelKosherForPassoverEndDate <= now)
+                .ExecuteUpdateAsync(
+                    s => s
+                        .SetProperty(p => p.LabelKosherForPassover, false)
+                        .SetProperty(p => p.LabelKosherForPassoverEndDate, (DateTime?)null),
+                    cancelToken)
+                .ConfigureAwait(false);
+
+            var newLabelRows = await _dbContext.Product
+                .Where(p =>
+                    !p.IsDeleted
+                    && p.LabelNew
+                    && p.LabelNewEndDate != null
+                    && p.LabelNewEndDate <= now)
+                .ExecuteUpdateAsync(
+                    s => s
+                        .SetProperty(p => p.LabelNew, false)
+                        .SetProperty(p => p.LabelNewEndDate, (DateTime?)null),
+                    cancelToken)
+                .ConfigureAwait(false);
+
+            return (passoverRows, newLabelRows);
         }
 
     }

@@ -133,6 +133,21 @@ public partial class Product
     [Precision(0)]
     public DateTime? LabelNewEndDate { get; set; }
 
+    /// <summary>Storefront label: רב מכר → Woo ed/v1 product-bestseller.</summary>
+    public bool LabelBestseller { get; set; }
+
+    /// <summary>Storefront label: מוכן לבישול → Woo ed/v1 product-readytocook.</summary>
+    public bool LabelReadyToCook { get; set; }
+
+    /// <summary>Storefront label: טבעי → Woo ed/v1 product-natural.</summary>
+    public bool LabelNatural { get; set; }
+
+    /// <summary>Storefront label: ללא תוספת סוכר → Woo ed/v1 product-sugarfree.</summary>
+    public bool LabelSugarFree { get; set; }
+
+    /// <summary>Storefront label: ללא לקטוז → Woo ed/v1 product-lactosefree.</summary>
+    public bool LabelLactoseFree { get; set; }
+
     [ForeignKey("BrandId")]
     [InverseProperty("Product")]
     public virtual Brand? Brand { get; set; }

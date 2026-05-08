@@ -1721,6 +1721,11 @@ namespace George.Services
             await PostBool("product-gluten-free", "gluten_free", product.LabelGlutenFree).ConfigureAwait(false);
             await PostBool("product-not-kosher", "not_kosher", product.LabelNotKosher).ConfigureAwait(false);
             await PostBool("product-kosher-for-passover", "kosher_for_passover", passoverEffective).ConfigureAwait(false);
+            await PostBool("product-bestseller", "bestseller", product.LabelBestseller).ConfigureAwait(false);
+            await PostBool("product-readytocook", "readytocook", product.LabelReadyToCook).ConfigureAwait(false);
+            await PostBool("product-natural", "natural", product.LabelNatural).ConfigureAwait(false);
+            await PostBool("product-sugarfree", "sugarfree", product.LabelSugarFree).ConfigureAwait(false);
+            await PostBool("product-lactosefree", "lactosefree", product.LabelLactoseFree).ConfigureAwait(false);
         }
 
         /// <summary>

@@ -105,6 +105,21 @@ namespace George.Services.Request
         public bool? LabelNew { get; set; }
 
         public DateTime? LabelNewEndDate { get; set; }
+
+        /// <summary>רב מכר</summary>
+        public bool? LabelBestseller { get; set; }
+
+        /// <summary>מוכן לבישול</summary>
+        public bool? LabelReadyToCook { get; set; }
+
+        /// <summary>טבעי</summary>
+        public bool? LabelNatural { get; set; }
+
+        /// <summary>ללא תוספת סוכר</summary>
+        public bool? LabelSugarFree { get; set; }
+
+        /// <summary>ללא לקטוז</summary>
+        public bool? LabelLactoseFree { get; set; }
     }
 
     public class CreateProductReq : ProductReq

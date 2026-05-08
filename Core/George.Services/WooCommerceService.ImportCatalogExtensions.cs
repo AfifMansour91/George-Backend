@@ -285,6 +285,22 @@ public partial class WooCommerceService
         if (kosherMeta != null)
             product.IsKosher = IsMetaYes(kosherMeta);
 
+        // Storefront label flags: Woo REST returns meta_data; keys should match what the site/plugin stores
+        // when syncing via ED/v1 (same JSON field names: frozen, bestseller, …). Multiple aliases cover plugins.
+        product.LabelFrozen = IsMetaYes(MetaStringAny(meta, "frozen", "_frozen"));
+        product.LabelGlutenFree = IsMetaYes(MetaStringAny(meta, "gluten_free", "_gluten_free", "gluten-free"));
+        product.LabelNotKosher = IsMetaYes(MetaStringAny(meta, "not_kosher", "_not_kosher", "not-kosher"));
+        product.LabelKosherForPassover = IsMetaYes(MetaStringAny(meta, "kosher_for_passover", "_kosher_for_passover"));
+        var passOverEndRaw = MetaStringAny(meta, "kosher_for_passover_end_date", "_kosher_for_passover_end_date");
+        var passOverEnd = TryParseWooDate(passOverEndRaw);
+        if (passOverEnd.HasValue)
+            product.LabelKosherForPassoverEndDate = passOverEnd;
+        product.LabelBestseller = IsMetaYes(MetaStringAny(meta, "bestseller", "_bestseller"));
+        product.LabelReadyToCook = IsMetaYes(MetaStringAny(meta, "readytocook", "_readytocook", "ready_to_cook"));
+        product.LabelNatural = IsMetaYes(MetaStringAny(meta, "natural", "_natural"));
+        product.LabelSugarFree = IsMetaYes(MetaStringAny(meta, "sugarfree", "_sugarfree", "sugar_free"));
+        product.LabelLactoseFree = IsMetaYes(MetaStringAny(meta, "lactosefree", "_lactosefree", "lactose_free"));
+
         var showMl = MetaStringAny(meta, "show_as_ml", "_show_as_ml");
         if (!string.IsNullOrWhiteSpace(showMl) && !showMl.StartsWith("field_", StringComparison.OrdinalIgnoreCase))
         {

@@ -23,6 +23,7 @@ namespace George.Api
 			base.AddHostedServices(services);
 
 			services.AddHostedService<DataRefreshService>();
+			services.AddHostedService<ExpiredTimedProductLabelsHostedService>();
 		}
 
 		protected override void Initialize(IServiceCollection services)
