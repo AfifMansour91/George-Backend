@@ -42,6 +42,9 @@ namespace George.Services.Response
         public bool? VoucherPrinterSilent { get; set; }
         public string? VoucherPrinterName { get; set; }
 
+        /// <summary>When true (default), UI asks for bag count when completing picking.</summary>
+        public bool? AskBagsCountAtPickingFinish { get; set; }
+
         /// <summary>When the site's account has kiosk enabled, contains the account kiosk settings (including showOutOfStockProducts, showOutOfStockAtBottom).</summary>
         public KioskSettingsRes? KioskSettings { get; set; }
     }

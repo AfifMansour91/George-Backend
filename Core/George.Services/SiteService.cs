@@ -53,6 +53,8 @@ namespace George.Services
             model.IsActive = true;
             if (!model.IsraelCityPickerEnabled.HasValue)
                 model.IsraelCityPickerEnabled = true;
+            if (!model.AskBagsCountAtPickingFinish.HasValue)
+                model.AskBagsCountAtPickingFinish = true;
 
             // Create the data in the DB.
             model = await _siteStorage.CreateSiteAsync(model, req.BusinessTypeIds, cancelToken).ConfigureAwait(false);

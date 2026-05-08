@@ -45,6 +45,9 @@ namespace George.Services.Request
         public bool? VoucherPrinterSilent { get; set; }
         /// <summary>Voucher printer: display name (e.g. WIFI, iPad).</summary>
         public string? VoucherPrinterName { get; set; }
+
+        /// <summary>When true (default), prompt for bag count when finishing picking.</summary>
+        public bool? AskBagsCountAtPickingFinish { get; set; }
     }
 
     public class CreateSiteReq : SiteReq

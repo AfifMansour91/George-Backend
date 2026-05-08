@@ -149,6 +149,7 @@ namespace George.Data
             if (updated.PrintFutureAtTime != null) dbSite.PrintFutureAtTime = updated.PrintFutureAtTime;
             if (updated.VoucherPrinterSilent.HasValue) dbSite.VoucherPrinterSilent = updated.VoucherPrinterSilent;
             if (updated.VoucherPrinterName != null) dbSite.VoucherPrinterName = updated.VoucherPrinterName;
+            if (updated.AskBagsCountAtPickingFinish.HasValue) dbSite.AskBagsCountAtPickingFinish = updated.AskBagsCountAtPickingFinish;
             dbSite.IsActive = updated.IsActive || dbSite.IsActive;
             dbSite.UpdatedDate = DateTime.UtcNow;
 
