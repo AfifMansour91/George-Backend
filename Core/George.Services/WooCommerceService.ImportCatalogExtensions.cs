@@ -244,6 +244,7 @@ public partial class WooCommerceService
         Product product,
         WooImportProductItem wp,
         int accountId,
+        int siteId,
         WooImportCatalogLookups lk,
         IReadOnlyDictionary<int, int> brandMap,
         CancellationToken cancelToken)
@@ -441,7 +442,98 @@ public partial class WooCommerceService
             }
         }
 
+        await ApplyWooImportLinkedProductsAsync(db, product.Id, wp, accountId, siteId, cancelToken);
+
         await db.SaveChangesAsync(cancelToken);
+    }
+
+    /// <summary>
+    /// WooCommerce linked products: <c>upsell_ids</c> → local <see cref="Product.RelatedProduct"/>,
+    /// <c>cross_sell_ids</c> → <see cref="Product.ComplementaryProduct"/>. Only links products that exist locally with matching <see cref="Product.WooCommerceId"/> on this site.
+    /// </summary>
+    private async Task ApplyWooImportLinkedProductsAsync(
+        GeorgeDBContext db,
+        int productId,
+        WooImportProductItem wp,
+        int accountId,
+        int siteId,
+        CancellationToken cancelToken)
+    {
+        var upsellWoo = wp.upsell_ids;
+        var crossWoo = wp.cross_sell_ids;
+
+        var tracked = await db.Product
+            .Include(p => p.RelatedProduct)
+            .Include(p => p.ComplementaryProduct)
+            .Include(p => p.Site)
+            .FirstAsync(p => p.Id == productId, cancelToken);
+
+        static async Task<List<int>> ResolveOrderedLocalIdsAsync(
+            GeorgeDBContext dbContext,
+            int acctId,
+            int sid,
+            List<int>? wooIds,
+            CancellationToken ct)
+        {
+            var result = new List<int>();
+            if (wooIds == null || wooIds.Count == 0)
+                return result;
+
+            var orderedDistinct = new List<int>();
+            var seenWoo = new HashSet<int>();
+            foreach (var w in wooIds)
+            {
+                if (w <= 0 || !seenWoo.Add(w))
+                    continue;
+                orderedDistinct.Add(w);
+            }
+
+            if (orderedDistinct.Count == 0)
+                return result;
+
+            var map = await dbContext.Product
+                .AsNoTracking()
+                .Where(p =>
+                    !p.IsDeleted
+                    && p.AccountId == acctId
+                    && p.WooCommerceId.HasValue
+                    && orderedDistinct.Contains(p.WooCommerceId.Value)
+                    && p.Site.Any(s => s.Id == sid))
+                .Select(p => new { p.WooCommerceId, p.Id })
+                .ToListAsync(ct);
+
+            var wooToLocal = map.ToDictionary(x => x.WooCommerceId!.Value, x => x.Id);
+            foreach (var woo in orderedDistinct)
+            {
+                if (wooToLocal.TryGetValue(woo, out var localId))
+                    result.Add(localId);
+            }
+
+            return result;
+        }
+
+        var upsellLocalIds = await ResolveOrderedLocalIdsAsync(db, accountId, siteId, upsellWoo, cancelToken);
+        var crossLocalIds = await ResolveOrderedLocalIdsAsync(db, accountId, siteId, crossWoo, cancelToken);
+
+        tracked.RelatedProduct.Clear();
+        foreach (var id in upsellLocalIds.Where(id => id != tracked.Id))
+        {
+            var other = await db.Product.FirstOrDefaultAsync(
+                p => p.Id == id && !p.IsDeleted && p.AccountId == accountId && p.Site.Any(s => s.Id == siteId),
+                cancelToken);
+            if (other != null)
+                tracked.RelatedProduct.Add(other);
+        }
+
+        tracked.ComplementaryProduct.Clear();
+        foreach (var id in crossLocalIds.Where(lid => lid != tracked.Id))
+        {
+            var other = await db.Product.FirstOrDefaultAsync(
+                p => p.Id == id && !p.IsDeleted && p.AccountId == accountId && p.Site.Any(s => s.Id == siteId),
+                cancelToken);
+            if (other != null)
+                tracked.ComplementaryProduct.Add(other);
+        }
     }
 
     private static bool WooImportProductLikelyHasVariations(WooImportProductItem wp) =>

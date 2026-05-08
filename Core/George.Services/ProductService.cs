@@ -127,7 +127,7 @@ namespace George.Services
             return response;
         }
 
-        /// <summary>Get related and complementary product IDs for the given product IDs at the site. Used by kiosk upsell step when pos products type is upsells/combined.</summary>
+        /// <summary>Linked product IDs at the site (RelatedProduct = Woo up-sells, ComplementaryProduct = Woo cross-sells), merged for kiosk when POS shows linked-product suggestions.</summary>
         public async Task<IApiResponse<List<int>>> GetUpsellProductIdsAsync(int siteId, List<int> productIds, CancellationToken cancelToken)
         {
             var response = new ApiResponse<List<int>>();

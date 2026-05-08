@@ -75,7 +75,7 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _productSvc.GetProductsAsync(request, cancelToken));
         }
 
-        /// <summary>Get related and complementary product IDs for the given product IDs at the site. For kiosk upsell step when "מוצרים נלווים" is selected in settings. Query: productIds=1,2,3 (comma-separated).</summary>
+        /// <summary>Both linked-product lists at the site: RelatedProduct (Woo up-sells) and ComplementaryProduct (Woo cross-sells). Used for kiosk POS suggestions when linked-products mode is enabled. Query: productIds=1,2,3 (comma-separated).</summary>
         [HttpGet("Site/{siteId:int}/UpsellProductIds")]
         [ProducesResponseType(typeof(IApiResponse<List<int>>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetUpsellProductIdsAsync(

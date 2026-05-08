@@ -1446,6 +1446,13 @@ namespace George.Services
                     ["meta_data"] = metaData
                 };
 
+                // Linked products (WooCommerce admin: מוצרים משודרגים / מוצרים משלימים) — REST keys are upsell_ids / cross_sell_ids.
+                // Local RelatedProduct = up-sells; ComplementaryProduct = cross-sells.
+                var upsellIds = await ResolveWooCommerceIdsForLinkedProductsAsync(baseUrl, siteId, product.RelatedProduct, httpClient, cancelToken).ConfigureAwait(false);
+                var crossSellIds = await ResolveWooCommerceIdsForLinkedProductsAsync(baseUrl, siteId, product.ComplementaryProduct, httpClient, cancelToken).ConfigureAwait(false);
+                wooProduct["upsell_ids"] = upsellIds;
+                wooProduct["cross_sell_ids"] = crossSellIds;
+
                 // Brand assignment — flat array of WooCommerce brand IDs (NOT [{"id":...}]) per spec §5.7.
                 // Uses DB state after EnsureAssignedBrandsSyncedToWooForSiteAsync so new brands get IDs first.
                 // Only include the "brands" key when at least one brand is synced; otherwise leave the
@@ -2285,6 +2292,35 @@ namespace George.Services
         /// Finds a product in WooCommerce by SKU. Tries plain SKU first, then prefixed (S{siteId}_{sku}) for backward compatibility with products synced when prefix was used.
         /// Returns its ID if found, so we can update instead of create (avoids product_invalid_sku when product already exists).
         /// </summary>
+        /// <summary>
+        /// Maps linked local products to WooCommerce product IDs for upsell_ids / cross_sell_ids (uses WooCommerceId, then SKU lookup).
+        /// Order matches the local collection; duplicates are skipped.
+        /// </summary>
+        private static async Task<List<int>> ResolveWooCommerceIdsForLinkedProductsAsync(
+            string baseUrl,
+            int siteId,
+            ICollection<Product>? linked,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            var ordered = new List<int>();
+            if (linked == null || linked.Count == 0)
+                return ordered;
+
+            var seen = new HashSet<int>();
+            foreach (var p in linked)
+            {
+                if (p == null) continue;
+                int? wooId = p.WooCommerceId;
+                if (!wooId.HasValue && !string.IsNullOrWhiteSpace(p.Sku))
+                    wooId = await FindProductIdBySkuAsync(baseUrl, siteId, p.Sku, httpClient, cancelToken).ConfigureAwait(false);
+                if (wooId.HasValue && wooId.Value > 0 && seen.Add(wooId.Value))
+                    ordered.Add(wooId.Value);
+            }
+
+            return ordered;
+        }
+
         private static async Task<int?> FindProductIdBySkuAsync(string baseUrl, int siteId, string sku, HttpClient httpClient, CancellationToken cancelToken)
         {
             if (string.IsNullOrWhiteSpace(sku)) return null;
@@ -2871,7 +2907,7 @@ namespace George.Services
 
                     await db.SaveChangesAsync(cancelToken);
 
-                    await ApplyWooImportProductExtensionsAsync(db, product, wp, accountId, importLookups, brandMap, cancelToken);
+                    await ApplyWooImportProductExtensionsAsync(db, product, wp, accountId, siteId, importLookups, brandMap, cancelToken);
 
                     // Woo variable parent can be "out of stock" in REST while each variation is instock without manage_stock.
                     if (wooVariations.Count > 0)
@@ -3022,6 +3058,12 @@ namespace George.Services
             /// WooCommerceService.Brands.cs.
             /// </summary>
             public List<WooImportProductBrandItem>? brands { get; set; }
+
+            /// <summary>WooCommerce REST: linked up-sell product IDs (מוצרים משודרגים).</summary>
+            public List<int>? upsell_ids { get; set; }
+
+            /// <summary>WooCommerce REST: linked cross-sell product IDs (מוצרים משלימים).</summary>
+            public List<int>? cross_sell_ids { get; set; }
         }
 
         /// <summary>One entry inside the product's brands[] array on read.</summary>

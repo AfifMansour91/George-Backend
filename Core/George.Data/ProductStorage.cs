@@ -121,7 +121,7 @@ namespace George.Data
             return res;
         }
 
-        /// <summary>Get unique related and complementary product IDs for the given product IDs, restricted to products that belong to the site. For kiosk upsell step. Uses EF only (no raw SQL, no concurrent context use).</summary>
+        /// <summary>Unions RelatedProduct (Woo up-sells) and ComplementaryProduct (Woo cross-sell) IDs for the given cart lines, filtered to products on the site. For kiosk POS linked-products step.</summary>
         public async Task<List<int>> GetUpsellProductIdsForSiteAsync(int siteId, List<int> productIds, CancellationToken cancelToken)
         {
             if (siteId <= 0 || productIds == null || productIds.Count == 0)
