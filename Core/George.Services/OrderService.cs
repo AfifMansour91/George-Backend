@@ -31,6 +31,7 @@ namespace George.Services
         private readonly SmsProvider _smsProvider;
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly PrintJobService _printJobService;
+        private readonly PromotionStorage _promotionStorage;
         private readonly string? _publicAppBaseUrl;
         private static readonly Dictionary<string, string> VoucherSourceLabels = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -60,6 +61,7 @@ namespace George.Services
             SmsProvider smsProvider,
             IServiceScopeFactory serviceScopeFactory,
             PrintJobService printJobService,
+            PromotionStorage promotionStorage,
             IConfiguration configuration)
             : base(logger, mapper, cache)
         {
@@ -71,6 +73,7 @@ namespace George.Services
             _smsProvider = smsProvider;
             _serviceScopeFactory = serviceScopeFactory;
             _printJobService = printJobService;
+            _promotionStorage = promotionStorage;
             _publicAppBaseUrl = ResolvePublicAppBaseUrl(configuration);
         }
 
@@ -177,6 +180,20 @@ namespace George.Services
                 }
                 items.Add(oi);
             }
+
+            // ─── Sprint 4: persist promotion linkage on the order lines ──────────────
+            // Spec `Sprint4/מבצעים.md` "סיכום אחריות": run the evaluator at finalize so
+            // each line carries the PromotionId + DiscountAmount that gave it its price.
+            // Failures here MUST NOT block the order from being created.
+            try
+            {
+                await ApplyPromotionsToOrderItemsAsync(req.SiteId, order.Source, items, cancelToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ApplyPromotionsToOrderItemsAsync failed siteId={SiteId}", req.SiteId);
+            }
+
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken);
             var loaded = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken);
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loaded, cancelToken).ConfigureAwait(false);
@@ -2383,6 +2400,97 @@ namespace George.Services
             if (string.Equals(s, "InTreatment", StringComparison.OrdinalIgnoreCase)) return "processing";
             if (string.Equals(s, "Ready", StringComparison.OrdinalIgnoreCase) || string.Equals(s, "Completed", StringComparison.OrdinalIgnoreCase)) return "completed";
             if (string.Equals(s, "Cancelled", StringComparison.OrdinalIgnoreCase)) return "cancelled";
+            return null;
+        }
+
+        // ─── Sprint 4: promotions on order finalize ──────────────────────────────
+        /// <summary>
+        /// Run <see cref="PromotionEvaluator"/> against the freshly-built items list and stamp
+        /// each line with the PromotionId + DiscountAmount it earned. Spec:
+        /// <c>Sprint4/מבצעים.md</c> → "סיכום אחריות".
+        /// </summary>
+        private async Task ApplyPromotionsToOrderItemsAsync(int siteId, string? orderSource, List<OrderItem> items, CancellationToken cancelToken)
+        {
+            if (items.Count == 0) return;
+
+            var utcNow = DateTime.UtcNow;
+            var candidates = await _promotionStorage
+                .GetActivePromotionsForEvaluationAsync(siteId, utcNow, cancelToken)
+                .ConfigureAwait(false);
+            if (candidates.Count == 0) return;
+
+            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken).ConfigureAwait(false);
+            var defaults = new PromotionEvaluator.SiteEvaluationDefaults
+            {
+                OveragePolicyDefault = string.IsNullOrWhiteSpace(site?.PromotionOveragePolicyDefault)
+                    ? "full_price"
+                    : site!.PromotionOveragePolicyDefault!,
+                ApplyOnPhoneOrders = site?.PromotionsApplyToPhoneOrders ?? true,
+                ApplyOnDiscountedProducts = site?.PromotionsApplyToDiscountedProducts ?? false,
+            };
+
+            var evalReq = new EvaluatePromotionsReq
+            {
+                SiteId = siteId,
+                Channel = MapOrderSourceToPromotionChannel(orderSource),
+                Cart = items.Select(it => new EvaluateCartLine
+                {
+                    ProductId = (it.ProductId ?? 0).ToString(),
+                    Quantity = it.Quantity,
+                    PricePerUnit = it.PricePerUnit,
+                    // CategoryId left null for v1 — Product has no primary CategoryId column;
+                    // category-scoped promos are matched at evaluate-time on the storefront only.
+                    CategoryId = null,
+                }).ToList(),
+                CartTotal = items.Sum(it => it.TotalPrice ?? 0m),
+            };
+
+            var result = PromotionEvaluator.Evaluate(candidates, evalReq, defaults, utcNow);
+            foreach (var applied in result.PromotionsApplied)
+            {
+                if (applied.EligibleItems != null && applied.EligibleItems.Count > 0)
+                {
+                    foreach (var ei in applied.EligibleItems)
+                    {
+                        if (ei.DiscountAmount <= 0m) continue;
+                        var match = items.FirstOrDefault(it => (it.ProductId ?? 0).ToString() == ei.ProductId && it.PromotionId == null);
+                        if (match == null) continue;
+                        match.PromotionId = applied.PromotionId;
+                        match.DiscountAmount = (match.DiscountAmount ?? 0m) + ei.DiscountAmount;
+                    }
+                }
+                else if (applied.PromotionType == "buy_x_pay_y")
+                {
+                    // BxPY: stamp the first matching line that hasn't been claimed by another promo.
+                    var match = items.FirstOrDefault(it => it.PromotionId == null && it.ProductId != null);
+                    if (match != null && applied.DiscountAmount > 0m)
+                    {
+                        match.PromotionId = applied.PromotionId;
+                        match.DiscountAmount = (match.DiscountAmount ?? 0m) + applied.DiscountAmount;
+                    }
+                }
+                else if (applied.PromotionType == "buy_x_get_y" && applied.RewardProductId.HasValue && applied.DiscountAmount > 0m)
+                {
+                    var rid = applied.RewardProductId.Value;
+                    var match = items.FirstOrDefault(it => it.ProductId == rid && it.PromotionId == null);
+                    if (match != null)
+                    {
+                        match.PromotionId = applied.PromotionId;
+                        match.DiscountAmount = (match.DiscountAmount ?? 0m) + applied.DiscountAmount;
+                    }
+                }
+            }
+        }
+
+        /// <summary>Maps the Order.Source string to a promotion channel key.</summary>
+        private static string? MapOrderSourceToPromotionChannel(string? source)
+        {
+            if (string.IsNullOrWhiteSpace(source)) return null;
+            var s = source.Trim().ToLowerInvariant();
+            if (s == "kiosk") return "store";
+            if (s == "phone" || s == "manual") return "phone";
+            if (s == "woocommerce" || s == "website" || s == "web") return "web";
+            if (s == "mobile" || s == "app") return "mobile";
             return null;
         }
     }

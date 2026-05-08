@@ -81,44 +81,110 @@ public static class PromotionPayloadValidator
         return true;
     }
 
+    /// <summary>
+    /// Spec-aligned shape (camelCase wire format from `Sprint4/מבצעים.md`):
+    /// {
+    ///   "version": 1,
+    ///   "condition": { "scope": "product"|"category", "productId"?, "categoryId"?, "quantity": int>0, "excludedProductIds": [int] },
+    ///   "pricing":   { "fixedPrice": number>0 },
+    ///   "overagePolicy"?: "same_price"|"full_price",
+    ///   "limits"?:    { "perOrder"?, "perCustomer"? },
+    ///   "daysOfWeek"?: [string]
+    /// }
+    /// </summary>
     private static bool ValidateBuyXPayY(JsonElement root, out string? errorMessage)
     {
-        if (!root.TryGetProperty("buyUnits", out var buyEl) || buyEl.ValueKind != JsonValueKind.Number
-            || !buyEl.TryGetInt32(out var buy) || buy < 1)
-            return Fail("Payload for buy_x_pay_y must include integer \"buyUnits\" >= 1.", out errorMessage);
+        if (!root.TryGetProperty("condition", out var cond) || cond.ValueKind != JsonValueKind.Object)
+            return Fail("Payload for buy_x_pay_y must include a \"condition\" object.", out errorMessage);
 
-        if (!root.TryGetProperty("payUnits", out var payEl) || payEl.ValueKind != JsonValueKind.Number
-            || !payEl.TryGetInt32(out var pay) || pay < 1)
-            return Fail("Payload for buy_x_pay_y must include integer \"payUnits\" >= 1.", out errorMessage);
+        var scope = cond.TryGetProperty("scope", out var scopeEl) && scopeEl.ValueKind == JsonValueKind.String
+            ? scopeEl.GetString()?.Trim().ToLowerInvariant()
+            : null;
+        if (scope is not ("product" or "category"))
+            return Fail("buy_x_pay_y condition.scope must be \"product\" or \"category\".", out errorMessage);
 
-        if (pay > buy)
-            return Fail("buy_x_pay_y: payUnits must be less than or equal to buyUnits.", out errorMessage);
+        if (scope == "product")
+        {
+            if (!cond.TryGetProperty("productId", out var pid) || pid.ValueKind != JsonValueKind.Number
+                || !pid.TryGetInt32(out var pidInt) || pidInt <= 0)
+                return Fail("buy_x_pay_y: condition.productId is required when scope=\"product\".", out errorMessage);
+        }
+        else
+        {
+            if (!cond.TryGetProperty("categoryId", out var cid) || cid.ValueKind != JsonValueKind.Number
+                || !cid.TryGetInt32(out var cidInt) || cidInt <= 0)
+                return Fail("buy_x_pay_y: condition.categoryId is required when scope=\"category\".", out errorMessage);
+        }
+
+        if (!cond.TryGetProperty("quantity", out var qEl) || qEl.ValueKind != JsonValueKind.Number
+            || !qEl.TryGetInt32(out var qty) || qty < 1)
+            return Fail("buy_x_pay_y: condition.quantity must be an integer >= 1.", out errorMessage);
+
+        if (!root.TryGetProperty("pricing", out var pricing) || pricing.ValueKind != JsonValueKind.Object)
+            return Fail("buy_x_pay_y must include a \"pricing\" object.", out errorMessage);
+        if (!pricing.TryGetProperty("fixedPrice", out var priceEl) || priceEl.ValueKind != JsonValueKind.Number
+            || !priceEl.TryGetDecimal(out var price) || price <= 0m)
+            return Fail("buy_x_pay_y: pricing.fixedPrice must be a number > 0.", out errorMessage);
+
+        if (root.TryGetProperty("overagePolicy", out var op) && op.ValueKind == JsonValueKind.String)
+        {
+            var ops = op.GetString()?.Trim().ToLowerInvariant();
+            if (ops is not (null or "same_price" or "full_price"))
+                return Fail("buy_x_pay_y overagePolicy must be \"same_price\" or \"full_price\".", out errorMessage);
+        }
 
         errorMessage = null;
         return true;
     }
 
+    /// <summary>
+    /// Spec-aligned shape (camelCase) — see Sprint4/מבצעים.md.
+    /// </summary>
     private static bool ValidateBuyXGetY(JsonElement root, out string? errorMessage)
     {
-        if (!root.TryGetProperty("benefitType", out var bt) || bt.ValueKind != JsonValueKind.String)
-            return Fail("Payload for buy_x_get_y must include string \"benefitType\" (free | percent_discount | fixed_price).", out errorMessage);
+        if (!root.TryGetProperty("condition", out var cond) || cond.ValueKind != JsonValueKind.Object)
+            return Fail("Payload for buy_x_get_y must include a \"condition\" object.", out errorMessage);
 
-        var bts = bt.GetString()?.Trim().ToLowerInvariant();
-        if (bts is not ("free" or "percent_discount" or "fixed_price"))
-            return Fail("buy_x_get_y benefitType must be free, percent_discount, or fixed_price.", out errorMessage);
+        var scope = cond.TryGetProperty("productScope", out var scopeEl) && scopeEl.ValueKind == JsonValueKind.String
+            ? scopeEl.GetString()?.Trim().ToLowerInvariant()
+            : "all";
+        if (scope is not ("all" or "specific_products" or "specific_categories"))
+            return Fail("buy_x_get_y condition.productScope must be \"all\", \"specific_products\", or \"specific_categories\".", out errorMessage);
 
-        if (bts == "percent_discount")
+        if (scope == "specific_products")
         {
-            if (!root.TryGetProperty("benefitPercent", out var pEl) || pEl.ValueKind != JsonValueKind.Number
-                || !pEl.TryGetDecimal(out var p) || p <= 0m || p > 100m)
-                return Fail("When benefitType is percent_discount, \"benefitPercent\" must be between 0 and 100.", out errorMessage);
+            if (!cond.TryGetProperty("productIds", out var pids) || pids.ValueKind != JsonValueKind.Array || pids.GetArrayLength() == 0)
+                return Fail("buy_x_get_y: condition.productIds must be a non-empty array when productScope=\"specific_products\".", out errorMessage);
+        }
+        else if (scope == "specific_categories")
+        {
+            if (!cond.TryGetProperty("categoryIds", out var cids) || cids.ValueKind != JsonValueKind.Array || cids.GetArrayLength() == 0)
+                return Fail("buy_x_get_y: condition.categoryIds must be a non-empty array when productScope=\"specific_categories\".", out errorMessage);
         }
 
-        if (bts == "fixed_price")
+        if (!root.TryGetProperty("reward", out var reward) || reward.ValueKind != JsonValueKind.Object)
+            return Fail("Payload for buy_x_get_y must include a \"reward\" object.", out errorMessage);
+
+        if (!reward.TryGetProperty("productIds", out var rids) || rids.ValueKind != JsonValueKind.Array || rids.GetArrayLength() == 0)
+            return Fail("buy_x_get_y: reward.productIds must be a non-empty array of product ids the customer can pick from.", out errorMessage);
+
+        if (!reward.TryGetProperty("discountType", out var dt) || dt.ValueKind != JsonValueKind.String)
+            return Fail("buy_x_get_y: reward.discountType must be \"free\", \"percentage\", or \"fixed_price\".", out errorMessage);
+        var dts = dt.GetString()?.Trim().ToLowerInvariant();
+        if (dts is not ("free" or "percentage" or "fixed_price"))
+            return Fail("buy_x_get_y: reward.discountType must be \"free\", \"percentage\", or \"fixed_price\".", out errorMessage);
+
+        if (dts == "percentage")
         {
-            if (!root.TryGetProperty("benefitFixedPriceNis", out var fEl) || fEl.ValueKind != JsonValueKind.Number
+            if (!reward.TryGetProperty("discountValue", out var pEl) || pEl.ValueKind != JsonValueKind.Number
+                || !pEl.TryGetDecimal(out var p) || p <= 0m || p > 100m)
+                return Fail("buy_x_get_y: when discountType=\"percentage\", reward.discountValue must be in (0, 100].", out errorMessage);
+        }
+        else if (dts == "fixed_price")
+        {
+            if (!reward.TryGetProperty("discountValue", out var fEl) || fEl.ValueKind != JsonValueKind.Number
                 || !fEl.TryGetDecimal(out var f) || f < 0m)
-                return Fail("When benefitType is fixed_price, \"benefitFixedPriceNis\" must be a number >= 0.", out errorMessage);
+                return Fail("buy_x_get_y: when discountType=\"fixed_price\", reward.discountValue must be a number >= 0.", out errorMessage);
         }
 
         errorMessage = null;

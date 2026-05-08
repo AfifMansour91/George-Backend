@@ -115,7 +115,21 @@ public partial class OrderItem
     /// </summary>
     public bool PickingUserConfirmed { get; set; }
 
+    // ─── Sprint 4: promotion linkage ────────────────────────────────────────
+    /// <summary>
+    /// Promotion that discounted this line at order finalize time. Null when no promo
+    /// applied. Spec: <c>Sprint4/מבצעים.md</c> "סיכום אחריות".
+    /// </summary>
+    public int? PromotionId { get; set; }
+
+    /// <summary>Discount amount applied to this line (NIS). Null when no promo applied.</summary>
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? DiscountAmount { get; set; }
+
     [ForeignKey("OrderId")]
     [InverseProperty("OrderItem")]
     public virtual Order Order { get; set; } = null!;
+
+    [ForeignKey("PromotionId")]
+    public virtual Promotion? Promotion { get; set; }
 }

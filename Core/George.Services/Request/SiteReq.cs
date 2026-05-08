@@ -45,6 +45,15 @@ namespace George.Services.Request
         public bool? VoucherPrinterSilent { get; set; }
         /// <summary>Voucher printer: display name (e.g. WIFI, iPad).</summary>
         public string? VoucherPrinterName { get; set; }
+
+        // Promotion settings (Sprint 4)
+        /// <summary>"same_price" | "full_price" (default). Default for BxPY over-quantity pricing.</summary>
+        public string? PromotionOveragePolicyDefault { get; set; }
+        public bool? PromotionsApplyToPhoneOrders { get; set; }
+        public bool? PromotionsApplyToDiscountedProducts { get; set; }
+        /// <summary>URL the storefront/kiosk listens on for promotion lifecycle events.</summary>
+        public string? PromotionWebhookUrl { get; set; }
+        public string? PromotionWebhookSecret { get; set; }
     }
 
     public class CreateSiteReq : SiteReq

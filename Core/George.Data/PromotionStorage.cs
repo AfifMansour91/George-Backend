@@ -164,6 +164,46 @@ public class PromotionStorage : StorageBase
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Promotions whose end-date has passed but are still <c>IsActive=true</c>.
+    /// Used by the midnight expiry job to flip them off and emit <c>promotion.ended</c>.
+    /// Spec: <c>Sprint4/מבצעים.md</c> "סיום מבצע אוטומטי".
+    /// </summary>
+    public async Task<List<Promotion>> GetExpiredActivePromotionsAsync(
+        DateTime utcNow, CancellationToken cancelToken)
+    {
+        var today = utcNow.Date;
+        return await _dbContext.Promotion
+            .AsNoTracking()
+            .Where(p => !p.IsDeleted
+                && !p.IsDraft
+                && p.IsActive
+                && p.ScheduleEndDateUtc != null
+                && p.ScheduleEndDateUtc!.Value.Date < today)
+            .ToListAsync(cancelToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Promotions eligible for cart-time evaluation: not deleted, not draft, IsActive,
+    /// and inside the optional date window. Used by <c>POST /Promotion/evaluate</c>.
+    /// </summary>
+    public async Task<List<Promotion>> GetActivePromotionsForEvaluationAsync(
+        int siteId, DateTime utcNow, CancellationToken cancelToken)
+    {
+        var today = utcNow.Date;
+        return await _dbContext.Promotion
+            .AsNoTracking()
+            .Where(p => p.SiteId == siteId
+                && !p.IsDeleted
+                && !p.IsDraft
+                && p.IsActive
+                && (p.ScheduleStartDateUtc == null || p.ScheduleStartDateUtc.Value.Date <= today)
+                && (p.ScheduleEndDateUtc == null || p.ScheduleEndDateUtc.Value.Date >= today))
+            .ToListAsync(cancelToken)
+            .ConfigureAwait(false);
+    }
+
     public async Task<Promotion> CreatePromotionAsync(Promotion entity, CancellationToken cancelToken)
     {
         _dbContext.Promotion.Add(entity);
@@ -322,9 +362,9 @@ public class PromotionStorage : StorageBase
             PromotionWire.SortBy.Discount => desc
                 ? query.OrderByDescending(x => x.PeriodDiscountNis).ThenByDescending(x => x.Promotion.Id)
                 : query.OrderBy(x => x.PeriodDiscountNis).ThenBy(x => x.Promotion.Id),
-            _ => desc
-                ? query.OrderByDescending(x => x.Promotion.UpdatedDate ?? x.Promotion.CreationTime).ThenByDescending(x => x.Promotion.Id)
-                : query.OrderBy(x => x.Promotion.UpdatedDate ?? x.Promotion.CreationTime).ThenBy(x => x.Promotion.Id),
+            // Default: most-recently updated first (created_time fallback).
+            _ => query.OrderByDescending(x => x.Promotion.UpdatedDate ?? x.Promotion.CreationTime)
+                      .ThenByDescending(x => x.Promotion.Id),
         };
     }
 }
@@ -336,6 +376,7 @@ public sealed class PromotionTabCounts
     public int Scheduled { get; set; }
     public int Drafts { get; set; }
     public int Ended { get; set; }
+    public int EndingWithinWeek { get; set; }
 }
 
 public sealed class PromotionPeriodTotals

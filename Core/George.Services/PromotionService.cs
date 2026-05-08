@@ -13,17 +13,20 @@ public class PromotionService : ServiceBase
 {
     private readonly PromotionStorage _promotionStorage;
     private readonly SiteStorage _siteStorage;
+    private readonly PromotionWebhookDispatcher _webhooks;
 
     public PromotionService(
         ILogger<PromotionService> logger,
         IMapper mapper,
         CacheManager cache,
         PromotionStorage promotionStorage,
-        SiteStorage siteStorage)
+        SiteStorage siteStorage,
+        PromotionWebhookDispatcher webhooks)
         : base(logger, mapper, cache)
     {
         _promotionStorage = promotionStorage;
         _siteStorage = siteStorage;
+        _webhooks = webhooks;
     }
 
     public async Task<IApiResponse<ApiListResponse<PromotionRes>>> GetPromotionsAsync(
@@ -156,6 +159,14 @@ public class PromotionService : ServiceBase
         model = await _promotionStorage.CreatePromotionAsync(model, cancelToken).ConfigureAwait(false);
         var reloaded = await _promotionStorage.GetPromotionAsync(model.Id, cancelToken).ConfigureAwait(false);
         response.Data = _mapper.Map<PromotionRes>(reloaded!);
+
+        // Webhook: only fire for published promotions; drafts are still being authored.
+        // See `Sprint4/מבצעים.md` "סנכרון מבצעים לאתר ולקיוסק".
+        if (reloaded is { IsDraft: false })
+        {
+            var siteForHook = await _siteStorage.GetSiteAsync(reloaded.SiteId, cancelToken).ConfigureAwait(false);
+            await _webhooks.FireAsync(PromotionWebhookDispatcher.EventCreated, reloaded, siteForHook, cancelToken).ConfigureAwait(false);
+        }
         return response;
     }
 
@@ -224,6 +235,13 @@ public class PromotionService : ServiceBase
 
         var reloaded = await _promotionStorage.GetPromotionAsync(promotionId, cancelToken).ConfigureAwait(false);
         response.Data = _mapper.Map<PromotionRes>(reloaded!);
+
+        // Webhook for full updates: skip drafts (still being authored).
+        if (reloaded is { IsDraft: false })
+        {
+            var siteForHook = await _siteStorage.GetSiteAsync(reloaded.SiteId, cancelToken).ConfigureAwait(false);
+            await _webhooks.FireAsync(PromotionWebhookDispatcher.EventUpdated, reloaded, siteForHook, cancelToken).ConfigureAwait(false);
+        }
         return response;
     }
 
@@ -241,6 +259,14 @@ public class PromotionService : ServiceBase
 
         var reloaded = await _promotionStorage.GetPromotionAsync(promotionId, cancelToken).ConfigureAwait(false);
         response.Data = _mapper.Map<PromotionRes>(reloaded!);
+
+        // Status toggle from the row's ⋮ menu — fire `updated` so storefronts can refresh
+        // their cache. We skip drafts on the safe assumption draft rows can't be toggled active.
+        if (reloaded is { IsDraft: false })
+        {
+            var siteForHook = await _siteStorage.GetSiteAsync(reloaded.SiteId, cancelToken).ConfigureAwait(false);
+            await _webhooks.FireAsync(PromotionWebhookDispatcher.EventUpdated, reloaded, siteForHook, cancelToken).ConfigureAwait(false);
+        }
         return response;
     }
 
@@ -250,6 +276,50 @@ public class PromotionService : ServiceBase
         var ok = await _promotionStorage.DeletePromotionAsync(promotionId, cancelToken).ConfigureAwait(false);
         if (!ok)
             return CreateResponse(response, StatusCode.ItemNotFound);
+        return response;
+    }
+
+    /// <summary>
+    /// `POST /Promotion/evaluate` — runs the cart-eligibility + math engine
+    /// (<see cref="PromotionEvaluator"/>) for the given site and cart. Returns the list
+    /// of applied promotions and the total discount, per <c>Sprint4/מבצעים.md</c>.
+    /// </summary>
+    public async Task<IApiResponse<EvaluatePromotionsRes>> EvaluatePromotionsAsync(
+        EvaluatePromotionsReq req, CancellationToken cancelToken)
+    {
+        var response = new ApiResponse<EvaluatePromotionsRes>
+        {
+            Data = new EvaluatePromotionsRes(),
+        };
+        if (req.SiteId <= 0)
+            return CreateResponse(response, StatusCode.InvalidId);
+
+        cancelToken.ThrowIfCancellationRequested();
+        var utcNow = DateTime.UtcNow;
+        var candidates = await _promotionStorage
+            .GetActivePromotionsForEvaluationAsync(req.SiteId, utcNow, cancelToken)
+            .ConfigureAwait(false);
+
+        if (candidates.Count == 0 || req.Cart is null || req.Cart.Count == 0)
+            return response;
+
+        // Site-level defaults for overage policy / phone-orders / discounted-product gating.
+        var site = await _siteStorage.GetSiteAsync(req.SiteId, cancelToken).ConfigureAwait(false);
+        var defaults = new PromotionEvaluator.SiteEvaluationDefaults
+        {
+            OveragePolicyDefault = string.IsNullOrWhiteSpace(site?.PromotionOveragePolicyDefault)
+                ? "full_price"
+                : site!.PromotionOveragePolicyDefault!,
+            ApplyOnPhoneOrders = site?.PromotionsApplyToPhoneOrders ?? true,
+            ApplyOnDiscountedProducts = site?.PromotionsApplyToDiscountedProducts ?? false,
+        };
+
+        // Coupon is normalized inside the evaluator; re-using NormalizeCouponCode keeps the
+        // create/update + evaluate paths consistent.
+        if (!string.IsNullOrWhiteSpace(req.CouponCode))
+            req.CouponCode = NormalizeCouponCode(req.CouponCode);
+
+        response.Data = PromotionEvaluator.Evaluate(candidates, req, defaults, utcNow);
         return response;
     }
 

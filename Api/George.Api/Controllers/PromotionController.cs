@@ -79,6 +79,19 @@ public class PromotionController : GeorgeControllerBase, IAuthUserProvider
         return await SafeCallWithErrorCatchingAsync(() => _promotionService.DeletePromotionAsync(promotionId, cancelToken));
     }
 
+    /// <summary>
+    /// Evaluate which promotions apply to a given cart (storefront/kiosk integration).
+    /// Spec: <c>Sprint4/מבצעים.md</c>.
+    /// </summary>
+    [HttpPost("evaluate")]
+    [ProducesResponseType(typeof(IApiResponse<EvaluatePromotionsRes>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> EvaluatePromotionsAsync(
+        [FromBody] EvaluatePromotionsReq req,
+        CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() => _promotionService.EvaluatePromotionsAsync(req, cancelToken));
+    }
+
     [ApiExplorerSettings(IgnoreApi = true)]
     public void SetAuthUser()
     {

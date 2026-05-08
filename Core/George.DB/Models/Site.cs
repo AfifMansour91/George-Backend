@@ -111,6 +111,30 @@ public partial class Site
     [StringLength(100)]
     public string? VoucherPrinterName { get; set; }
 
+    /// <summary>
+    /// Promotion settings (Sprint 4 — `Sprint4/מבצעים.md` "הגדרות מבצעים").
+    /// Default for BxPY over-quantity pricing: "same_price" (pro-rated) | "full_price" (regular). Null = "full_price".
+    /// </summary>
+    [StringLength(20)]
+    public string? PromotionOveragePolicyDefault { get; set; }
+
+    /// <summary>When true (default), promotions apply to phone-placed manual orders. Spec: "הזמנות טלפוניות".</summary>
+    public bool? PromotionsApplyToPhoneOrders { get; set; }
+
+    /// <summary>When true, promotions stack on already-discounted products. Default false. Spec: "מבצע על מוצרים מוזלים".</summary>
+    public bool? PromotionsApplyToDiscountedProducts { get; set; }
+
+    /// <summary>
+    /// Optional URL that StoreOS POSTs promotion lifecycle events to (created/updated/ended).
+    /// See `Sprint4/מבצעים.md` "סנכרון מבצעים לאתר ולקיוסק (Webhook)".
+    /// </summary>
+    [StringLength(500)]
+    public string? PromotionWebhookUrl { get; set; }
+
+    /// <summary>Shared secret for HMAC-SHA256 signing of webhook bodies (header `X-StoreOS-Signature`).</summary>
+    [StringLength(200)]
+    public string? PromotionWebhookSecret { get; set; }
+
     [ForeignKey("AccountId")]
     [InverseProperty("Site")]
     public virtual Account Account { get; set; } = null!;

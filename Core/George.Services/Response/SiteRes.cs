@@ -42,6 +42,15 @@ namespace George.Services.Response
         public bool? VoucherPrinterSilent { get; set; }
         public string? VoucherPrinterName { get; set; }
 
+        // Promotion settings (Sprint 4)
+        /// <summary>"same_price" | "full_price" (default). Default for BxPY over-quantity pricing.</summary>
+        public string? PromotionOveragePolicyDefault { get; set; }
+        public bool? PromotionsApplyToPhoneOrders { get; set; }
+        public bool? PromotionsApplyToDiscountedProducts { get; set; }
+        /// <summary>URL the storefront/kiosk listens on for promotion lifecycle events.</summary>
+        public string? PromotionWebhookUrl { get; set; }
+        public string? PromotionWebhookSecret { get; set; }
+
         /// <summary>When the site's account has kiosk enabled, contains the account kiosk settings (including showOutOfStockProducts, showOutOfStockAtBottom).</summary>
         public KioskSettingsRes? KioskSettings { get; set; }
     }
