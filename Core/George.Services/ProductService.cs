@@ -902,6 +902,7 @@ namespace George.Services
                 DisplayOrder = req.DisplayOrder,
                 SeoTitle = req.SeoTitle,
                 SeoDescription = req.SeoDescription,
+                Slug = string.IsNullOrWhiteSpace(req.Slug) ? null : req.Slug.Trim(),
                 ShowAsMl = req.ShowAsMl ?? (req.WeightUnit == "ml" ? true : null),
                 WeightUnit = req.WeightUnit ?? (req.ShowAsMl == true ? "ml" : null),
                 LabelFrozen = req.LabelFrozen ?? false,
@@ -947,6 +948,9 @@ namespace George.Services
                 AccountId = existing.AccountId ?? req.AccountId,
                 SeoTitle = req.SeoTitle ?? existing.SeoTitle,
                 SeoDescription = req.SeoDescription ?? existing.SeoDescription,
+                Slug = req.Slug != null
+                    ? (string.IsNullOrWhiteSpace(req.Slug) ? null : req.Slug.Trim())
+                    : existing.Slug,
                 ShowAsMl = req.ShowAsMl.HasValue ? (req.ShowAsMl ?? (req.WeightUnit == "ml" ? true : null)) : existing.ShowAsMl,
                 WeightUnit = req.WeightUnit != null ? (req.WeightUnit == "ml" || req.ShowAsMl == true ? "ml" : req.WeightUnit) : existing.WeightUnit,
                 DisplayOrder = req.DisplayOrder ?? existing.DisplayOrder,
@@ -1012,6 +1016,7 @@ namespace George.Services
                 WeightUnit = product.WeightUnit,
                 SeoTitle = product.SeoTitle,
                 SeoDescription = product.SeoDescription,
+                Slug = product.Slug,
                 LowStockThreshold = product.LowStockThreshold,
                 LabelFrozen = product.LabelFrozen,
                 LabelGlutenFree = product.LabelGlutenFree,

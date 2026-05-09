@@ -384,6 +384,7 @@ namespace George.Data
             dbProduct.WeightConfigId = updated.WeightConfigId;
             dbProduct.SeoTitle = updated.SeoTitle;
             dbProduct.SeoDescription = updated.SeoDescription;
+            dbProduct.Slug = string.IsNullOrWhiteSpace(updated.Slug) ? null : updated.Slug.Trim();
             dbProduct.LowStockThreshold = updated.LowStockThreshold;
             dbProduct.LabelFrozen = updated.LabelFrozen;
             dbProduct.LabelGlutenFree = updated.LabelGlutenFree;

@@ -94,6 +94,8 @@ namespace George.Services.Request
 
         public string? SeoDescription { get; set; }
 
+        public string? Slug { get; set; }
+
         public string? SourceProductId { get; set; }
 
         /// <summary>Related/accessory template product IDs (נלווים).</summary>

@@ -62,6 +62,7 @@ namespace George.Services.Response
         public int? DisplayOrder { get; set; }
         public string? SeoTitle { get; set; }
         public string? SeoDescription { get; set; }
+        public string? Slug { get; set; }
         public string? SourceProductId { get; set; }
 
         /// <summary>Related/accessory template product IDs (נלווים).</summary>

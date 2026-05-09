@@ -1446,6 +1446,9 @@ namespace George.Services
                     ["meta_data"] = metaData
                 };
 
+                if (!string.IsNullOrWhiteSpace(product.Slug))
+                    wooProduct["slug"] = product.Slug.Trim();
+
                 // Linked products (WooCommerce admin: מוצרים משודרגים / מוצרים משלימים) — REST keys are upsell_ids / cross_sell_ids.
                 // Local RelatedProduct = up-sells; ComplementaryProduct = cross-sells.
                 var upsellIds = await ResolveWooCommerceIdsForLinkedProductsAsync(baseUrl, siteId, product.RelatedProduct, httpClient, cancelToken).ConfigureAwait(false);
@@ -3033,6 +3036,7 @@ namespace George.Services
         {
             public int id { get; set; }
             public string? name { get; set; }
+            public string? slug { get; set; }
             public string? description { get; set; }
             public string? short_description { get; set; }
             public string? sku { get; set; }

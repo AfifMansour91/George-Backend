@@ -78,6 +78,9 @@ namespace George.Services.Request
         public string? SeoTitle { get; set; }
         public string? SeoDescription { get; set; }
 
+        /// <summary>WooCommerce permalink slug (product <c>slug</c>).</summary>
+        public string? Slug { get; set; }
+
         /// <summary>Related/accessory product IDs (נלווים).</summary>
         public List<int>? RelatedProductIds { get; set; }
 

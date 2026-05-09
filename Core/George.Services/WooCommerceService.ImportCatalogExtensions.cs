@@ -281,6 +281,12 @@ public partial class WooCommerceService
         product.SeoTitle = MetaStringAny(meta, "_yoast_wpseo_title");
         product.SeoDescription = MetaStringAny(meta, "_yoast_wpseo_metadesc");
 
+        if (!string.IsNullOrWhiteSpace(wp.slug))
+        {
+            var s = wp.slug.Trim();
+            product.Slug = s.Length > 200 ? s[..200] : s;
+        }
+
         var kosherMeta = MetaStringAny(meta, "_is_kosher");
         if (kosherMeta != null)
             product.IsKosher = IsMetaYes(kosherMeta);

@@ -550,6 +550,7 @@ namespace George.Services
                 IsWeighted = req.IsWeighted,
                 SeoTitle = req.SeoTitle,
                 SeoDescription = req.SeoDescription,
+                Slug = string.IsNullOrWhiteSpace(req.Slug) ? null : req.Slug.Trim(),
                 SourceProductId = req.SourceProductId,
                 ShowAsMl = req.ShowAsMl ?? (req.WeightUnit == "ml" ? true : null),
                 WeightUnit = req.WeightUnit ?? (req.ShowAsMl == true ? "ml" : null)
@@ -581,6 +582,9 @@ namespace George.Services
                 IsWeighted = req.IsWeighted ?? existing.IsWeighted,
                 SeoTitle = req.SeoTitle ?? existing.SeoTitle,
                 SeoDescription = req.SeoDescription ?? existing.SeoDescription,
+                Slug = req.Slug != null
+                    ? (string.IsNullOrWhiteSpace(req.Slug) ? null : req.Slug.Trim())
+                    : existing.Slug,
                 SourceProductId = req.SourceProductId ?? existing.SourceProductId,
                 ShowAsMl = req.ShowAsMl.HasValue ? (req.ShowAsMl ?? (req.WeightUnit == "ml" ? true : null)) : existing.ShowAsMl,
                 WeightUnit = req.WeightUnit != null ? (req.WeightUnit == "ml" || req.ShowAsMl == true ? "ml" : req.WeightUnit) : existing.WeightUnit,
@@ -637,6 +641,7 @@ namespace George.Services
                 DisplayOrder = templateProduct.DisplayOrder,
                 SeoTitle = templateProduct.SeoTitle,
                 SeoDescription = templateProduct.SeoDescription,
+                Slug = templateProduct.Slug,
                 SourceProductId = templateProduct.SourceProductId,
                 ShowAsMl = templateProduct.ShowAsMl ?? (templateProduct.WeightUnit == "ml" ? true : null),
                 WeightUnit = templateProduct.WeightUnit

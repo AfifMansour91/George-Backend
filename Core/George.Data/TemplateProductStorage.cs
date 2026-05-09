@@ -312,6 +312,7 @@ namespace George.Data
             dbTemplateProduct.WeightConfigId = updated.WeightConfigId;
             dbTemplateProduct.SeoTitle = updated.SeoTitle;
             dbTemplateProduct.SeoDescription = updated.SeoDescription;
+            dbTemplateProduct.Slug = string.IsNullOrWhiteSpace(updated.Slug) ? null : updated.Slug.Trim();
             dbTemplateProduct.SourceProductId = updated.SourceProductId;
             dbTemplateProduct.UpdatedDate = DateTime.UtcNow;
             dbTemplateProduct.UpdateUserId = updated.UpdateUserId;

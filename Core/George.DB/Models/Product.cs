@@ -93,6 +93,10 @@ public partial class Product
     [StringLength(2000)]
     public string? SeoDescription { get; set; }
 
+    /// <summary>WooCommerce product permalink segment (REST <c>slug</c> / WordPress <c>post_name</c>).</summary>
+    [StringLength(200)]
+    public string? Slug { get; set; }
+
     [StringLength(100)]
     public string? TemplateId { get; set; }
 
