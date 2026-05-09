@@ -1456,14 +1456,14 @@ namespace George.Services
                 wooProduct["upsell_ids"] = upsellIds;
                 wooProduct["cross_sell_ids"] = crossSellIds;
 
-                // Brand assignment — flat array of WooCommerce brand IDs (NOT [{"id":...}]) per spec §5.7.
+                // Brand assignment — Woo REST expects an array of objects with "id" (see Products API brands write-mode).
                 // Uses DB state after EnsureAssignedBrandsSyncedToWooForSiteAsync so new brands get IDs first.
                 // Only include the "brands" key when at least one brand is synced; otherwise leave the
                 // existing Woo-side assignment alone (avoids accidentally clearing brands when our local
                 // brands haven't been pushed yet).
                 var brandIds = await ResolveWooBrandIdsForProductOnSiteAsync(siteId, product, cancelToken).ConfigureAwait(false);
                 if (brandIds.Count > 0)
-                    wooProduct["brands"] = brandIds;
+                    wooProduct["brands"] = brandIds.Select(id => (object)new Dictionary<string, object> { ["id"] = id }).ToList();
 
                 // For variable products, ensure global attributes exist and use their IDs + actual slugs from WooCommerce
                 var attributeMap = new Dictionary<string, int?>();   // attribute name -> WooCommerce ID
@@ -1491,10 +1491,7 @@ namespace George.Services
                     {
                         foreach (var option in product.ProductOption.Where(po => !po.IsDeleted))
                         {
-                            var attributeValues = option.ProductOptionValue?
-                                .Select(pov => pov.Value)
-                                .Where(v => !string.IsNullOrWhiteSpace(v))
-                                .ToList() ?? new List<string>();
+                            var attributeValues = GetProductOptionValuesForWooSync(option, product);
 
                             if (attributeValues.Any())
                             {
@@ -1533,12 +1530,7 @@ namespace George.Services
                                 ["position"] = index,
                                 ["visible"] = true,
                                 ["variation"] = true,
-                                ["options"] = option.ProductOptionValue?
-                                    .Select(pov => pov.Value)
-                                    .Where(v => !string.IsNullOrWhiteSpace(v))
-                                    .Select(v => v.Trim())
-                                    .Distinct()
-                                    .ToList() ?? new List<string>()
+                                ["options"] = GetProductOptionValuesForWooSync(option, product)
                             };
                             if (!string.IsNullOrEmpty(slug))
                                 dict["name"] = slug;
@@ -2468,6 +2460,32 @@ namespace George.Services
         }
 
         /// <summary>
+        /// Values to register on the Woo global attribute: use <see cref="ProductOptionValue"/> when present;
+        /// if empty, derive distinct values from <see cref="ProductVariantOptionValue"/> so variable products
+        /// still sync when variants exist but option-value rows were never persisted (API shows empty <c>values</c>).
+        /// </summary>
+        private static List<string> GetProductOptionValuesForWooSync(ProductOption option, Product product)
+        {
+            var fromOption = option.ProductOptionValue?
+                .Select(pov => pov.Value)
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Select(v => v.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList() ?? new List<string>();
+            if (fromOption.Count > 0)
+                return fromOption;
+
+            var key = NormalizeOptionKey(option.Name);
+            return product.ProductVariant?
+                .Where(v => !v.IsDeleted)
+                .SelectMany(v => v.ProductVariantOptionValue ?? Enumerable.Empty<ProductVariantOptionValue>())
+                .Where(pvo => NormalizeOptionKey(pvo.OptionName) == key && !string.IsNullOrWhiteSpace(pvo.OptionValue))
+                .Select(pvo => pvo.OptionValue.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList() ?? new List<string>();
+        }
+
+        /// <summary>
         /// OCWSU weighable plugin expects meta <c>_ocwsu_product_weight_units</c> to match radio values: <c>kg</c> or <c>grams</c>.
         /// Our <see cref="Unit.Name"/> may be <c>g</c>, <c>gram</c>, Hebrew <c>גרם</c>, etc.
         /// </summary>
@@ -3062,9 +3080,8 @@ namespace George.Services
             public List<WooImportImageListItem>? images { get; set; }
             public List<WooImportTagItem>? tags { get; set; }
             /// <summary>
-            /// WooCommerce 9.6+ brands taxonomy on the product. Read shape is an array of objects
-            /// (id/name/slug) — same as categories. WRITES use a flat ID array; see
-            /// WooCommerceService.Brands.cs.
+            /// WooCommerce 9.6+ brands on the product. REST read/write both use an array of objects with <c>id</c>
+            /// (see Products API); import only needs this read shape.
             /// </summary>
             public List<WooImportProductBrandItem>? brands { get; set; }
 

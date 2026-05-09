@@ -18,22 +18,28 @@ namespace George.Services
     /// <summary>
     /// Brand-specific methods for the WooCommerce REST integration.
     ///
-    /// Important payload-shape note (see brands-feature-spec.md §5.7):
-    ///   When assigning brands to a product the body is a FLAT ARRAY of IDs:
-    ///       {"brands":[16,21]}
-    ///   NOT an array of objects like categories. The wrapper type
-    ///   <see cref="WooProductBrandsAssignmentBody"/> below pins this shape down,
-    ///   and a unit test in George.Services.Tests asserts the exact serialized JSON.
+    /// WooCommerce REST API v3 (products): for writes, <c>brands</c> must be an array of objects with an <c>id</c>
+    /// property — same pattern as read responses. Example:
+    ///   <c>{"brands":[{"id":16},{"id":21}]}</c>
+    /// A flat array of integers is rejected with an invalid-parameter error (e.g. Hebrew message mentioning brands).
+    /// <see cref="WooProductBrandsAssignmentBody"/> pins this shape; tests assert serialized JSON.
     /// </summary>
     public partial class WooCommerceService
     {
         //*************************    Helpers / DTOs    *************************//
 
+        /// <summary>Single brand reference in PUT /products/{id} <c>brands</c> array (write operations).</summary>
+        public sealed class WooProductBrandIdRef
+        {
+            [JsonPropertyName("id")]
+            public int Id { get; set; }
+        }
+
         /// <summary>The exact body shape expected by PUT /products/{id} when assigning brands.</summary>
         public sealed class WooProductBrandsAssignmentBody
         {
             [JsonPropertyName("brands")]
-            public int[] Brands { get; set; } = Array.Empty<int>();
+            public WooProductBrandIdRef[] Brands { get; set; } = Array.Empty<WooProductBrandIdRef>();
         }
 
         /// <summary>JSON shape returned by GET/POST/PUT /products/brands.</summary>
@@ -153,7 +159,7 @@ namespace George.Services
         /// <summary>
         /// Ensures every brand assigned to <paramref name="product"/> exists on WooCommerce for
         /// <paramref name="siteId"/> (creates terms when <see cref="Brand.WooCommerceBrandId"/> is null).
-        /// Must run before building the product PUT payload so <c>brands: [ … ]</c> uses real Woo IDs.
+        /// Must run before building the product PUT payload so <c>brands</c> objects carry real Woo IDs.
         /// </summary>
         private async Task EnsureAssignedBrandsSyncedToWooForSiteAsync(int siteId, Product product, CancellationToken cancelToken)
         {
@@ -227,8 +233,8 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Assigns a flat list of WooCommerce brand IDs to a WooCommerce product
-        /// (PUT /products/{wooProductId} with body <c>{"brands":[16,21]}</c>).
+        /// Assigns WooCommerce brand term IDs to a WooCommerce product
+        /// (PUT /products/{wooProductId} with body <c>{"brands":[{"id":16},{"id":21}]}</c>).
         /// Pass an empty array to clear all brands. Returns true on 2xx.
         /// </summary>
         public async Task<bool> AssignProductBrandsAsync(
@@ -242,9 +248,10 @@ namespace George.Services
 
             using (httpClient)
             {
+                var ids = wooBrandIds?.Distinct().ToArray() ?? Array.Empty<int>();
                 var body = new WooProductBrandsAssignmentBody
                 {
-                    Brands = wooBrandIds?.Distinct().ToArray() ?? Array.Empty<int>(),
+                    Brands = ids.Select(id => new WooProductBrandIdRef { Id = id }).ToArray(),
                 };
 
                 var url = $"{baseUrl}/products/{wooProductId}";
