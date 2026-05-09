@@ -131,7 +131,7 @@ public partial class Product
     [Precision(0)]
     public DateTime? LabelKosherForPassoverEndDate { get; set; }
 
-    /// <summary>Storefront label: חדש (site-only timing; no Woo ACF in current API).</summary>
+    /// <summary>Storefront label: חדש — synced via Woo <c>meta_data</c> (<c>new</c> / ACF <c>field_69f5c7cfeadce</c>) and ED/v1 <c>product-new</c>.</summary>
     public bool LabelNew { get; set; }
 
     [Precision(0)]

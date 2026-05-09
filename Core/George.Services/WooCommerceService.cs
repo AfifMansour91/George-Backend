@@ -1347,6 +1347,7 @@ namespace George.Services
                 // ACF true/false field: value goes in "show_as_ml" (1/0), reference key goes in "_show_as_ml"
                 metaData.Add(new { key = "show_as_ml", value = showAsMl ? "1" : "0" });
                 metaData.Add(new { key = "_show_as_ml", value = "field_699f090751cad" });
+                AppendWooAcfStoreLabelMeta(metaData, product);
                 if (product.CostPrice.HasValue)
                     metaData.Add(new { key = "_cost_price", value = product.CostPrice.Value.ToString() });
                 if (!string.IsNullOrEmpty(product.SeoTitle))
@@ -1690,6 +1691,8 @@ namespace George.Services
             var now = DateTime.UtcNow;
             var passoverEffective = product.LabelKosherForPassover &&
                                     (!product.LabelKosherForPassoverEndDate.HasValue || product.LabelKosherForPassoverEndDate.Value > now);
+            var newEffective = product.LabelNew &&
+                               (!product.LabelNewEndDate.HasValue || product.LabelNewEndDate.Value > now);
 
             using var http = _httpClientFactory.CreateClient();
             http.Timeout = TimeSpan.FromSeconds(60);
@@ -1721,6 +1724,7 @@ namespace George.Services
             await PostBool("product-natural", "natural", product.LabelNatural).ConfigureAwait(false);
             await PostBool("product-sugarfree", "sugarfree", product.LabelSugarFree).ConfigureAwait(false);
             await PostBool("product-lactosefree", "lactosefree", product.LabelLactoseFree).ConfigureAwait(false);
+            await PostBool("product-new", "new", newEffective).ConfigureAwait(false);
         }
 
         /// <summary>
