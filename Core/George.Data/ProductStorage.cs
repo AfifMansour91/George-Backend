@@ -35,6 +35,18 @@ namespace George.Data
             return result;
         }
 
+        private static List<int> DistinctPositiveIdsPreserveOrder(IEnumerable<int> ids)
+        {
+            var seen = new HashSet<int>();
+            var result = new List<int>();
+            foreach (var id in ids)
+            {
+                if (id <= 0 || !seen.Add(id)) continue;
+                result.Add(id);
+            }
+            return result;
+        }
+
         public async Task<DataListResult<Product>> GetProductsAsync(
             ProductFilter? filter,
             PagingExDto paging,
@@ -45,6 +57,8 @@ namespace George.Data
             // Lighter includes for list; ProductOption and ProductVariant only when requested (e.g. My Products page needs them for "with variations" filter)
             var query = _dbContext.Product
                 .Include(p => p.Brand)
+                .Include(p => p.ProductBrand)
+                    .ThenInclude(pb => pb.Brand)
                 .Include(p => p.Supplier)
                 .Include(p => p.Status)
                 .Include(p => p.Visibility)
@@ -179,6 +193,8 @@ namespace George.Data
 
             var query = _dbContext.Product
                 .Include(p => p.Brand)
+                .Include(p => p.ProductBrand)
+                    .ThenInclude(pb => pb.Brand)
                 .Include(p => p.Supplier)
                 .Include(p => p.Status)
                 .Include(p => p.Visibility)
@@ -247,7 +263,7 @@ namespace George.Data
                 .FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
         }
 
-        public async Task<Product> CreateProductAsync(Product product, List<int>? siteIds, List<int>? categoryIds, List<string>? tags, List<int>? relatedProductIds, List<int>? complementaryProductIds, CancellationToken cancelToken)
+        public async Task<Product> CreateProductAsync(Product product, List<int>? siteIds, List<int>? categoryIds, List<int>? brandIds, List<string>? tags, List<int>? relatedProductIds, List<int>? complementaryProductIds, CancellationToken cancelToken)
         {
             // Normalize empty SKU to NULL to avoid unique constraint violations
             if (string.IsNullOrWhiteSpace(product.Sku))
@@ -285,6 +301,41 @@ namespace George.Data
                         CategoryId = category.Id
                     });
                 }
+            }
+
+            // Brands (many-to-many). When brandIds is null, fall back to legacy Product.BrandId from MapLookups.
+            if (brandIds != null)
+            {
+                var ordered = DistinctPositiveIdsPreserveOrder(brandIds);
+                if (ordered.Count > 0)
+                {
+                    var accountId = product.AccountId;
+                    var valid = await _dbContext.Brand
+                        .Where(b => ordered.Contains(b.Id) && !b.IsDeleted && (!accountId.HasValue || b.AccountId == accountId))
+                        .Select(b => b.Id)
+                        .ToListAsync(cancelToken)
+                        .ConfigureAwait(false);
+                    var validSet = valid.ToHashSet();
+                    var hasPrimary = false;
+                    foreach (var bid in ordered)
+                    {
+                        if (!validSet.Contains(bid)) continue;
+                        product.ProductBrand.Add(new ProductBrand
+                        {
+                            BrandId = bid,
+                            IsPrimary = !hasPrimary,
+                        });
+                        hasPrimary = true;
+                    }
+                }
+            }
+            else if (product.BrandId.HasValue)
+            {
+                product.ProductBrand.Add(new ProductBrand
+                {
+                    BrandId = product.BrandId.Value,
+                    IsPrimary = true,
+                });
             }
 
             // Add tags
@@ -343,12 +394,13 @@ namespace George.Data
             return product;
         }
 
-        public async Task<Product?> UpdateProductAsync(Product updated, List<int>? siteIds, List<int>? categoryIds, List<string>? tags, List<int>? relatedProductIds, List<int>? complementaryProductIds, CancellationToken cancelToken)
+        public async Task<Product?> UpdateProductAsync(Product updated, List<int>? siteIds, List<int>? categoryIds, List<int>? brandIds, List<string>? tags, List<int>? relatedProductIds, List<int>? complementaryProductIds, CancellationToken cancelToken)
         {
             var dbProduct = await _dbContext.Product
                 .Include(p => p.Site)
                 .Include(p => p.Tag)
                 .Include(p => p.ProductCategory)
+                .Include(p => p.ProductBrand)
                 .Include(p => p.RelatedProduct)
                 .Include(p => p.ComplementaryProduct)
                 .FirstOrDefaultAsync(p => p.Id == updated.Id, cancelToken);
@@ -433,6 +485,35 @@ namespace George.Data
                             ProductId = dbProduct.Id,
                             CategoryId = category.Id
                         });
+                    }
+                }
+            }
+
+            // Update brands (many-to-many). Null brandIds = leave unchanged (partial updates).
+            if (brandIds != null)
+            {
+                dbProduct.ProductBrand.Clear();
+                var ordered = DistinctPositiveIdsPreserveOrder(brandIds);
+                if (ordered.Count > 0)
+                {
+                    var accountId = dbProduct.AccountId;
+                    var valid = await _dbContext.Brand
+                        .Where(b => ordered.Contains(b.Id) && !b.IsDeleted && (!accountId.HasValue || b.AccountId == accountId))
+                        .Select(b => b.Id)
+                        .ToListAsync(cancelToken)
+                        .ConfigureAwait(false);
+                    var validSet = valid.ToHashSet();
+                    var hasPrimary = false;
+                    foreach (var bid in ordered)
+                    {
+                        if (!validSet.Contains(bid)) continue;
+                        dbProduct.ProductBrand.Add(new ProductBrand
+                        {
+                            ProductId = dbProduct.Id,
+                            BrandId = bid,
+                            IsPrimary = !hasPrimary,
+                        });
+                        hasPrimary = true;
                     }
                 }
             }
@@ -1020,8 +1101,29 @@ namespace George.Data
                 product.SetupTypeId = st?.Id;
             }
 
-            // Map brand — free text from UI: find or create Brand for this account (same idea as TemplateProductStorage).
-            if (req.Brand.HasValue())
+            // Map brands: explicit IDs replace legacy single FK via ProductBrand (handled in Create/UpdateProductAsync).
+            if (req.BrandIds != null)
+            {
+                var ordered = DistinctPositiveIdsPreserveOrder(req.BrandIds);
+                if (ordered.Count == 0)
+                {
+                    product.BrandId = null;
+                }
+                else
+                {
+                    var accountId = product.AccountId;
+                    var valid = await _dbContext.Brand
+                        .Where(b => ordered.Contains(b.Id) && !b.IsDeleted && (!accountId.HasValue || b.AccountId == accountId))
+                        .Select(b => b.Id)
+                        .ToListAsync(cancelToken)
+                        .ConfigureAwait(false);
+                    var validSet = valid.ToHashSet();
+                    var first = ordered.FirstOrDefault(id => validSet.Contains(id));
+                    product.BrandId = first > 0 ? first : null;
+                }
+            }
+            // Legacy free-text brand (find/create). Only when BrandIds omitted — avoids wiping BrandId on partial updates.
+            else if (req.Brand.HasValue())
             {
                 var name = req.Brand.Trim();
                 var accountId = product.AccountId;
@@ -1041,10 +1143,6 @@ namespace George.Data
                 }
 
                 product.BrandId = brand.Id;
-            }
-            else
-            {
-                product.BrandId = null;
             }
 
             // Map supplier — find or create Supplier for this account.

@@ -50,6 +50,8 @@ namespace George.Services.Response
         public List<int> CategoryIds { get; set; } = new(); // GlobalCategory IDs
         public List<int> SubcategoryIds { get; set; } = new(); // GlobalCategory IDs
         public List<string> Tags { get; set; } = new();
+        /// <summary>Assigned global brand IDs (TemplateProductBrand). Legacy Brand.SourceGlobalBrandId included when join is empty.</summary>
+        public List<int> BrandIds { get; set; } = new();
         public string? Brand { get; set; }
         public string? Supplier { get; set; }
         public bool? IsKosher { get; set; }

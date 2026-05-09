@@ -182,11 +182,17 @@ namespace George.Services
 
         private static IEnumerable<int> GetDistinctBrandIdsForProduct(Product product)
         {
+            if (product.ProductBrand != null && product.ProductBrand.Count > 0)
+            {
+                var ordered = product.ProductBrand
+                    .OrderByDescending(pb => pb.IsPrimary)
+                    .ThenBy(pb => pb.BrandId);
+                foreach (var pb in ordered)
+                    yield return pb.BrandId;
+                yield break;
+            }
             if (product.BrandId.HasValue)
                 yield return product.BrandId.Value;
-            if (product.ProductBrand == null) yield break;
-            foreach (var pb in product.ProductBrand)
-                yield return pb.BrandId;
         }
 
         /// <summary>

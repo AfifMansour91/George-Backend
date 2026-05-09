@@ -64,6 +64,8 @@ namespace George.Services.Response
         public List<int> CategoryIds { get; set; } = new();
         public List<int> SubcategoryIds { get; set; } = new();
         public List<string> Tags { get; set; } = new();
+        /// <summary>Assigned account brand IDs (ProductBrand join; legacy Product.BrandId included when join is empty).</summary>
+        public List<int> BrandIds { get; set; } = new();
         public string? Brand { get; set; }
         public string? Supplier { get; set; }
         public bool? IsKosher { get; set; }

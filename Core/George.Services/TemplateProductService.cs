@@ -84,6 +84,7 @@ namespace George.Services
                 templateProduct, 
                 req.SiteIds, 
                 categoryIds,
+                req.BrandIds,
                 req.Tags,
                 req.RelatedProductIds,
                 req.ComplementaryProductIds,
@@ -156,6 +157,7 @@ namespace George.Services
                 templateProduct,
                 req.SiteIds,
                 categoryIdsToApply,
+                req.BrandIds,
                 req.Tags,
                 req.RelatedProductIds,
                 req.ComplementaryProductIds,
@@ -384,6 +386,7 @@ namespace George.Services
                             templateProduct,
                             req.SiteIds ?? productReq.SiteIds,
                             CombineCategoryIds(resolvedCategoryIds, resolvedSubcategoryIds),
+                            productReq.BrandIds,
                             productReq.Tags,
                             productReq.RelatedProductIds,
                             productReq.ComplementaryProductIds,
@@ -441,6 +444,7 @@ namespace George.Services
                             templateProduct,
                             req.SiteIds ?? productReq.SiteIds,
                             CombineCategoryIds(resolvedCategoryIds, resolvedSubcategoryIds),
+                            productReq.BrandIds,
                             productReq.Tags,
                             productReq.RelatedProductIds,
                             productReq.ComplementaryProductIds,
@@ -699,6 +703,28 @@ namespace George.Services
                 res.ComplementaryProductIds = templateProduct.ComplementaryTemplateProduct.Select(p => p.Id).ToList();
             }
 
+            // Global brands: prefer TemplateProductBrand; fall back to Brand.SourceGlobalBrandId
+            if (templateProduct.TemplateProductBrand != null && templateProduct.TemplateProductBrand.Count > 0)
+            {
+                var ordered = templateProduct.TemplateProductBrand
+                    .OrderByDescending(tpb => tpb.IsPrimary)
+                    .ThenBy(tpb => tpb.GlobalBrandId)
+                    .ToList();
+                var seen = new HashSet<int>();
+                res.BrandIds = new List<int>();
+                foreach (var tpb in ordered)
+                {
+                    if (seen.Add(tpb.GlobalBrandId))
+                        res.BrandIds.Add(tpb.GlobalBrandId);
+                }
+                res.Brand = ordered.FirstOrDefault()?.GlobalBrand?.Name ?? templateProduct.Brand?.Name;
+            }
+            else if (templateProduct.Brand?.SourceGlobalBrandId is int sgid && sgid > 0)
+            {
+                res.BrandIds = new List<int> { sgid };
+                res.Brand = templateProduct.Brand?.Name;
+            }
+
             // Map lookups
             res.Status = templateProduct.Status?.Name;
             res.Visibility = templateProduct.Visibility?.Name;
@@ -706,7 +732,8 @@ namespace George.Services
             res.StockStatus = templateProduct.StockStatus?.Name;
             res.ShippingClass = templateProduct.ShippingClass?.Name;
             res.SetupType = templateProduct.SetupType?.Name;
-            res.Brand = templateProduct.Brand?.Name;
+            if (string.IsNullOrEmpty(res.Brand))
+                res.Brand = templateProduct.Brand?.Name;
             res.Supplier = templateProduct.Supplier?.Name;
 
             // Map options
@@ -781,6 +808,7 @@ namespace George.Services
                 StockStatus = req.StockStatus,
                 ShippingClass = req.ShippingClass,
                 SetupType = req.SetupType,
+                BrandIds = req.BrandIds,
                 Brand = req.Brand,
                 Supplier = req.Supplier,
                 WeightConfig = req.WeightConfig != null ? new WeightConfigDto

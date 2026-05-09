@@ -175,6 +175,7 @@ namespace George.Services
                 product, 
                 req.SiteIds, 
                 CombineCategoryIds(req.CategoryIds, req.SubcategoryIds),
+                ResolveBrandIdsForPersistence(req, product),
                 req.Tags,
                 req.RelatedProductIds,
                 req.ComplementaryProductIds,
@@ -265,6 +266,7 @@ namespace George.Services
                 product,
                 req.SiteIds,
                 categoryIdsToApply,
+                ResolveBrandIdsForPersistence(req, product),
                 req.Tags,
                 req.RelatedProductIds,
                 req.ComplementaryProductIds,
@@ -661,6 +663,7 @@ namespace George.Services
                             product,
                             siteIdsForUpdate,
                             CombineCategoryIds(resolvedCategoryIds, resolvedSubcategoryIds),
+                            ResolveBrandIdsForPersistence(productReq, product),
                             productReq.Tags,
                             productReq.RelatedProductIds,
                             productReq.ComplementaryProductIds,
@@ -727,6 +730,7 @@ namespace George.Services
                             product,
                             targetSiteIds,
                             CombineCategoryIds(resolvedCategoryIds, resolvedSubcategoryIds),
+                            ResolveBrandIdsForPersistence(productReq, product),
                             productReq.Tags,
                             productReq.RelatedProductIds,
                             productReq.ComplementaryProductIds,
@@ -1080,6 +1084,28 @@ namespace George.Services
                 res.ComplementaryProductIds = product.ComplementaryProduct.Select(p => p.Id).ToList();
             }
 
+            // Brands: prefer many-to-many join; fall back to legacy Product.BrandId
+            if (product.ProductBrand != null && product.ProductBrand.Count > 0)
+            {
+                var orderedBrands = product.ProductBrand
+                    .OrderByDescending(pb => pb.IsPrimary)
+                    .ThenBy(pb => pb.BrandId)
+                    .ToList();
+                var seenIds = new HashSet<int>();
+                res.BrandIds = new List<int>();
+                foreach (var pb in orderedBrands)
+                {
+                    if (seenIds.Add(pb.BrandId))
+                        res.BrandIds.Add(pb.BrandId);
+                }
+                res.Brand = orderedBrands.FirstOrDefault()?.Brand?.Name ?? product.Brand?.Name;
+            }
+            else if (product.BrandId.HasValue)
+            {
+                res.BrandIds = new List<int> { product.BrandId.Value };
+                res.Brand = product.Brand?.Name;
+            }
+
             // Map lookups
             res.Status = product.Status?.Name;
             res.Visibility = product.Visibility?.Name;
@@ -1087,7 +1113,8 @@ namespace George.Services
             res.StockStatus = product.StockStatus?.Name;
             res.ShippingClass = product.ShippingClass?.Name;
             res.SetupType = product.SetupType?.Name;
-            res.Brand = product.Brand?.Name;
+            if (string.IsNullOrEmpty(res.Brand))
+                res.Brand = product.Brand?.Name;
             res.Supplier = product.Supplier?.Name;
 
             // Map options
@@ -1153,6 +1180,19 @@ namespace George.Services
             return combined;
         }
 
+        /// <summary>
+        /// Null = do not change ProductBrand rows (partial update). Non-null = replace join (may be empty).
+        /// When only legacy <see cref="ProductReq.Brand"/> is sent, rebuild join from resolved <see cref="Product.BrandId"/>.
+        /// </summary>
+        private static List<int>? ResolveBrandIdsForPersistence(ProductReq req, Product productAfterLookups)
+        {
+            if (req.BrandIds != null)
+                return req.BrandIds;
+            if (req.Brand != null && req.Brand.HasValue())
+                return productAfterLookups.BrandId.HasValue ? new List<int> { productAfterLookups.BrandId.Value } : new List<int>();
+            return null;
+        }
+
         private ProductLookupDto MapToLookupDto(ProductReq req)
         {
             return new ProductLookupDto
@@ -1163,6 +1203,7 @@ namespace George.Services
                 StockStatus = req.StockStatus,
                 ShippingClass = req.ShippingClass,
                 SetupType = req.SetupType,
+                BrandIds = req.BrandIds,
                 Brand = req.Brand,
                 Supplier = req.Supplier,
                 WeightConfig = req.WeightConfig != null ? new WeightConfigDto

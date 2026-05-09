@@ -62,6 +62,8 @@ namespace George.Services.Request
         public List<int>? CategoryIds { get; set; }
         public List<int>? SubcategoryIds { get; set; }
         public List<string>? Tags { get; set; }
+        /// <summary>Account brand IDs (many-to-many). When set (including empty), replaces ProductBrand rows. Omit for partial updates.</summary>
+        public List<int>? BrandIds { get; set; }
         public string? Brand { get; set; }
         public string? Supplier { get; set; }
         public bool? IsKosher { get; set; }
