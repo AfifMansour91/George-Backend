@@ -428,11 +428,14 @@ public partial class WooCommerceService
         if (wp.images is { Count: > 0 })
         {
             var ordered = wp.images.OrderBy(i => i.position).ToList();
+            var seenUrls = new HashSet<string>(StringComparer.Ordinal);
             var sort = 0;
             foreach (var img in ordered)
             {
                 var url = img.src?.Trim();
                 if (string.IsNullOrWhiteSpace(url)) continue;
+                if (!seenUrls.Add(url))
+                    continue;
                 db.ProductImage.Add(new ProductImage
                 {
                     ProductId = product.Id,
