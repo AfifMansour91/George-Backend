@@ -47,6 +47,14 @@ namespace George.Services.Response
         public int Updated { get; set; }
     }
 
+    /// <summary>Woo product REST <c>id</c> that appeared more than once in the merged import feed (same id, multiple JSON rows).</summary>
+    public class WooCommerceImportFeedDuplicateRow
+    {
+        public int WooProductId { get; set; }
+        public int RowCount { get; set; }
+        public string? NameHint { get; set; }
+    }
+
     public class WooCommerceImportFromWooRes
     {
         public string Message { get; set; } = string.Empty;
@@ -55,6 +63,15 @@ namespace George.Services.Response
         public WooCommerceImportEntityCounts Products { get; set; } = new();
         public WooCommerceImportEntityCounts Variations { get; set; } = new();
         public List<string> Errors { get; set; } = new();
+
+        /// <summary>Woo REST rows with valid product id after merging <c>status=any</c> + <c>trash</c>, before de-duplicating repeated ids in the feed.</summary>
+        public int WooProductFeedRowCount { get; set; }
+
+        /// <summary>Distinct Woo product REST ids actually imported (one local row per id).</summary>
+        public int WooProductUniqueIdCount { get; set; }
+
+        /// <summary>Each Woo product id that occurred more than once in the raw feed (empty when there are no duplicate rows).</summary>
+        public List<WooCommerceImportFeedDuplicateRow> WooProductFeedDuplicates { get; set; } = new();
     }
 
     /// <summary>Progress during Woo → George catalog import (streamed as NDJSON).</summary>

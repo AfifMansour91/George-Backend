@@ -275,7 +275,54 @@ namespace George.Services
                 importProgress?.Report(new WooCommerceImportProgress { Phase = "fetch", Total = 2, Completed = 0 });
                 var wooCategories = await FetchWooPagedAsync<WooImportCategoryItem>(httpClient, $"{baseUrl}/products/categories", cancelToken);
                 importProgress?.Report(new WooCommerceImportProgress { Phase = "fetch", Total = 2, Completed = 1 });
-                var wooProducts = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products", cancelToken);
+                // Include draft/private/pending/future (status=any). Woo often keeps trashed posts out of "any" — merge a trash pass so counts match admin "All".
+                var wooProductsRaw = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products?status=any", cancelToken);
+                try
+                {
+                    var trashedRows = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products?status=trash", cancelToken);
+                    if (trashedRows.Count > 0)
+                    {
+                        // Same post id must not appear twice in the merged feed (avoids false "duplicate" counts when any+trash overlap or plugins echo rows).
+                        var idsAlready = wooProductsRaw.Where(w => w.id > 0).Select(w => w.id).ToHashSet();
+                        var trashOnlyNew = trashedRows.Where(t => t.id > 0 && !idsAlready.Contains(t.id)).ToList();
+                        var skippedTrashOverlap = trashedRows.Count - trashOnlyNew.Count;
+                        if (skippedTrashOverlap > 0)
+                        {
+                            _logger.LogInformation(
+                                "WooCommerce import: skipped {Skipped} trash product row(s) whose id already existed in the status=any feed (same Woo id in both lists).",
+                                skippedTrashOverlap);
+                        }
+                        if (trashOnlyNew.Count > 0)
+                        {
+                            var before = wooProductsRaw.Count;
+                            wooProductsRaw = wooProductsRaw.Concat(trashOnlyNew).ToList();
+                            _logger.LogInformation(
+                                "WooCommerce import: merged {TrashRows} trash-only product row(s) into feed ({Before} → {After} rows before REST id de-dupe).",
+                                trashOnlyNew.Count,
+                                before,
+                                wooProductsRaw.Count);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "WooCommerce import: optional products?status=trash fetch failed; continuing with status=any only.");
+                }
+
+                var wooProducts = DedupeWooImportProductsByRestId(wooProductsRaw);
+                var feedRowCountWithId = wooProductsRaw.Count(w => w.id > 0);
+                var uniqueIdCount = wooProducts.Count(w => w.id > 0);
+                response.Data.WooProductFeedRowCount = feedRowCountWithId;
+                response.Data.WooProductUniqueIdCount = uniqueIdCount;
+                response.Data.WooProductFeedDuplicates = BuildWooProductFeedDuplicateRows(wooProductsRaw);
+                if (wooProducts.Count < wooProductsRaw.Count)
+                {
+                    _logger.LogWarning(
+                        "WooCommerce import: product feed contained {Dup} duplicate REST id row(s) ({Raw} rows, {Unique} unique).",
+                        wooProductsRaw.Count - wooProducts.Count,
+                        wooProductsRaw.Count,
+                        wooProducts.Count);
+                }
                 importProgress?.Report(new WooCommerceImportProgress { Phase = "fetch", Total = 2, Completed = 2 });
 
                 using var scope = _scopeFactory.CreateScope();
@@ -300,10 +347,24 @@ namespace George.Services
                 var brandMap = await UpsertBrandsFromWooAsync(db, siteForImport, siteForImport.AccountId, httpClient, baseUrl, response.Data, cancelToken);
                 importProgress?.Report(new WooCommerceImportProgress { Phase = "brands", Total = 1, Completed = 1 });
 
-                await UpsertProductsFromWooAsync(db, siteForImport, baseUrl, httpClient, wooProducts, categoryMap, brandMap, importLookups, response.Data, importProgress, cancelToken);
+                await UpsertProductsFromWooAsync(
+                    db,
+                    siteForImport,
+                    baseUrl,
+                    httpClient,
+                    wooProducts,
+                    categoryMap,
+                    brandMap,
+                    importLookups,
+                    response.Data,
+                    importProgress,
+                    cancelToken);
 
                 await tx.CommitAsync(cancelToken);
-                response.Data.Message = $"Imported from WooCommerce: {wooCategories.Count} categories, {brandMap.Count} brands, and {wooProducts.Count} products processed.";
+                var dupRows = feedRowCountWithId - uniqueIdCount;
+                response.Data.Message = dupRows > 0
+                    ? $"Imported from WooCommerce: {wooCategories.Count} categories, {brandMap.Count} brands, {uniqueIdCount} unique Woo products ({feedRowCountWithId} API rows; {dupRows} duplicate id row(s) in the feed were merged into one product each)."
+                    : $"Imported from WooCommerce: {wooCategories.Count} categories, {brandMap.Count} brands, and {uniqueIdCount} unique Woo products processed.";
                 return response;
             }
             catch (Exception ex)
@@ -2571,6 +2632,55 @@ namespace George.Services
             return items;
         }
 
+        /// <summary>
+        /// Woo feed can contain duplicate REST rows for the same product id (bad cache / plugins / double page).
+        /// Import stats and progress must follow unique Woo ids so counts match persisted products.
+        /// </summary>
+        private static List<WooImportProductItem> DedupeWooImportProductsByRestId(List<WooImportProductItem> items)
+        {
+            return items
+                .Where(wp => wp.id > 0)
+                .GroupBy(wp => wp.id)
+                .Select(g => g.First())
+                .ToList();
+        }
+
+        /// <summary>Woo ids that appeared more than once in the merged product feed (for support / UI).</summary>
+        private static List<WooCommerceImportFeedDuplicateRow> BuildWooProductFeedDuplicateRows(List<WooImportProductItem> raw)
+        {
+            return raw
+                .Where(w => w.id > 0)
+                .GroupBy(w => w.id)
+                .Where(g => g.Count() > 1)
+                .Select(g =>
+                {
+                    var first = g.First();
+                    string? hint = null;
+                    if (!string.IsNullOrWhiteSpace(first.name))
+                        hint = first.name.Trim();
+                    else if (!string.IsNullOrWhiteSpace(first.slug))
+                        hint = first.slug.Trim();
+                    return new WooCommerceImportFeedDuplicateRow
+                    {
+                        WooProductId = g.Key,
+                        RowCount = g.Count(),
+                        NameHint = hint
+                    };
+                })
+                .OrderBy(x => x.WooProductId)
+                .ToList();
+        }
+
+        /// <summary>Woo sometimes returns blank <c>name</c>; use slug or id so the row is still imported.</summary>
+        private static string ResolveWooImportProductDisplayName(WooImportProductItem wp)
+        {
+            if (!string.IsNullOrWhiteSpace(wp.name))
+                return wp.name.Trim();
+            if (!string.IsNullOrWhiteSpace(wp.slug))
+                return wp.slug.Trim();
+            return $"Product #{wp.id}";
+        }
+
         /// <summary>Stable key for matching local categories to Woo rows by parent + name (same name under different parents must not collide).</summary>
         private static string WooImportCategoryCompositeKey(int? parentCategoryId, string nameTrimmed) =>
             $"{(parentCategoryId?.ToString(CultureInfo.InvariantCulture) ?? "root")}\x1e{(nameTrimmed ?? "").Trim()}";
@@ -2727,6 +2837,7 @@ namespace George.Services
         {
             var siteId = site.Id;
             var accountId = site.AccountId;
+            // Match only catalog rows already on THIS site. Same SKU/name/Woo id on another site → not in this set → import creates a new Product and links it here (multi-site catalog).
             var existingProducts = await db.Product
                 .Include(p => p.Site)
                 .Include(p => p.ProductCategory)
@@ -2747,10 +2858,13 @@ namespace George.Services
                 .GroupBy(p => p.Sku!.Trim(), StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
-            var eligibleProducts = wooProducts.Where(wp => wp.id > 0 && !string.IsNullOrWhiteSpace(wp.name)).ToList();
+            var eligibleProducts = wooProducts.Where(wp => wp.id > 0).ToList();
+            // Progress matches what we actually persist: one step per distinct Woo product id (duplicate rows in the feed are merged upstream).
             var productTotal = eligibleProducts.Count;
             importProgress?.Report(new WooCommerceImportProgress { Phase = "products", Total = productTotal, Completed = 0 });
             var completedProducts = 0;
+            /** One Created/Updated stat per local Product.Id (two Woo parents can share SKU → same row; duplicate ids already stripped upstream). */
+            var importProductStatsIds = new HashSet<int>();
 
             for (var offset = 0; offset < eligibleProducts.Count; offset += WooImportProductBatchSize)
             {
@@ -2779,9 +2893,14 @@ namespace George.Services
                     if (byWooId.TryGetValue(wp.id, out var existingByWoo))
                         product = existingByWoo;
                     else if (!string.IsNullOrWhiteSpace(wp.sku) && bySku.TryGetValue(wp.sku.Trim(), out var existingBySku))
-                        product = existingBySku;
+                    {
+                        // Two different Woo ids must not share one local row (duplicate SKUs in Woo are common).
+                        // SKU match only when this row is still unlinked to Woo, or already this Woo id.
+                        if (existingBySku.WooCommerceId == null || existingBySku.WooCommerceId == wp.id)
+                            product = existingBySku;
+                    }
 
-                    var isCreate = product == null;
+                    bool isCreate = product == null;
                     if (isCreate)
                     {
                         product = new Product
@@ -2794,11 +2913,9 @@ namespace George.Services
                         };
                         product.Site.Add(site);
                         db.Product.Add(product);
-                        stats.Products.Created++;
                     }
                     else
                     {
-                        stats.Products.Updated++;
                         if (!product!.Site.Any(s => s.Id == siteId))
                             product.Site.Add(site);
                         product.IsDeleted = false;
@@ -2808,7 +2925,28 @@ namespace George.Services
                     if (product == null)
                         continue;
 
-                    product.Name = wp.name.Trim();
+                    // Rare: two Woo rows resolved to the same tracked local row in one run (e.g. odd DB state). Skipping drops Woo ids from the catalog — always persist one row per Woo id.
+                    if (product.Id != 0 && importProductStatsIds.Contains(product.Id))
+                    {
+                        _logger.LogWarning(
+                            "WooCommerce import: Woo product id {WooId} (SKU {Sku}) resolved to local product {LocalId} already updated in this run — creating a new local product for this Woo id.",
+                            wp.id,
+                            wp.sku ?? "",
+                            product.Id);
+                        product = new Product
+                        {
+                            AccountId = accountId,
+                            GuidId = Guid.NewGuid(),
+                            CreationTime = DateTime.UtcNow,
+                            IsDeleted = false,
+                            IsActive = true
+                        };
+                        product.Site.Add(site);
+                        db.Product.Add(product);
+                        isCreate = true;
+                    }
+
+                    product.Name = ResolveWooImportProductDisplayName(wp);
                     product.ShortDescription = wp.short_description;
                     product.LongDescription = wp.description;
                     product.Sku = string.IsNullOrWhiteSpace(wp.sku) ? null : wp.sku.Trim();
@@ -2819,6 +2957,14 @@ namespace George.Services
                     product.StockQuantity = wp.manage_stock == true ? wp.stock_quantity : null;
 
                     await db.SaveChangesAsync(cancelToken);
+
+                    if (importProductStatsIds.Add(product.Id))
+                    {
+                        if (isCreate)
+                            stats.Products.Created++;
+                        else
+                            stats.Products.Updated++;
+                    }
 
                     db.ProductCategory.RemoveRange(db.ProductCategory.Where(x => x.ProductId == product.Id));
                     var optionIds = product.ProductOption.Select(o => o.Id).ToList();

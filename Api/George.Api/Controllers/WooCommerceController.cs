@@ -147,7 +147,10 @@ namespace George.Api.Controllers
                     categories = new { created = d.Categories.Created, updated = d.Categories.Updated },
                     products = new { created = d.Products.Created, updated = d.Products.Updated },
                     variations = new { created = d.Variations.Created, updated = d.Variations.Updated },
-                    errors = d.Errors
+                    errors = d.Errors,
+                    wooProductFeedRowCount = d.WooProductFeedRowCount,
+                    wooProductUniqueIdCount = d.WooProductUniqueIdCount,
+                    wooProductFeedDuplicates = d.WooProductFeedDuplicates
                 });
             }
             catch (Exception ex)
