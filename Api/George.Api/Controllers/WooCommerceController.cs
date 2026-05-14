@@ -293,7 +293,7 @@ namespace George.Api.Controllers
             });
         }
 
-        /// <summary>Record payment from WooCommerce (invoice, Cardcom <c>cardcomPayment</c> JSON, <c>status</c>). Use <c>orderNumber</c> and/or <c>orderId</c> (WooCommerce id). Auth: X-Api-Key or Bearer &lt;key&gt;.</summary>
+        /// <summary>Record payment from WooCommerce (root <c>orderId</c>, <c>orderNumber</c>, <c>payment</c>, <c>status</c>, etc.). Auth: X-Api-Key or Bearer &lt;key&gt;.</summary>
         [HttpPost("OrderPayment")]
         [Authorize(AuthenticationSchemes = WooCommerceApiKeyAuthenticationHandler.SchemeName)]
         [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]
@@ -310,6 +310,11 @@ namespace George.Api.Controllers
                 _logger.LogWarning("WooCommerce OrderPayment: empty body (null payload).");
                 return BadRequest();
             }
+            payload.NormalizeWooCommercePaymentRequest();
+            _logger.LogInformation(
+                "WooCommerce OrderPayment full payload (after normalize). siteId={SiteId}, fullPayload={FullPayload}",
+                siteId.Value,
+                SerializeOrderPaymentPayloadForLog(payload));
             var hasCardcom = payload.CardcomPayment != null && payload.CardcomPayment.Type != JTokenType.Null;
             _logger.LogInformation(
                 "WooCommerce OrderPayment request received. siteId={SiteId}, orderNumber={OrderNumber}, orderId={OrderId}, gatewayStatus={GatewayStatus}, hasCardcomPayment={HasCardcom}, headers={Headers}",
@@ -373,6 +378,27 @@ namespace George.Api.Controllers
             catch
             {
                 return data.ToString() ?? "null";
+            }
+        }
+
+        /// <summary>Newtonsoft JSON (contract fields + <c>JToken</c>); internal <c>[JsonIgnore]</c> merge fields may be omitted from this string.</summary>
+        private static string SerializeOrderPaymentPayloadForLog(WooCommerceOrderPaymentPayload payload)
+        {
+            try
+            {
+                return Newtonsoft.Json.JsonConvert.SerializeObject(
+                    payload,
+                    Newtonsoft.Json.Formatting.None,
+                    new Newtonsoft.Json.JsonSerializerSettings
+                    {
+                        NullValueHandling = Newtonsoft.Json.NullValueHandling.Include,
+                        DefaultValueHandling = Newtonsoft.Json.DefaultValueHandling.Include,
+                        ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore
+                    });
+            }
+            catch (Exception ex)
+            {
+                return $"<serialize error: {ex.Message}>";
             }
         }
 

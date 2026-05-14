@@ -2110,13 +2110,14 @@ namespace George.Services
         public async Task<IApiResponse<OrderRes>> RecordPaymentFromWooCommerceAsync(int siteId, WooCommerceOrderPaymentPayload payment, CancellationToken cancelToken = default)
         {
             var response = new ApiResponse<OrderRes>();
+            payment.NormalizeWooCommercePaymentRequest();
             var externalKey = payment.ResolveExternalOrderKey();
             if (string.IsNullOrWhiteSpace(externalKey))
             {
                 _logger.LogWarning(
-                    "WooCommerce OrderPayment rejected: orderNumber and orderId missing. siteId={SiteId}",
+                    "WooCommerce OrderPayment rejected: orderNumber, orderId, and externalOrderId missing. siteId={SiteId}",
                     siteId);
-                return CreateResponse(response, StatusCode.InvalidRequest, "orderNumber or orderId is required.");
+                return CreateResponse(response, StatusCode.InvalidRequest, "orderNumber, orderId, or externalOrderId is required.");
             }
             var order = await _orderStorage.GetOrderBySiteAndExternalIdAsync(siteId, externalKey, cancelToken).ConfigureAwait(false);
             if (order == null)
@@ -2126,7 +2127,8 @@ namespace George.Services
                     siteId, externalKey, payment.Status);
                 return CreateResponse(response, StatusCode.ItemNotFound, "Order not found.");
             }
-            var treatAsPaid = IsSuccessfulWooCommerceGatewayPaymentStatus(payment.Status);
+            var treatAsPaid = IsSuccessfulWooCommerceGatewayPaymentStatus(payment.Status)
+                && HasWooCommercePaidTransactionWhenRequired(payment);
             var cardcomJson = SerializeCardcomPaymentToken(payment.CardcomPayment);
             var cardcomChars = cardcomJson?.Length ?? 0;
             _logger.LogInformation(
@@ -2172,6 +2174,14 @@ namespace George.Services
             if (s is "failed" or "fail" or "error" or "declined" or "rejected" or "cancelled" or "canceled") return false;
             if (s.Contains("declin", StringComparison.Ordinal) || s.Contains("fail", StringComparison.Ordinal)) return false;
             return true;
+        }
+
+        /// <summary>When root <c>payment</c> is sent, a non-empty <c>transactionId</c> is required to mark paid; legacy bodies without <c>payment</c> unchanged.</summary>
+        private static bool HasWooCommercePaidTransactionWhenRequired(WooCommerceOrderPaymentPayload payment)
+        {
+            if (!payment.RequiresGatewayTransactionIdForPaid())
+                return true;
+            return !string.IsNullOrWhiteSpace(payment.ResolveGatewayTransactionIdForPaid());
         }
 
         /// <summary>

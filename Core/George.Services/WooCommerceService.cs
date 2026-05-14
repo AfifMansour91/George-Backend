@@ -13,12 +13,14 @@ using George.Data;
 using George.DB;
 using George.Services.Request;
 using George.Services.Response;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using Attribute = George.DB.Attribute;
 using System.Globalization;
+using ImageMagick;
 
 namespace George.Services
 {
@@ -42,6 +44,8 @@ namespace George.Services
         private readonly AttributeStorage _attributeStorage;
         private readonly OrderStorage _orderStorage;
         private readonly BrandStorage _brandStorage;
+        private readonly MediaStorage _mediaStorage;
+        private readonly IFileStorage _fileStorage;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IServiceScopeFactory _scopeFactory;
 
@@ -55,6 +59,8 @@ namespace George.Services
             AttributeStorage attributeStorage,
             OrderStorage orderStorage,
             BrandStorage brandStorage,
+            MediaStorage mediaStorage,
+            IFileStorage fileStorage,
             IHttpClientFactory httpClientFactory,
             IServiceScopeFactory scopeFactory
         ) : base(logger, mapper, cache)
@@ -65,6 +71,8 @@ namespace George.Services
             _attributeStorage = attributeStorage;
             _orderStorage = orderStorage;
             _brandStorage = brandStorage;
+            _mediaStorage = mediaStorage;
+            _fileStorage = fileStorage;
             _httpClientFactory = httpClientFactory;
             _scopeFactory = scopeFactory;
         }
@@ -1357,6 +1365,7 @@ namespace George.Services
                     .OrderBy(pi => pi.SortOrder)
                     .Where(pi => IsPublicImageUrl(pi.Url))
                     .ToList() ?? new List<ProductImage>();
+                var wpJsonBaseForMedia = GetWordPressRestBaseUrlFromWooV3BaseUrl(baseUrl);
                 var images = new List<object>();
                 for (var i = 0; i < ourProductImages.Count; i++)
                 {
@@ -1368,27 +1377,87 @@ namespace George.Services
                     {
                         try
                         {
-                            var lastSegment = new Uri(url, UriKind.RelativeOrAbsolute).Segments.LastOrDefault()?.Trim('/');
+                            var lastSegment = new Uri(url, UriKind.Absolute).Segments.LastOrDefault()?.Trim('/');
                             if (!string.IsNullOrEmpty(lastSegment))
                                 friendlyName = lastSegment;
                         }
                         catch { /* ignore URI parse */ }
                     }
+
+                    // Same as media library "download to our storage": persist JPEG to our bucket/disk and point Media + ProductImage at the public URL, then WooCommerce sideloads that URL like any normal product image.
+                    if (pi.MediaId.HasValue && await ImageRequiresJpegMediaUploadForWooAsync(url, friendlyName, cancelToken).ConfigureAwait(false))
+                    {
+                        var mirroredUrl = await TryMirrorProductImageToOurStorageForWooAsync(pi.MediaId.Value, url, cancelToken).ConfigureAwait(false);
+                        if (!string.IsNullOrEmpty(mirroredUrl))
+                        {
+                            url = mirroredUrl;
+                            _logger.LogInformation("Woo sync: mirrored product image to our storage for product {ProductId}, media {MediaId}", product.Id, pi.MediaId.Value);
+                        }
+                    }
+
+                    // Modern formats (AVIF/HEIF/WebP) and negotiation CDNs (e.g. Wolt imageproxy) often fail WooCommerce URL sideload on WordPress; upload JPEG via wp/v2/media then attach by id.
+                    if (await ImageRequiresJpegMediaUploadForWooAsync(url, friendlyName, cancelToken).ConfigureAwait(false))
+                    {
+                        var compatFile = $"george-woo-{product.Id}-{i}.jpg";
+                        if (existingWooImages != null)
+                        {
+                            var compatMatch = existingWooImages.FirstOrDefault(ex =>
+                                string.Equals((ex.name ?? "").Trim(), compatFile, StringComparison.OrdinalIgnoreCase));
+                            if (compatMatch.id != 0)
+                            {
+                                images.Add(new { id = compatMatch.id, position });
+                                continue;
+                            }
+                        }
+
+                        byte[] jpegBytes;
+                        try
+                        {
+                            jpegBytes = await DownloadImageAndEncodeAsJpegAsync(url, cancelToken).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Woo sync: could not re-encode image to JPEG for product {ProductId}, url={Url}", product.Id, url);
+                            if (TryAppendWoltJpegFormatQuery(url, out var woltAfterDecodeFail))
+                            {
+                                _logger.LogInformation("Woo sync: using Wolt JPEG URL sideload after decode failure product {ProductId}.", product.Id);
+                                images.Add(new { src = woltAfterDecodeFail, name = compatFile, position });
+                            }
+
+                            continue;
+                        }
+
+                        var uploadResult = await TryUploadJpegToWordPressMediaLibraryAsync(httpClient, wpJsonBaseForMedia, jpegBytes, compatFile, cancelToken).ConfigureAwait(false);
+                        if (uploadResult.MediaId.HasValue)
+                            images.Add(new { id = uploadResult.MediaId.Value, position });
+                        else if (TryAppendWoltJpegFormatQuery(url, out var woltJpegSideloadUrl))
+                        {
+                            _logger.LogInformation(
+                                "Woo sync: wp/v2/media failed ({Status}) for product {ProductId}; using Wolt JPEG URL sideload (format=jpg).",
+                                uploadResult.HttpStatus, product.Id);
+                            images.Add(new { src = woltJpegSideloadUrl, name = compatFile, position });
+                        }
+                        else
+                            _logger.LogWarning("Woo sync: wp/v2/media upload failed for product {ProductId}, file {File}; image skipped.", product.Id, compatFile);
+                        continue;
+                    }
+
+                    // WordPress sideload derives the upload file type from the filename; extensionless URLs (e.g. CDN asset IDs) fail with "not allowed to upload this file type".
+                    var sideloadFileName = await ResolveWooImageSideloadFileNameAsync(url, friendlyName, cancelToken).ConfigureAwait(false);
+
                     if (existingWooImages != null)
                     {
-                        // Match by name first (system/WooCommerce image name), then by URL
-                        var match = default((int id, string? src, string? name));
-                        if (!string.IsNullOrEmpty(friendlyName))
-                            match = existingWooImages.FirstOrDefault(ex => string.Equals((ex.name ?? "").Trim(), friendlyName, StringComparison.OrdinalIgnoreCase));
+                        // Match by attachment name (with/without extension) so re-sync does not duplicate after Woo rewrites src to local URLs.
+                        var match = existingWooImages.FirstOrDefault(ex => WooProductImageAttachmentNameMatchesHint(ex.name, friendlyName, sideloadFileName));
                         if (match.id == 0)
                             match = existingWooImages.FirstOrDefault(ex => string.Equals((ex.src ?? "").Trim(), url, StringComparison.OrdinalIgnoreCase));
                         if (match.id != 0)
                             images.Add(new { id = match.id, position });
                         else
-                            images.Add(string.IsNullOrEmpty(friendlyName) ? (object)new { src = url, position } : new { src = url, name = friendlyName, position });
+                            images.Add(new { src = url, name = sideloadFileName, position });
                     }
                     else
-                        images.Add(string.IsNullOrEmpty(friendlyName) ? (object)new { src = url, position } : new { src = url, name = friendlyName, position });
+                        images.Add(new { src = url, name = sideloadFileName, position });
                 }
 
                 // Map tags
@@ -2117,6 +2186,7 @@ namespace George.Services
                 .ToDictionary(g => g.Key, g => g.Select(x => x.id).ToList());
 
             var usedWooVariationIds = new HashSet<int>();
+            var wpJsonBaseForMedia = GetWordPressRestBaseUrlFromWooV3BaseUrl(baseUrl);
 
             // Per-variation stock in Woo whenever George uses stock_management_type "variation" (qty or binary in/out).
             // When VariationStockByQuantity is false, each variant still uses StockQuantity as 0/1 for in/out — we must not send parent stock_status for every line or Woo never reflects per-variation toggles.
@@ -2202,7 +2272,57 @@ namespace George.Services
                             ? variant.StockQuantity ?? 0
                             : ((variant.StockQuantity ?? 0) > 0 ? 1m : 0m);
                     if (!string.IsNullOrEmpty(variant.ImageUrl))
-                        wooVariation["image"] = new { src = variant.ImageUrl };
+                    {
+                        var vUrl = variant.ImageUrl.Trim();
+                        if (await ImageRequiresJpegMediaUploadForWooAsync(vUrl, variant.Sku, cancelToken).ConfigureAwait(false))
+                        {
+                            var compatFile = $"george-woo-var-{product.Id}-{variant.Id}.jpg";
+                            int? mediaId = null;
+                            if (wooVariationIdToUse.HasValue)
+                                mediaId = await TryGetWooVariationCompatImageMediaIdAsync(baseUrl, wooProductId, wooVariationIdToUse.Value, compatFile, httpClient, cancelToken).ConfigureAwait(false);
+
+                            string? woltSideloadSrc = null;
+                            if (!mediaId.HasValue)
+                            {
+                                try
+                                {
+                                    var jpegBytes = await DownloadImageAndEncodeAsJpegAsync(vUrl, cancelToken).ConfigureAwait(false);
+                                    var uploadResult = await TryUploadJpegToWordPressMediaLibraryAsync(httpClient, wpJsonBaseForMedia, jpegBytes, compatFile, cancelToken).ConfigureAwait(false);
+                                    mediaId = uploadResult.MediaId;
+                                    if (!mediaId.HasValue && TryAppendWoltJpegFormatQuery(vUrl, out var woltJpegSideloadUrl))
+                                    {
+                                        _logger.LogInformation(
+                                            "Woo sync: wp/v2/media failed ({Status}) for product {ProductId} variant {VariantId}; using Wolt JPEG URL sideload.",
+                                            uploadResult.HttpStatus, product.Id, variant.Id);
+                                        woltSideloadSrc = woltJpegSideloadUrl;
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Woo sync: could not re-encode variation image to JPEG product {ProductId} variant {VariantId}", product.Id, variant.Id);
+                                    if (TryAppendWoltJpegFormatQuery(vUrl, out var woltJpegSideloadUrl))
+                                    {
+                                        _logger.LogInformation(
+                                            "Woo sync: using Wolt JPEG URL sideload after decode failure product {ProductId} variant {VariantId}.",
+                                            product.Id, variant.Id);
+                                        woltSideloadSrc = woltJpegSideloadUrl;
+                                    }
+                                }
+                            }
+
+                            if (mediaId.HasValue)
+                                wooVariation["image"] = new { id = mediaId.Value };
+                            else if (woltSideloadSrc != null)
+                                wooVariation["image"] = new { src = woltSideloadSrc, name = compatFile };
+                            else
+                                _logger.LogWarning("Woo sync: variation image skipped (JPEG upload path) product {ProductId} variant {VariantId}", product.Id, variant.Id);
+                        }
+                        else
+                        {
+                            var variationImageFileName = await ResolveWooImageSideloadFileNameAsync(vUrl, variant.Sku, cancelToken).ConfigureAwait(false);
+                            wooVariation["image"] = new { src = vUrl, name = variationImageFileName };
+                        }
+                    }
 
                     int? wooVariationId = null;
 
@@ -2460,6 +2580,364 @@ namespace George.Services
             return true;
         }
 
+        private static readonly string[] WooSideloadRecognizedImageExtensions =
+        {
+            ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".ico", ".svg"
+        };
+
+        private static bool FileNameHasRecognizedImageExtension(string? fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName)) return false;
+            var ext = Path.GetExtension(fileName.Trim());
+            return WooSideloadRecognizedImageExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static string SanitizeWooSideloadFileNameStem(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return "";
+            var s = Path.GetFileName(raw.Trim());
+            if (string.IsNullOrEmpty(s)) return "";
+            s = Regex.Replace(s, @"[^\w\-\.\u0590-\u05FF]+", "_", RegexOptions.CultureInvariant).Trim('_', '.');
+            return string.IsNullOrEmpty(s) ? "" : s;
+        }
+
+        private static bool FileNamesEqualIgnoringExtension(string a, string b)
+        {
+            a = Path.GetFileName(a.Trim());
+            b = Path.GetFileName(b.Trim());
+            if (a.Length == 0 || b.Length == 0) return false;
+            return string.Equals(Path.GetFileNameWithoutExtension(a), Path.GetFileNameWithoutExtension(b), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool WooProductImageAttachmentNameMatchesHint(string? attachmentName, string? friendlyNameHint, string sideloadFileName)
+        {
+            if (string.IsNullOrWhiteSpace(attachmentName)) return false;
+            attachmentName = attachmentName.Trim();
+            if (string.Equals(attachmentName, sideloadFileName, StringComparison.OrdinalIgnoreCase)) return true;
+            if (!string.IsNullOrWhiteSpace(friendlyNameHint) && string.Equals(attachmentName, friendlyNameHint.Trim(), StringComparison.OrdinalIgnoreCase)) return true;
+            if (!string.IsNullOrWhiteSpace(friendlyNameHint) && FileNamesEqualIgnoringExtension(attachmentName, friendlyNameHint.Trim())) return true;
+            return FileNamesEqualIgnoringExtension(attachmentName, sideloadFileName);
+        }
+
+        /// <summary>
+        /// WooCommerce/WordPress sideload uses the provided <c>name</c> (or URL basename) for file-type checks. URLs without a file extension often fail validation even when bytes are valid JPEG/PNG.
+        /// </summary>
+        private async Task<string> ResolveWooImageSideloadFileNameAsync(string imageUrl, string? friendlyNameHint, CancellationToken cancelToken)
+        {
+            var baseFromHint = SanitizeWooSideloadFileNameStem(friendlyNameHint);
+            if (string.IsNullOrEmpty(baseFromHint) && Uri.TryCreate(imageUrl, UriKind.Absolute, out var uri))
+            {
+                var seg = uri.Segments.LastOrDefault()?.Trim('/');
+                baseFromHint = SanitizeWooSideloadFileNameStem(seg);
+            }
+
+            if (string.IsNullOrEmpty(baseFromHint))
+                baseFromHint = "product-image";
+
+            if (FileNameHasRecognizedImageExtension(baseFromHint))
+                return baseFromHint;
+
+            var ext = await ProbeImageExtensionFromUrlAsync(imageUrl, cancelToken).ConfigureAwait(false);
+            var stem = Path.GetFileNameWithoutExtension(baseFromHint);
+            if (string.IsNullOrEmpty(stem))
+                stem = "image";
+            return stem + ext;
+        }
+
+        /// <summary>
+        /// CDNs (e.g. Wolt imageproxy) use <c>Vary: Accept</c> and may return AVIF to default clients; prefer classic raster types for WordPress compatibility.
+        /// </summary>
+        private static void AddCdnFriendlyImageAcceptHeader(HttpRequestMessage request)
+        {
+            request.Headers.TryAddWithoutValidation(
+                "Accept",
+                "image/jpeg,image/png,image/webp,image/gif;q=0.9,image/avif;q=0.3,*/*;q=0.1");
+        }
+
+        private async Task<string> ProbeImageExtensionFromUrlAsync(string imageUrl, CancellationToken cancelToken)
+        {
+            using var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.Clear();
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Head, imageUrl);
+                AddCdnFriendlyImageAcceptHeader(req);
+                using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancelToken).ConfigureAwait(false);
+                if (resp.IsSuccessStatusCode && TryMapImageContentTypeToExtension(resp.Content.Headers.ContentType?.MediaType, out var ext))
+                    return ext;
+            }
+            catch
+            {
+                // fall through to default
+            }
+
+            return ".jpg";
+        }
+
+        private static bool TryMapImageContentTypeToExtension(string? mediaType, out string extensionWithDot)
+        {
+            extensionWithDot = ".jpg";
+            if (string.IsNullOrWhiteSpace(mediaType)) return false;
+            var primary = mediaType.Trim().Split(';')[0].Trim().ToLowerInvariant();
+            extensionWithDot = primary switch
+            {
+                "image/jpeg" or "image/jpg" => ".jpg",
+                "image/pjpeg" => ".jpg",
+                "image/png" => ".png",
+                "image/gif" => ".gif",
+                "image/webp" => ".webp",
+                "image/bmp" or "image/x-ms-bmp" => ".bmp",
+                "image/svg+xml" => ".svg",
+                "image/x-icon" or "image/vnd.microsoft.icon" => ".ico",
+                _ => ""
+            };
+            return extensionWithDot.Length > 0;
+        }
+
+        private static string GetWordPressRestBaseUrlFromWooV3BaseUrl(string wcV3BaseUrl)
+        {
+            const string suffix = "/wc/v3";
+            if (wcV3BaseUrl.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                return wcV3BaseUrl[..^suffix.Length];
+            var idx = wcV3BaseUrl.LastIndexOf("/wc/v3", StringComparison.OrdinalIgnoreCase);
+            return idx >= 0 ? wcV3BaseUrl[..idx] : wcV3BaseUrl;
+        }
+
+        private async Task<bool> ImageRequiresJpegMediaUploadForWooAsync(string imageUrl, string? friendlyNameHint, CancellationToken cancelToken)
+        {
+            // Wolt (and similar) vary real bytes by Accept; WordPress sideload may get WebP/AVIF and reject even with a .jpg filename hint.
+            if (ImageUrlUsesWoltStyleNegotiatedCdn(imageUrl))
+                return true;
+            if (PathOrUriHasAvifHeifHeicExtension(imageUrl) || PathOrUriHasAvifHeifHeicExtension(friendlyNameHint))
+                return true;
+            if (PathOrUriHasWebpExtension(imageUrl) || PathOrUriHasWebpExtension(friendlyNameHint))
+                return true;
+            var mime = await ProbeImagePrimaryContentTypeAsync(imageUrl, cancelToken).ConfigureAwait(false);
+            return IsAvifHeifHeicContentType(mime) || IsWebpContentType(mime);
+        }
+
+        private static bool ImageUrlUsesWoltStyleNegotiatedCdn(string imageUrl)
+        {
+            if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var u)) return false;
+            return string.Equals(u.Host, "imageproxy.wolt.com", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Wolt imageproxy returns JPEG when <c>format=jpg</c> is set; WordPress can sideload that URL while WooCommerce API keys cannot create <c>wp/v2/media</c> (401).
+        /// </summary>
+        private static bool TryAppendWoltJpegFormatQuery(string imageUrl, out string jpegSideloadUrl)
+        {
+            jpegSideloadUrl = imageUrl;
+            if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var u) || !ImageUrlUsesWoltStyleNegotiatedCdn(imageUrl))
+                return false;
+            if (imageUrl.Contains("format=", StringComparison.OrdinalIgnoreCase))
+            {
+                jpegSideloadUrl = imageUrl;
+                return true;
+            }
+
+            jpegSideloadUrl = string.IsNullOrEmpty(u.Query) ? imageUrl + "?format=jpg" : imageUrl + "&format=jpg";
+            return true;
+        }
+
+        private static bool PathOrUriHasWebpExtension(string? urlOrFileName)
+        {
+            if (string.IsNullOrWhiteSpace(urlOrFileName)) return false;
+            string ext;
+            try
+            {
+                ext = Uri.TryCreate(urlOrFileName, UriKind.Absolute, out var uri)
+                    ? Path.GetExtension(uri.AbsolutePath)
+                    : Path.GetExtension(urlOrFileName);
+            }
+            catch
+            {
+                ext = Path.GetExtension(urlOrFileName);
+            }
+
+            return ext.Equals(".webp", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsWebpContentType(string? mime)
+        {
+            if (string.IsNullOrWhiteSpace(mime)) return false;
+            var primary = mime.Trim().Split(';')[0].Trim().ToLowerInvariant();
+            return primary == "image/webp";
+        }
+
+        private static bool PathOrUriHasAvifHeifHeicExtension(string? urlOrFileName)
+        {
+            if (string.IsNullOrWhiteSpace(urlOrFileName)) return false;
+            string ext;
+            try
+            {
+                ext = Uri.TryCreate(urlOrFileName, UriKind.Absolute, out var u)
+                    ? Path.GetExtension(u.AbsolutePath)
+                    : Path.GetExtension(urlOrFileName);
+            }
+            catch
+            {
+                ext = Path.GetExtension(urlOrFileName);
+            }
+
+            return ext.Equals(".avif", StringComparison.OrdinalIgnoreCase)
+                || ext.Equals(".heif", StringComparison.OrdinalIgnoreCase)
+                || ext.Equals(".heic", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsAvifHeifHeicContentType(string? mime)
+        {
+            if (string.IsNullOrWhiteSpace(mime)) return false;
+            var primary = mime.Trim().Split(';')[0].Trim().ToLowerInvariant();
+            return primary is "image/avif" or "image/heif" or "image/heic" or "image/heif-sequence" or "image/avif-sequence";
+        }
+
+        private async Task<string?> ProbeImagePrimaryContentTypeAsync(string imageUrl, CancellationToken cancelToken)
+        {
+            using var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.Clear();
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Head, imageUrl);
+                AddCdnFriendlyImageAcceptHeader(req);
+                using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancelToken).ConfigureAwait(false);
+                if (resp.IsSuccessStatusCode)
+                    return resp.Content.Headers.ContentType?.MediaType;
+            }
+            catch
+            {
+                // ignore
+            }
+
+            return null;
+        }
+
+        private async Task<byte[]> DownloadImageAndEncodeAsJpegAsync(string imageUrl, CancellationToken cancelToken)
+        {
+            using var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromMinutes(2);
+            client.DefaultRequestHeaders.Clear();
+            using var req = new HttpRequestMessage(HttpMethod.Get, imageUrl);
+            AddCdnFriendlyImageAcceptHeader(req);
+            using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseContentRead, cancelToken).ConfigureAwait(false);
+            resp.EnsureSuccessStatusCode();
+            await using var input = await resp.Content.ReadAsStreamAsync(cancelToken).ConfigureAwait(false);
+            using var ms = new MemoryStream();
+            await input.CopyToAsync(ms, cancelToken).ConfigureAwait(false);
+            using var image = new MagickImage(ms.ToArray());
+            image.Format = MagickFormat.Jpeg;
+            image.Quality = 90;
+            return image.ToByteArray();
+        }
+
+        private readonly record struct WpMediaUploadResult(int? MediaId, int HttpStatus);
+
+        private async Task<WpMediaUploadResult> TryUploadJpegToWordPressMediaLibraryAsync(
+            HttpClient httpClient,
+            string wpJsonBaseUrl,
+            byte[] jpegBytes,
+            string fileName,
+            CancellationToken cancelToken)
+        {
+            try
+            {
+                var url = $"{wpJsonBaseUrl.TrimEnd('/')}/wp/v2/media";
+                using var multipart = new MultipartFormDataContent();
+                var fileContent = new ByteArrayContent(jpegBytes);
+                fileContent.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
+                multipart.Add(fileContent, "file", fileName);
+                using var resp = await httpClient.PostAsync(url, multipart, cancelToken).ConfigureAwait(false);
+                var body = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+                var status = (int)resp.StatusCode;
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var snippet = body.Length > 2000 ? body[..2000] : body;
+                    _logger.LogWarning("WordPress POST wp/v2/media failed ({Status}) for {FileName}: {Body}", status, fileName, snippet);
+                    return new WpMediaUploadResult(null, status);
+                }
+
+                using var doc = JsonDocument.Parse(body);
+                if (doc.RootElement.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number && idEl.TryGetInt32(out var id))
+                    return new WpMediaUploadResult(id, status);
+
+                return new WpMediaUploadResult(null, status);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "WordPress media upload threw for {FileName}", fileName);
+                return new WpMediaUploadResult(null, 0);
+            }
+        }
+
+        /// <summary>
+        /// Downloads the external image, encodes as JPEG, uploads via <see cref="IFileStorage"/> (same as media library), updates <see cref="Media"/> and linked <see cref="ProductImage"/> URLs.
+        /// </summary>
+        private async Task<string?> TryMirrorProductImageToOurStorageForWooAsync(int mediaId, string sourceUrl, CancellationToken cancelToken)
+        {
+            try
+            {
+                var jpegBytes = await DownloadImageAndEncodeAsJpegAsync(sourceUrl, cancelToken).ConfigureAwait(false);
+                if (jpegBytes.Length == 0) return null;
+
+                var fileName = $"woo-sync-{mediaId}.jpg";
+                using var stream = new MemoryStream(jpegBytes);
+                var formFile = new FormFile(stream, 0, jpegBytes.Length, "file", fileName)
+                {
+                    Headers = new HeaderDictionary(),
+                    ContentType = "image/jpeg"
+                };
+
+                var path = FileHelper.GetTempFolderPath();
+                var uploadResult = await _fileStorage.UploadFileAsync(formFile, path, cancelToken).ConfigureAwait(false);
+                if (!uploadResult.IsSuccessful || string.IsNullOrEmpty(uploadResult.FilePath))
+                {
+                    _logger.LogWarning(
+                        "Woo sync: mirror to our storage failed for media {MediaId}: {Message}",
+                        mediaId,
+                        uploadResult.Exception?.Message ?? "upload failed");
+                    return null;
+                }
+
+                var newUrl = FileHelper.GetFileExternalPath(uploadResult.FilePath);
+                var updated = await _mediaStorage.UpdateMediaUrlAndSizeAsync(mediaId, newUrl, jpegBytes.LongLength, updateUserId: null, cancelToken).ConfigureAwait(false);
+                return updated ? newUrl : null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Woo sync: mirror to our storage threw for media {MediaId}, url={Url}", mediaId, sourceUrl);
+                return null;
+            }
+        }
+
+        private static async Task<int?> TryGetWooVariationCompatImageMediaIdAsync(
+            string baseUrl,
+            int wooProductId,
+            int wooVariationId,
+            string compatImageFileName,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            try
+            {
+                var url = $"{baseUrl}/products/{wooProductId}/variations/{wooVariationId}";
+                using var resp = await httpClient.GetAsync(url, cancelToken).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode) return null;
+                var body = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+                var v = TryDeserialize<WooVariationReadForImage>(body);
+                if (v?.image == null || v.image.id <= 0) return null;
+                if (string.Equals((v.image.name ?? "").Trim(), compatImageFileName, StringComparison.OrdinalIgnoreCase))
+                    return v.image.id;
+            }
+            catch
+            {
+                // ignore
+            }
+
+            return null;
+        }
+
         // Helper classes for WooCommerce API responses
         private class WooCommerceCategoryResponse
         {
@@ -2500,6 +2978,19 @@ namespace George.Services
         private class WooCommerceVariationResponse
         {
             public int id { get; set; }
+        }
+
+        /// <summary>GET single variation — image block includes media id and filename for AVIF-compat dedup.</summary>
+        private class WooVariationReadForImage
+        {
+            public WooVariationImageBlock? image { get; set; }
+        }
+
+        private class WooVariationImageBlock
+        {
+            public int id { get; set; }
+            public string? name { get; set; }
+            public string? src { get; set; }
         }
 
         /// <summary>For GET variations list: each variation has id and attributes (id, option).</summary>
