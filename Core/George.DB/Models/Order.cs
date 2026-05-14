@@ -192,17 +192,41 @@ public partial class Order
     [StringLength(100)]
     public string? InvoiceNumber { get; set; }
 
+    /// <summary>Last payment webhook <c>orderId</c> (WooCommerce / gateway echo).</summary>
+    [StringLength(64)]
+    public string? GatewayPaymentOrderId { get; set; }
+
+    /// <summary>Last payment webhook <c>externalOrderId</c>.</summary>
+    [StringLength(64)]
+    public string? GatewayPaymentExternalOrderId { get; set; }
+
+    /// <summary>Last payment webhook <c>siteId</c> echo (API key still authorizes site).</summary>
+    [StringLength(50)]
+    public string? GatewayPaymentSiteId { get; set; }
+
+    /// <summary>Last payment webhook <c>isFinished</c> (e.g. charged label).</summary>
+    [StringLength(200)]
+    public string? IsFinished { get; set; }
+
+    /// <summary>Last payment webhook <c>payment.transactionId</c>.</summary>
+    [StringLength(120)]
+    public string? GatewayPaymentTransactionId { get; set; }
+
+    /// <summary>Last payment webhook <c>payment.paymentGateway</c> (any provider).</summary>
+    [StringLength(200)]
+    public string? PaymentGateway { get; set; }
+
     [Precision(0)]
     public DateTime? PaidAt { get; set; }
 
     /// <summary>When true, one-time catalog stock deduction for lines without saved picking has already run when the order reached Completed.</summary>
     public bool CompletionInventoryApplied { get; set; }
 
-    /// <summary>Raw JSON of <c>cardcomPayment</c> from WooCommerce <c>POST /WooCommerce/OrderPayment</c>.</summary>
+    /// <summary>Legacy: raw gateway JSON from older webhooks; prefer gateway payment columns.</summary>
     [Column(TypeName = "nvarchar(max)")]
     public string? CardcomPaymentJson { get; set; }
 
-    /// <summary>Gateway-reported <c>status</c> from the same webhook (e.g. success / failed).</summary>
+    /// <summary>Gateway-reported <c>status</c> from payment webhook (e.g. success / failed).</summary>
     [StringLength(100)]
     public string? ExternalPaymentStatus { get; set; }
 

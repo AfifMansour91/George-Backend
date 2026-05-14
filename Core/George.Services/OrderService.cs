@@ -2106,7 +2106,7 @@ namespace George.Services
                 .Replace("'", "&#39;", StringComparison.Ordinal);
         }
 
-        /// <summary>Record payment from WooCommerce (invoice, Cardcom JSON, gateway status). API key auth. Order: <c>orderNumber</c> and/or <c>orderId</c> (WooCommerce id) must match <see cref="Order.ExternalOrderId"/>.</summary>
+        /// <summary>Record payment from WooCommerce gateway webhook. API key auth. Order: <c>orderNumber</c> / <c>orderId</c> / <c>externalOrderId</c> must match <see cref="Order.ExternalOrderId"/>.</summary>
         public async Task<IApiResponse<OrderRes>> RecordPaymentFromWooCommerceAsync(int siteId, WooCommerceOrderPaymentPayload payment, CancellationToken cancelToken = default)
         {
             var response = new ApiResponse<OrderRes>();
@@ -2129,21 +2129,15 @@ namespace George.Services
             }
             var treatAsPaid = IsSuccessfulWooCommerceGatewayPaymentStatus(payment.Status)
                 && HasWooCommercePaidTransactionWhenRequired(payment);
-            var cardcomJson = SerializeCardcomPaymentToken(payment.CardcomPayment);
-            var cardcomChars = cardcomJson?.Length ?? 0;
             _logger.LogInformation(
-                "WooCommerce OrderPayment processing. siteId={SiteId}, externalOrderKey={ExternalOrderKey}, internalOrderId={InternalOrderId}, gatewayStatus={GatewayStatus}, treatAsPaid={TreatAsPaid}, cardcomJsonChars={CardcomChars}, hasInvoice={HasInvoice}",
-                siteId, externalKey, order.Id, payment.Status, treatAsPaid, cardcomChars, !string.IsNullOrWhiteSpace(payment.InvoiceNumber));
+                "WooCommerce OrderPayment processing. siteId={SiteId}, externalOrderKey={ExternalOrderKey}, internalOrderId={InternalOrderId}, gatewayStatus={GatewayStatus}, treatAsPaid={TreatAsPaid}, gatewayTx={GatewayTx}, invoice={Invoice}, paymentGateway={PaymentGateway}",
+                siteId, externalKey, order.Id, payment.Status, treatAsPaid,
+                payment.Payment?.TransactionId?.Trim(),
+                payment.InvoiceNumber,
+                payment.Payment?.PaymentGateway);
             var updated = await _orderStorage.UpdateOrderAsync(order.Id, o =>
             {
-                if (payment.InvoiceNumber != null) o.InvoiceNumber = payment.InvoiceNumber;
-                if (payment.PaymentReference != null || payment.ClearanceNumber != null)
-                    o.PaymentReference = payment.PaymentReference ?? payment.ClearanceNumber;
-                if (treatAsPaid && payment.PaidAt.HasValue) o.PaidAt = payment.PaidAt;
-                if (treatAsPaid) o.PaymentStatus = "Paid";
-                if (!string.IsNullOrWhiteSpace(payment.Status)) o.ExternalPaymentStatus = payment.Status.Trim();
-                if (!string.IsNullOrWhiteSpace(cardcomJson)) o.CardcomPaymentJson = cardcomJson;
-                o.UpdatedDate = DateTime.UtcNow;
+                ApplyGatewayPaymentWebhookToOrder(o, payment, treatAsPaid);
             }, cancelToken).ConfigureAwait(false);
             if (updated == null)
             {
@@ -2160,10 +2154,26 @@ namespace George.Services
             return response;
         }
 
-        private static string? SerializeCardcomPaymentToken(JToken? cardcom)
+        private static void ApplyGatewayPaymentWebhookToOrder(Order o, WooCommerceOrderPaymentPayload p, bool treatAsPaid)
         {
-            if (cardcom == null || cardcom.Type == JTokenType.Null) return null;
-            return cardcom.ToString(Formatting.None);
+            o.GatewayPaymentOrderId = WooCommerceOrderPaymentPayload.GatewayTokenToString(p.OrderId);
+            o.GatewayPaymentExternalOrderId = WooCommerceOrderPaymentPayload.GatewayTokenToString(p.ExternalOrderId);
+            o.GatewayPaymentSiteId = string.IsNullOrWhiteSpace(p.SiteId) ? null : p.SiteId.Trim();
+            o.IsFinished = string.IsNullOrWhiteSpace(p.IsFinished) ? null : p.IsFinished.Trim();
+            o.GatewayPaymentTransactionId = string.IsNullOrWhiteSpace(p.Payment?.TransactionId) ? null : p.Payment!.TransactionId.Trim();
+            o.PaymentGateway = string.IsNullOrWhiteSpace(p.Payment?.PaymentGateway) ? null : p.Payment!.PaymentGateway.Trim();
+            if (!string.IsNullOrWhiteSpace(p.InvoiceNumber))
+                o.InvoiceNumber = p.InvoiceNumber;
+            if (!string.IsNullOrWhiteSpace(p.PaymentReference))
+                o.PaymentReference = p.PaymentReference;
+            if (treatAsPaid)
+            {
+                o.PaymentStatus = "Paid";
+                o.PaidAt = DateTime.UtcNow;
+            }
+            if (!string.IsNullOrWhiteSpace(p.Status))
+                o.ExternalPaymentStatus = p.Status.Trim();
+            o.CardcomPaymentJson = null;
         }
 
         /// <summary>When <paramref name="status"/> is empty, treat as success (legacy webhooks). Otherwise avoid marking paid on clear failure tokens.</summary>

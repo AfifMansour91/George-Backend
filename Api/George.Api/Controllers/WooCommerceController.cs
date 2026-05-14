@@ -315,14 +315,14 @@ namespace George.Api.Controllers
                 "WooCommerce OrderPayment full payload (after normalize). siteId={SiteId}, fullPayload={FullPayload}",
                 siteId.Value,
                 SerializeOrderPaymentPayloadForLog(payload));
-            var hasCardcom = payload.CardcomPayment != null && payload.CardcomPayment.Type != JTokenType.Null;
+            var hasPaymentBlock = payload.Payment != null;
             _logger.LogInformation(
-                "WooCommerce OrderPayment request received. siteId={SiteId}, orderNumber={OrderNumber}, orderId={OrderId}, gatewayStatus={GatewayStatus}, hasCardcomPayment={HasCardcom}, headers={Headers}",
+                "WooCommerce OrderPayment request received. siteId={SiteId}, orderNumber={OrderNumber}, orderId={OrderId}, gatewayStatus={GatewayStatus}, hasPaymentBlock={HasPayment}, headers={Headers}",
                 siteId.Value,
                 payload.OrderNumber,
                 payload.OrderId?.ToString(),
                 payload.Status,
-                hasCardcom,
+                hasPaymentBlock,
                 SerializeForLog(GetRequestHeadersForLog()));
             return await SafeCallWithErrorCatchingAsync(async () =>
             {

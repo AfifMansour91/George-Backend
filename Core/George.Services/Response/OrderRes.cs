@@ -63,9 +63,26 @@ public class OrderRes
     public string? ExternalOrderId { get; set; }
     /// <summary>Number of bags/cartons packed (set at end of picking).</summary>
     public int? BagsCount { get; set; }
-    /// <summary>JSON from WooCommerce payment webhook (<c>cardcomPayment</c>).</summary>
+    /// <summary>Payment reference / clearance (legacy; often same as gateway transaction id).</summary>
+    public string? PaymentReference { get; set; }
+    /// <summary>Invoice number when paid.</summary>
+    public string? InvoiceNumber { get; set; }
+    public DateTime? PaidAt { get; set; }
+    /// <summary>Last payment webhook <c>orderId</c>.</summary>
+    public string? GatewayPaymentOrderId { get; set; }
+    /// <summary>Last payment webhook <c>externalOrderId</c>.</summary>
+    public string? GatewayPaymentExternalOrderId { get; set; }
+    /// <summary>Last payment webhook <c>siteId</c> echo.</summary>
+    public string? GatewayPaymentSiteId { get; set; }
+    /// <summary>Last payment webhook <c>isFinished</c>.</summary>
+    public string? IsFinished { get; set; }
+    /// <summary>Last payment webhook <c>payment.transactionId</c>.</summary>
+    public string? GatewayPaymentTransactionId { get; set; }
+    /// <summary>Last payment webhook <c>payment.paymentGateway</c>.</summary>
+    public string? PaymentGateway { get; set; }
+    /// <summary>Legacy raw JSON from older payment webhooks.</summary>
     public string? CardcomPaymentJson { get; set; }
-    /// <summary>Gateway <c>status</c> from WooCommerce payment webhook.</summary>
+    /// <summary>Gateway <c>status</c> from payment webhook.</summary>
     public string? ExternalPaymentStatus { get; set; }
     public List<OrderItemRes> Items { get; set; } = new();
 }

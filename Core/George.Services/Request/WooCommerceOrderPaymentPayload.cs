@@ -43,26 +43,13 @@ public class WooCommerceOrderPaymentPayload
     public WooCommerceOrderPaymentGatewayDetails? Payment { get; set; }
 
     // -------------------------------------------------------------------------
-    // Not part of the current WooCommerce JSON contract — kept for
-    // OrderService / merge pipeline (populated from payment.* or left unset).
+    // Populated during normalize from payment.* — not deserialized from JSON.
     // -------------------------------------------------------------------------
     [JsonIgnore]
     public string? InvoiceNumber { get; set; }
 
     [JsonIgnore]
     public string? PaymentReference { get; set; }
-
-    [JsonIgnore]
-    public string? ClearanceNumber { get; set; }
-
-    [JsonIgnore]
-    public decimal? Amount { get; set; }
-
-    [JsonIgnore]
-    public DateTime? PaidAt { get; set; }
-
-    [JsonIgnore]
-    public JToken? CardcomPayment { get; set; }
 
     /// <summary>Applies root plugin fields into the internal flat fields used downstream.</summary>
     public void NormalizeWooCommercePaymentRequest() => ApplyRootFlatPluginShape();
@@ -76,73 +63,15 @@ public class WooCommerceOrderPaymentPayload
             SiteId = SiteId.Trim();
         if (!string.IsNullOrWhiteSpace(OrderNumber))
             OrderNumber = OrderNumber.Trim();
-        MergeGatewayPaymentIntoSelf(Payment, IsFinished);
+        if (Payment == null)
+            return;
+        if (!string.IsNullOrWhiteSpace(Payment.InvoiceNumber))
+            InvoiceNumber = Payment.InvoiceNumber.Trim();
+        if (!string.IsNullOrWhiteSpace(Payment.TransactionId))
+            PaymentReference = Payment.TransactionId.Trim();
     }
 
-    private void MergeGatewayPaymentIntoSelf(WooCommerceOrderPaymentGatewayDetails? p, string? isFinished)
-    {
-        if (p != null)
-        {
-            if (!string.IsNullOrWhiteSpace(p.InvoiceNumber))
-                InvoiceNumber = p.InvoiceNumber.Trim();
-            if (!string.IsNullOrWhiteSpace(p.TransactionId))
-                PaymentReference = p.TransactionId.Trim();
-        }
-
-        var hasGatewayFields = p != null &&
-            (!string.IsNullOrWhiteSpace(p.TransactionId) ||
-             !string.IsNullOrWhiteSpace(p.InvoiceNumber) ||
-             !string.IsNullOrWhiteSpace(p.PaymentGateway));
-        var hasIsFinished = !string.IsNullOrWhiteSpace(isFinished);
-
-        if (!hasGatewayFields && !hasIsFinished)
-            return;
-
-        if (CardcomPayment is JObject joExisting)
-        {
-            if (p != null)
-            {
-                if (!string.IsNullOrWhiteSpace(p.TransactionId)) joExisting["transactionId"] = p.TransactionId.Trim();
-                if (!string.IsNullOrWhiteSpace(p.InvoiceNumber)) joExisting["invoiceNumber"] = p.InvoiceNumber.Trim();
-                if (!string.IsNullOrWhiteSpace(p.PaymentGateway)) joExisting["paymentGateway"] = p.PaymentGateway.Trim();
-            }
-            if (hasIsFinished)
-                joExisting["isFinished"] = isFinished!.Trim();
-            return;
-        }
-
-        if (CardcomPayment == null || CardcomPayment.Type == JTokenType.Null)
-        {
-            var jo = new JObject();
-            if (p != null)
-            {
-                if (!string.IsNullOrWhiteSpace(p.TransactionId)) jo["transactionId"] = p.TransactionId.Trim();
-                if (!string.IsNullOrWhiteSpace(p.InvoiceNumber)) jo["invoiceNumber"] = p.InvoiceNumber.Trim();
-                if (!string.IsNullOrWhiteSpace(p.PaymentGateway)) jo["paymentGateway"] = p.PaymentGateway.Trim();
-            }
-            if (hasIsFinished)
-                jo["isFinished"] = isFinished!.Trim();
-            if (jo.Count > 0)
-                CardcomPayment = jo;
-            return;
-        }
-
-        if (hasGatewayFields || hasIsFinished)
-        {
-            var wrap = new JObject { ["raw"] = CardcomPayment };
-            if (p != null)
-            {
-                if (!string.IsNullOrWhiteSpace(p.TransactionId)) wrap["transactionId"] = p.TransactionId.Trim();
-                if (!string.IsNullOrWhiteSpace(p.InvoiceNumber)) wrap["invoiceNumber"] = p.InvoiceNumber.Trim();
-                if (!string.IsNullOrWhiteSpace(p.PaymentGateway)) wrap["paymentGateway"] = p.PaymentGateway.Trim();
-            }
-            if (hasIsFinished)
-                wrap["isFinished"] = isFinished!.Trim();
-            CardcomPayment = wrap;
-        }
-    }
-
-    /// <summary>When root <see cref="Payment"/> is present, a non-empty <c>transactionId</c> is required to mark paid.</summary>
+    /// <summary>When root <see cref="Payment"/> is present, a non-empty <c>transactionId</c> is required to treat the order as paid.</summary>
     public bool RequiresGatewayTransactionIdForPaid() => Payment != null;
 
     public string? ResolveGatewayTransactionIdForPaid() =>
@@ -153,18 +82,20 @@ public class WooCommerceOrderPaymentPayload
     {
         if (!string.IsNullOrWhiteSpace(OrderNumber))
             return OrderNumber.Trim();
-        if (FormatExternalToken(OrderId, out var fromOrderId))
+        var fromOrderId = GatewayTokenToString(OrderId);
+        if (!string.IsNullOrWhiteSpace(fromOrderId))
             return fromOrderId;
-        if (FormatExternalToken(ExternalOrderId, out var fromExt))
+        var fromExt = GatewayTokenToString(ExternalOrderId);
+        if (!string.IsNullOrWhiteSpace(fromExt))
             return fromExt;
         return null;
     }
 
-    private static bool FormatExternalToken(JToken? token, out string? key)
+    /// <summary>Formats JSON <c>orderId</c> / <c>externalOrderId</c> tokens for storage or lookup.</summary>
+    public static string? GatewayTokenToString(JToken? token)
     {
-        key = null;
         if (token == null || token.Type == JTokenType.Null)
-            return false;
+            return null;
         var s = token.Type switch
         {
             JTokenType.String => token.Value<string>()?.Trim(),
@@ -172,9 +103,6 @@ public class WooCommerceOrderPaymentPayload
             JTokenType.Float => token.Value<decimal>().ToString(CultureInfo.InvariantCulture),
             _ => token.ToString().Trim()
         };
-        if (string.IsNullOrWhiteSpace(s))
-            return false;
-        key = s;
-        return true;
+        return string.IsNullOrWhiteSpace(s) ? null : s;
     }
 }
