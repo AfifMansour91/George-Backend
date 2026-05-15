@@ -99,6 +99,8 @@ public class UpdatePickingItemReq
     public int OrderItemId { get; set; }
     public decimal? PickedQuantity { get; set; }
     public decimal? TotalPrice { get; set; }
+    /// <summary>When set from shop picking UI, persisted as-is. When null, server sets confirmed only if picked/total changed vs DB (legacy clients).</summary>
+    public bool? PickingUserConfirmed { get; set; }
 }
 
 /// <summary>Sprint 2: Update order (status, notes, delivery).</summary>

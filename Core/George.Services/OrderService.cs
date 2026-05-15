@@ -565,7 +565,7 @@ namespace George.Services
                     .ApplyPickingConsumptionDeltaAsync(
                         oi.ProductId.Value,
                         oi.ProductVariantId,
-                        oi.Quantity,
+                        OrderItemStockConsumption.ResolveOrderedCatalogConsumption(oi),
                         cancelToken)
                     .ConfigureAwait(false);
                 stockPushProductIds.Add(oi.ProductId.Value);
@@ -630,7 +630,7 @@ namespace George.Services
             return response;
         }
 
-        /// <summary>Save picking state (שמור וצא). Body: { "items": [ { "orderItemId", "pickedQuantity", "totalPrice" }, ... ] }.</summary>
+        /// <summary>Save picking state (שמור וצא). Body: { "items": [ { "orderItemId", "pickedQuantity", "totalPrice", "pickingUserConfirmed" }, ... ] }.</summary>
         public async Task<IApiResponse<OrderRes>> UpdatePickingAsync(int orderId, UpdatePickingReq? req, CancellationToken cancelToken = default)
         {
             var response = new ApiResponse<OrderRes>();
@@ -647,19 +647,19 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.InvalidRequest, "Cannot update picking for a cancelled order.");
             var updates = req.Items
                 .Where(i => i.OrderItemId > 0)
-                .Select(i => (i.OrderItemId, i.PickedQuantity, i.TotalPrice))
+                .Select(i => (i.OrderItemId, i.PickedQuantity, i.TotalPrice, i.PickingUserConfirmed))
                 .ToList();
             var updated = await _orderStorage.UpdatePickingAsync(orderId, updates, cancelToken);
             if (updated == null) return CreateResponse(response, StatusCode.ItemNotFound);
 
             var stockPushProductIds = new List<int>();
-            foreach (var (orderItemId, newPicked, _) in updates)
+            foreach (var (orderItemId, newPicked, _, _) in updates)
             {
                 var line = orderCheck.OrderItem?.FirstOrDefault(i => i.Id == orderItemId && !i.IsDeleted);
                 if (line == null || line.ProductId is not > 0) continue;
                 var oldPicked = line.PickedQuantity ?? 0m;
                 var newPickedVal = newPicked ?? 0m;
-                var consumptionDelta = newPickedVal - oldPicked;
+                var consumptionDelta = OrderItemStockConsumption.ResolvePickingDeltaCatalogConsumption(line, oldPicked, newPickedVal);
                 if (consumptionDelta == 0m) continue;
                 await _productStorage
                     .ApplyPickingConsumptionDeltaAsync(
@@ -2283,7 +2283,7 @@ namespace George.Services
                     .ApplyPickingConsumptionDeltaAsync(
                         line.ProductId.Value,
                         line.ProductVariantId,
-                        line.Quantity,
+                        OrderItemStockConsumption.ResolveOrderedCatalogConsumption(line),
                         cancelToken)
                     .ConfigureAwait(false);
                 productIds.Add(line.ProductId.Value);
@@ -2319,7 +2319,7 @@ namespace George.Services
                     .ApplyPickingConsumptionDeltaAsync(
                         line.ProductId.Value,
                         line.ProductVariantId,
-                        line.Quantity,
+                        OrderItemStockConsumption.ResolveOrderedCatalogConsumption(line),
                         cancelToken)
                     .ConfigureAwait(false);
                 productIds.Add(line.ProductId.Value);
@@ -2348,7 +2348,7 @@ namespace George.Services
                 if (line.PickedQuantity.HasValue && line.PickedQuantity.Value > 0m)
                     restoreQty = line.PickedQuantity.Value;
                 else if (!line.PickedQuantity.HasValue && order.CompletionInventoryApplied && line.Quantity > 0m)
-                    restoreQty = line.Quantity;
+                    restoreQty = OrderItemStockConsumption.ResolveOrderedCatalogConsumption(line);
                 else
                     continue;
                 await _productStorage
@@ -2376,7 +2376,7 @@ namespace George.Services
                     .ApplyPickingConsumptionDeltaAsync(
                         line.ProductId.Value,
                         line.ProductVariantId,
-                        line.Quantity,
+                        OrderItemStockConsumption.ResolveOrderedCatalogConsumption(line),
                         cancelToken)
                     .ConfigureAwait(false);
                 productIds.Add(line.ProductId.Value);

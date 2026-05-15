@@ -167,19 +167,9 @@ namespace George.Data
         }
 
         /// <summary>
-        /// For lines where the picking UI stores <strong>kg</strong> in <see cref="OrderItem.PickedQuantity"/>, do not baseline it to
-        /// <see cref="OrderItem.Quantity"/> (piece count). That made vouchers show a fake "after pick" weight (e.g. 2 ק"ג for 2 יח').
-        /// Piece-only lines still baseline to quantity for inventory delta accounting.
-        /// </summary>
-        private static bool SkipPickedQuantityBaselineBecausePickIsWeightKg(OrderItem item)
-        {
-            if (item.UnitWeightGrams is > 0m) return true;
-            return string.Equals(item.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase);
-        }
-
-        /// <summary>
-        /// After ordered quantities were deducted from catalog (Woo ingest or internal create), set <see cref="OrderItem.PickedQuantity"/> to <see cref="OrderItem.Quantity"/>
-        /// so picking deltas are only the adjustment beyond what was ordered (avoids double-deduct when the order later completes).
+        /// After ordered quantities were deducted from catalog (Woo ingest or internal create), set <see cref="OrderItem.PickedQuantity"/>
+        /// to the same stock units that were consumed (kg for fixed-weight unit lines, piece count otherwise) so picking deltas only adjust beyond the order,
+        /// and vouchers do not show a bogus picked weight (e.g. 2 ק"ג meaning 2 יח').
         /// Sets <see cref="Order.CompletionInventoryApplied"/> so completion-time stock does not run again for the same consumption.
         /// </summary>
         public async Task SetOrderedCatalogConsumedAndBaselinePickingAsync(int orderId, CancellationToken cancelToken)
@@ -192,16 +182,19 @@ namespace George.Data
             db.CompletionInventoryApplied = true;
             foreach (var item in db.OrderItem.Where(i => !i.IsDeleted))
             {
-                if (item.ProductId is > 0 && item.Quantity > 0m && !SkipPickedQuantityBaselineBecausePickIsWeightKg(item))
-                    item.PickedQuantity = item.Quantity;
+                if (item.ProductId is > 0 && item.Quantity > 0m)
+                {
+                    item.PickedQuantity = OrderItemStockConsumption.ResolveOrderedCatalogConsumption(item);
+                    item.PickingUserConfirmed = false;
+                }
             }
             db.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
         }
 
         /// <summary>
-        /// Sets <see cref="OrderItem.PickedQuantity"/> = <see cref="OrderItem.Quantity"/> only for the given line ids (e.g. lines just added via AddItems).
-        /// Does not change <see cref="Order.CompletionInventoryApplied"/> or other order lines.
+        /// Sets <see cref="OrderItem.PickedQuantity"/> to ordered catalog consumption (see <see cref="OrderItemStockConsumption.ResolveOrderedCatalogConsumption"/>)
+        /// only for the given line ids (e.g. lines just added via AddItems). Does not change <see cref="Order.CompletionInventoryApplied"/> or other order lines.
         /// </summary>
         public async Task SetPickedQuantityBaselineForOrderItemIdsAsync(
             int orderId,
@@ -219,9 +212,10 @@ namespace George.Data
             var touched = false;
             foreach (var item in db.OrderItem.Where(i => !i.IsDeleted && idSet.Contains(i.Id)))
             {
-                if (item.ProductId is > 0 && item.Quantity > 0m && !SkipPickedQuantityBaselineBecausePickIsWeightKg(item))
+                if (item.ProductId is > 0 && item.Quantity > 0m)
                 {
-                    item.PickedQuantity = item.Quantity;
+                    item.PickedQuantity = OrderItemStockConsumption.ResolveOrderedCatalogConsumption(item);
+                    item.PickingUserConfirmed = false;
                     touched = true;
                 }
             }
@@ -292,8 +286,11 @@ namespace George.Data
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
         }
 
-        /// <summary>Update picked quantity (and optional line total) for order items (שמור וצא).</summary>
-        public async Task<Order?> UpdatePickingAsync(int orderId, List<(int OrderItemId, decimal? PickedQuantity, decimal? TotalPrice)> updates, CancellationToken cancelToken)
+        /// <summary>Save picked quantity (and optional line total) for order items (שמור וצא).</summary>
+        public async Task<Order?> UpdatePickingAsync(
+            int orderId,
+            List<(int OrderItemId, decimal? PickedQuantity, decimal? TotalPrice, bool? PickingUserConfirmed)> updates,
+            CancellationToken cancelToken)
         {
             if (updates == null || updates.Count == 0) return null;
             var db = await _dbContext.Order
@@ -301,17 +298,34 @@ namespace George.Data
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
             if (db == null) return null;
             var itemMap = db.OrderItem?.ToDictionary(i => i.Id) ?? new Dictionary<int, OrderItem>();
-            foreach (var (orderItemId, pickedQty, totalPrice) in updates)
+            foreach (var (orderItemId, pickedQty, totalPrice, confirmFromClient) in updates)
             {
                 if (!itemMap.TryGetValue(orderItemId, out var item)) continue;
+                var prevPicked = item.PickedQuantity;
+                var prevTotal = item.TotalPrice;
+
                 item.PickedQuantity = pickedQty;
                 item.TotalPrice = totalPrice;
-                item.PickingUserConfirmed = true;
+
+                if (confirmFromClient == true)
+                    item.PickingUserConfirmed = true;
+                else if (confirmFromClient == false)
+                    item.PickingUserConfirmed = false;
+                else if (!NullableDecimalEquals(pickedQty, prevPicked) || !NullableDecimalEquals(totalPrice, prevTotal))
+                    item.PickingUserConfirmed = true;
+                // else: unchanged vs DB — leave PickingUserConfirmed as-is (avoids marking every line picked when client sends full cart)
             }
             RecalculateOrderHeaderTotalsFromLines(db);
             db.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
             return db;
+        }
+
+        private static bool NullableDecimalEquals(decimal? a, decimal? b)
+        {
+            if (a == null && b == null) return true;
+            if (a == null || b == null) return false;
+            return a.Value == b.Value;
         }
 
         /// <summary>Merchandise counted toward order subtotal after picking: only lines with picked qty &gt; 0 (0 is "not picked", not null-only).</summary>

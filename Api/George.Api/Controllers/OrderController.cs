@@ -72,7 +72,7 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _orderSvc.RemoveOrderItemAsync(orderId, orderItemId, cancelToken));
         }
 
-        /// <summary>Save picking state (שמור וצא). Body: { "items": [ { "orderItemId", "pickedQuantity", "totalPrice" }, ... ] }.</summary>
+        /// <summary>Save picking state (שמור וצא). Body: { "items": [ { "orderItemId", "pickedQuantity", "totalPrice", "pickingUserConfirmed" }, ... ] }.</summary>
         [HttpPut("{orderId:int}/Picking")]
         [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> UpdatePickingAsync([FromRoute] int orderId, [FromBody] UpdatePickingReq? req, CancellationToken cancelToken = default)
