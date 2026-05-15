@@ -56,6 +56,17 @@ public static class OrderItemStockConsumption
             if (kg is > 0m and < 500m) return kg;
         }
 
+        // Phone/Kiosk by_weight + catalog unit g: Quantity=1 placeholder, ordered grams in UnitWeightGrams (e.g. 300 → 0.3 kg).
+        if (line.UnitWeightGrams is > 0m && line.UnitWeightGrams != 1000m)
+        {
+            var grams = line.UnitWeightGrams.Value;
+            var kgPerUnitField = grams / 1000m;
+            if (line.Quantity <= 1m && grams < 1000m)
+                return kgPerUnitField;
+            if (line.Quantity > 1m)
+                return line.Quantity * kgPerUnitField;
+        }
+
         return line.Quantity;
     }
 

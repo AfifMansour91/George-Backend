@@ -31,6 +31,18 @@ public class OrderItemStockConsumptionTests
     }
 
     [Fact]
+    public void ResolveOrdered_WeightMode_ByWeightGramsCart_UsesUnitWeightGramsAsTotalKg()
+    {
+        var line = new OrderItem
+        {
+            Quantity = 1m,
+            OrderLineQuantityMode = "weight",
+            UnitWeightGrams = 300m,
+        };
+        Assert.Equal(0.3m, OrderItemStockConsumption.ResolveOrderedCatalogConsumption(line));
+    }
+
+    [Fact]
     public void ResolveOrdered_WeightMode_FallsBackToQuantityWhenNoLineEconomics()
     {
         var line = new OrderItem
