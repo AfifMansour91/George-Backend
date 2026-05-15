@@ -487,7 +487,8 @@ namespace George.Api.Core
 				"StoreOS",
 				"0545555555",
                 "StoreOS",
-				"StoreOS");
+                "StoreOS",
+                otpWebOriginHost: Configuration["Auth:OtpSmsWebOriginHost"]);
  
 
             // Set globals.
