@@ -157,6 +157,17 @@ public partial class WooCommerceService
         };
     }
 
+    /// <summary>
+    /// Woo <c>draft</c>/<c>pending</c> products are not sellable in the storefront; import them as George
+    /// <see cref="Product.VisibilityId"/> hidden (מוסתר) with publication status publish so the list shows hidden, not active.
+    /// </summary>
+    private static bool WooImportPostStatusShouldBeCatalogHidden(string? wooPostStatus)
+    {
+        if (string.IsNullOrWhiteSpace(wooPostStatus)) return false;
+        var s = wooPostStatus.Trim().ToLowerInvariant();
+        return s is "draft" or "pending";
+    }
+
     private static int? ResolveStockManagementTypeId(WooImportCatalogLookups lk, bool? manageStock, bool isVariable)
     {
         if (lk.StockManagementTypes.Count == 0)
@@ -266,6 +277,16 @@ public partial class WooCommerceService
         if (visId.HasValue) product.VisibilityId = visId;
         var stId = ResolveProductStatusId(lk, wp.status);
         if (stId.HasValue) product.StatusId = stId;
+
+        if (WooImportPostStatusShouldBeCatalogHidden(wp.status))
+        {
+            var hiddenVis = ResolveVisibilityId(lk, "hidden");
+            if (hiddenVis.HasValue)
+                product.VisibilityId = hiddenVis.Value;
+            var publishedSt = ResolveProductStatusId(lk, "publish");
+            if (publishedSt.HasValue)
+                product.StatusId = publishedSt.Value;
+        }
 
         if (!string.IsNullOrWhiteSpace(wp.shipping_class))
         {
