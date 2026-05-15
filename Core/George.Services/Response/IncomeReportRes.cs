@@ -79,6 +79,8 @@ namespace George.Services.Response
         public string Name { get; set; } = "";
         public decimal Pct { get; set; }
         public decimal Income { get; set; }
+        /// <summary>Count of orders attributed to this source (for income vs orders toggle in UI).</summary>
+        public int OrderCount { get; set; }
     }
 
     public class IncomeReportHourBucketDto
@@ -97,6 +99,10 @@ namespace George.Services.Response
         public decimal DeliveryIncome { get; set; }
         /// <summary>סה״כ הכנסות לאיסוף עצמי.</summary>
         public decimal PickupIncome { get; set; }
+        /// <summary>הזמנות משלוח (ספירת הזמנות, לא לפי הכנסה).</summary>
+        public int DeliveryOrderCount { get; set; }
+        /// <summary>הזמנות איסוף עצמי.</summary>
+        public int PickupOrderCount { get; set; }
         public List<IncomeReportSourceSliceDto> SourceSlices { get; set; } = new();
         public string? PeakOrderHourLabel { get; set; }
         public string? PeakDeliveryHourLabel { get; set; }
@@ -112,6 +118,10 @@ namespace George.Services.Response
         public string Name { get; set; } = "";
         public string CategoryName { get; set; } = "";
         public string QuantityLabel { get; set; } = "";
+        /// <summary>Optional: kg sold when line is weight-based (picked preferred).</summary>
+        public decimal? QuantityKg { get; set; }
+        /// <summary>Optional: unit count when not purely weight.</summary>
+        public decimal? QuantityUnits { get; set; }
         public decimal Revenue { get; set; }
         public bool TrendUp { get; set; }
         public string? ImageUrl { get; set; }

@@ -1,0 +1,173 @@
+using George.DB;
+using George.Services;
+using George.Services.Response;
+
+namespace George.Services.Tests;
+
+public class QuantityConcentrationReportServiceTests
+{
+    private static Product WeightedProduct() => new() { Id = 1, Name = "נתח", IsWeighted = true };
+
+    [Fact]
+    public void SplitLineQty_WeightMode_IgnoresLineUnit()
+    {
+        var line = new OrderItem
+        {
+            OrderLineQuantityMode = "weight",
+            Quantity = 1m,
+            SaleTotalWeight = "2.5",
+            LineUnit = 1m,
+        };
+        var p = WeightedProduct();
+        var (kg, units) = QuantityConcentrationReportService.SplitLineQty(line, p);
+        Assert.Equal(2.5m, kg);
+        Assert.Equal(0m, units);
+    }
+
+    [Fact]
+    public void SplitLineQty_WeightedSoldByUnits_KeepsUnitsAndKg()
+    {
+        var line = new OrderItem
+        {
+            OrderLineQuantityMode = "units",
+            Quantity = 3m,
+            UnitWeightGrams = 250m,
+            LineUnit = 3m,
+        };
+        var p = WeightedProduct();
+        var (kg, units) = QuantityConcentrationReportService.SplitLineQty(line, p);
+        Assert.Equal(0.75m, kg);
+        Assert.Equal(3m, units);
+    }
+
+    [Fact]
+    public void CollapseIfSingleSyntheticLine_RemovesDuplicateProductNameRow()
+    {
+        var lines = new List<QuantityConcentrationLineDto>
+        {
+            new()
+            {
+                LineLabel = "בשר טחון",
+                QuantityKg = 15m,
+                QuantityUnits = null,
+                WeightPerUnitKg = null,
+                Note = null,
+            },
+        };
+        var result = QuantityConcentrationReportService.CollapseIfSingleSyntheticLine(lines, "בשר טחון");
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void BuildLineLabel_PrefersCutLabelOverSaleUnitsLine()
+    {
+        var line = new OrderItem
+        {
+            OrderLineCuttingLabel = "עובי אצבע (כ 200 גר')",
+            SaleUnitsLine = "עובי אצבע (כ 200 גר') 200 גר') 200 גר')",
+        };
+        var label = QuantityConcentrationReportService.BuildLineLabel(line);
+        Assert.Equal("עובי אצבע (כ 200 גר')", label);
+    }
+
+    [Fact]
+    public void BuildLineLabel_OmitsSizeWhenRedundantWithCutGrams()
+    {
+        var line = new OrderItem
+        {
+            OrderLineCuttingLabel = "עובי אצבע (כ 200 גר')",
+            OrderLineSizeLabel = "(כ 200 גרם)",
+        };
+        var label = QuantityConcentrationReportService.BuildLineLabel(line);
+        Assert.Equal("עובי אצבע (כ 200 גר')", label);
+    }
+
+    [Fact]
+    public void ApplyDetailLineDisplayRules_DropsSyntheticNameAndPerUnitOnly_ForWeighted()
+    {
+        var lines = new List<QuantityConcentrationLineDto>
+        {
+            new()
+            {
+                LineLabel = "פלאט איירון",
+                QuantityKg = 1.5m,
+                QuantityUnits = null,
+                WeightPerUnitKg = null,
+                Note = null,
+            },
+            new()
+            {
+                LineLabel = "500 גרם ליח'",
+                QuantityKg = 0.5m,
+                QuantityUnits = 1m,
+                WeightPerUnitKg = 0.5m,
+                Note = null,
+            },
+        };
+        var p = new Product { Id = 1, Name = "פלאט איירון", IsWeighted = true };
+        var result = QuantityConcentrationReportService.ApplyDetailLineDisplayRules(lines, p);
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void ApplyDetailLineDisplayRules_MergesLinesWithSameNormalizedLabel()
+    {
+        var lines = new List<QuantityConcentrationLineDto>
+        {
+            new()
+            {
+                LineLabel = "עובי אצבע (כ 200 גר')",
+                QuantityKg = 0.2m,
+                QuantityUnits = null,
+                WeightPerUnitKg = null,
+                Note = null,
+            },
+            new()
+            {
+                LineLabel = "עובי אצבע (כ 200 גר')",
+                QuantityKg = 2m,
+                QuantityUnits = 10m,
+                WeightPerUnitKg = 0.2m,
+                Note = null,
+            },
+        };
+        var p = new Product { Id = 2, Name = "סטייק סינטה", IsWeighted = true };
+        var result = QuantityConcentrationReportService.ApplyDetailLineDisplayRules(lines, p);
+        Assert.Single(result);
+        Assert.Equal(2.2m, result[0].QuantityKg);
+        Assert.Equal(10m, result[0].QuantityUnits);
+        Assert.Equal(0.2m, result[0].WeightPerUnitKg);
+    }
+
+    [Fact]
+    public void AppendRemainderDetailLineIfNeeded_AddsUnattributedRowWhenTotalsExceedDisplayedDetail()
+    {
+        var lines = new List<QuantityConcentrationLineDto>
+        {
+            new()
+            {
+                LineLabel = "נתח שלם",
+                QuantityKg = 2m,
+                QuantityUnits = 1m,
+                WeightPerUnitKg = 2m,
+                Note = null,
+            },
+        };
+        var withRemainder = QuantityConcentrationReportService.AppendRemainderDetailLineIfNeeded(lines, 3m, 1m);
+        Assert.Equal(2, withRemainder.Count);
+        Assert.Equal(QuantityConcentrationReportService.RemainderLineLabel, withRemainder[1].LineLabel);
+        Assert.Equal(1m, withRemainder[1].QuantityKg);
+        Assert.Null(withRemainder[1].QuantityUnits);
+        Assert.Null(withRemainder[1].WeightPerUnitKg);
+    }
+
+    [Fact]
+    public void AppendRemainderDetailLineIfNeeded_SkipsWhenNoDetailRowsSoParentRowIsEnough()
+    {
+        var unchanged = QuantityConcentrationReportService.AppendRemainderDetailLineIfNeeded(
+            new List<QuantityConcentrationLineDto>(),
+            2m,
+            0m);
+        Assert.Empty(unchanged);
+    }
+}

@@ -64,10 +64,13 @@ namespace George.Services.Response
 
     public class ProductsReportCategorySliceDto
     {
+        public int? CategoryId { get; set; }
         public string Name { get; set; } = "";
         public string? Color { get; set; }
         public decimal Pct { get; set; }
         public decimal Revenue { get; set; }
+        /// <summary>Optional breakdown by direct child categories (revenue roll-up from leaf sales).</summary>
+        public List<ProductsReportCategorySliceDto>? SubSlices { get; set; }
     }
 
     public class ProductsReportUpsellPairDto
