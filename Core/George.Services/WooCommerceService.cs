@@ -1555,10 +1555,13 @@ namespace George.Services
                 }
 
                 var wooSku = GetWooCommerceSku(siteId, product.Sku);
-                // Send product weight to WooCommerce only when product is weighable; otherwise leave empty so previous value is not applied.
-                // Fallback: for weighted setups where Product.Weight is empty, use WeightConfig.UnitWeight.
-                //var productWeightForWoo = ResolveProductWeightForWoo(product, isWeighted);
-                var productWeightForWoo = product.Weight.HasValue && product.Weight.Value > 0 ? (product.Weight?.ToString() ?? "") : "";
+                // WooCommerce core "weight" (משלוח / product data) is for non-weighable catalog weight only.
+                // Weighable products use OCWSU meta (_ocwsu_*); if we keep sending Product.Weight here, an old value (e.g. 0.3 kg from before switching to שקיל) never clears in Woo.
+                var productWeightForWoo = isWeighted
+                    ? ""
+                    : (product.Weight.HasValue && product.Weight.Value > 0
+                        ? product.Weight.Value.ToString(CultureInfo.InvariantCulture)
+                        : "");
                 var wooProduct = new Dictionary<string, object>
                 {
                     ["name"] = product.Name,
@@ -2176,6 +2179,10 @@ namespace George.Services
             CancellationToken cancelToken)
         {
             var variants = product.ProductVariant?.Where(v => !v.IsDeleted).ToList() ?? new List<ProductVariant>();
+            // Same weighable rule as parent product payload: do not send WC native variation weight when product is שקיל (clears stale shipping weights).
+            var setupTypeNameForVariants = product.SetupType?.Name ?? "";
+            var isWeightedBySetupForVariants = setupTypeNameForVariants is "by_weight" or "by_unit" or "by_unit_and_weight";
+            var isWeightedForVariations = product.IsWeighted == true || (product.IsWeighted != false && isWeightedBySetupForVariants);
 
             // Fetch existing WooCommerce variations so we can match by attributes (avoid duplicates) and delete removed ones
             var existingWoo = await GetExistingWooCommerceVariationsAsync(baseUrl, wooProductId, httpClient, cancelToken);
@@ -2252,16 +2259,18 @@ namespace George.Services
                     }
 
                     var variantWooSku = GetWooCommerceSku(siteId, variant.Sku);
-                    // Variation weight only when product is weighable (same as product-level weight).
-                    //var variationWeightForWoo = isWeighted ? (variant.Weight?.ToString() ?? "") : "";
+                    var variationWeightForWoo = isWeightedForVariations
+                        ? ""
+                        : (variant.Weight.HasValue && variant.Weight.Value > 0
+                            ? variant.Weight.Value.ToString(CultureInfo.InvariantCulture)
+                            : "");
                     var wooVariation = new Dictionary<string, object>
                     {
                         ["regular_price"] = variant.Price?.ToString() ?? product.Price?.ToString() ?? "0",
                         ["sku"] = variantWooSku,
                         ["manage_stock"] = manageVariationStockInWoo,
                         ["stock_status"] = variantStockStatus,
-                        //["weight"] = variationWeightForWoo,
-                        ["weight"] = variant.Weight?.ToString() ?? "",
+                        ["weight"] = variationWeightForWoo,
                         ["attributes"] = variationAttributesList
                     };
                     // Omit sale_price when absent so Woo does not reject the payload; send only when there is a positive sale.
