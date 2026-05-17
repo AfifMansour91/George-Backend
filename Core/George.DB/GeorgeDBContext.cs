@@ -212,6 +212,17 @@ namespace George.DB
 
 		private void MapNonScaffoldEntities(ModelBuilder modelBuilder)
 		{
+			modelBuilder.Entity<OrderStatusHistory>(entity =>
+			{
+				entity.ToTable("OrderStatusHistory");
+				entity.HasIndex(e => new { e.OrderId, e.OccurredAt }, "IX_OrderStatusHistory_OrderId_OccurredAt");
+				entity.HasOne(d => d.Order)
+					.WithMany(p => p.OrderStatusHistory)
+					.HasForeignKey(d => d.OrderId)
+					.OnDelete(DeleteBehavior.Cascade)
+					.HasConstraintName("FK_OrderStatusHistory_Order");
+			});
+
 			modelBuilder.Entity<UserPreference>(entity =>
 			{
 				entity.HasKey(e => e.UserId);

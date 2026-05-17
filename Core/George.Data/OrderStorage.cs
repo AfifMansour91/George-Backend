@@ -485,6 +485,153 @@ namespace George.Data
 
             return productIds;
         }
+
+        /// <summary>Append a status transition when status changes (Kanban, API, WooCommerce).</summary>
+        public async Task AppendOrderStatusHistoryAsync(
+            int orderId,
+            string status,
+            DateTime occurredAtUtc,
+            CancellationToken cancelToken)
+        {
+            if (orderId <= 0 || string.IsNullOrWhiteSpace(status)) return;
+            var normalized = status.Trim();
+            var last = await _dbContext.OrderStatusHistory
+                .Where(h => h.OrderId == orderId)
+                .OrderByDescending(h => h.OccurredAt)
+                .ThenByDescending(h => h.Id)
+                .Select(h => h.Status)
+                .FirstOrDefaultAsync(cancelToken)
+                .ConfigureAwait(false);
+            if (last != null && string.Equals(last, normalized, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            _dbContext.OrderStatusHistory.Add(new OrderStatusHistory
+            {
+                OrderId = orderId,
+                Status = normalized,
+                OccurredAt = occurredAtUtc.Kind == DateTimeKind.Utc
+                    ? occurredAtUtc
+                    : occurredAtUtc.ToUniversalTime(),
+            });
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+        }
+
+        public async Task<List<OrderStatusHistory>> GetOrderStatusHistoryAsync(int orderId, CancellationToken cancelToken)
+        {
+            return await _dbContext.OrderStatusHistory
+                .AsNoTracking()
+                .Where(h => h.OrderId == orderId)
+                .OrderBy(h => h.OccurredAt)
+                .ThenBy(h => h.Id)
+                .ToListAsync(cancelToken)
+                .ConfigureAwait(false);
+        }
+
+        public async Task<Dictionary<int, List<(string Status, DateTime OccurredAt)>>> GetStatusHistoryByOrderIdsAsync(
+            IReadOnlyCollection<int> orderIds,
+            CancellationToken cancelToken)
+        {
+            if (orderIds == null || orderIds.Count == 0)
+                return new Dictionary<int, List<(string, DateTime)>>();
+
+            var rows = await _dbContext.OrderStatusHistory
+                .AsNoTracking()
+                .Where(h => orderIds.Contains(h.OrderId))
+                .OrderBy(h => h.OrderId)
+                .ThenBy(h => h.OccurredAt)
+                .ThenBy(h => h.Id)
+                .Select(h => new { h.OrderId, h.Status, h.OccurredAt })
+                .ToListAsync(cancelToken)
+                .ConfigureAwait(false);
+
+            return rows
+                .GroupBy(r => r.OrderId)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Select(r => (r.Status, r.OccurredAt)).ToList());
+        }
+
+        /// <summary>Completed orders for site whose last update falls in [fromUtc, toUtcExclusive).</summary>
+        public async Task<List<Order>> GetCompletedOrdersInRangeAsync(
+            int siteId,
+            DateTime fromUtc,
+            DateTime toUtcExclusive,
+            CancellationToken cancelToken)
+        {
+            return await _dbContext.Order
+                .AsNoTracking()
+                .Where(o =>
+                    !o.IsDeleted &&
+                    o.SiteId == siteId &&
+                    o.Status == "Completed" &&
+                    (o.UpdatedDate ?? o.CreationTime) >= fromUtc &&
+                    (o.UpdatedDate ?? o.CreationTime) < toUtcExclusive)
+                .ToListAsync(cancelToken)
+                .ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Orders used for handling KPIs: became Ready in the period (בטיפול→מוכן), not only Completed.
+        /// Falls back to completed-in-range when no Ready transitions exist (legacy / backfill-only DB).
+        /// </summary>
+        public async Task<List<Order>> GetOrdersForHandlingMetricsInRangeAsync(
+            int siteId,
+            DateTime fromUtc,
+            DateTime toUtcExclusive,
+            CancellationToken cancelToken)
+        {
+            var readyInRangeIds = await (
+                from h in _dbContext.OrderStatusHistory.AsNoTracking()
+                join o in _dbContext.Order.AsNoTracking() on h.OrderId equals o.Id
+                where !o.IsDeleted
+                      && o.SiteId == siteId
+                      && h.Status == "Ready"
+                      && h.OccurredAt >= fromUtc
+                      && h.OccurredAt < toUtcExclusive
+                select h.OrderId
+            )
+                .Distinct()
+                .ToListAsync(cancelToken)
+                .ConfigureAwait(false);
+
+            if (readyInRangeIds.Count > 0)
+            {
+                return await _dbContext.Order
+                    .AsNoTracking()
+                    .Where(o => readyInRangeIds.Contains(o.Id))
+                    .ToListAsync(cancelToken)
+                    .ConfigureAwait(false);
+            }
+
+            // Orders touched in period that already have InTreatment + Ready in history (timezone / backfill edge cases).
+            var fallbackIds = await (
+                from o in _dbContext.Order.AsNoTracking()
+                where !o.IsDeleted
+                      && o.SiteId == siteId
+                      && (o.UpdatedDate ?? o.CreationTime) >= fromUtc
+                      && (o.UpdatedDate ?? o.CreationTime) < toUtcExclusive
+                      && _dbContext.OrderStatusHistory.Any(h =>
+                          h.OrderId == o.Id && h.Status == "InTreatment")
+                      && _dbContext.OrderStatusHistory.Any(h =>
+                          h.OrderId == o.Id && h.Status == "Ready")
+                select o.Id
+            )
+                .Distinct()
+                .ToListAsync(cancelToken)
+                .ConfigureAwait(false);
+
+            if (fallbackIds.Count > 0)
+            {
+                return await _dbContext.Order
+                    .AsNoTracking()
+                    .Where(o => fallbackIds.Contains(o.Id))
+                    .ToListAsync(cancelToken)
+                    .ConfigureAwait(false);
+            }
+
+            return await GetCompletedOrdersInRangeAsync(siteId, fromUtc, toUtcExclusive, cancelToken)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>Internal DTO for customer profile from orders.</summary>

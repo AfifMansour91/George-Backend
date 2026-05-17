@@ -21,7 +21,7 @@ using QRCoder;
 
 namespace George.Services
 {
-    public class OrderService : ServiceBase
+    public partial class OrderService : ServiceBase
     {
         private readonly OrderStorage _orderStorage;
         private readonly CustomerStorage _customerStorage;
@@ -97,6 +97,7 @@ namespace George.Services
 
             var res = await _orderStorage.GetOrdersAsync(request.Filter, request, cancelToken);
             response.Data!.Items = res.Items.ConvertAll(o => _mapper.Map<OrderRes>(o));
+            await EnrichOrderResListAsync(response.Data.Items, res.Items, cancelToken).ConfigureAwait(false);
             response.Data.Skip = request.Skip;
             response.Data.Limit = request.Take;
             response.Data.Total = res.Total;
@@ -110,6 +111,7 @@ namespace George.Services
             if (order == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
             response.Data = _mapper.Map<OrderRes>(order);
+            await EnrichOrderResAsync(response.Data, order, cancelToken).ConfigureAwait(false);
             return response;
         }
 
@@ -178,6 +180,12 @@ namespace George.Services
                 items.Add(oi);
             }
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken);
+            await RecordOrderStatusChangeAsync(
+                created.Id,
+                previousStatus: null,
+                newStatus: created.Status,
+                occurredAtUtc: created.CreationTime,
+                cancelToken).ConfigureAwait(false);
             var loaded = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken);
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loaded, cancelToken).ConfigureAwait(false);
             await TryApplyInternalOrderCatalogOnCreateAsync(loaded!, cancelToken).ConfigureAwait(false);
@@ -186,6 +194,8 @@ namespace George.Services
             if (loadedAfterStock != null)
                 await TryEnqueueNewOrderAutoPrintAsync(loadedAfterStock, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(loadedAfterStock);
+            if (loadedAfterStock != null)
+                await EnrichOrderResAsync(response.Data, loadedAfterStock, cancelToken).ConfigureAwait(false);
             return response;
         }
 
@@ -431,6 +441,15 @@ namespace George.Services
             }, cancelToken);
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
+            if (req.Status != null)
+            {
+                await RecordOrderStatusChangeAsync(
+                    orderId,
+                    previousStatus,
+                    updated.Status,
+                    DateTime.UtcNow,
+                    cancelToken).ConfigureAwait(false);
+            }
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "order update", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             if (loaded != null && loaded.CustomerId is int customerId && customerId > 0)
@@ -464,6 +483,8 @@ namespace George.Services
                 await TrySendOrderReadyCustomerSmsAsync(loaded, cancelToken).ConfigureAwait(false);
             }
             response.Data = _mapper.Map<OrderRes>(loaded);
+            if (loaded != null)
+                await EnrichOrderResAsync(response.Data, loaded, cancelToken).ConfigureAwait(false);
             return response;
         }
 
@@ -486,8 +507,15 @@ namespace George.Services
             var order = await _orderStorage.CancelOrderAsync(orderId, AuthUser.Id, softDelete, cancelToken);
             if (order == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
+            await RecordOrderStatusChangeAsync(
+                orderId,
+                beforeCancel.Status,
+                "Cancelled",
+                DateTime.UtcNow,
+                cancelToken).ConfigureAwait(false);
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, order, "order cancel", statusOverrideForWcRest: "cancelled", cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(order);
+            await EnrichOrderResAsync(response.Data!, order, cancelToken).ConfigureAwait(false);
             return response;
         }
 
@@ -1388,6 +1416,15 @@ namespace George.Services
                 }, cancelToken).ConfigureAwait(false);
                 if (updated == null)
                     return CreateResponse(response, StatusCode.ItemNotFound);
+                if (!string.Equals(previousWooStatus, updated.Status, StringComparison.OrdinalIgnoreCase))
+                {
+                    await RecordOrderStatusChangeAsync(
+                        existing.Id,
+                        previousWooStatus,
+                        updated.Status,
+                        DateTime.UtcNow,
+                        cancelToken).ConfigureAwait(false);
+                }
                 var updateItems = new List<OrderItem>();
                 if (payload.Items != null)
                 {
@@ -1438,6 +1475,7 @@ namespace George.Services
                 var loaded = await _orderStorage.GetOrderByIdAsync(existing.Id, cancelToken).ConfigureAwait(false);
                 await TryApplyCompletionInventoryWhenOrderCompletedAsync(existing.Id, previousWooStatus, loaded, cancelToken).ConfigureAwait(false);
                 response.Data = _mapper.Map<OrderRes>(loaded!);
+                await EnrichOrderResAsync(response.Data, loaded!, cancelToken).ConfigureAwait(false);
                 return response;
             }
             var createItems = new List<CreateOrderItemReq>();
@@ -1538,6 +1576,12 @@ namespace George.Services
                 items.Add(oi);
             }
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken).ConfigureAwait(false);
+            await RecordOrderStatusChangeAsync(
+                created.Id,
+                previousStatus: null,
+                newStatus: created.Status,
+                occurredAtUtc: created.CreationTime,
+                cancelToken).ConfigureAwait(false);
             var loadedOrder = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false);
             await TryApplyWooIncomingOrderCatalogAndBaselinePickingAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loadedOrder, cancelToken).ConfigureAwait(false);
@@ -1545,6 +1589,7 @@ namespace George.Services
             if (loadedOrder != null)
                 await TryEnqueueNewOrderAutoPrintAsync(loadedOrder, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(loadedOrder!);
+            await EnrichOrderResAsync(response.Data, loadedOrder!, cancelToken).ConfigureAwait(false);
             return response;
         }
 

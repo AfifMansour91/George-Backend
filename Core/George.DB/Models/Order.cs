@@ -237,6 +237,9 @@ public partial class Order
     [InverseProperty("Order")]
     public virtual ICollection<OrderItem> OrderItem { get; set; } = new List<OrderItem>();
 
+    [InverseProperty("Order")]
+    public virtual ICollection<OrderStatusHistory> OrderStatusHistory { get; set; } = new List<OrderStatusHistory>();
+
     [ForeignKey("SiteId")]
     [InverseProperty("Order")]
     public virtual Site Site { get; set; } = null!;

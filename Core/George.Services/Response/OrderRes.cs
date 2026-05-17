@@ -84,5 +84,12 @@ public class OrderRes
     public string? CardcomPaymentJson { get; set; }
     /// <summary>Gateway <c>status</c> from payment webhook.</summary>
     public string? ExternalPaymentStatus { get; set; }
+
+    /// <summary>First transition to New (defaults to <see cref="CreationTime"/>).</summary>
+    public DateTime? NewAt { get; set; }
+    public DateTime? InTreatmentAt { get; set; }
+    public DateTime? ReadyAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+
     public List<OrderItemRes> Items { get; set; } = new();
 }

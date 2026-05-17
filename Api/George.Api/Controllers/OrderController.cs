@@ -28,11 +28,36 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _orderSvc.GetOrdersAsync(request, cancelToken));
         }
 
+        /// <summary>Aggregated handling medians for a site and date range (dashboard). Literal route before {orderId}.</summary>
+        [HttpGet("HandlingMetrics")]
+        [ProducesResponseType(typeof(IApiResponse<OrderHandlingMetricsRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetHandlingMetricsAsync(
+            [FromQuery] int siteId,
+            [FromQuery] string from,
+            [FromQuery] string to,
+            CancellationToken cancelToken = default)
+        {
+            if (!DateTime.TryParse(from, out var fromDate) || !DateTime.TryParse(to, out var toDate))
+                return BadRequest("from and to must be valid dates (yyyy-MM-dd).");
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _orderSvc.GetOrderHandlingMetricsAsync(siteId, fromDate, toDate, cancelToken));
+        }
+
         [HttpGet("{orderId:int}")]
         [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetOrderAsync([FromRoute] int orderId, CancellationToken cancelToken = default)
         {
             return await SafeCallWithErrorCatchingAsync(() => _orderSvc.GetOrderAsync(orderId, cancelToken));
+        }
+
+        /// <summary>Status timeline for handling-time metrics (dashboard).</summary>
+        [HttpGet("{orderId:int}/StatusHistory")]
+        [ProducesResponseType(typeof(IApiResponse<List<OrderStatusHistoryEntryRes>>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetOrderStatusHistoryAsync(
+            [FromRoute] int orderId,
+            CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _orderSvc.GetOrderStatusHistoryAsync(orderId, cancelToken));
         }
 
         [HttpPost]
