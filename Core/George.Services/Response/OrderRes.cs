@@ -67,6 +67,8 @@ public class OrderRes
     public string? PaymentReference { get; set; }
     /// <summary>Invoice number when paid.</summary>
     public string? InvoiceNumber { get; set; }
+    /// <summary>Cardcom document URL when an invoice was issued.</summary>
+    public string? CardcomDocumentUrl { get; set; }
     public DateTime? PaidAt { get; set; }
     /// <summary>Last payment webhook <c>orderId</c>.</summary>
     public string? GatewayPaymentOrderId { get; set; }
@@ -91,5 +93,13 @@ public class OrderRes
     public DateTime? ReadyAt { get; set; }
     public DateTime? CompletedAt { get; set; }
 
+    public string PaymentSettleStatus { get; set; } = "None";
+    public decimal? PaymentAuthorizedAmount { get; set; }
+    public string? CardcomLowProfileId { get; set; }
+    public int? CustomerPaymentMethodId { get; set; }
+    /// <summary>Last 4 digits from Cardcom authorization/charge.</summary>
+    public string? CardcomTokenLast4 { get; set; }
+    /// <summary>Card brand from Cardcom (e.g. Visa).</summary>
+    public string? CardcomCardBrand { get; set; }
     public List<OrderItemRes> Items { get; set; } = new();
 }

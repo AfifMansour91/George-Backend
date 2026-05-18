@@ -45,6 +45,17 @@ namespace George.Services.Response
         /// <summary>When true (default), UI asks for bag count when completing picking.</summary>
         public bool? AskBagsCountAtPickingFinish { get; set; }
 
+        public string? PaymentGatewayProvider { get; set; }
+        public int? CardcomTerminalNumber { get; set; }
+        public string? CardcomApiName { get; set; }
+        public bool? HasCardcomApiPassword { get; set; }
+        public bool? CardcomSaveCardEnabled { get; set; }
+        public int? PaymentAuthBufferPercent { get; set; }
+        public decimal? PaymentMaxAuthAmount { get; set; }
+        public bool? PaymentAllowCaptureAboveAuth { get; set; }
+        public string? CardcomCssUrl { get; set; }
+        public string? CardcomLogoUrl { get; set; }
+
         /// <summary>When the site's account has kiosk enabled, contains the account kiosk settings (including showOutOfStockProducts, showOutOfStockAtBottom).</summary>
         public KioskSettingsRes? KioskSettings { get; set; }
     }

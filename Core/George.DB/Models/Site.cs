@@ -114,6 +114,36 @@ public partial class Site
     /// <summary>When true (default), staff must confirm bag count before completing picking. When false, skip that prompt.</summary>
     public bool? AskBagsCountAtPickingFinish { get; set; }
 
+    /// <summary>Active payment provider: none | cardcom.</summary>
+    [StringLength(32)]
+    public string PaymentGatewayProvider { get; set; } = "none";
+
+    public int? CardcomTerminalNumber { get; set; }
+
+    [StringLength(100)]
+    public string? CardcomApiName { get; set; }
+
+    [StringLength(500)]
+    public string? CardcomApiPasswordEncrypted { get; set; }
+
+    public bool CardcomSaveCardEnabled { get; set; } = true;
+
+    public int PaymentAuthBufferPercent { get; set; } = 25;
+
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? PaymentMaxAuthAmount { get; set; }
+
+    public bool PaymentAllowCaptureAboveAuth { get; set; }
+
+    [StringLength(2000)]
+    public string? CardcomProviderExtrasJson { get; set; }
+
+    [StringLength(500)]
+    public string? CardcomCssUrl { get; set; }
+
+    [StringLength(500)]
+    public string? CardcomLogoUrl { get; set; }
+
     [ForeignKey("AccountId")]
     [InverseProperty("Site")]
     public virtual Account Account { get; set; } = null!;
@@ -133,6 +163,9 @@ public partial class Site
 
     [InverseProperty("Site")]
     public virtual ICollection<Order> Order { get; set; } = new List<Order>();
+
+    [InverseProperty("Site")]
+    public virtual ICollection<CustomerPaymentMethod> CustomerPaymentMethod { get; set; } = new List<CustomerPaymentMethod>();
 
     [InverseProperty("Site")]
     public virtual ICollection<SiteOrderReceptionClosed> SiteOrderReceptionClosed { get; set; } = new List<SiteOrderReceptionClosed>();

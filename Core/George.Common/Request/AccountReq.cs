@@ -266,6 +266,14 @@ namespace George.Common.Request
         public OrderReadySettingsReq? OrderReady { get; set; }
         public OrderNotPickedUpSettingsReq? OrderNotPickedUp { get; set; }
         public AfterDeliverySettingsReq? AfterDelivery { get; set; }
+        public PaymentNotificationSettingsReq? Payments { get; set; }
+    }
+
+    public class PaymentNotificationSettingsReq
+    {
+        public string? CustomerMessageInvoice { get; set; }
+        public string? CustomerMessageRefund { get; set; }
+        public string? CustomerMessagePaymentLink { get; set; }
     }
 
     public class NewOrderSoundTriggerSourcesReq

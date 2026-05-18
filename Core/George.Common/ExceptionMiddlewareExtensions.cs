@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Text;
@@ -51,8 +51,10 @@ namespace George.Common
 				_logger.LogError(ex, "An unhandled exception has occurred.");
 
 				var errorResponse = new ApiResponse<bool> {
-					StatusCode = StatusCode.UserNotFound,
-					StatusMessage = StatusCode.UserNotFound.GetDescription(),
+					StatusCode = StatusCode.UnknownError,
+					StatusMessage = string.IsNullOrWhiteSpace(ex.Message)
+						? StatusCode.UnknownError.GetDescription()
+						: ex.Message,
 					Exception = ex.ToString(),
 					Timestamp = DateTime.UtcNow
 				};

@@ -48,6 +48,17 @@ namespace George.Services.Request
 
         /// <summary>When true (default), prompt for bag count when finishing picking.</summary>
         public bool? AskBagsCountAtPickingFinish { get; set; }
+
+        public string? PaymentGatewayProvider { get; set; }
+        public int? CardcomTerminalNumber { get; set; }
+        public string? CardcomApiName { get; set; }
+        public string? CardcomApiPassword { get; set; }
+        public bool? CardcomSaveCardEnabled { get; set; }
+        public int? PaymentAuthBufferPercent { get; set; }
+        public decimal? PaymentMaxAuthAmount { get; set; }
+        public bool? PaymentAllowCaptureAboveAuth { get; set; }
+        public string? CardcomCssUrl { get; set; }
+        public string? CardcomLogoUrl { get; set; }
     }
 
     public class CreateSiteReq : SiteReq

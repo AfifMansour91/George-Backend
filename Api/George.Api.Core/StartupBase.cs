@@ -105,6 +105,8 @@ namespace George.Api.Core
 			// Authentication
 			AddAuthenticationAndAuthorization(services);
 
+			services.AddDataProtection();
+
 			// HTTP
 			AddHttpServices(services);
 
@@ -366,8 +368,9 @@ namespace George.Api.Core
 			services.AddScoped<BrandStorage>();
 			services.AddScoped<AttributeStorage>();
 			services.AddScoped<MediaStorage>();
-			services.AddScoped<OrderStorage>();
-			services.AddScoped<IncomeReportStorage>();
+            services.AddScoped<OrderStorage>();
+            services.AddScoped<PaymentStorage>();
+            services.AddScoped<IncomeReportStorage>();
 			services.AddScoped<ProductsReportStorage>();
 			services.AddScoped<QuantityConcentrationReportStorage>();
 			services.AddScoped<CustomerStorage>();
@@ -394,6 +397,9 @@ namespace George.Api.Core
 			services.AddScoped<AttributeService>();
 			services.AddScoped<MediaService>();
 			services.AddScoped<OrderService>();
+			services.AddScoped<George.Services.Payments.PaymentService>();
+			services.AddScoped<George.Services.Payments.Cardcom.CardcomGateway>();
+			services.AddSingleton<George.Services.Payments.PaymentTokenProtector>();
 			services.AddScoped<IncomeReportService>();
 			services.AddScoped<ProductsReportService>();
 			services.AddScoped<InventoryReportService>();
@@ -454,6 +460,11 @@ namespace George.Api.Core
 
 			// Register http services.
 			services.AddHttpClient<HttpHelper>();
+			services.AddHttpClient(George.Services.Payments.Cardcom.CardcomGateway.HttpClientName, client =>
+			{
+				client.BaseAddress = new Uri("https://secure.cardcom.solutions/api/v11/");
+				client.Timeout = TimeSpan.FromSeconds(60);
+			});
 		}
 
 		protected virtual void AddAutoMapper(IServiceCollection services)

@@ -51,6 +51,10 @@ public partial class GeorgeDBContextBase : DbContext
 
     public virtual DbSet<OrderItem> OrderItem { get; set; }
 
+    public virtual DbSet<OrderPaymentEvent> OrderPaymentEvent { get; set; }
+
+    public virtual DbSet<CustomerPaymentMethod> CustomerPaymentMethod { get; set; }
+
     public virtual DbSet<Product> Product { get; set; }
 
     public virtual DbSet<ProductBrand> ProductBrand { get; set; }
@@ -475,6 +479,32 @@ public partial class GeorgeDBContextBase : DbContext
             entity.HasOne(d => d.Site).WithMany(p => p.Order)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_Order_Site");
+
+            entity.Property(e => e.PaymentSettleStatus).HasDefaultValue("None");
+
+            entity.HasOne(d => d.CustomerPaymentMethod).WithMany(p => p.Order)
+                .HasForeignKey(d => d.CustomerPaymentMethodId)
+                .OnDelete(DeleteBehavior.NoAction)
+                .HasConstraintName("FK_Order_CustomerPaymentMethod");
+        });
+
+        modelBuilder.Entity<OrderPaymentEvent>(entity =>
+        {
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.HasOne(d => d.Order).WithMany(p => p.OrderPaymentEvent)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_OrderPaymentEvent_Order");
+        });
+
+        modelBuilder.Entity<CustomerPaymentMethod>(entity =>
+        {
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.HasOne(d => d.Customer).WithMany(p => p.CustomerPaymentMethod)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_CustomerPaymentMethod_Customer");
+            entity.HasOne(d => d.Site).WithMany(p => p.CustomerPaymentMethod)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_CustomerPaymentMethod_Site");
         });
 
         modelBuilder.Entity<OrderItem>(entity =>
@@ -670,6 +700,10 @@ public partial class GeorgeDBContextBase : DbContext
             entity.Property(e => e.Currency).HasDefaultValue("ILS");
             entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.PaymentGatewayProvider).HasDefaultValue("none");
+            entity.Property(e => e.CardcomSaveCardEnabled).HasDefaultValue(true);
+            entity.Property(e => e.PaymentAuthBufferPercent).HasDefaultValue(25);
+            entity.Property(e => e.PaymentAllowCaptureAboveAuth).HasDefaultValue(false);
 
             entity.HasOne(d => d.Account).WithMany(p => p.Site)
                 .OnDelete(DeleteBehavior.ClientSetNull)

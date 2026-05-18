@@ -1,5 +1,6 @@
 using System.Linq;
 using George.Common;
+using George.Common.Payment;
 using George.DB;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -107,6 +108,15 @@ namespace George.Data
                 .Include(o => o.Account)
                 .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
                 .FirstOrDefaultAsync(o => !o.IsDeleted && o.SiteId == siteId && o.ExternalOrderId == externalOrderId, cancelToken);
+        }
+
+        public async Task<Order?> GetOrderByLowProfileIdAsync(string lowProfileId, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(lowProfileId)) return null;
+            return await _dbContext.Order
+                .Include(o => o.Site)
+                .Include(o => o.CustomerPaymentMethod)
+                .FirstOrDefaultAsync(o => !o.IsDeleted && o.CardcomLowProfileId == lowProfileId, cancelToken);
         }
 
         /// <summary>Returns next order number for the site (e.g. 1001, 1002). Caller can assign to new order.</summary>
@@ -390,6 +400,16 @@ namespace George.Data
             return new string(phone.Where(char.IsDigit).ToArray());
         }
 
+        private static bool IsCardcomCreditPaymentMethod(string? method)
+        {
+            if (string.IsNullOrWhiteSpace(method)) return false;
+            var m = method.Trim();
+            return m.Equals("SavedCard", StringComparison.OrdinalIgnoreCase)
+                || m.Equals("CreditCard", StringComparison.OrdinalIgnoreCase)
+                || m.Equals("CreditPhone", StringComparison.OrdinalIgnoreCase)
+                || m.Equals("CreditSms", StringComparison.OrdinalIgnoreCase);
+        }
+
         /// <summary>Get customer profile by phone at site: name, manager note, and stats from order history.</summary>
         public async Task<CustomerOrderProfile> GetCustomerProfileByPhoneAsync(int siteId, string? phone, CancellationToken cancelToken)
         {
@@ -425,6 +445,40 @@ namespace George.Data
                 result.TotalTransactions = totals.Sum();
                 result.AverageOrderTotal = totals.Sum() / totals.Count;
             }
+
+            foreach (var o in orders)
+            {
+                if (!IsCardcomCreditPaymentMethod(o.PaymentMethod))
+                    continue;
+
+                var hasTokenOnOrder = o.CustomerPaymentMethodId != null
+                    || !string.IsNullOrWhiteSpace(o.CardcomTokenLast4)
+                    || string.Equals(o.PaymentSettleStatus, PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(o.PaymentSettleStatus, PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase);
+
+                if (!hasTokenOnOrder)
+                    continue;
+
+                var last4 = o.CardcomTokenLast4;
+                var brand = o.CardcomCardBrand;
+                if (o.CustomerPaymentMethodId is int pmId)
+                {
+                    var pm = await _dbContext.CustomerPaymentMethod.AsNoTracking()
+                        .FirstOrDefaultAsync(m => m.Id == pmId && !m.IsRetired, cancelToken)
+                        .ConfigureAwait(false);
+                    if (pm != null)
+                    {
+                        last4 = pm.Last4Digits ?? last4;
+                        brand = pm.CardBrand ?? brand;
+                    }
+                }
+
+                result.HasSavedCard = true;
+                result.SavedCardLast4 = last4;
+                result.SavedCardBrand = brand;
+                break;
+            }
+
             return result;
         }
 
@@ -645,5 +699,8 @@ namespace George.Data
         public int OrderCount { get; set; }
         public decimal? AverageOrderTotal { get; set; }
         public decimal? TotalTransactions { get; set; }
+        public bool HasSavedCard { get; set; }
+        public string? SavedCardLast4 { get; set; }
+        public string? SavedCardBrand { get; set; }
     }
 }

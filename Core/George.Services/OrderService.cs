@@ -31,6 +31,7 @@ namespace George.Services
         private readonly SmsProvider _smsProvider;
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly PrintJobService _printJobService;
+        private readonly Payments.PaymentService _paymentService;
         private readonly string? _publicAppBaseUrl;
         private static readonly Dictionary<string, string> VoucherSourceLabels = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -60,6 +61,7 @@ namespace George.Services
             SmsProvider smsProvider,
             IServiceScopeFactory serviceScopeFactory,
             PrintJobService printJobService,
+            Payments.PaymentService paymentService,
             IConfiguration configuration)
             : base(logger, mapper, cache)
         {
@@ -71,6 +73,7 @@ namespace George.Services
             _smsProvider = smsProvider;
             _serviceScopeFactory = serviceScopeFactory;
             _printJobService = printJobService;
+            _paymentService = paymentService;
             _publicAppBaseUrl = ResolvePublicAppBaseUrl(configuration);
         }
 
@@ -157,6 +160,7 @@ namespace George.Services
             var order = _mapper.Map<Order>(req);
             RebuildDeliveryAddressFromStreetAndCity(order);
             order.CustomerId = customer.Id; // always set: customer was either found or created above
+            await _paymentService.PrepareOrderPaymentOnCreateAsync(order, cancelToken).ConfigureAwait(false);
             order.CreationTime = DateTime.UtcNow;
             order.CreationUserId = AuthUser.Id;
             order.IsDeleted = false;
@@ -190,6 +194,8 @@ namespace George.Services
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loaded, cancelToken).ConfigureAwait(false);
             await TryApplyInternalOrderCatalogOnCreateAsync(loaded!, cancelToken).ConfigureAwait(false);
             var loadedAfterStock = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false) ?? loaded;
+            if (loadedAfterStock != null)
+                await _paymentService.TryPlaceAuthorizationHoldAfterOrderCreatedAsync(loadedAfterStock, cancelToken).ConfigureAwait(false);
             await TrySendNewOrderCustomerSmsAsync(loadedAfterStock!, cancelToken).ConfigureAwait(false);
             if (loadedAfterStock != null)
                 await TryEnqueueNewOrderAutoPrintAsync(loadedAfterStock, cancelToken).ConfigureAwait(false);
@@ -241,7 +247,7 @@ namespace George.Services
             if (string.IsNullOrWhiteSpace(template))
                 return;
 
-            var body = ReplaceOrderPlaceholders(template, order);
+            var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
             try
             {
                 if (!SmsProvider.IsInitialized)
@@ -277,7 +283,7 @@ namespace George.Services
             if (string.IsNullOrWhiteSpace(template))
                 return;
 
-            var body = ReplaceOrderPlaceholders(template, order);
+            var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
             try
             {
                 if (!SmsProvider.IsInitialized)
@@ -312,53 +318,6 @@ namespace George.Services
             return settings.OrderReadyCustomerMessagePickup ?? settings.OrderReadyCustomerMessageShipping;
         }
 
-        /// <summary>
-        /// Match picking: if any line has picked qty &gt; 0, sum only those lines (+ shipping). Otherwise pre-pick — sum all line totals (new order SMS).
-        /// </summary>
-        private static decimal ResolveOrderTotalForPlaceholders(Order order)
-        {
-            var items = order.OrderItem;
-            if (items == null || items.Count == 0)
-                return order.Total ?? 0m;
-
-            var anyPicked = items.Any(i => i.PickedQuantity.HasValue && i.PickedQuantity.Value > 0m);
-            var shipping = order.ShippingCost ?? 0m;
-            if (anyPicked)
-            {
-                var pickedSum = items.Sum(i =>
-                {
-                    if (!i.PickedQuantity.HasValue || i.PickedQuantity.Value <= 0m)
-                        return 0m;
-                    if (i.TotalPrice.HasValue)
-                        return i.TotalPrice.Value;
-                    return i.PickedQuantity.Value * (i.PricePerUnit ?? 0m);
-                });
-                return pickedSum + shipping;
-            }
-
-            var allLines = items.Sum(i => i.TotalPrice ?? i.Quantity * (i.PricePerUnit ?? 0m));
-            if (allLines + shipping > 0m)
-                return allLines + shipping;
-            return order.Total ?? 0m;
-        }
-
-        private static string ReplaceOrderPlaceholders(string template, Order order)
-        {
-            var orderDate = order.CreationTime;
-            var deliveryDate = order.DeliveryDate;
-            var pickupDate = order.PickupDate;
-            var orderTotalStr = ResolveOrderTotalForPlaceholders(order).ToString("N2", CultureInfo.InvariantCulture);
-            return template
-                .Replace("[customer_name]", order.CustomerName ?? "")
-                .Replace("[order_number]", order.OrderNumber ?? "")
-                .Replace("[order_date]", orderDate.ToString("dd/MM/yyyy"))
-                .Replace("[order_total]", orderTotalStr)
-                .Replace("[delivery_date]", deliveryDate.HasValue ? deliveryDate.Value.ToString("dd/MM/yyyy") : "")
-                .Replace("[delivery_time]", order.DeliveryTime ?? "")
-                .Replace("[pickup_date]", pickupDate.HasValue ? pickupDate.Value.ToString("dd/MM/yyyy") : "")
-                .Replace("[pickup_time]", order.PickupTime ?? "");
-        }
-
         /// <summary>Send reminder SMS to customer for a ready order (שלח תזכורת). Uses OrderReady message template from account notification settings.</summary>
         public async Task<IApiResponse<bool>> SendReminderAsync(int orderId, CancellationToken cancelToken = default)
         {
@@ -377,7 +336,7 @@ namespace George.Services
             var template = ResolveOrderReadyCustomerMessageTemplate(settings, order);
             if (string.IsNullOrWhiteSpace(template))
                 return CreateResponse(response, StatusCode.InvalidRequest, "No reminder message template configured for this order.");
-            var body = ReplaceOrderPlaceholders(template, order);
+            var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
             try
             {
                 if (!SmsProvider.IsInitialized)
@@ -513,6 +472,7 @@ namespace George.Services
                 "Cancelled",
                 DateTime.UtcNow,
                 cancelToken).ConfigureAwait(false);
+            await _paymentService.TryVoidAuthorizationOnCancelAsync(order, cancelToken).ConfigureAwait(false);
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, order, "order cancel", statusOverrideForWcRest: "cancelled", cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(order);
             await EnrichOrderResAsync(response.Data!, order, cancelToken).ConfigureAwait(false);
@@ -534,6 +494,21 @@ namespace George.Services
             response.Data.OrderCount = profile.OrderCount;
             response.Data.AverageOrderTotal = profile.AverageOrderTotal;
             response.Data.TotalTransactions = profile.TotalTransactions;
+            response.Data.HasSavedCard = profile.HasSavedCard;
+            response.Data.SavedCardLast4 = profile.SavedCardLast4;
+            response.Data.SavedCardBrand = profile.SavedCardBrand;
+
+            var cardRes = await _paymentService.GetSavedCardForCustomerAsync(siteId, phone, null, cancelToken)
+                .ConfigureAwait(false);
+            if (cardRes.Data?.HasCard == true)
+            {
+                response.Data.HasSavedCard = true;
+                if (!string.IsNullOrWhiteSpace(cardRes.Data.Last4Digits))
+                    response.Data.SavedCardLast4 = cardRes.Data.Last4Digits;
+                if (!string.IsNullOrWhiteSpace(cardRes.Data.CardBrand))
+                    response.Data.SavedCardBrand = cardRes.Data.CardBrand;
+            }
+
             return response;
         }
 
