@@ -21,6 +21,7 @@ namespace George.Services.Response
         public decimal? WeightPerUnitKg { get; set; }
         public decimal? QuantityKg { get; set; }
         public decimal? QuantityUnits { get; set; }
+        public bool ShowUnitsInTotalQuantity { get; set; } = true;
         public string? Note { get; set; }
         /// <summary>Live variant stock (units) when parent uses variation quantity management.</summary>
         public decimal? StockUnits { get; set; }
@@ -36,6 +37,8 @@ namespace George.Services.Response
         public int CategoryId { get; set; }
         public decimal? TotalQuantityKg { get; set; }
         public decimal? TotalQuantityUnits { get; set; }
+        /// <summary>When false, total quantity column shows kg only (pure by-weight products).</summary>
+        public bool ShowUnitsInTotalQuantity { get; set; } = true;
         public decimal? StockKg { get; set; }
         public decimal? StockUnits { get; set; }
         /// <summary><c>quantity</c> = numeric on-hand; <c>status</c> = in/out only (no shortage numbers).</summary>

@@ -185,13 +185,16 @@ namespace George.Services
                     if (b.Units > 0m) sumUnits += b.Units;
                     var variantId = b.VariantIds.Count > 0 ? b.VariantIds.Min() : (int?)null;
                     var (lineSk, lineSu) = ResolveLineCatalogStock(p, stockDisplayMode, variantId);
+                    var lineLabel = b.LineLabel;
+                    var noteText = string.IsNullOrEmpty(kv.Key.note) ? null : kv.Key.note;
                     lines.Add(new QuantityConcentrationLineDto
                     {
-                        LineLabel = b.LineLabel,
+                        LineLabel = lineLabel,
                         WeightPerUnitKg = b.UnitWeightKg is > 0m ? Round2(b.UnitWeightKg.Value) : null,
                         QuantityKg = b.Kg > 0m ? Round2(b.Kg) : null,
                         QuantityUnits = b.Units > 0m ? Round2(b.Units) : null,
-                        Note = string.IsNullOrEmpty(kv.Key.note) ? null : kv.Key.note,
+                        Note = noteText,
+                        ShowUnitsInTotalQuantity = ShowUnitsInTotalQuantity(p, b.Units),
                         StockKg = lineSk,
                         StockUnits = lineSu,
                         VariantId = variantId,
@@ -201,15 +204,14 @@ namespace George.Services
                 lines = CollapseIfSingleSyntheticLine(lines, p.Name ?? "");
                 lines = FilterAndMergeDetailLines(lines, p);
                 lines = EnrichVariationQuantityStockLines(p, lines, stockDisplayMode);
-                lines = AppendRemainderDetailLineIfNeeded(lines, sumKg, sumUnits);
+                lines = AppendRemainderDetailLineIfNeeded(lines, sumKg, sumUnits, p);
 
                 var orderVariantIds = g.SelectMany(kv => kv.Value.VariantIds).ToHashSet();
                 var (stockKg, stockUnits, shortageKg, shortageUnits, st) =
                     ComputeStockAndShortage(p, account, sumKg, sumUnits, orderVariantIds, stockDisplayMode);
 
-                var totalUnitsOut = sumUnits > 0m ? Round2(sumUnits) : (decimal?)null;
-                if (p.IsWeighted == true && sumKg > 0m && lines.Count == 0)
-                    totalUnitsOut = null;
+                var showUnitsInTotal = ShowUnitsInTotalQuantity(p, sumUnits);
+                var totalUnitsOut = showUnitsInTotal && sumUnits > 0m ? Round2(sumUnits) : (decimal?)null;
 
                 groups.Add(new QuantityConcentrationProductGroupDto
                 {
@@ -218,6 +220,7 @@ namespace George.Services
                     CategoryId = PrimaryCategoryId(p) ?? 0,
                     TotalQuantityKg = sumKg > 0m ? Round2(sumKg) : null,
                     TotalQuantityUnits = totalUnitsOut,
+                    ShowUnitsInTotalQuantity = showUnitsInTotal,
                     StockKg = stockKg,
                     StockUnits = stockUnits,
                     StockDisplayMode = stockDisplayMode,
@@ -276,11 +279,34 @@ namespace George.Services
             return "\u001eno_structured_option";
         }
 
+        /// <summary>
+        /// מוצר עם וריאציות בקטלוג (חיתוכים/אפשרויות) — בלי קשר לסוג ניהול המלאי (כמות/סטטוס/וריאציה).
+        /// </summary>
+        private static bool ProductHasCatalogVariationOptions(Product p) =>
+            ProductCatalogStockClassification.ActiveVariants(p).Count > 0;
+
         private static List<QuantityConcentrationLineDto> FilterAndMergeDetailLines(
             List<QuantityConcentrationLineDto> lines,
             Product p)
         {
             var pn = (p.Name ?? "").Trim();
+
+            if (!ProductHasCatalogVariationOptions(p))
+            {
+                var kept = lines.Where(l =>
+                    !string.IsNullOrEmpty(l.Note)
+                    || (l.QuantityKg ?? 0) > 0
+                    || (l.QuantityUnits ?? 0) > 0).ToList();
+
+                if (!string.IsNullOrEmpty(pn))
+                {
+                    foreach (var l in kept)
+                        l.LineLabel = pn;
+                }
+
+                return MergeLinesByCanonicalLabel(kept);
+            }
+
             var filtered = lines.Where(l =>
             {
                 if (!string.IsNullOrEmpty(l.Note)) return true;
@@ -338,9 +364,13 @@ namespace George.Services
         public static List<QuantityConcentrationLineDto> AppendRemainderDetailLineIfNeeded(
             List<QuantityConcentrationLineDto> lines,
             decimal sumKgRaw,
-            decimal sumUnitsRaw)
+            decimal sumUnitsRaw,
+            Product? product = null)
         {
             if (lines.Count == 0)
+                return lines;
+
+            if (product != null && !ProductHasCatalogVariationOptions(product))
                 return lines;
 
             var detKg = lines.Sum(l => l.QuantityKg ?? 0m);
@@ -628,11 +658,24 @@ namespace George.Services
         {
             var opts = v.ProductVariantOptionValue?.OrderBy(o => o.OptionName).ToList()
                        ?? new List<ProductVariantOptionValue>();
+            string raw;
             if (opts.Count == 0)
-                return $"#{v.Id}";
-            if (opts.Count == 1)
-                return opts[0].OptionValue.Trim();
-            return string.Join(" · ", opts.Select(o => $"{o.OptionName}: {o.OptionValue}"));
+                raw = $"#{v.Id}";
+            else if (opts.Count == 1)
+                raw = opts[0].OptionValue.Trim();
+            else
+                raw = string.Join(" · ", opts.Select(o => $"{o.OptionName}: {o.OptionValue}"));
+            return raw;
+        }
+
+        /// <summary>Unit count in total-qty column only for non-weighted products; weighted rows show kg only.</summary>
+        private static bool ShowUnitsInTotalQuantity(Product p, decimal sumUnits)
+        {
+            if (sumUnits <= 0m)
+                return false;
+            if (p.IsWeighted == true)
+                return false;
+            return true;
         }
 
         private static decimal? MergeStockField(
@@ -682,6 +725,7 @@ namespace George.Services
                     LineLabel = label,
                     VariantId = v.Id,
                     StockUnits = stockU,
+                    ShowUnitsInTotalQuantity = ShowUnitsInTotalQuantity(p, 0m),
                 });
             }
 
