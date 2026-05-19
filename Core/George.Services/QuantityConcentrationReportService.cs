@@ -131,7 +131,10 @@ namespace George.Services
                     var key = (line.ProductId.Value, cutKey, note);
                     if (!buckets.TryGetValue(key, out var b))
                     {
-                        b = new LineBucket { LineLabel = BuildLineLabel(line) };
+                        b = new LineBucket
+                        {
+                            LineLabel = OrderItemReportLineLabel.ResolveOptionDisplayLabel(line, p.Name) ?? "",
+                        };
                         buckets[key] = b;
                     }
 
@@ -166,7 +169,7 @@ namespace George.Services
                     if (b.Units > 0m) sumUnits += b.Units;
                     lines.Add(new QuantityConcentrationLineDto
                     {
-                        LineLabel = NormalizeOptionLineLabel(b.LineLabel),
+                        LineLabel = b.LineLabel,
                         WeightPerUnitKg = b.UnitWeightKg is > 0m ? Round2(b.UnitWeightKg.Value) : null,
                         QuantityKg = b.Kg > 0m ? Round2(b.Kg) : null,
                         QuantityUnits = b.Units > 0m ? Round2(b.Units) : null,
@@ -236,71 +239,14 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Semantic bucket key: merges lines that only differ by product title vs SaleUnitsLine noise,
-        /// keeps separate buckets for real cuts, non–per-unit-only sizes, and meaningful variants.
+        /// Bucket key — real catalog option only; otherwise one bucket per product (units/kg on parent row).
         /// </summary>
         private static string BuildCutBucketKey(OrderItem line, string? productName)
         {
-            var cut = (line.OrderLineCuttingLabel ?? "").Trim();
-            var size = (line.OrderLineSizeLabel ?? "").Trim();
-            var vt = (line.VariantTitle ?? "").Trim();
-            var per = (line.OrderLinePerUnitWeightLabel ?? "").Trim();
-            var pn = (productName ?? "").Trim();
-
-            if (cut.Length > 0)
-            {
-                if (size.Length > 0 && !IsRedundantSizeVsCut(size, cut))
-                    return AttrDedupeKey(cut) + "\u001e" + AttrDedupeKey(size);
-                return AttrDedupeKey(cut);
-            }
-
-            if (size.Length > 0 && !IsPerUnitWeightOnlyDisplayLabel(size))
-                return AttrDedupeKey(size);
-
-            if (vt.Length > 0 && !IsGenericVariantTitle(vt) &&
-                (pn.Length == 0 || !AttrKeysEqual(vt, pn)) &&
-                !IsPerUnitWeightOnlyDisplayLabel(vt))
-                return AttrDedupeKey(vt);
-
-            if (per.Length > 0 && IsPerUnitWeightOnlyDisplayLabel(per))
-                return "\u001eper_unit:" + AttrDedupeKey(per);
-            if (size.Length > 0 && IsPerUnitWeightOnlyDisplayLabel(size))
-                return "\u001eper_unit:" + AttrDedupeKey(size);
-            if (vt.Length > 0 && IsPerUnitWeightOnlyDisplayLabel(vt))
-                return "\u001eper_unit:" + AttrDedupeKey(vt);
-
+            var label = OrderItemReportLineLabel.ResolveOptionDisplayLabel(line, productName);
+            if (!string.IsNullOrEmpty(label))
+                return AttrDedupeKey(label);
             return "\u001eno_structured_option";
-        }
-
-        private static bool IsRedundantSizeVsCut(string size, string cut)
-        {
-            if (string.IsNullOrWhiteSpace(size) || string.IsNullOrWhiteSpace(cut)) return false;
-            if (cut.Contains(size.Trim(), StringComparison.OrdinalIgnoreCase)) return true;
-            var gs = ParseGramsFromHebrewWeightLabel(size);
-            var gc = ParseGramsFromHebrewWeightLabel(cut);
-            return gs > 0m && gc > 0m && gs == gc;
-        }
-
-        /// <summary>Labels like "200 גרם ליח'" — detail row is noise when parent is shown in kg.</summary>
-        private static bool IsPerUnitWeightOnlyDisplayLabel(string label)
-        {
-            var t = label.Trim();
-            if (t.Length == 0) return false;
-            if (Regex.IsMatch(t, @"^[\d.,]+\s*גרם\s*ליח", RegexOptions.IgnoreCase)) return true;
-            return Regex.IsMatch(t, @"^[\d.,]+\s*ק[״""\u0022']?\s*ג\s*ליח", RegexOptions.IgnoreCase);
-        }
-
-        private static string NormalizeOptionLineLabel(string raw)
-        {
-            if (string.IsNullOrWhiteSpace(raw)) return raw;
-            var t = raw.Trim();
-            t = Regex.Replace(t,
-                @"\(\s*כ\s*([\d.,]+)\s*גר'\s*\)\s*\(\s*כ\s*\1\s*גרם\s*\)",
-                "(כ $1 גר')", RegexOptions.IgnoreCase);
-            t = Regex.Replace(t,
-                @"\(\s*כ\s*([\d.,]+)\s*גרם\s*\)\s*\(\s*כ\s*\1\s*גר'\s*\)",
-                "(כ $1 גרם)", RegexOptions.IgnoreCase);
-            return DedupeRepeatedLabelFragments(t);
         }
 
         private static List<QuantityConcentrationLineDto> FilterAndMergeDetailLines(
@@ -312,7 +258,8 @@ namespace George.Services
             {
                 if (!string.IsNullOrEmpty(l.Note)) return true;
                 if (IsSyntheticLineLabel(l.LineLabel, pn)) return false;
-                if (p.IsWeighted == true && IsPerUnitWeightOnlyDisplayLabel(l.LineLabel)) return false;
+                if (p.IsWeighted == true && OrderItemReportLineLabel.IsNonOptionDisplayLabel(l.LineLabel))
+                    return false;
                 return true;
             }).ToList();
 
@@ -321,7 +268,7 @@ namespace George.Services
 
         private static List<QuantityConcentrationLineDto> MergeLinesByCanonicalLabel(List<QuantityConcentrationLineDto> lines) =>
             lines
-                .GroupBy(l => (l.Note ?? "", AttrDedupeKey(NormalizeOptionLineLabel(l.LineLabel))))
+                .GroupBy(l => (l.Note ?? "", AttrDedupeKey(l.LineLabel.Trim())))
                 .Select(g =>
                 {
                     var list = g.ToList();
@@ -330,7 +277,7 @@ namespace George.Services
                         var only = list[0];
                         return new QuantityConcentrationLineDto
                         {
-                            LineLabel = NormalizeOptionLineLabel(only.LineLabel),
+                            LineLabel = only.LineLabel,
                             Note = only.Note,
                             WeightPerUnitKg = only.WeightPerUnitKg,
                             QuantityKg = only.QuantityKg,
@@ -344,7 +291,7 @@ namespace George.Services
                     var bestLabel = list.OrderByDescending(x => x.LineLabel.Length).First().LineLabel;
                     return new QuantityConcentrationLineDto
                     {
-                        LineLabel = NormalizeOptionLineLabel(bestLabel),
+                        LineLabel = bestLabel,
                         Note = list[0].Note,
                         WeightPerUnitKg = wpu is > 0m ? wpu : null,
                         QuantityKg = kg > 0m ? Round2(kg) : null,
@@ -505,16 +452,6 @@ namespace George.Services
             return false;
         }
 
-        private static bool IsGenericVariantTitle(string vt)
-        {
-            var s = vt.Trim();
-            if (s.Length == 0) return true;
-            if (s == "יחידה") return true;
-            if (string.Equals(s, "kg", StringComparison.OrdinalIgnoreCase)) return true;
-            if (Regex.IsMatch(s, @"^ק[״""\u0022']?\s*ג$")) return true;
-            return false;
-        }
-
         private static string AttrDedupeKey(string s)
         {
             var t = s.Trim().Normalize(NormalizationForm.FormKC);
@@ -524,99 +461,8 @@ namespace George.Services
             return t.ToLowerInvariant();
         }
 
-        private static bool AttrKeysEqual(string a, string b) =>
-            string.Equals(AttrDedupeKey(a), AttrDedupeKey(b), StringComparison.Ordinal);
-
-        private static void AddDedupeParts(ICollection<string> parts, string piece)
-        {
-            var t = piece.Trim();
-            if (t.Length == 0) return;
-            var k = AttrDedupeKey(t);
-            foreach (var existing in parts)
-            {
-                if (AttrDedupeKey(existing) == k) return;
-            }
-            parts.Add(t);
-        }
-
-        private static List<string> BuildLineLabelParts(OrderItem line)
-        {
-            var parts = new List<string>();
-            var cut = (line.OrderLineCuttingLabel ?? "").Trim();
-            var hasStructuredCut = cut.Length > 0;
-            if (hasStructuredCut) AddDedupeParts(parts, cut);
-
-            var size = (line.OrderLineSizeLabel ?? "").Trim();
-            if (size.Length > 0 && !AttrKeysEqual(size, cut) && !IsRedundantSizeVsCut(size, cut))
-                AddDedupeParts(parts, size);
-
-            var vt = (line.VariantTitle ?? "").Trim();
-            if (vt.Length > 0 && !IsGenericVariantTitle(vt) &&
-                !AttrKeysEqual(vt, cut) && !AttrKeysEqual(vt, size))
-                AddDedupeParts(parts, vt);
-
-            var showPer = IsWeightedSoldByUnits(line);
-            var per = (line.OrderLinePerUnitWeightLabel ?? "").Trim();
-            if (showPer && per.Length > 0 &&
-                !AttrKeysEqual(per, cut) && !AttrKeysEqual(per, size) && !AttrKeysEqual(per, vt))
-                AddDedupeParts(parts, per);
-
-            if (parts.Count > 0) return parts;
-
-            var sul = (line.SaleUnitsLine ?? "").Trim();
-            if (sul.Length > 0)
-            {
-                var normalized = DedupeRepeatedLabelFragments(sul);
-                if (normalized.Length > 0) parts.Add(normalized);
-                return parts;
-            }
-
-            return parts;
-        }
-
-        public static string BuildLineLabel(OrderItem line)
-        {
-            var parts = BuildLineLabelParts(line);
-            string raw;
-            if (parts.Count > 0)
-                raw = string.Join(" · ", parts);
-            else
-            {
-                var title = (line.Title ?? "").Trim();
-                raw = string.IsNullOrEmpty(title) ? "—" : title;
-            }
-
-            return NormalizeOptionLineLabel(raw);
-        }
-
-        /// <summary>Remove consecutive duplicate phrases (e.g. repeated "200 גר')") from a bad combined line.</summary>
-        private static string DedupeRepeatedLabelFragments(string s)
-        {
-            var t = s.Trim();
-            if (t.Length == 0) return t;
-            var pieces = Regex.Split(t, @"\s*[·|]\s*").Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
-            if (pieces.Count <= 1)
-            {
-                var seq = t.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                return string.Join(" ", DedupeSequenceByNormKey(seq));
-            }
-            return string.Join(" · ", DedupeSequenceByNormKey(pieces));
-        }
-
-        private static List<string> DedupeSequenceByNormKey(IReadOnlyList<string> tokens)
-        {
-            var outList = new List<string>();
-            string? prevKey = null;
-            foreach (var tok in tokens)
-            {
-                var k = AttrDedupeKey(tok);
-                if (prevKey != null && k == prevKey)
-                    continue;
-                outList.Add(tok);
-                prevKey = k;
-            }
-            return outList;
-        }
+        public static string BuildLineLabel(OrderItem line, string? productName = null) =>
+            OrderItemReportLineLabel.BuildLineLabel(line, productName);
 
         public static List<QuantityConcentrationLineDto> CollapseIfSingleSyntheticLine(
             List<QuantityConcentrationLineDto> lines,
@@ -625,8 +471,10 @@ namespace George.Services
             if (lines.Count != 1) return lines;
             var L = lines[0];
             if (!string.IsNullOrEmpty(L.Note)) return lines;
-            if (!IsSyntheticLineLabel(L.LineLabel, productName)) return lines;
-            return new List<QuantityConcentrationLineDto>();
+            if (IsSyntheticLineLabel(L.LineLabel, productName)) return new List<QuantityConcentrationLineDto>();
+            if (OrderItemReportLineLabel.IsNonOptionDisplayLabel(L.LineLabel))
+                return new List<QuantityConcentrationLineDto>();
+            return lines;
         }
 
         private static bool IsSyntheticLineLabel(string label, string productName)

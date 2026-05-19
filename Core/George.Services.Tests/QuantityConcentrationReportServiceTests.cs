@@ -71,15 +71,40 @@ public class QuantityConcentrationReportServiceTests
     }
 
     [Fact]
-    public void BuildLineLabel_OmitsSizeWhenRedundantWithCutGrams()
+    public void BuildLineLabel_PrefersVariantTitle_OverComputedCutAndSize()
     {
         var line = new OrderItem
         {
-            OrderLineCuttingLabel = "עובי אצבע (כ 200 גר')",
+            VariantTitle = "עובי אצבע (כ 200 גר')",
+            OrderLineCuttingLabel = "עובי אצבע",
             OrderLineSizeLabel = "(כ 200 גרם)",
         };
-        var label = QuantityConcentrationReportService.BuildLineLabel(line);
+        var label = QuantityConcentrationReportService.BuildLineLabel(line, "סטייק סינטה");
         Assert.Equal("עובי אצבע (כ 200 גר')", label);
+    }
+
+    [Fact]
+    public void ApplyDetailLineDisplayRules_HidesUnitsAndPerUnitWeightLabels_WithoutVariants()
+    {
+        var lines = new List<QuantityConcentrationLineDto>
+        {
+            new()
+            {
+                LineLabel = "500 גרם ליח'",
+                QuantityKg = 0.5m,
+                QuantityUnits = 1m,
+                WeightPerUnitKg = 0.5m,
+            },
+            new()
+            {
+                LineLabel = "3 יח'",
+                QuantityKg = 0.75m,
+                QuantityUnits = 3m,
+            },
+        };
+        var p = new Product { Id = 1, Name = "נתח בקר", IsWeighted = true };
+        var result = QuantityConcentrationReportService.ApplyDetailLineDisplayRules(lines, p);
+        Assert.Empty(result);
     }
 
     [Fact]
