@@ -13,6 +13,13 @@ namespace George.Services
     /// <summary>דוח ריכוז כמויות — הזמנות פתוחות לפי תאריך אספקה, קיבוץ לפי מוצר+אפשרות+הערה.</summary>
     public class QuantityConcentrationReportService : ServiceBase
     {
+        private enum PickedFilterMode
+        {
+            NotPicked,
+            Picked,
+            All,
+        }
+
         /// <summary>
         /// כותרת שורת פרוט שמייצגת הפרש בין סה&quot;כ המוצר לבין סכום שורות הפירוט (אחרי סינון תצוגה).
         /// </summary>
@@ -44,6 +51,7 @@ namespace George.Services
             DateTime? from,
             DateTime? to,
             int? categoryId,
+            string? pickedFilter = null,
             bool includePicked = false,
             CancellationToken cancelToken = default)
         {
@@ -88,6 +96,7 @@ namespace George.Services
             }
 
             var catFilter = categoryId is > 0 ? categoryId : null;
+            var pickedMode = ResolvePickedFilter(pickedFilter, includePicked);
 
             var categories = await _categoryStorage
                 .GetCategoriesAsync(
@@ -117,7 +126,7 @@ namespace George.Services
                 foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
                 {
                     if (line.ProductId is not > 0) continue;
-                    if (!includePicked && line.PickingUserConfirmed) continue;
+                    if (!LineMatchesPickedFilter(line, pickedMode)) continue;
                     if (!productDict.TryGetValue(line.ProductId.Value, out var p)) continue;
                     var cid = PrimaryCategoryId(p);
                     if (catFilter != null && cid != catFilter) continue;
@@ -621,5 +630,29 @@ namespace George.Services
             var st = Classify(stock);
             return (sk, su, shK, shU, st);
         }
+
+        private static PickedFilterMode ResolvePickedFilter(string? pickedFilter, bool includePicked)
+        {
+            if (!string.IsNullOrWhiteSpace(pickedFilter))
+            {
+                return pickedFilter.Trim().ToLowerInvariant() switch
+                {
+                    "all" => PickedFilterMode.All,
+                    "picked" => PickedFilterMode.Picked,
+                    "notpicked" or "not_picked" => PickedFilterMode.NotPicked,
+                    _ => PickedFilterMode.NotPicked,
+                };
+            }
+
+            return includePicked ? PickedFilterMode.All : PickedFilterMode.NotPicked;
+        }
+
+        private static bool LineMatchesPickedFilter(OrderItem line, PickedFilterMode mode) =>
+            mode switch
+            {
+                PickedFilterMode.All => true,
+                PickedFilterMode.Picked => line.PickingUserConfirmed,
+                _ => !line.PickingUserConfirmed,
+            };
     }
 }

@@ -38,12 +38,13 @@ namespace George.Api.Controllers
             [FromQuery] DateTime? from = null,
             [FromQuery] DateTime? to = null,
             [FromQuery] int? categoryId = null,
+            [FromQuery] string? city = null,
             [FromQuery] string? coupon = null,
             [FromQuery] string? kpiCompare = null,
             CancellationToken cancelToken = default)
         {
             return await SafeCallWithErrorCatchingAsync(() =>
-                _incomeReportService.GetReportAsync(siteId, period, from, to, categoryId, coupon, kpiCompare, cancelToken));
+                _incomeReportService.GetReportAsync(siteId, period, from, to, categoryId, city, coupon, kpiCompare, cancelToken));
         }
 
         /// <summary>
@@ -69,7 +70,7 @@ namespace George.Api.Controllers
 
             var couponTrim = coupon.Trim();
             return await SafeCallWithErrorCatchingAsync(() =>
-                _incomeReportService.GetReportAsync(siteId, period, from, to, null, couponTrim, null, cancelToken));
+                _incomeReportService.GetReportAsync(siteId, period, from, to, null, null, couponTrim, null, cancelToken));
         }
 
         private bool IsPublicCouponShareTokenValid(string? token)
