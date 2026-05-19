@@ -11,7 +11,7 @@ public static class OrderItemReportLineLabel
 {
     /// <summary>
     /// Single display label for a variant/cut row: VariantTitle, else cutting, else size (no concatenation).
-    /// </summary>
+    /// </summary> 
     public static string? ResolveOptionDisplayLabel(OrderItem line, string? productName = null)
     {
         var pn = (productName ?? "").Trim();
