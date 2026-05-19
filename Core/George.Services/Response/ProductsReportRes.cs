@@ -22,6 +22,10 @@ namespace George.Services.Response
         public decimal? LeadingCategoryRevenuePct { get; set; }
         public int OutOfStockCount { get; set; }
         public int LowStockCount { get; set; }
+        /// <summary>Among out-of-stock catalog products: min days since last paid completed sale (most recent).</summary>
+        public int? DaysSinceLastSaleAmongOutOfStock { get; set; }
+        /// <summary>Among low-stock catalog products: min days since last paid completed sale (most recent).</summary>
+        public int? DaysSinceLastSaleAmongLowStock { get; set; }
     }
 
     public class ProductsReportUnsoldRowDto
@@ -97,6 +101,8 @@ namespace George.Services.Response
     {
         public ProductsReportRangeDto CurrentRange { get; set; } = new();
         public List<ProductsReportCategoryOptionDto> Categories { get; set; } = new();
+        /// <summary>Distinct cut / option labels in the period (for table filter).</summary>
+        public List<string> CutOptions { get; set; } = new();
         public ProductsReportKpisDto Kpis { get; set; } = new();
         public List<ProductsReportProductRowDto> ProductRows { get; set; } = new();
         public List<ProductsReportCategorySliceDto> CategorySlices { get; set; } = new();

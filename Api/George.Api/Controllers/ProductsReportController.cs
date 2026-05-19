@@ -30,10 +30,11 @@ namespace George.Api.Controllers
             [FromQuery] DateTime? to = null,
             [FromQuery] int? categoryId = null,
             [FromQuery] string? excludeCategoryIds = null,
+            [FromQuery] string? cutLabel = null,
             CancellationToken cancelToken = default)
         {
             return await SafeCallWithErrorCatchingAsync(() =>
-                _productsReportService.GetReportAsync(siteId, period, from, to, categoryId, excludeCategoryIds, cancelToken));
+                _productsReportService.GetReportAsync(siteId, period, from, to, categoryId, excludeCategoryIds, cutLabel, cancelToken));
         }
 
         [ApiExplorerSettings(IgnoreApi = true)]

@@ -102,32 +102,63 @@ namespace George.Data
         }
 
         /// <summary>
-        /// Latest paid completed/delivered order time per product for the site (any history).
-        /// Used for &quot;days since last sale&quot; on products that had no sales in the report window.
+        /// Latest completed/delivered order time per catalog product (any history).
+        /// Matches <see cref="OrderItem.ProductId"/> and legacy <see cref="OrderItem.WooCommerceProductId"/> lines.
+        /// Includes completed COD (<c>Unpaid</c>/<c>Pending</c>) so stock KPI footnotes are not blank when only paid lines are in the income window.
         /// </summary>
         public async Task<Dictionary<int, DateTime>> GetLastPaidCompletedOrderCreationTimeUtcPerProductAsync(
             int siteId,
-            IEnumerable<int> productIds,
+            IEnumerable<(int ProductId, int? WooCommerceId)> products,
             CancellationToken cancelToken)
         {
-            var idSet = productIds.Where(id => id > 0).Distinct().ToArray();
-            if (idSet.Length == 0)
+            var idSet = products.Select(p => p.ProductId).Where(id => id > 0).Distinct().ToArray();
+            var wooToProduct = products
+                .Where(p => p.ProductId > 0 && p.WooCommerceId is > 0)
+                .GroupBy(p => p.WooCommerceId!.Value)
+                .ToDictionary(g => g.Key, g => g.First().ProductId);
+            var wooIdSet = wooToProduct.Keys.ToArray();
+            if (idSet.Length == 0 && wooIdSet.Length == 0)
                 return new Dictionary<int, DateTime>();
 
-            var rows = await (
+            var lines = await (
                 from i in _dbContext.OrderItem.AsNoTracking()
                 join o in _dbContext.Order.AsNoTracking() on i.OrderId equals o.Id
                 where !i.IsDeleted && !o.IsDeleted
                       && o.SiteId == siteId
-                      && i.ProductId != null
-                      && idSet.Contains(i.ProductId.Value)
                       && (o.Status == "Completed" || o.Status == "Delivered" || o.Status == "Ready")
-                      && o.PaymentStatus == "Paid"
-                group o.CreationTime by i.ProductId!.Value into g
-                select new { ProductId = g.Key, LastUtc = g.Max() }
+                      && (o.PaymentStatus == null
+                          || o.PaymentStatus == ""
+                          || ((o.PaymentStatus.ToLower() == "paid"
+                               || o.PaymentStatus.ToLower() == "unpaid"
+                               || o.PaymentStatus.ToLower() == "pending")
+                              && o.PaymentStatus.ToLower() != "refunded"
+                              && o.PaymentStatus.ToLower() != "failed"))
+                      && ((i.ProductId != null && idSet.Contains(i.ProductId.Value))
+                          || (i.WooCommerceProductId != null && wooIdSet.Contains(i.WooCommerceProductId.Value)))
+                select new { i.ProductId, i.WooCommerceProductId, o.CreationTime }
             ).ToListAsync(cancelToken).ConfigureAwait(false);
 
-            return rows.ToDictionary(x => x.ProductId, x => x.LastUtc);
+            var map = new Dictionary<int, DateTime>();
+            foreach (var row in lines)
+            {
+                var pid = row.ProductId;
+                if (pid is not > 0
+                    && row.WooCommerceProductId is > 0
+                    && wooToProduct.TryGetValue(row.WooCommerceProductId.Value, out var mapped))
+                    pid = mapped;
+                if (pid is not > 0) continue;
+
+                var ct = row.CreationTime;
+                if (ct.Kind == DateTimeKind.Local)
+                    ct = ct.ToUniversalTime();
+                else if (ct.Kind == DateTimeKind.Unspecified)
+                    ct = DateTime.SpecifyKind(ct, DateTimeKind.Utc);
+
+                if (!map.TryGetValue(pid.Value, out var prev) || ct > prev)
+                    map[pid.Value] = ct;
+            }
+
+            return map;
         }
     }
 }

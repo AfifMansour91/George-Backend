@@ -194,13 +194,36 @@ public static class ProductCatalogStockClassification
     /// <summary>
     /// When false, catalog row has no meaningful on-hand number — classify from <see cref="IsOutOfStockStatus"/> only.
     /// </summary>
-    private static bool UsesQuantityThresholds(Product p)
+    public static bool UsesQuantityThresholds(Product p)
     {
         if (ManagementTypeNorm(p) == "status")
             return false;
         if (IsExplicitQuantityManagement(p))
             return true;
         return p.StockQuantity.HasValue;
+    }
+
+    /// <summary>
+    /// My Products / inventory report: show numeric on-hand (not in/out only).
+    /// <c>quantity</c>, or <c>variation</c> with <see cref="Product.VariationStockByQuantity"/> = true.
+    /// </summary>
+    public static bool UsesNumericStockDisplay(Product p)
+    {
+        var apiType = StockManagementTypeForApi(p);
+        if (apiType == "status")
+            return false;
+        if (apiType == "quantity")
+            return true;
+        if (apiType == "variation")
+        {
+            var variants = ActiveVariants(p);
+            return variants.Count > 0 && p.VariationStockByQuantity == true;
+        }
+
+        if (IsVariableUnitWeightProduct(p))
+            return false;
+
+        return UsesQuantityThresholds(p);
     }
 
     private static bool IsVariableUnitWeightProduct(Product p)

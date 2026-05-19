@@ -71,42 +71,130 @@ public class QuantityConcentrationReportServiceTests
     }
 
     [Fact]
-    public void BuildLineLabel_OmitsSizeWhenRedundantWithCutGrams()
+    public void BuildLineLabel_PrefersVariantTitle_OverComputedCutAndSize()
     {
         var line = new OrderItem
         {
-            OrderLineCuttingLabel = "עובי אצבע (כ 200 גר')",
+            VariantTitle = "עובי אצבע (כ 200 גר')",
+            OrderLineCuttingLabel = "עובי אצבע",
             OrderLineSizeLabel = "(כ 200 גרם)",
         };
-        var label = QuantityConcentrationReportService.BuildLineLabel(line);
+        var label = QuantityConcentrationReportService.BuildLineLabel(line, "סטייק סינטה");
         Assert.Equal("עובי אצבע (כ 200 גר')", label);
     }
 
     [Fact]
-    public void ApplyDetailLineDisplayRules_DropsSyntheticNameAndPerUnitOnly_ForWeighted()
+    public void ApplyDetailLineDisplayRules_SimpleProduct_UsesProductName_NotWeightLabels()
     {
         var lines = new List<QuantityConcentrationLineDto>
         {
-            new()
-            {
-                LineLabel = "פלאט איירון",
-                QuantityKg = 1.5m,
-                QuantityUnits = null,
-                WeightPerUnitKg = null,
-                Note = null,
-            },
             new()
             {
                 LineLabel = "500 גרם ליח'",
                 QuantityKg = 0.5m,
                 QuantityUnits = 1m,
                 WeightPerUnitKg = 0.5m,
+            },
+            new()
+            {
+                LineLabel = "3 יח'",
+                QuantityKg = 0.75m,
+                QuantityUnits = 3m,
+            },
+        };
+        var p = new Product { Id = 1, Name = "נתח בקר", IsWeighted = true };
+        var result = QuantityConcentrationReportService.ApplyDetailLineDisplayRules(lines, p);
+        Assert.Single(result);
+        Assert.Equal("נתח בקר", result[0].LineLabel);
+        Assert.Equal(1.25m, result[0].QuantityKg);
+        Assert.Equal(4m, result[0].QuantityUnits);
+    }
+
+    [Fact]
+    public void ApplyDetailLineDisplayRules_SimpleProduct_SplitsRowsByNote_WithProductName()
+    {
+        var lines = new List<QuantityConcentrationLineDto>
+        {
+            new()
+            {
+                LineLabel = "500 גרם ליח'",
+                QuantityKg = 1m,
+                QuantityUnits = 2m,
+                Note = "ללא שומן",
+            },
+            new()
+            {
+                LineLabel = "3 יח'",
+                QuantityKg = 0.5m,
+                QuantityUnits = 1m,
                 Note = null,
             },
         };
         var p = new Product { Id = 1, Name = "פלאט איירון", IsWeighted = true };
         var result = QuantityConcentrationReportService.ApplyDetailLineDisplayRules(lines, p);
-        Assert.Empty(result);
+        Assert.Equal(2, result.Count);
+        Assert.All(result, r => Assert.Equal("פלאט איירון", r.LineLabel));
+        Assert.Contains(result, r => r.Note == "ללא שומן" && r.QuantityKg == 1m);
+        Assert.Contains(result, r => r.Note == null && r.QuantityUnits == 1m);
+    }
+
+    [Fact]
+    public void AppendRemainderDetailLineIfNeeded_SkipsForSimpleProductWithoutVariations()
+    {
+        var lines = new List<QuantityConcentrationLineDto>
+        {
+            new()
+            {
+                LineLabel = "נתח שלם",
+                QuantityKg = 2m,
+                QuantityUnits = 1m,
+            },
+        };
+        var p = new Product { Id = 1, Name = "נתח שלם", IsWeighted = true };
+        var result = QuantityConcentrationReportService.AppendRemainderDetailLineIfNeeded(lines, 3m, 1m, p);
+        Assert.Single(result);
+    }
+
+    [Fact]
+    public void ApplyDetailLineDisplayRules_WeightedWithCatalogVariants_KeepsVariantLabels_EvenWhenStockIsQuantity()
+    {
+        var lines = new List<QuantityConcentrationLineDto>
+        {
+            new() { LineLabel = "עובי אצבע (כ 200 גר')", QuantityKg = 1m },
+            new() { LineLabel = "נתח שלם", QuantityKg = 2m },
+        };
+        var p = new Product
+        {
+            Id = 1,
+            Name = "סטייק אנטריקוט",
+            IsWeighted = true,
+            StockManagementType = new StockManagementType { Name = "quantity" },
+            ProductVariant = new List<ProductVariant>
+            {
+                new()
+                {
+                    Id = 1,
+                    IsDeleted = false,
+                    ProductVariantOptionValue = new List<ProductVariantOptionValue>
+                    {
+                        new() { OptionValue = "עובי אצבע (כ 200 גר')" },
+                    },
+                },
+                new()
+                {
+                    Id = 2,
+                    IsDeleted = false,
+                    ProductVariantOptionValue = new List<ProductVariantOptionValue>
+                    {
+                        new() { OptionValue = "נתח שלם" },
+                    },
+                },
+            },
+        };
+        var result = QuantityConcentrationReportService.ApplyDetailLineDisplayRules(lines, p);
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, r => r.LineLabel == "עובי אצבע (כ 200 גר')");
+        Assert.Contains(result, r => r.LineLabel == "נתח שלם");
     }
 
     [Fact]
@@ -146,14 +234,22 @@ public class QuantityConcentrationReportServiceTests
         {
             new()
             {
-                LineLabel = "נתח שלם",
+                LineLabel = "עובי אצבע",
                 QuantityKg = 2m,
                 QuantityUnits = 1m,
                 WeightPerUnitKg = 2m,
                 Note = null,
             },
         };
-        var withRemainder = QuantityConcentrationReportService.AppendRemainderDetailLineIfNeeded(lines, 3m, 1m);
+        var p = new Product
+        {
+            Id = 1,
+            Name = "סטייק",
+            IsWeighted = true,
+            StockManagementType = new StockManagementType { Name = "variation" },
+            ProductVariant = new List<ProductVariant> { new() { Id = 1, IsDeleted = false } },
+        };
+        var withRemainder = QuantityConcentrationReportService.AppendRemainderDetailLineIfNeeded(lines, 3m, 1m, p);
         Assert.Equal(2, withRemainder.Count);
         Assert.Equal(QuantityConcentrationReportService.RemainderLineLabel, withRemainder[1].LineLabel);
         Assert.Equal(1m, withRemainder[1].QuantityKg);

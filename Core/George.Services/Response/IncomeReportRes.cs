@@ -12,6 +12,13 @@ namespace George.Services.Response
         public string Name { get; set; } = "";
     }
 
+    public class IncomeReportCityOptionDto
+    {
+        /// <summary>Filter query value; <c>__no_city__</c> for orders without <see cref="George.DB.Order.DeliveryCity"/>.</summary>
+        public string Key { get; set; } = "";
+        public string Name { get; set; } = "";
+    }
+
     public class IncomeReportKpisDto
     {
         public decimal TotalIncome { get; set; }
@@ -132,6 +139,8 @@ namespace George.Services.Response
         public IncomeReportRangeDto CurrentRange { get; set; } = new();
         public IncomeReportRangeDto? BaselineRange { get; set; }
         public List<IncomeReportCategoryOptionDto> Categories { get; set; } = new();
+        /// <summary>Distinct delivery cities in the current period (before city filter).</summary>
+        public List<IncomeReportCityOptionDto> Cities { get; set; } = new();
         public IncomeReportKpisDto Kpis { get; set; } = new();
         public List<IncomeReportDayRowDto> DayRows { get; set; } = new();
         public IncomeReportDayTotalsDto DayTotals { get; set; } = new();

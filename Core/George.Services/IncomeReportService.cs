@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using George.Common;
@@ -11,7 +12,11 @@ namespace George.Services
 {
     public class IncomeReportService : ServiceBase
     {
+        /// <summary>Matches orders Kanban city filter when <see cref="Order.DeliveryCity"/> is empty.</summary>
+        public const string CityEmptyFilterKey = "__no_city__";
+
         private static readonly TimeZoneInfo IsraelTimeZone = ResolveIsraelTimeZone();
+        private static readonly CompareInfo HebrewCompare = CultureInfo.GetCultureInfo("he-IL").CompareInfo;
 
         private static TimeZoneInfo ResolveIsraelTimeZone()
         {
@@ -144,6 +149,7 @@ namespace George.Services
             DateTime? customFrom,
             DateTime? customTo,
             int? categoryId,
+            string? city,
             string? coupon,
             string? kpiCompare,
             CancellationToken cancelToken = default)
@@ -170,10 +176,14 @@ namespace George.Services
 
             var couponTrim = string.IsNullOrWhiteSpace(coupon) ? null : coupon.Trim();
 
-            var currentOrders = await _incomeReportStorage.GetReportOrdersAsync(siteId, fromUtc, toUtcExclusive, couponTrim, cancelToken)
+            var currentOrdersAll = await _incomeReportStorage.GetReportOrdersAsync(siteId, fromUtc, toUtcExclusive, couponTrim, cancelToken)
                 .ConfigureAwait(false);
-            var baselineOrders = await _incomeReportStorage.GetReportOrdersAsync(siteId, baselineFrom, baselineToEx, couponTrim, cancelToken)
+            var baselineOrdersAll = await _incomeReportStorage.GetReportOrdersAsync(siteId, baselineFrom, baselineToEx, couponTrim, cancelToken)
                 .ConfigureAwait(false);
+
+            var cityTrim = string.IsNullOrWhiteSpace(city) ? null : city.Trim();
+            var currentOrders = FilterOrdersByCity(currentOrdersAll, cityTrim);
+            var baselineOrders = FilterOrdersByCity(baselineOrdersAll, cityTrim);
 
             var productIds = currentOrders.SelectMany(o => o.OrderItem).Select(i => i.ProductId ?? 0)
                 .Concat(baselineOrders.SelectMany(o => o.OrderItem).Select(i => i.ProductId ?? 0))
@@ -200,6 +210,7 @@ namespace George.Services
                 .Select(c => new IncomeReportCategoryOptionDto { Id = c.Id, Name = c.Name })
                 .OrderBy(c => c.Name)
                 .ToList();
+            res.Cities = BuildCityOptions(currentOrdersAll);
 
             res.Kpis = BuildKpis(currentOrders, baselineOrders, products, catFilter, priorCustomerIds);
             res.DayRows = BuildDayRows(currentOrders, products, catFilter, fromUtc, toUtcExclusive, period);
@@ -924,6 +935,43 @@ namespace George.Services
             }
 
             return null;
+        }
+
+        private static List<Order> FilterOrdersByCity(List<Order> orders, string? cityKey)
+        {
+            if (string.IsNullOrWhiteSpace(cityKey))
+                return orders;
+            if (string.Equals(cityKey, CityEmptyFilterKey, StringComparison.Ordinal))
+                return orders.Where(o => string.IsNullOrWhiteSpace(o.DeliveryCity)).ToList();
+            return orders
+                .Where(o => string.Equals(o.DeliveryCity?.Trim(), cityKey, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        private static List<IncomeReportCityOptionDto> BuildCityOptions(List<Order> ordersInPeriod)
+        {
+            var byKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var hasEmpty = false;
+            foreach (var o in ordersInPeriod)
+            {
+                var raw = o.DeliveryCity?.Trim();
+                if (string.IsNullOrEmpty(raw))
+                {
+                    hasEmpty = true;
+                    continue;
+                }
+
+                if (!byKey.ContainsKey(raw))
+                    byKey[raw] = raw;
+            }
+
+            var list = byKey.Values
+                .OrderBy(n => n, Comparer<string>.Create((a, b) => HebrewCompare.Compare(a, b, CompareOptions.None)))
+                .Select(n => new IncomeReportCityOptionDto { Key = n, Name = n })
+                .ToList();
+            if (hasEmpty)
+                list.Insert(0, new IncomeReportCityOptionDto { Key = CityEmptyFilterKey, Name = "" });
+            return list;
         }
 
         private static decimal Round2(decimal d) => Math.Round(d, 2, MidpointRounding.AwayFromZero);
