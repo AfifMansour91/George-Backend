@@ -23,6 +23,7 @@ namespace George.Data
                 .Include(p => p.WeightConfig)
                     .ThenInclude(wc => wc!.UnitWeightMode)
                 .Include(p => p.ProductVariant)
+                    .ThenInclude(v => v.ProductVariantOptionValue)
                 .Include(p => p.ProductCategory)
                 .ThenInclude(pc => pc.Category)
                 .Include(p => p.ProductImage)

@@ -147,6 +147,10 @@ namespace George.Services
                         buckets[key] = b;
                     }
 
+                    var variant = FindVariant(p, line);
+                    if (variant != null)
+                        b.VariantIds.Add(variant.Id);
+
                     b.Kg += kg;
                     b.Units += units;
                     if (IsWeightedSoldByUnits(line))
@@ -169,6 +173,9 @@ namespace George.Services
                 if (!productDict.TryGetValue(g.Key, out var p))
                     continue;
 
+                var stockDisplayMode = ResolveStockDisplayMode(p);
+                var variantQtyStock = UsesVariationQuantityStock(p);
+
                 decimal sumKg = 0m, sumUnits = 0m;
                 var lines = new List<QuantityConcentrationLineDto>();
                 foreach (var kv in g.OrderBy(x => x.Value.LineLabel, StringComparer.OrdinalIgnoreCase))
@@ -176,6 +183,8 @@ namespace George.Services
                     var b = kv.Value;
                     if (b.Kg > 0m) sumKg += b.Kg;
                     if (b.Units > 0m) sumUnits += b.Units;
+                    var variantId = b.VariantIds.Count > 0 ? b.VariantIds.Min() : (int?)null;
+                    var (lineSk, lineSu) = ResolveLineCatalogStock(p, stockDisplayMode, variantId);
                     lines.Add(new QuantityConcentrationLineDto
                     {
                         LineLabel = b.LineLabel,
@@ -183,15 +192,20 @@ namespace George.Services
                         QuantityKg = b.Kg > 0m ? Round2(b.Kg) : null,
                         QuantityUnits = b.Units > 0m ? Round2(b.Units) : null,
                         Note = string.IsNullOrEmpty(kv.Key.note) ? null : kv.Key.note,
+                        StockKg = lineSk,
+                        StockUnits = lineSu,
+                        VariantId = variantId,
                     });
                 }
 
                 lines = CollapseIfSingleSyntheticLine(lines, p.Name ?? "");
                 lines = FilterAndMergeDetailLines(lines, p);
+                lines = EnrichVariationQuantityStockLines(p, lines, stockDisplayMode);
                 lines = AppendRemainderDetailLineIfNeeded(lines, sumKg, sumUnits);
 
+                var orderVariantIds = g.SelectMany(kv => kv.Value.VariantIds).ToHashSet();
                 var (stockKg, stockUnits, shortageKg, shortageUnits, st) =
-                    ComputeStockAndShortage(p, account, sumKg, sumUnits);
+                    ComputeStockAndShortage(p, account, sumKg, sumUnits, orderVariantIds, stockDisplayMode);
 
                 var totalUnitsOut = sumUnits > 0m ? Round2(sumUnits) : (decimal?)null;
                 if (p.IsWeighted == true && sumKg > 0m && lines.Count == 0)
@@ -206,6 +220,9 @@ namespace George.Services
                     TotalQuantityUnits = totalUnitsOut,
                     StockKg = stockKg,
                     StockUnits = stockUnits,
+                    StockDisplayMode = stockDisplayMode,
+                    StockUnitLabel = StockUnitLabelForProduct(p, variantQtyStock),
+                    StockManagementType = ProductCatalogStockClassification.StockManagementTypeForApi(p),
                     StockStatus = st,
                     ShortageKg = shortageKg,
                     ShortageUnits = shortageUnits,
@@ -224,6 +241,7 @@ namespace George.Services
             public decimal Kg;
             public decimal Units;
             public decimal? UnitWeightKg;
+            public readonly HashSet<int> VariantIds = new();
         }
 
         private sealed class LineBucketComparer : IEqualityComparer<(int pid, string cutKey, string note)>
@@ -282,17 +300,7 @@ namespace George.Services
                 {
                     var list = g.ToList();
                     if (list.Count == 1)
-                    {
-                        var only = list[0];
-                        return new QuantityConcentrationLineDto
-                        {
-                            LineLabel = only.LineLabel,
-                            Note = only.Note,
-                            WeightPerUnitKg = only.WeightPerUnitKg,
-                            QuantityKg = only.QuantityKg,
-                            QuantityUnits = only.QuantityUnits,
-                        };
-                    }
+                        return list[0];
 
                     var kg = list.Sum(x => x.QuantityKg ?? 0m);
                     var u = list.Sum(x => x.QuantityUnits ?? 0m);
@@ -305,6 +313,9 @@ namespace George.Services
                         WeightPerUnitKg = wpu is > 0m ? wpu : null,
                         QuantityKg = kg > 0m ? Round2(kg) : null,
                         QuantityUnits = u > 0m ? Round2(u) : null,
+                        VariantId = list.Select(x => x.VariantId).FirstOrDefault(x => x is > 0),
+                        StockKg = MergeStockField(list, l => l.StockKg),
+                        StockUnits = MergeStockField(list, l => l.StockUnits),
                     };
                 })
                 .OrderBy(x => x.LineLabel, StringComparer.OrdinalIgnoreCase)
@@ -583,52 +594,235 @@ namespace George.Services
 
         private static decimal Round2(decimal d) => Math.Round(d, 2, MidpointRounding.AwayFromZero);
 
-        private static (decimal? stockKg, decimal? stockUnits, decimal? shortageKg, decimal? shortageUnits, string status)
-            ComputeStockAndShortage(Product p, Account? account, decimal totalKg, decimal totalUnits)
+        private static ProductVariant? FindVariant(Product p, OrderItem line)
         {
-            var stock = p.StockQuantity ?? 0m;
-            var weighted = p.IsWeighted == true;
-
-            var thr = p.LowStockThreshold is > 0m
-                ? p.LowStockThreshold.Value
-                : (weighted
-                    ? account?.DefaultLowStockThresholdWeighted
-                    : account?.DefaultLowStockThresholdUnits) ?? (weighted ? 2m : 3m);
-
-            string Classify(decimal qty)
+            if (line.ProductVariantId is int vid && vid > 0)
             {
-                if (qty <= 0m) return "out";
-                if (thr > 0m && qty <= thr) return "low";
-                return "ok";
+                return p.ProductVariant?.FirstOrDefault(v => !v.IsDeleted && v.Id == vid);
             }
 
-            decimal? sk = null;
-            decimal? su = null;
+            if (line.WooCommerceVariationId is int woo && woo > 0)
+            {
+                return p.ProductVariant?.FirstOrDefault(v => !v.IsDeleted && v.WooCommerceVariationId == woo);
+            }
+
+            var optionLabel = OrderItemReportLineLabel.ResolveOptionDisplayLabel(line, p.Name);
+            if (string.IsNullOrWhiteSpace(optionLabel))
+                return null;
+
+            var key = AttrDedupeKey(optionLabel);
+            foreach (var v in ProductCatalogStockClassification.ActiveVariants(p))
+            {
+                if (AttrDedupeKey(FormatVariantLabel(v)) == key)
+                    return v;
+                var opts = v.ProductVariantOptionValue?.Where(o => !string.IsNullOrWhiteSpace(o.OptionValue)).ToList();
+                if (opts is { Count: > 0 }
+                    && opts.Any(o => key.Contains(AttrDedupeKey(o.OptionValue), StringComparison.Ordinal)))
+                    return v;
+            }
+
+            return null;
+        }
+
+        private static string FormatVariantLabel(ProductVariant v)
+        {
+            var opts = v.ProductVariantOptionValue?.OrderBy(o => o.OptionName).ToList()
+                       ?? new List<ProductVariantOptionValue>();
+            if (opts.Count == 0)
+                return $"#{v.Id}";
+            if (opts.Count == 1)
+                return opts[0].OptionValue.Trim();
+            return string.Join(" · ", opts.Select(o => $"{o.OptionName}: {o.OptionValue}"));
+        }
+
+        private static decimal? MergeStockField(
+            List<QuantityConcentrationLineDto> list,
+            Func<QuantityConcentrationLineDto, decimal?> selector)
+        {
+            if (!list.Any(x => selector(x).HasValue))
+                return null;
+            return Round2(list.Sum(x => selector(x) ?? 0m));
+        }
+
+        /// <summary>
+        /// Variation + quantity: ensure every catalog variant appears with live stock (even if not in orders).
+        /// </summary>
+        private static List<QuantityConcentrationLineDto> EnrichVariationQuantityStockLines(
+            Product p,
+            List<QuantityConcentrationLineDto> lines,
+            string stockDisplayMode)
+        {
+            if (stockDisplayMode != "quantity" || !UsesVariationQuantityStock(p))
+                return lines;
+
+            var variants = ProductCatalogStockClassification.ActiveVariants(p);
+            var result = new List<QuantityConcentrationLineDto>(lines);
+
+            foreach (var v in variants.OrderBy(FormatVariantLabel, StringComparer.OrdinalIgnoreCase))
+            {
+                var label = FormatVariantLabel(v);
+                var stockU = Round2(v.StockQuantity ?? 0m);
+                var labelKey = AttrDedupeKey(label);
+
+                var existing = result.FirstOrDefault(l =>
+                    l.VariantId == v.Id
+                    || AttrDedupeKey(l.LineLabel.Trim()) == labelKey);
+
+                if (existing != null)
+                {
+                    existing.VariantId = v.Id;
+                    existing.StockUnits = stockU;
+                    if (string.IsNullOrWhiteSpace(existing.LineLabel) || IsSyntheticLineLabel(existing.LineLabel, p.Name ?? ""))
+                        existing.LineLabel = label;
+                    continue;
+                }
+
+                result.Add(new QuantityConcentrationLineDto
+                {
+                    LineLabel = label,
+                    VariantId = v.Id,
+                    StockUnits = stockU,
+                });
+            }
+
+            return result
+                .OrderByDescending(l => (l.QuantityKg ?? 0m) > 0m || (l.QuantityUnits ?? 0m) > 0m)
+                .ThenBy(l => l.LineLabel, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static string ResolveStockDisplayMode(Product p) =>
+            ProductCatalogStockClassification.UsesNumericStockDisplay(p) ? "quantity" : "status";
+
+        private static bool UsesVariationQuantityStock(Product p) =>
+            ProductCatalogStockClassification.IsVariationManagement(p)
+            && ProductCatalogStockClassification.ActiveVariants(p).Count > 0
+            && p.VariationStockByQuantity == true;
+
+        private static string? StockUnitLabelForProduct(Product p, bool variantQuantityStock)
+        {
+            if (variantQuantityStock)
+                return "יח׳";
+            if (p.IsWeighted == true)
+                return string.IsNullOrWhiteSpace(p.WeightUnit) ? "ק״ג" : p.WeightUnit!.Trim();
+            var setup = (p.SetupType?.Name ?? "").Trim().ToLowerInvariant();
+            if (setup == "by_weight")
+                return string.IsNullOrWhiteSpace(p.WeightUnit) ? "ק״ג" : p.WeightUnit!.Trim();
+            return "יח׳";
+        }
+
+        private static (decimal? kg, decimal? units) ResolveCatalogStockDisplay(Product p, HashSet<int> orderVariantIds)
+        {
+            var variants = ProductCatalogStockClassification.ActiveVariants(p);
+            if (UsesVariationQuantityStock(p))
+            {
+                var sum = variants.Sum(v => v.StockQuantity ?? 0m);
+                return (null, Round2(sum));
+            }
+
+            var qty = p.StockQuantity ?? 0m;
+            if (p.IsWeighted == true)
+                return (Round2(qty), null);
+            return (null, Round2(qty));
+        }
+
+        private static (decimal? kg, decimal? units) ResolveLineCatalogStock(
+            Product p,
+            string stockDisplayMode,
+            int? variantId)
+        {
+            if (stockDisplayMode != "quantity" || variantId is not > 0)
+                return (null, null);
+
+            if (!UsesVariationQuantityStock(p))
+                return (null, null);
+
+            var v = p.ProductVariant?.FirstOrDefault(x => !x.IsDeleted && x.Id == variantId);
+            return v == null ? (null, null) : (null, Round2(v.StockQuantity ?? 0m));
+        }
+
+        private static decimal ResolveAvailableUnits(Product p, HashSet<int> orderVariantIds)
+        {
+            var variants = ProductCatalogStockClassification.ActiveVariants(p);
+            if (ProductCatalogStockClassification.IsVariationManagement(p) && variants.Count > 0)
+            {
+                if (p.VariationStockByQuantity != true)
+                    return 0m;
+
+                var relevant = orderVariantIds.Count > 0
+                    ? variants.Where(v => orderVariantIds.Contains(v.Id))
+                    : variants;
+                return relevant.Sum(v => v.StockQuantity ?? 0m);
+            }
+
+            return p.StockQuantity ?? 0m;
+        }
+
+        private static decimal ResolveAvailableKg(Product p, HashSet<int> orderVariantIds)
+        {
+            _ = orderVariantIds;
+            return p.StockQuantity ?? 0m;
+        }
+
+        private static bool ShouldCompareDemandInUnits(Product p, decimal totalKg, decimal totalUnits)
+        {
+            if (totalUnits <= 0m)
+                return false;
+
+            if (ProductCatalogStockClassification.IsVariationManagement(p)
+                && ProductCatalogStockClassification.ActiveVariants(p).Count > 0
+                && p.VariationStockByQuantity == true)
+                return true;
+
+            if (p.IsWeighted != true)
+                return true;
+
+            // שקיל לפי יחידה — גם כשמוצג גם ק"ג בדוח
+            return totalKg > 0m;
+        }
+
+        /// <summary>
+        /// Live catalog stock for the report row — never infer shortage when stock is status-only or unknown quantity.
+        /// </summary>
+        private static (decimal? stockKg, decimal? stockUnits, decimal? shortageKg, decimal? shortageUnits, string status)
+            ComputeStockAndShortage(
+                Product p,
+                Account? account,
+                decimal totalKg,
+                decimal totalUnits,
+                HashSet<int> orderVariantIds,
+                string displayMode)
+        {
+            var status = ProductCatalogStockClassification.ClassifyStock(p, account);
+
+            if (displayMode == "status")
+                return (null, null, null, null, status);
+
+            var (sk, su) = ResolveCatalogStockDisplay(p, orderVariantIds);
+
             decimal? shK = null;
             decimal? shU = null;
 
-            var useKgForStock = weighted && totalKg > 0m;
-            if (useKgForStock)
+            if (ShouldCompareDemandInUnits(p, totalKg, totalUnits))
             {
-                sk = Round2(stock);
-                var d = totalKg - stock;
-                shK = d > 0m ? Round2(d) : null;
-            }
-            else if (totalUnits > 0m)
-            {
-                su = Round2(stock);
-                var d = totalUnits - stock;
+                var available = su ?? ResolveAvailableUnits(p, orderVariantIds);
+                var d = totalUnits - available;
                 shU = d > 0m ? Round2(d) : null;
             }
             else if (totalKg > 0m)
             {
-                sk = Round2(stock);
-                var d = totalKg - stock;
+                var available = sk ?? ResolveAvailableKg(p, orderVariantIds);
+                var d = totalKg - available;
                 shK = d > 0m ? Round2(d) : null;
             }
+            else if (totalUnits > 0m)
+            {
+                var available = su ?? ResolveAvailableUnits(p, orderVariantIds);
+                var d = totalUnits - available;
+                shU = d > 0m ? Round2(d) : null;
+            }
 
-            var st = Classify(stock);
-            return (sk, su, shK, shU, st);
+            return (sk, su, shK, shU, status);
         }
 
         private static PickedFilterMode ResolvePickedFilter(string? pickedFilter, bool includePicked)
