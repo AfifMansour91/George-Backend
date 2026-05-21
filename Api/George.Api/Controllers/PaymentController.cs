@@ -77,6 +77,13 @@ public class PaymentController : GeorgeControllerBase, IAuthUserProvider
             _paymentSvc.SendOrderInvoiceSmsAsync(orderId, req?.OverridePhone, cancelToken));
     }
 
+    [HttpPost("Order/{orderId:int}/Void")]
+    [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> VoidPendingAsync([FromRoute] int orderId, CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() => _paymentSvc.VoidPendingPaymentAsync(orderId, cancelToken));
+    }
+
     [HttpPost("Order/{orderId:int}/Refund")]
     [ProducesResponseType(typeof(IApiResponse<RefundPaymentRes>), (int)HttpStatusCode.OK)]
     public async Task<IActionResult> RefundAsync(

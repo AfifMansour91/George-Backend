@@ -190,6 +190,15 @@ public class PaymentService : ServiceBase
             return CreateResponse(new ApiResponse<SendPaymentSmsRes>(), StatusCode.InvalidRequest, "Customer phone is required.");
 
         var body = await BuildPaymentLinkSmsBodyAsync(order, session.Data.PaymentUrl, cancelToken);
+        if (string.IsNullOrWhiteSpace(body) ||
+            !body.Contains(session.Data.PaymentUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            await LogEventAsync(order.Id, "PaymentLinkSms", "MissingUrl",
+                "SMS body does not contain payment URL after template replace.", null, null, null, null, cancelToken);
+            return CreateResponse(new ApiResponse<SendPaymentSmsRes>(), StatusCode.InvalidRequest,
+                "Payment link is missing from SMS message. Add [payment_url] to the payment SMS template in notification settings.");
+        }
+
         if (!SmsProvider.IsInitialized)
             return CreateResponse(new ApiResponse<SendPaymentSmsRes>(), StatusCode.InvalidRequest, "SMS provider is not configured.");
 
@@ -1454,8 +1463,67 @@ public class PaymentService : ServiceBase
             ? PaymentNotificationDefaults.PaymentLinkSms
             : settings.PaymentCustomerMessagePaymentLink!;
         var storeName = await ResolveStoreNameAsync(order, cancelToken);
-        return NotificationMessageHelper.ReplacePaymentPlaceholders(
+        var body = NotificationMessageHelper.ReplacePaymentPlaceholders(
             template, order, storeName, paymentUrl: paymentUrl);
+        if (!string.IsNullOrWhiteSpace(paymentUrl) &&
+            !body.Contains(paymentUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            body = $"{body.TrimEnd()}\n{paymentUrl.Trim()}";
+        }
+        return body;
+    }
+
+    /// <summary>Void pending Cardcom authorization or clear initiated session (staff cancel from payment setup UI).</summary>
+    public async Task<IApiResponse<bool>> VoidPendingPaymentAsync(int orderId, CancellationToken cancelToken = default)
+    {
+        var response = new ApiResponse<bool>();
+        var order = await _paymentStorage.GetOrderForPaymentAsync(orderId, cancelToken);
+        if (order == null)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+
+        var settle = (order.PaymentSettleStatus ?? PaymentSettleStatus.None).Trim();
+        if (string.Equals(settle, PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(settle, PaymentSettleStatus.Refunded, StringComparison.OrdinalIgnoreCase))
+        {
+            return CreateResponse(response, StatusCode.InvalidRequest, "Order is already charged.");
+        }
+
+        if (string.Equals(settle, PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase))
+            await TryVoidAuthorizationOnCancelAsync(order, cancelToken);
+
+        order.PaymentSettleStatus = PaymentSettleStatus.Voided;
+        order.CardcomLowProfileId = null;
+        order.PaymentAuthorizedAmount = null;
+        order.CardcomApprovalNumber = null;
+        order.PaymentGateway = PaymentGatewayProviderId.None;
+        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+
+        await LogEventAsync(order.Id, "Void", "StaffCancel", "Payment session cancelled by staff.", null, null, null, null, cancelToken);
+        response.Data = true;
+        return response;
+    }
+
+    /// <summary>When staff switches order to cash, release Cardcom hold and clear credit state.</summary>
+    public async Task ClearCardcomOnCashPaymentAsync(Order order, CancellationToken cancelToken = default)
+    {
+        if (order == null) return;
+        var method = (order.PaymentMethod ?? "").Trim();
+        if (!method.Equals("Cash", StringComparison.OrdinalIgnoreCase) &&
+            !method.Contains("cod", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (string.Equals(order.PaymentSettleStatus, PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase))
+            await TryVoidAuthorizationOnCancelAsync(order, cancelToken);
+
+        order.PaymentSettleStatus = PaymentSettleStatus.None;
+        order.PaymentGateway = PaymentGatewayProviderId.None;
+        order.CardcomLowProfileId = null;
+        order.PaymentAuthorizedAmount = null;
+        order.CardcomApprovalNumber = null;
+        order.CustomerPaymentMethodId = null;
+        order.CardcomTokenLast4 = null;
+        order.CardcomCardBrand = null;
+        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
     }
 
     private async Task<AccountNotificationSettings?> GetPaymentNotificationSettingsAsync(

@@ -410,6 +410,11 @@ namespace George.Services
                     cancelToken).ConfigureAwait(false);
             }
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "order update", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
+            if (req.PaymentMethod != null && beforeUpdate != null &&
+                !string.Equals(beforeUpdate.PaymentMethod, updated.PaymentMethod, StringComparison.OrdinalIgnoreCase))
+            {
+                await _paymentService.ClearCardcomOnCashPaymentAsync(updated, cancelToken).ConfigureAwait(false);
+            }
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             if (loaded != null && loaded.CustomerId is int customerId && customerId > 0)
             {
