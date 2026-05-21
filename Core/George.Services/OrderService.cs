@@ -467,6 +467,8 @@ namespace George.Services
                         restoredProductIds,
                         "order cancel (catalog restored)",
                         cancelToken).ConfigureAwait(false);
+                await _paymentService.TryVoidAuthorizationOnOrderCancelAsync(beforeCancel, cancelToken)
+                    .ConfigureAwait(false);
             }
             var order = await _orderStorage.CancelOrderAsync(orderId, AuthUser.Id, softDelete, cancelToken);
             if (order == null)
@@ -477,7 +479,6 @@ namespace George.Services
                 "Cancelled",
                 DateTime.UtcNow,
                 cancelToken).ConfigureAwait(false);
-            await _paymentService.TryVoidAuthorizationOnCancelAsync(order, cancelToken).ConfigureAwait(false);
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, order, "order cancel", statusOverrideForWcRest: "cancelled", cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(order);
             await EnrichOrderResAsync(response.Data!, order, cancelToken).ConfigureAwait(false);

@@ -705,51 +705,98 @@ public class PaymentService : ServiceBase
         return response;
     }
 
+    /// <summary>Release Cardcom hold when cancelling New / InTreatment orders (kanban).</summary>
+    public async Task TryVoidAuthorizationOnOrderCancelAsync(Order order, CancellationToken cancelToken = default)
+    {
+        var status = (order.Status ?? "").Trim();
+        if (!string.Equals(status, "New", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(status, "InTreatment", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        await TryVoidAuthorizationOnCancelAsync(order, cancelToken).ConfigureAwait(false);
+    }
+
     public async Task TryVoidAuthorizationOnCancelAsync(Order order, CancellationToken cancelToken = default)
     {
-        if (order.PaymentSettleStatus != PaymentSettleStatus.Authorized &&
-            order.PaymentSettleStatus != PaymentSettleStatus.Initiated)
+        var settle = (order.PaymentSettleStatus ?? PaymentSettleStatus.None).Trim();
+        if (string.Equals(settle, PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(settle, PaymentSettleStatus.Refunded, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(settle, PaymentSettleStatus.Voided, StringComparison.OrdinalIgnoreCase))
             return;
 
-        var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
-        if (creds == null) return;
-
-        string? token = null;
-        string? cardExp = null;
-        var approval = order.CardcomApprovalNumber;
-        if (order.CustomerPaymentMethodId is int pmId)
+        if (string.Equals(settle, PaymentSettleStatus.Initiated, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(settle, PaymentSettleStatus.None, StringComparison.OrdinalIgnoreCase))
         {
-            var pm = await _paymentStorage.GetPaymentMethodByIdAsync(pmId, cancelToken);
-            if (pm != null)
+            await ClearPendingCardcomSessionAsync(order, "Order cancel (no authorization hold)", cancelToken)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        if (!string.Equals(settle, PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(settle, PaymentSettleStatus.OverAuthRequiresTopup, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken).ConfigureAwait(false);
+        if (creds == null)
+            return;
+
+        var (token, cardExp, approval) = await ResolveChargeTokenAsync(order, cancelToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(cardExp) || string.IsNullOrWhiteSpace(approval))
+        {
+            _logger.LogWarning(
+                "Order {OrderId} cancel: cannot void Cardcom authorization — missing token or approval (settle={Settle}).",
+                order.Id, settle);
+            await ClearPendingCardcomSessionAsync(order, "Order cancel (void skipped — missing credentials)", cancelToken)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        var amount = order.PaymentAuthorizedAmount ?? ComputeAuthorizationAmount(order, creds);
+        if (amount <= 0)
+            amount = order.Total ?? 0m;
+
+        try
+        {
+            var tx = await _cardcom.VoidAuthorizationAsync(creds, new VoidAuthorizationRequest
             {
-                token = _tokenProtector.Unprotect(pm.EncryptedToken);
-                cardExp = pm.CardExpirationMMYY;
-                if (string.IsNullOrWhiteSpace(approval) && !string.IsNullOrWhiteSpace(pm.EncryptedApprovalNumber))
-                    approval = _tokenProtector.Unprotect(pm.EncryptedApprovalNumber);
+                Amount = amount,
+                Token = token,
+                CardExpirationMMYY = cardExp,
+                ApprovalNumber = approval,
+                ExternalUniqTranId = $"void-cancel-{order.Id}",
+            }, cancelToken).ConfigureAwait(false);
+
+            await LogEventAsync(order.Id, "Void", tx.ResponseCode.ToString(), tx.Description,
+                tx.TranzactionId, MaskToken(token), amount, tx.RawJson, cancelToken).ConfigureAwait(false);
+
+            if (!tx.Success)
+            {
+                _logger.LogWarning(
+                    "Order {OrderId} cancel: Cardcom void failed: {Description}",
+                    order.Id, tx.Description);
             }
         }
-
-        if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(approval))
-            return;
-
-        var amount = order.PaymentAuthorizedAmount ?? order.Total ?? 0m;
-        var tx = await _cardcom.VoidAuthorizationAsync(creds, new VoidAuthorizationRequest
+        catch (Exception ex)
         {
-            Amount = amount,
-            Token = token,
-            CardExpirationMMYY = cardExp ?? "",
-            ApprovalNumber = approval,
-            ExternalUniqTranId = $"void-{order.Id}",
-        }, cancelToken);
-
-        await LogEventAsync(order.Id, "Void", tx.ResponseCode.ToString(), tx.Description,
-            tx.TranzactionId, MaskToken(token), amount, tx.RawJson, cancelToken);
-
-        if (tx.Success)
-        {
-            order.PaymentSettleStatus = PaymentSettleStatus.Voided;
-            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            _logger.LogError(ex, "Order {OrderId} cancel: Cardcom void threw.", order.Id);
         }
+
+        await ClearPendingCardcomSessionAsync(order, "Order cancel", cancelToken).ConfigureAwait(false);
+    }
+
+    private async Task ClearPendingCardcomSessionAsync(
+        Order order,
+        string logDescription,
+        CancellationToken cancelToken)
+    {
+        order.PaymentSettleStatus = PaymentSettleStatus.Voided;
+        order.CardcomLowProfileId = null;
+        order.PaymentAuthorizedAmount = null;
+        order.CardcomApprovalNumber = null;
+        order.PaymentGateway = PaymentGatewayProviderId.None;
+        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken).ConfigureAwait(false);
+        await LogEventAsync(order.Id, "Void", "OrderCancel", logDescription, null, null, null, null, cancelToken)
+            .ConfigureAwait(false);
     }
 
     public async Task<IApiResponse<SavedCardRes>> GetSavedCardForCustomerAsync(
@@ -1488,17 +1535,13 @@ public class PaymentService : ServiceBase
             return CreateResponse(response, StatusCode.InvalidRequest, "Order is already charged.");
         }
 
-        if (string.Equals(settle, PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase))
-            await TryVoidAuthorizationOnCancelAsync(order, cancelToken);
+        if (string.Equals(settle, PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(settle, PaymentSettleStatus.OverAuthRequiresTopup, StringComparison.OrdinalIgnoreCase))
+            await TryVoidAuthorizationOnCancelAsync(order, cancelToken).ConfigureAwait(false);
+        else
+            await ClearPendingCardcomSessionAsync(order, "Payment session cancelled by staff.", cancelToken)
+                .ConfigureAwait(false);
 
-        order.PaymentSettleStatus = PaymentSettleStatus.Voided;
-        order.CardcomLowProfileId = null;
-        order.PaymentAuthorizedAmount = null;
-        order.CardcomApprovalNumber = null;
-        order.PaymentGateway = PaymentGatewayProviderId.None;
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
-
-        await LogEventAsync(order.Id, "Void", "StaffCancel", "Payment session cancelled by staff.", null, null, null, null, cancelToken);
         response.Data = true;
         return response;
     }
