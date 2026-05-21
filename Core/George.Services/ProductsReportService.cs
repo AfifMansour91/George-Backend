@@ -275,7 +275,7 @@ namespace George.Services
                     DaysSinceLastSale = daysSinceLastSale,
                     StockStatus = st,
                     StockQuantity = p.StockQuantity,
-                    IsWeighted = p.IsWeighted == true,
+                    IsWeighted = ProductCatalogStockClassification.IsWeightedLikeProduct(p),
                 });
             }
 

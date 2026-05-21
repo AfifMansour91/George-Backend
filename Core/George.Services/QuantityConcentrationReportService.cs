@@ -570,7 +570,7 @@ namespace George.Services
                     var kg = LineWeightKg(line) ?? TotalKgFromGramsPerUnit(line);
                     return (kg ?? 0m, u);
                 }
-                if (p.IsWeighted == true)
+                if (ProductCatalogStockClassification.IsWeightedLikeProduct(p))
                 {
                     var kgW = LineWeightKg(line) ?? TotalKgFromGramsPerUnit(line);
                     if (kgW is > 0m)
@@ -579,7 +579,7 @@ namespace George.Services
                 return (0m, u);
             }
 
-            if (p.IsWeighted == true)
+            if (ProductCatalogStockClassification.IsWeightedLikeProduct(p))
             {
                 var kg = LineWeightKg(line) ?? TotalKgFromGramsPerUnit(line);
                 if (kg is > 0m)

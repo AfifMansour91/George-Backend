@@ -251,7 +251,8 @@ public static class ProductCatalogStockClassification
             .Count(x => x.Length > 0);
     }
 
-    private static bool IsWeightedLikeProduct(Product p)
+    /// <summary>Same rule as SPA <c>stockLevels</c> / products report — not <see cref="Product.IsWeighted"/> alone.</summary>
+    public static bool IsWeightedLikeProduct(Product p)
     {
         if (p.IsWeighted == true)
             return true;

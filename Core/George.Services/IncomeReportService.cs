@@ -728,15 +728,18 @@ namespace George.Services
                     var t = kv.Value;
                     var baseRev = bas.TryGetValue(kv.Key, out var br) ? br.revenue : 0m;
                     var trendUp = t.revenue >= baseRev;
-                    var qtyLabel = FormatTopProductQtyLabel(t.kg, t.units, products.TryGetValue(kv.Key, out var pProd) ? pProd : null);
+                    products.TryGetValue(kv.Key, out var pProd);
+                    var weighted = pProd != null && ProductCatalogStockClassification.IsWeightedLikeProduct(pProd);
+                    var qtyLabel = FormatTopProductQtyLabel(t.kg, t.units, weighted);
                     return new IncomeReportTopProductDto
                     {
                         ProductId = kv.Key,
                         Name = t.name,
                         CategoryName = t.cat,
                         QuantityLabel = qtyLabel,
+                        IsWeighted = weighted,
                         QuantityKg = t.kg > 0m ? Round2(t.kg) : null,
-                        QuantityUnits = t.units > 0m ? Round2(t.units) : null,
+                        QuantityUnits = !weighted && t.units > 0m ? Round2(t.units) : null,
                         Revenue = Round2(t.revenue),
                         TrendUp = trendUp,
                         ImageUrl = t.imageUrl,
@@ -775,7 +778,7 @@ namespace George.Services
                     if (!map.ContainsKey(p.Id))
                         map[p.Id] = new TopAgg { name = p.Name ?? "", cat = catName, imageUrl = FirstImageUrl(p) };
                     var t = map[p.Id];
-                    var (kgLine, unitLine) = SplitIncomeReportLineQty(line, p);
+                    var (kgLine, unitLine) = QuantityConcentrationReportService.SplitLineQty(line, p);
                     t.revenue += merch;
                     t.kg += kgLine;
                     t.units += unitLine;
@@ -788,77 +791,19 @@ namespace George.Services
             return map;
         }
 
-        private static (decimal kg, decimal units) SplitIncomeReportLineQty(OrderItem line, Product p)
+        private static string FormatTopProductQtyLabel(decimal kg, decimal units, bool weighted)
         {
-            var mode = (line.OrderLineQuantityMode ?? "").Trim().ToLowerInvariant();
-            if (mode == "weight")
+            if (weighted)
             {
-                var kg = LineWeightKgForReport(line, p);
-                return (kg ?? 0m, line.LineUnit ?? 0m);
+                if (kg > 0m)
+                    return $"{Round2(kg)} ק\"ג";
+                return "—";
             }
 
-            if (mode == "units")
-            {
-                var u = EffectiveLineUnitQuantity(line);
-                return (0m, u);
-            }
-
-            if (p.IsWeighted == true)
-            {
-                var kg = LineWeightKgForReport(line, p);
-                if (kg is > 0m)
-                    return (kg.Value, line.LineUnit ?? 0m);
-            }
-
-            return (LineWeightKgForReport(line, p) ?? 0m, EffectiveLineUnitQuantity(line));
-        }
-
-        private static decimal EffectiveLineUnitQuantity(OrderItem line)
-        {
-            if (line.PickingUserConfirmed && line.PickedQuantity is > 0m &&
-                !string.Equals(line.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase))
-                return line.PickedQuantity.Value;
-            return line.LineUnit ?? line.Quantity;
-        }
-
-        private static decimal? LineWeightKgForReport(OrderItem i, Product p)
-        {
-            if (i.PickingUserConfirmed && i.PickedQuantity is > 0m &&
-                string.Equals(i.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase))
-                return i.PickedQuantity.Value;
-
-            if (i.PickingUserConfirmed && i.PickedQuantity is > 0m && p.IsWeighted == true)
-                return i.PickedQuantity.Value;
-
-            if (i.PickedQuantity is > 0m &&
-                string.Equals(i.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase))
-                return i.PickedQuantity.Value;
-
-            if (i.UnitWeightGrams is > 0m && i.Quantity > 0m)
-                return i.Quantity * (i.UnitWeightGrams.Value / 1000m);
-
-            if (!string.IsNullOrWhiteSpace(i.SaleTotalWeight) &&
-                decimal.TryParse(i.SaleTotalWeight.Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var w))
-                return w;
-
-            if (i.LineUnitWeightKg is > 0m && i.Quantity > 0m)
-                return i.Quantity * i.LineUnitWeightKg.Value;
-
-            return null;
-        }
-
-        private static string FormatTopProductQtyLabel(decimal kg, decimal units, Product? p)
-        {
-            var weighted = p?.IsWeighted == true;
-            if (kg > 0m && (units <= 0m || weighted))
-                return $"{Round2(kg)} ק\"ג";
-            if (kg > 0m && units > 0m)
-            {
-                var uStr = units == Math.Floor(units) ? ((int)units).ToString() : Round2(units).ToString(System.Globalization.CultureInfo.InvariantCulture);
-                return $"{uStr} יח' · {Round2(kg)} ק\"ג";
-            }
             if (units > 0m)
                 return units == Math.Floor(units) ? $"{(int)units} יח'" : $"{Round2(units)} יח'";
+            if (kg > 0m)
+                return $"{Round2(kg)} ק\"ג";
             return "—";
         }
 
