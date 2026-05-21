@@ -71,6 +71,7 @@ namespace George.Data
                 var term = filter.Search.SearchTerm!.Trim();
                 query = query.Where(o =>
                     (o.OrderNumber != null && o.OrderNumber.Contains(term)) ||
+                    (o.ExternalOrderId != null && o.ExternalOrderId.Contains(term)) ||
                     (o.CustomerName != null && o.CustomerName.Contains(term)) ||
                     (o.CustomerPhone != null && o.CustomerPhone.Contains(term)) ||
                     (o.CustomerNote != null && o.CustomerNote.Contains(term)));
