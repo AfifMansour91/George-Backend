@@ -2179,10 +2179,12 @@ namespace George.Services
             CancellationToken cancelToken)
         {
             var variants = product.ProductVariant?.Where(v => !v.IsDeleted).ToList() ?? new List<ProductVariant>();
-            // Same weighable rule as parent product payload: do not send WC native variation weight when product is שקיל (clears stale shipping weights).
+            // Weighable products normally omit WC native weight (OCWSU meta). Exception: "משקל לפי וריאציה" — OCWSU reads _ocwsu_get_weight_from_variation from each variation's weight field.
             var setupTypeNameForVariants = product.SetupType?.Name ?? "";
             var isWeightedBySetupForVariants = setupTypeNameForVariants is "by_weight" or "by_unit" or "by_unit_and_weight";
             var isWeightedForVariations = product.IsWeighted == true || (product.IsWeighted != false && isWeightedBySetupForVariants);
+            var weightFromVariation = product.WeightConfig?.WeightByVariant == true
+                || string.Equals(product.WeightConfig?.UnitWeightMode?.Name, "by_variant", StringComparison.OrdinalIgnoreCase);
 
             // Fetch existing WooCommerce variations so we can match by attributes (avoid duplicates) and delete removed ones
             var existingWoo = await GetExistingWooCommerceVariationsAsync(baseUrl, wooProductId, httpClient, cancelToken);
@@ -2259,7 +2261,7 @@ namespace George.Services
                     }
 
                     var variantWooSku = GetWooCommerceSku(siteId, variant.Sku);
-                    var variationWeightForWoo = isWeightedForVariations
+                    var variationWeightForWoo = isWeightedForVariations && !weightFromVariation
                         ? ""
                         : (variant.Weight.HasValue && variant.Weight.Value > 0
                             ? variant.Weight.Value.ToString(CultureInfo.InvariantCulture)
