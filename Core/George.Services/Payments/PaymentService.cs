@@ -1874,4 +1874,150 @@ public class PaymentService : ServiceBase
         return null;
     }
 
+    /// <summary>
+    /// Apply WooCommerce gateway payment (checkout J5 auth or final capture) onto an order — same fields as phone Cardcom flow.
+    /// </summary>
+    public void ApplyWooCommerceGatewayPaymentFields(
+        Order order,
+        WooCommerceOrderPaymentGatewayDetails? payment,
+        string? gatewayStatus,
+        string? isFinished,
+        string? gatewayOrderId,
+        string? gatewayExternalOrderId,
+        string? gatewaySiteId)
+    {
+        if (gatewayOrderId != null)
+            order.GatewayPaymentOrderId = gatewayOrderId;
+        if (gatewayExternalOrderId != null)
+            order.GatewayPaymentExternalOrderId = gatewayExternalOrderId;
+        if (gatewaySiteId != null)
+            order.GatewayPaymentSiteId = gatewaySiteId;
+        if (!string.IsNullOrWhiteSpace(isFinished))
+            order.IsFinished = isFinished.Trim();
+        if (!string.IsNullOrWhiteSpace(gatewayStatus))
+            order.ExternalPaymentStatus = gatewayStatus.Trim();
+
+        if (payment == null)
+            return;
+
+        var txId = payment.ResolveTransactionId();
+        if (txId != null)
+        {
+            order.GatewayPaymentTransactionId = txId;
+            order.PaymentReference = txId;
+        }
+
+        var gatewayId = payment.ResolvePaymentGatewayId();
+        if (gatewayId != null)
+            order.PaymentGateway = gatewayId;
+
+        if (!string.IsNullOrWhiteSpace(payment.InvoiceNumber))
+            order.InvoiceNumber = payment.InvoiceNumber.Trim();
+
+        var last4 = payment.ResolveLast4Digits();
+        if (last4 != null)
+            order.CardcomTokenLast4 = last4;
+
+        if (!string.IsNullOrWhiteSpace(payment.CardBrand))
+            order.CardcomCardBrand = payment.CardBrand.Trim();
+
+        if (!string.IsNullOrWhiteSpace(payment.ApprovalNumber))
+            order.CardcomApprovalNumber = payment.ApprovalNumber.Trim();
+
+        var authAmount = payment.ResolveAuthOrPaymentAmount();
+        if (authAmount is > 0)
+            order.PaymentAuthorizedAmount = authAmount;
+        else if (order.Total is > 0 && order.PaymentAuthorizedAmount == null)
+            order.PaymentAuthorizedAmount = order.Total;
+
+        var gatewayFailed = WooCommerceGatewayPaymentInterpreter.IsGatewayFailureStatus(gatewayStatus);
+        var gatewaySuccess = WooCommerceGatewayPaymentInterpreter.IsGatewaySuccessStatus(gatewayStatus);
+        var hasTx = txId != null;
+        var isFinalCapture = WooCommerceGatewayPaymentInterpreter.IsFinalCapture(isFinished, gatewayStatus);
+
+        if (gatewayFailed)
+        {
+            order.PaymentSettleStatus = PaymentSettleStatus.Failed;
+            return;
+        }
+
+        if (!gatewaySuccess || !hasTx)
+            return;
+
+        if (isFinalCapture)
+        {
+            order.PaymentSettleStatus = PaymentSettleStatus.Captured;
+            order.PaymentStatus = "Paid";
+            order.PaidAt = DateTime.UtcNow;
+            return;
+        }
+
+        // Website checkout: J5 authorization hold — unpaid until picking capture.
+        order.PaymentSettleStatus = PaymentSettleStatus.Authorized;
+        if (string.Equals(order.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase))
+            return;
+        if (string.IsNullOrWhiteSpace(order.PaymentStatus)
+            || string.Equals(order.PaymentStatus, "Pending", StringComparison.OrdinalIgnoreCase))
+            order.PaymentStatus = "Unpaid";
+    }
+
+    /// <summary>Log payment event for Woo gateway webhook (shown in order payment popover).</summary>
+    public async Task LogWooCommerceGatewayPaymentEventAsync(
+        int orderId,
+        WooCommerceOrderPaymentGatewayDetails? payment,
+        string? gatewayStatus,
+        string? isFinished,
+        CancellationToken cancelToken = default)
+    {
+        var gatewayFailed = WooCommerceGatewayPaymentInterpreter.IsGatewayFailureStatus(gatewayStatus);
+        var gatewaySuccess = WooCommerceGatewayPaymentInterpreter.IsGatewaySuccessStatus(gatewayStatus);
+        var hasTx = !string.IsNullOrWhiteSpace(payment?.ResolveTransactionId());
+        if (!gatewaySuccess && !gatewayFailed)
+            return;
+        if (gatewaySuccess && !hasTx)
+            return;
+
+        var isFinalCapture = WooCommerceGatewayPaymentInterpreter.IsFinalCapture(isFinished, gatewayStatus);
+        var eventType = gatewayFailed
+            ? "WooGatewayPaymentFailed"
+            : isFinalCapture
+                ? "CaptureAuthorization"
+                : "TokenAuthorizationHold";
+
+        await LogEventAsync(
+            orderId,
+            eventType,
+            gatewayFailed ? "1" : "0",
+            gatewayStatus,
+            payment?.ResolveTransactionId(),
+            null,
+            payment?.ResolveAuthOrPaymentAmount(),
+            null,
+            cancelToken);
+    }
+
+    /// <summary>Persist gateway payment fields + log event after WooCommerce OrderPayment or embedded order payment.</summary>
+    public async Task CompleteWooCommerceGatewayPaymentAsync(
+        Order order,
+        WooCommerceOrderPaymentGatewayDetails? payment,
+        string? gatewayStatus,
+        string? isFinished,
+        CancellationToken cancelToken = default)
+    {
+        ApplyWooCommerceGatewayPaymentFields(
+            order,
+            payment,
+            gatewayStatus,
+            isFinished,
+            gatewayOrderId: null,
+            gatewayExternalOrderId: null,
+            gatewaySiteId: null);
+        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await LogWooCommerceGatewayPaymentEventAsync(order.Id, payment, gatewayStatus, isFinished, cancelToken);
+    }
+
+    /// <summary>Persist payment columns after WooCommerce gateway update.</summary>
+    public Task PersistOrderPaymentStateAsync(Order order, CancellationToken cancelToken) =>
+        _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+
 }

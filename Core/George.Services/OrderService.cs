@@ -1454,6 +1454,9 @@ namespace George.Services
                     updated.OrderItem?.OrderBy(i => i.SortOrder).ToList());
                 await _orderStorage.ReplaceOrderItemsAsync(existing.Id, updateItems, cancelToken).ConfigureAwait(false);
                 var loaded = await _orderStorage.GetOrderByIdAsync(existing.Id, cancelToken).ConfigureAwait(false);
+                if (loaded != null && payload.HasEmbeddedGatewayPayment())
+                    await TryApplyEmbeddedWooCommerceGatewayPaymentAsync(loaded, payload, cancelToken).ConfigureAwait(false);
+                loaded = await _orderStorage.GetOrderByIdAsync(existing.Id, cancelToken).ConfigureAwait(false);
                 await TryApplyCompletionInventoryWhenOrderCompletedAsync(existing.Id, previousWooStatus, loaded, cancelToken).ConfigureAwait(false);
                 response.Data = _mapper.Map<OrderRes>(loaded!);
                 await EnrichOrderResAsync(response.Data, loaded!, cancelToken).ConfigureAwait(false);
@@ -1524,6 +1527,7 @@ namespace George.Services
             ApplyWooCommerceShippingAddressToOrder(order, payload.ShippingAddress);
             order.CustomerId = customer.Id;
             order.ManagerNote = null;
+            await _paymentService.PrepareOrderPaymentOnCreateAsync(order, cancelToken).ConfigureAwait(false);
             // Use the date when the order was placed in WooCommerce, not when our API received the webhook
             order.CreationTime = payload.OrderDate.HasValue
                 ? (payload.OrderDate.Value.Kind == DateTimeKind.Utc ? payload.OrderDate.Value : payload.OrderDate.Value.ToUniversalTime())
@@ -1564,6 +1568,9 @@ namespace George.Services
                 occurredAtUtc: created.CreationTime,
                 cancelToken).ConfigureAwait(false);
             var loadedOrder = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false);
+            if (loadedOrder != null)
+                await TryApplyEmbeddedWooCommerceGatewayPaymentAsync(loadedOrder, payload, cancelToken).ConfigureAwait(false);
+            loadedOrder = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false);
             await TryApplyWooIncomingOrderCatalogAndBaselinePickingAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loadedOrder, cancelToken).ConfigureAwait(false);
             await TrySendNewOrderCustomerSmsAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
@@ -2153,17 +2160,28 @@ namespace George.Services
                     siteId, externalKey, payment.Status);
                 return CreateResponse(response, StatusCode.ItemNotFound, "Order not found.");
             }
-            var treatAsPaid = IsSuccessfulWooCommerceGatewayPaymentStatus(payment.Status)
-                && HasWooCommercePaidTransactionWhenRequired(payment);
+            var isFinalCapture = payment.IsFinalGatewayCapture();
             _logger.LogInformation(
-                "WooCommerce OrderPayment processing. siteId={SiteId}, externalOrderKey={ExternalOrderKey}, internalOrderId={InternalOrderId}, gatewayStatus={GatewayStatus}, treatAsPaid={TreatAsPaid}, gatewayTx={GatewayTx}, invoice={Invoice}, paymentGateway={PaymentGateway}",
-                siteId, externalKey, order.Id, payment.Status, treatAsPaid,
+                "WooCommerce OrderPayment processing. siteId={SiteId}, externalOrderKey={ExternalOrderKey}, internalOrderId={InternalOrderId}, gatewayStatus={GatewayStatus}, isFinalCapture={IsFinalCapture}, gatewayTx={GatewayTx}, invoice={Invoice}, paymentGateway={PaymentGateway}",
+                siteId, externalKey, order.Id, payment.Status, isFinalCapture,
                 payment.Payment?.TransactionId?.Trim(),
                 payment.InvoiceNumber,
                 payment.Payment?.PaymentGateway);
             var updated = await _orderStorage.UpdateOrderAsync(order.Id, o =>
             {
-                ApplyGatewayPaymentWebhookToOrder(o, payment, treatAsPaid);
+                o.GatewayPaymentOrderId = WooCommerceOrderPaymentPayload.GatewayTokenToString(payment.OrderId);
+                o.GatewayPaymentExternalOrderId = WooCommerceOrderPaymentPayload.GatewayTokenToString(payment.ExternalOrderId);
+                o.GatewayPaymentSiteId = string.IsNullOrWhiteSpace(payment.SiteId) ? null : payment.SiteId.Trim();
+                _paymentService.ApplyWooCommerceGatewayPaymentFields(
+                    o,
+                    payment.Payment,
+                    payment.Status,
+                    payment.IsFinished,
+                    o.GatewayPaymentOrderId,
+                    o.GatewayPaymentExternalOrderId,
+                    o.GatewayPaymentSiteId);
+                if (!string.IsNullOrWhiteSpace(payment.PaymentReference))
+                    o.PaymentReference = payment.PaymentReference;
             }, cancelToken).ConfigureAwait(false);
             if (updated == null)
             {
@@ -2173,51 +2191,46 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.ItemNotFound);
             }
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken).ConfigureAwait(false);
+            if (loaded != null)
+            {
+                _paymentService.ApplyWooCommerceGatewayPaymentFields(
+                    loaded,
+                    payment.Payment,
+                    payment.Status,
+                    payment.IsFinished,
+                    loaded.GatewayPaymentOrderId,
+                    loaded.GatewayPaymentExternalOrderId,
+                    loaded.GatewayPaymentSiteId);
+                await _paymentService.PersistOrderPaymentStateAsync(loaded, cancelToken).ConfigureAwait(false);
+                await _paymentService.LogWooCommerceGatewayPaymentEventAsync(
+                    loaded.Id,
+                    payment.Payment,
+                    payment.Status,
+                    payment.IsFinished,
+                    cancelToken).ConfigureAwait(false);
+                loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken).ConfigureAwait(false);
+            }
             response.Data = _mapper.Map<OrderRes>(loaded!);
             _logger.LogInformation(
-                "WooCommerce OrderPayment completed. siteId={SiteId}, internalOrderId={InternalOrderId}, externalOrderKey={ExternalOrderKey}, paymentStatus={PaymentStatus}, externalPaymentStatus={ExternalPaymentStatus}",
-                siteId, loaded!.Id, externalKey, loaded.PaymentStatus, loaded.ExternalPaymentStatus);
+                "WooCommerce OrderPayment completed. siteId={SiteId}, internalOrderId={InternalOrderId}, externalOrderKey={ExternalOrderKey}, paymentStatus={PaymentStatus}, paymentSettleStatus={PaymentSettleStatus}, externalPaymentStatus={ExternalPaymentStatus}",
+                siteId, loaded!.Id, externalKey, loaded.PaymentStatus, loaded.PaymentSettleStatus, loaded.ExternalPaymentStatus);
             return response;
         }
 
-        private static void ApplyGatewayPaymentWebhookToOrder(Order o, WooCommerceOrderPaymentPayload p, bool treatAsPaid)
+        private async Task TryApplyEmbeddedWooCommerceGatewayPaymentAsync(
+            Order order,
+            WooCommerceOrderPayload payload,
+            CancellationToken cancelToken)
         {
-            o.GatewayPaymentOrderId = WooCommerceOrderPaymentPayload.GatewayTokenToString(p.OrderId);
-            o.GatewayPaymentExternalOrderId = WooCommerceOrderPaymentPayload.GatewayTokenToString(p.ExternalOrderId);
-            o.GatewayPaymentSiteId = string.IsNullOrWhiteSpace(p.SiteId) ? null : p.SiteId.Trim();
-            o.IsFinished = string.IsNullOrWhiteSpace(p.IsFinished) ? null : p.IsFinished.Trim();
-            o.GatewayPaymentTransactionId = string.IsNullOrWhiteSpace(p.Payment?.TransactionId) ? null : p.Payment!.TransactionId.Trim();
-            o.PaymentGateway = string.IsNullOrWhiteSpace(p.Payment?.PaymentGateway) ? null : p.Payment!.PaymentGateway.Trim();
-            if (!string.IsNullOrWhiteSpace(p.InvoiceNumber))
-                o.InvoiceNumber = p.InvoiceNumber;
-            if (!string.IsNullOrWhiteSpace(p.PaymentReference))
-                o.PaymentReference = p.PaymentReference;
-            if (treatAsPaid)
-            {
-                o.PaymentStatus = "Paid";
-                o.PaidAt = DateTime.UtcNow;
-            }
-            if (!string.IsNullOrWhiteSpace(p.Status))
-                o.ExternalPaymentStatus = p.Status.Trim();
-            o.CardcomPaymentJson = null;
-        }
-
-        /// <summary>When <paramref name="status"/> is empty, treat as success (legacy webhooks). Otherwise avoid marking paid on clear failure tokens.</summary>
-        private static bool IsSuccessfulWooCommerceGatewayPaymentStatus(string? status)
-        {
-            if (string.IsNullOrWhiteSpace(status)) return true;
-            var s = status.Trim().ToLowerInvariant();
-            if (s is "failed" or "fail" or "error" or "declined" or "rejected" or "cancelled" or "canceled") return false;
-            if (s.Contains("declin", StringComparison.Ordinal) || s.Contains("fail", StringComparison.Ordinal)) return false;
-            return true;
-        }
-
-        /// <summary>When root <c>payment</c> is sent, a non-empty <c>transactionId</c> is required to mark paid; legacy bodies without <c>payment</c> unchanged.</summary>
-        private static bool HasWooCommercePaidTransactionWhenRequired(WooCommerceOrderPaymentPayload payment)
-        {
-            if (!payment.RequiresGatewayTransactionIdForPaid())
-                return true;
-            return !string.IsNullOrWhiteSpace(payment.ResolveGatewayTransactionIdForPaid());
+            if (!payload.HasEmbeddedGatewayPayment())
+                return;
+            var gatewayStatus = payload.GetResolvedGatewayPaymentStatus();
+            await _paymentService.CompleteWooCommerceGatewayPaymentAsync(
+                order,
+                payload.Payment,
+                gatewayStatus,
+                payload.GatewayIsFinished,
+                cancelToken).ConfigureAwait(false);
         }
 
         /// <summary>
