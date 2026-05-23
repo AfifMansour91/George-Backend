@@ -28,6 +28,10 @@ namespace George.Services.Response
         public decimal? StockKg { get; set; }
         /// <summary>Catalog variant id when line maps to a variation (stock row).</summary>
         public int? VariantId { get; set; }
+        /// <summary>variant | weightChoice | noteBucket | remainder — SPA rendering hint.</summary>
+        public string? LineDisplayKind { get; set; }
+        /// <summary>Display suffix for line stock when it differs from the parent group.</summary>
+        public string? StockUnitLabel { get; set; }
     }
 
     public class QuantityConcentrationProductGroupDto
@@ -39,6 +43,8 @@ namespace George.Services.Response
         public decimal? TotalQuantityUnits { get; set; }
         /// <summary>When false, total quantity column shows kg only (pure by-weight products).</summary>
         public bool ShowUnitsInTotalQuantity { get; set; } = true;
+        /// <summary>When true, SPA shows optional unit-weight column for this product group.</summary>
+        public bool ShowWeightPerUnitColumn { get; set; }
         public decimal? StockKg { get; set; }
         public decimal? StockUnits { get; set; }
         /// <summary><c>quantity</c> = numeric on-hand; <c>status</c> = in/out only (no shortage numbers).</summary>
@@ -46,6 +52,8 @@ namespace George.Services.Response
         /// <summary>Display suffix for numeric stock, e.g. יח׳ or ק״ג (aligned with My Products).</summary>
         public string? StockUnitLabel { get; set; }
         public string? StockManagementType { get; set; }
+        /// <summary>When <see cref="StockManagementType"/> is variation — per-variant numeric stock vs in/out only.</summary>
+        public bool VariationStockByQuantity { get; set; }
         /// <summary>ok | low | out — aligned with products report / SPA buckets.</summary>
         public string StockStatus { get; set; } = "ok";
         public decimal? ShortageKg { get; set; }
