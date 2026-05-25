@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using AutoMapper;
 using George.Common;
+using George.Common.Payment;
 using George.Data;
 using George.DB;
 using George.Providers;
@@ -195,13 +196,15 @@ namespace George.Services
             await TryApplyInternalOrderCatalogOnCreateAsync(loaded!, cancelToken).ConfigureAwait(false);
             var loadedAfterStock = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false) ?? loaded;
             if (loadedAfterStock != null)
-                await _paymentService.TryPlaceAuthorizationHoldAfterOrderCreatedAsync(loadedAfterStock, cancelToken).ConfigureAwait(false);
-            await TrySendNewOrderCustomerSmsAsync(loadedAfterStock!, cancelToken).ConfigureAwait(false);
-            if (loadedAfterStock != null)
-                await TryEnqueueNewOrderAutoPrintAsync(loadedAfterStock, cancelToken).ConfigureAwait(false);
-            response.Data = _mapper.Map<OrderRes>(loadedAfterStock);
-            if (loadedAfterStock != null)
-                await EnrichOrderResAsync(response.Data, loadedAfterStock, cancelToken).ConfigureAwait(false);
+                await _paymentService.TryPlaceAuthorizationHoldIfNeededAsync(loadedAfterStock, cancelToken).ConfigureAwait(false);
+            var loadedAfterPayment = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false)
+                ?? loadedAfterStock;
+            await TrySendNewOrderCustomerSmsAsync(loadedAfterPayment!, cancelToken).ConfigureAwait(false);
+            if (loadedAfterPayment != null)
+                await TryEnqueueNewOrderAutoPrintAsync(loadedAfterPayment, cancelToken).ConfigureAwait(false);
+            response.Data = _mapper.Map<OrderRes>(loadedAfterPayment);
+            if (loadedAfterPayment != null)
+                await EnrichOrderResAsync(response.Data, loadedAfterPayment, cancelToken).ConfigureAwait(false);
             return response;
         }
 
@@ -440,6 +443,18 @@ namespace George.Services
                 }
             }
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(orderId, previousStatus, loaded, cancelToken).ConfigureAwait(false);
+            if (loaded != null)
+            {
+                var paymentMethod = (loaded.PaymentMethod ?? "").Trim();
+                var settle = (loaded.PaymentSettleStatus ?? "").Trim();
+                var needsSavedCardHold = string.Equals(paymentMethod, "SavedCard", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(settle, PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(settle, PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase)
+                    && string.IsNullOrWhiteSpace(loaded.CardcomLowProfileId);
+                if (needsSavedCardHold)
+                    await _paymentService.TryPlaceAuthorizationHoldIfNeededAsync(loaded, cancelToken).ConfigureAwait(false);
+                loaded = await _orderStorage.GetOrderByIdAsync(loaded.Id, cancelToken).ConfigureAwait(false) ?? loaded;
+            }
             if (loaded != null &&
                 !string.Equals(previousStatus, "Ready", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(loaded.Status, "Ready", StringComparison.OrdinalIgnoreCase))

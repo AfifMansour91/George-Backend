@@ -325,14 +325,18 @@ public class PaymentService : ServiceBase
     /// After order is persisted: J5 hold on saved token for phone/SavedCard orders (kiosk/SMS use Low Profile).
     /// Hold is for validation only; picking charges via token because J5 often expires before pick (~48h).
     /// </summary>
-    public async Task TryPlaceAuthorizationHoldAfterOrderCreatedAsync(Order order, CancellationToken cancelToken = default)
+    public Task TryPlaceAuthorizationHoldAfterOrderCreatedAsync(Order order, CancellationToken cancelToken = default)
+        => TryPlaceAuthorizationHoldIfNeededAsync(order, cancelToken);
+
+    public async Task TryPlaceAuthorizationHoldIfNeededAsync(Order order, CancellationToken cancelToken = default)
     {
         if (order.Id <= 0) return;
         if (!IsCardcomCreditPaymentMethod(order.PaymentMethod) &&
             !string.Equals(order.PaymentMethod, "SavedCard", StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (order.PaymentSettleStatus == PaymentSettleStatus.Authorized)
+        if (order.PaymentSettleStatus == PaymentSettleStatus.Authorized
+            || order.PaymentSettleStatus == PaymentSettleStatus.Captured)
             return;
 
         if (!string.IsNullOrWhiteSpace(order.CardcomLowProfileId))
@@ -345,19 +349,47 @@ public class PaymentService : ServiceBase
         if (!string.Equals(order.PaymentMethod, "SavedCard", StringComparison.OrdinalIgnoreCase))
             return;
 
+        if (order.CustomerPaymentMethodId is not > 0 && order.CustomerId is int cid)
+        {
+            var defaultPm = await _paymentStorage.GetDefaultPaymentMethodAsync(cid, order.SiteId, cancelToken);
+            if (defaultPm != null)
+            {
+                order.CustomerPaymentMethodId = defaultPm.Id;
+                order.CardcomTokenLast4 = defaultPm.Last4Digits;
+                order.CardcomCardBrand = defaultPm.CardBrand;
+                order.PaymentGateway = PaymentGatewayProviderId.Cardcom;
+                order.PaymentSettleStatus ??= PaymentSettleStatus.Initiated;
+            }
+        }
+
         CustomerPaymentMethod? pm = null;
         if (order.CustomerPaymentMethodId is int pmId)
             pm = await _paymentStorage.GetPaymentMethodByIdAsync(pmId, cancelToken);
-        else if (order.CustomerId is int cid)
-            pm = await _paymentStorage.GetDefaultPaymentMethodAsync(cid, order.SiteId, cancelToken);
+        else if (order.CustomerId is int customerId)
+            pm = await _paymentStorage.GetDefaultPaymentMethodAsync(customerId, order.SiteId, cancelToken);
 
-        if (pm == null) return;
+        if (pm == null)
+        {
+            await MarkSavedCardHoldFailedAsync(order,
+                "No saved card on file for this customer.", cancelToken);
+            return;
+        }
 
         if (!_tokenProtector.TryUnprotect(pm.EncryptedToken, out var token))
+        {
+            await MarkSavedCardHoldFailedAsync(order,
+                "Saved card cannot be read (server encryption keys changed). Remove the saved card and have the customer pay again to save a new card.",
+                cancelToken);
             return;
+        }
+
         var cardExp = pm.CardExpirationMMYY ?? "";
         if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(cardExp))
+        {
+            await MarkSavedCardHoldFailedAsync(order,
+                "Saved card is missing token or expiration.", cancelToken);
             return;
+        }
 
         var authAmount = ComputeAuthorizationAmount(order, creds);
         var hold = await _cardcom.PlaceTokenAuthorizationHoldAsync(creds, new PlaceTokenAuthorizationHoldRequest
@@ -386,7 +418,45 @@ public class PaymentService : ServiceBase
         order.GatewayPaymentTransactionId = hold.TranzactionId;
         order.PaymentReference = hold.TranzactionId;
         order.CustomerPaymentMethodId = pm.Id;
+        order.CardcomTokenLast4 = pm.Last4Digits ?? order.CardcomTokenLast4;
+        order.CardcomCardBrand = pm.CardBrand ?? order.CardcomCardBrand;
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+    }
+
+    private async Task MarkSavedCardHoldFailedAsync(Order order, string message, CancellationToken cancelToken)
+    {
+        _logger.LogWarning("Saved card authorization hold skipped for order {OrderId}: {Message}", order.Id, message);
+        order.PaymentSettleStatus = PaymentSettleStatus.Failed;
+        order.ExternalPaymentStatus = message;
+        order.PaymentGateway = PaymentGatewayProviderId.Cardcom;
+        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await LogEventAsync(order.Id, "TokenAuthorizationHold", "-1", message, null, null, order.Total, null, cancelToken);
+    }
+
+    public async Task<IApiResponse<bool>> RetrySavedCardAuthorizationHoldAsync(
+        int orderId,
+        CancellationToken cancelToken = default)
+    {
+        var response = new ApiResponse<bool>();
+        var order = await _paymentStorage.GetOrderForPaymentAsync(orderId, cancelToken);
+        if (order == null)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+        if (!string.Equals(order.PaymentMethod, "SavedCard", StringComparison.OrdinalIgnoreCase))
+            return CreateResponse(response, StatusCode.InvalidRequest, "Order is not a saved-card payment.");
+
+        await TryPlaceAuthorizationHoldIfNeededAsync(order, cancelToken);
+        var after = await _paymentStorage.GetOrderForPaymentAsync(orderId, cancelToken);
+        var authorized = after != null
+            && string.Equals(after.PaymentSettleStatus, PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase);
+        if (!authorized)
+        {
+            var msg = after?.ExternalPaymentStatus?.Trim();
+            return CreateResponse(response, StatusCode.InvalidRequest,
+                string.IsNullOrWhiteSpace(msg) ? "Saved card authorization hold failed." : msg);
+        }
+
+        response.Data = true;
+        return response;
     }
 
     public async Task<IApiResponse<FinalizePickingPaymentRes>> FinalizePickingPaymentAsync(
