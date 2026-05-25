@@ -42,6 +42,8 @@ public class RefundPaymentRes
     public bool Success { get; set; }
     public decimal RefundedAmount { get; set; }
     public string? TransactionId { get; set; }
+    public string? RefundInvoiceNumber { get; set; }
+    public string? RefundDocumentUrl { get; set; }
 }
 
 public class SavedCardRes

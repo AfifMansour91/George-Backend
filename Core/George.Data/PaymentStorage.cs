@@ -78,6 +78,40 @@ public class PaymentStorage : StorageBase
         return true;
     }
 
+    public async Task<bool> IsPaymentMethodRetiredOnSiteAsync(int paymentMethodId, int siteId, CancellationToken cancelToken) =>
+        await _dbContext.CustomerPaymentMethod
+            .AnyAsync(m => m.Id == paymentMethodId && m.SiteId == siteId && m.IsRetired, cancelToken);
+
+    public async Task<int?> GetCustomerIdByPhoneAsync(int siteId, string? phone, CancellationToken cancelToken)
+    {
+        var normalized = NormalizePhoneDigits(phone);
+        if (normalized.Length < 4)
+            return null;
+
+        var customer = await _dbContext.Set<Customer>().AsNoTracking()
+            .FirstOrDefaultAsync(c => !c.IsDeleted && c.SiteId == siteId && c.NormalizedPhone == normalized,
+                cancelToken);
+        return customer?.Id;
+    }
+
+    public async Task<int> RetireAllPaymentMethodsForCustomerAsync(int customerId, int siteId, CancellationToken cancelToken)
+    {
+        var pms = await _dbContext.CustomerPaymentMethod
+            .Where(m => m.CustomerId == customerId && m.SiteId == siteId && !m.IsRetired)
+            .ToListAsync(cancelToken);
+        if (pms.Count == 0)
+            return 0;
+
+        foreach (var pm in pms)
+        {
+            pm.IsRetired = true;
+            pm.IsDefault = false;
+        }
+
+        await _dbContext.SaveChangesAsync(cancelToken);
+        return pms.Count;
+    }
+
     public async Task<bool> CustomerExistsAsync(int customerId, CancellationToken cancelToken) =>
         await _dbContext.Set<Customer>().AnyAsync(c => c.Id == customerId && !c.IsDeleted, cancelToken);
 
@@ -185,7 +219,10 @@ public class PaymentStorage : StorageBase
             .ToListAsync(cancelToken);
 
         foreach (var m in existing)
+        {
             m.IsDefault = false;
+            m.IsRetired = true;
+        }
 
         method.IsDefault = true;
         method.CreationTime = DateTime.UtcNow;
@@ -225,6 +262,8 @@ public class PaymentStorage : StorageBase
         tracked.PaymentGateway = order.PaymentGateway;
         tracked.InvoiceNumber = order.InvoiceNumber;
         tracked.CardcomDocumentUrl = order.CardcomDocumentUrl;
+        tracked.RefundInvoiceNumber = order.RefundInvoiceNumber;
+        tracked.CardcomRefundDocumentUrl = order.CardcomRefundDocumentUrl;
         tracked.PaidAt = order.PaidAt;
         tracked.ExternalPaymentStatus = order.ExternalPaymentStatus;
         tracked.UpdatedDate = DateTime.UtcNow;
@@ -245,80 +284,28 @@ public class PaymentStorage : StorageBase
     }
 
     /// <summary>
-    /// Resolve saved card display for manual order UI: CRM payment method first, then recent orders for same phone.
+    /// Resolve saved card for manual order UI from the customer's active default payment method only.
     /// </summary>
     public async Task<(bool HasCard, string? Last4Digits, string? CardBrand, int? CustomerPaymentMethodId)?>
         ResolveSavedCardByPhoneAsync(int siteId, string? phone, int? customerId, CancellationToken cancelToken)
     {
-        if (siteId <= 0) return null;
+        if (siteId <= 0)
+            return null;
 
+        int? resolvedCustomerId = null;
         if (customerId is int cid && await CustomerExistsAsync(cid, cancelToken))
-        {
-            var pmById = await GetDefaultPaymentMethodAsync(cid, siteId, cancelToken);
-            if (pmById != null)
-                return (true, pmById.Last4Digits, pmById.CardBrand, pmById.Id);
-        }
+            resolvedCustomerId = cid;
 
-        var normalized = NormalizePhoneDigits(phone);
-        if (normalized.Length >= 4)
-        {
-            var customer = await _dbContext.Set<Customer>().AsNoTracking()
-                .FirstOrDefaultAsync(c => !c.IsDeleted && c.SiteId == siteId && c.NormalizedPhone == normalized,
-                    cancelToken);
-            if (customer != null)
-            {
-                var pm = await GetDefaultPaymentMethodAsync(customer.Id, siteId, cancelToken);
-                if (pm != null)
-                    return (true, pm.Last4Digits, pm.CardBrand, pm.Id);
-            }
-        }
+        if (resolvedCustomerId == null)
+            resolvedCustomerId = await GetCustomerIdByPhoneAsync(siteId, phone, cancelToken);
 
-        if (normalized.Length < 4) return null;
+        if (resolvedCustomerId is not int custId)
+            return null;
 
-        var recentOrders = await _dbContext.Order.AsNoTracking()
-            .Where(o => !o.IsDeleted && o.SiteId == siteId && o.CustomerPhone != null)
-            .OrderByDescending(o => o.CreationTime)
-            .Take(500)
-            .Select(o => new
-            {
-                o.CustomerPhone,
-                o.CardcomTokenLast4,
-                o.CardcomCardBrand,
-                o.CustomerPaymentMethodId,
-                o.PaymentMethod,
-                o.PaymentSettleStatus,
-            })
-            .ToListAsync(cancelToken);
+        var pm = await GetDefaultPaymentMethodAsync(custId, siteId, cancelToken);
+        if (pm == null)
+            return null;
 
-        foreach (var o in recentOrders.Where(o => NormalizePhoneDigits(o.CustomerPhone) == normalized))
-        {
-            if (o.CustomerPaymentMethodId is int pmId)
-            {
-                var pm = await GetPaymentMethodByIdAsync(pmId, cancelToken);
-                if (pm != null && !pm.IsRetired)
-                {
-                    return (
-                        true,
-                        pm.Last4Digits ?? o.CardcomTokenLast4,
-                        pm.CardBrand ?? o.CardcomCardBrand,
-                        pm.Id);
-                }
-            }
-
-            if (!IsCardcomCreditPaymentMethod(o.PaymentMethod))
-                continue;
-
-            var hasTokenOnOrder = o.CustomerPaymentMethodId != null
-                || !string.IsNullOrWhiteSpace(o.CardcomTokenLast4)
-                || string.Equals(o.PaymentSettleStatus, "Authorized", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(o.PaymentSettleStatus, "Captured", StringComparison.OrdinalIgnoreCase);
-
-            if (!hasTokenOnOrder)
-                continue;
-
-            return (true, o.CardcomTokenLast4, o.CardcomCardBrand, o.CustomerPaymentMethodId);
-        }
-
-        return null;
+        return (true, pm.Last4Digits, pm.CardBrand, pm.Id);
     }
 }

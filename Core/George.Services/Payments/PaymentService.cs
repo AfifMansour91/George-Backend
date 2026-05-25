@@ -765,12 +765,27 @@ public class PaymentService : ServiceBase
         return CardcomDocumentBuilder.Build(order, items, creds.DocumentTypeToCreate, sendByEmail, sendBySms, isoCoinId);
     }
 
+    private static CardcomTransactionDocument BuildRefundDocumentForOrder(Order order, SitePaymentCredentials creds)
+    {
+        var items = order.OrderItem?.Where(i => !i.IsDeleted) ?? Enumerable.Empty<OrderItem>();
+        var isoCoinId = CardcomDocumentBuilder.MapCurrencyToIsoCoinId(creds.Currency);
+        return CardcomDocumentBuilder.Build(order, items, CardcomDocumentBuilder.RefundDocumentType, false, false, isoCoinId);
+    }
+
     private static void ApplyInvoiceFromTransaction(Order order, PaymentTransactionResult tx)
     {
         if (!string.IsNullOrWhiteSpace(tx.DocumentNumber))
             order.InvoiceNumber = tx.DocumentNumber;
         if (!string.IsNullOrWhiteSpace(tx.DocumentUrl))
             order.CardcomDocumentUrl = tx.DocumentUrl;
+    }
+
+    private static void ApplyRefundInvoiceFromTransaction(Order order, PaymentTransactionResult tx)
+    {
+        if (!string.IsNullOrWhiteSpace(tx.DocumentNumber))
+            order.RefundInvoiceNumber = tx.DocumentNumber;
+        if (!string.IsNullOrWhiteSpace(tx.DocumentUrl))
+            order.CardcomRefundDocumentUrl = tx.DocumentUrl;
     }
 
     private static bool OrderMissingInvoiceDocument(Order order) =>
@@ -885,11 +900,35 @@ public class PaymentService : ServiceBase
 
         order.PaymentSettleStatus = PaymentSettleStatus.Refunded;
         order.PaymentStatus = "Refunded";
+
+        if (!string.IsNullOrWhiteSpace(tx.TranzactionId) && !string.IsNullOrWhiteSpace(creds.ApiPassword))
+        {
+            try
+            {
+                var refundDoc = await TryCreateRefundDocumentAsync(order, creds, tx.TranzactionId, cancelToken);
+                if (refundDoc?.Success == true)
+                    ApplyRefundInvoiceFromTransaction(order, refundDoc);
+            }
+            catch (Exception docEx)
+            {
+                _logger.LogWarning(docEx,
+                    "Refund credit note failed for order {OrderId}; refund completed without document.",
+                    order.Id);
+            }
+        }
+
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
 
-        await TrySendRefundSmsAsync(order, creds, amount, tx.TranzactionId, cancelToken);
+        await TrySendRefundSmsAsync(order, creds, amount, tx.TranzactionId, order.CardcomRefundDocumentUrl, cancelToken);
 
-        response.Data = new RefundPaymentRes { Success = true, RefundedAmount = amount, TransactionId = tx.TranzactionId };
+        response.Data = new RefundPaymentRes
+        {
+            Success = true,
+            RefundedAmount = amount,
+            TransactionId = tx.TranzactionId,
+            RefundInvoiceNumber = order.RefundInvoiceNumber,
+            RefundDocumentUrl = order.CardcomRefundDocumentUrl,
+        };
         return response;
     }
 
@@ -1021,26 +1060,44 @@ public class PaymentService : ServiceBase
         CancellationToken cancelToken = default)
     {
         var response = new ApiResponse<bool>();
+        var customerIds = new HashSet<int>();
 
-        if (customerPaymentMethodId is int pmId)
+        if (customerId is int cid && await _paymentStorage.CustomerExistsAsync(cid, cancelToken))
+            customerIds.Add(cid);
+
+        var phoneCustomerId = await _paymentStorage.GetCustomerIdByPhoneAsync(siteId, phone, cancelToken);
+        if (phoneCustomerId is int pcid)
+            customerIds.Add(pcid);
+
+        var retiredTotal = 0;
+        foreach (var id in customerIds)
+            retiredTotal += await _paymentStorage.RetireAllPaymentMethodsForCustomerAsync(id, siteId, cancelToken);
+
+        if (retiredTotal > 0)
         {
-            var retired = await _paymentStorage.RetirePaymentMethodAsync(pmId, siteId, cancelToken);
-            if (!retired)
-                return CreateResponse(response, StatusCode.ItemNotFound);
             response.Data = true;
             return response;
         }
 
-        var resolved = await _paymentStorage.ResolveSavedCardByPhoneAsync(siteId, phone, customerId, cancelToken);
-        if (resolved == null || !resolved.Value.HasCard || resolved.Value.CustomerPaymentMethodId is not int resolvedPmId)
-            return CreateResponse(response, StatusCode.InvalidRequest,
-                "No removable saved card found for this customer.");
+        if (customerPaymentMethodId is int requestedPmId
+            && await TryRetireOrConfirmAlreadyRetiredAsync(requestedPmId, siteId, cancelToken))
+        {
+            response.Data = true;
+            return response;
+        }
 
-        var ok = await _paymentStorage.RetirePaymentMethodAsync(resolvedPmId, siteId, cancelToken);
-        if (!ok)
-            return CreateResponse(response, StatusCode.ItemNotFound);
-        response.Data = true;
-        return response;
+        return CreateResponse(response, StatusCode.ItemNotFound);
+    }
+
+    private async Task<bool> TryRetireOrConfirmAlreadyRetiredAsync(
+        int paymentMethodId,
+        int siteId,
+        CancellationToken cancelToken)
+    {
+        if (await _paymentStorage.RetirePaymentMethodAsync(paymentMethodId, siteId, cancelToken))
+            return true;
+
+        return await _paymentStorage.IsPaymentMethodRetiredOnSiteAsync(paymentMethodId, siteId, cancelToken);
     }
 
     public async Task<IApiResponse<List<PaymentEventRes>>> GetPaymentEventsAsync(int orderId, CancellationToken cancelToken = default)
@@ -1682,6 +1739,7 @@ public class PaymentService : ServiceBase
         SitePaymentCredentials creds,
         decimal refundAmount,
         string? refundTransactionId,
+        string? refundDocumentUrl,
         CancellationToken cancelToken)
     {
         var phone = (order.CustomerPhone ?? "").Trim();
@@ -1690,19 +1748,7 @@ public class PaymentService : ServiceBase
 
         try
         {
-            string? documentUrl = null;
-            try
-            {
-                documentUrl = await ResolveRefundDocumentUrlAsync(order, creds, refundTransactionId, cancelToken);
-            }
-            catch (Exception docEx)
-            {
-                _logger.LogWarning(docEx,
-                    "Refund document URL failed for order {OrderId}; sending refund SMS without document link.",
-                    order.Id);
-            }
-
-            var body = await BuildRefundSmsBodyAsync(order, documentUrl ?? "", refundAmount, cancelToken);
+            var body = await BuildRefundSmsBodyAsync(order, refundDocumentUrl ?? "", refundAmount, cancelToken);
             var sent = await _smsProvider.SendTextAsync(phone, body, cancelToken);
             if (sent)
             {
@@ -1716,7 +1762,7 @@ public class PaymentService : ServiceBase
         }
     }
 
-    private async Task<string?> ResolveRefundDocumentUrlAsync(
+    private async Task<PaymentTransactionResult?> TryCreateRefundDocumentAsync(
         Order order,
         SitePaymentCredentials creds,
         string? refundTransactionId,
@@ -1725,7 +1771,7 @@ public class PaymentService : ServiceBase
         if (string.IsNullOrWhiteSpace(refundTransactionId) || string.IsNullOrWhiteSpace(creds.ApiPassword))
             return null;
 
-        var document = BuildDocumentForOrder(order, creds, sendByEmail: false, sendBySms: false);
+        var document = BuildRefundDocumentForOrder(order, creds);
         var result = await _cardcom.CreateDocumentAsync(creds, new CreateCardcomDocumentRequest
         {
             Document = document,
@@ -1736,7 +1782,7 @@ public class PaymentService : ServiceBase
             $"refund:{result.Description}", result.TranzactionId ?? refundTransactionId, null, order.Total,
             result.RawJson, cancelToken);
 
-        return result.Success ? result.DocumentUrl?.Trim() : null;
+        return result;
     }
 
     private async Task<string> BuildInvoiceSmsBodyAsync(Order order, string documentUrl, CancellationToken cancelToken)

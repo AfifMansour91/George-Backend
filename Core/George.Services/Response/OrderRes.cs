@@ -69,6 +69,10 @@ public class OrderRes
     public string? InvoiceNumber { get; set; }
     /// <summary>Cardcom document URL when an invoice was issued.</summary>
     public string? CardcomDocumentUrl { get; set; }
+    /// <summary>Credit note number after refund.</summary>
+    public string? RefundInvoiceNumber { get; set; }
+    /// <summary>Cardcom credit note URL after refund.</summary>
+    public string? CardcomRefundDocumentUrl { get; set; }
     public DateTime? PaidAt { get; set; }
     /// <summary>Last payment webhook <c>orderId</c>.</summary>
     public string? GatewayPaymentOrderId { get; set; }

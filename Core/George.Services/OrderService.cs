@@ -517,19 +517,21 @@ namespace George.Services
             response.Data.OrderCount = profile.OrderCount;
             response.Data.AverageOrderTotal = profile.AverageOrderTotal;
             response.Data.TotalTransactions = profile.TotalTransactions;
-            response.Data.HasSavedCard = profile.HasSavedCard;
-            response.Data.SavedCardLast4 = profile.SavedCardLast4;
-            response.Data.SavedCardBrand = profile.SavedCardBrand;
 
             var cardRes = await _paymentService.GetSavedCardForCustomerAsync(siteId, phone, null, cancelToken)
                 .ConfigureAwait(false);
+            response.Data.HasSavedCard = cardRes.Data?.HasCard == true;
             if (cardRes.Data?.HasCard == true)
             {
-                response.Data.HasSavedCard = true;
                 if (!string.IsNullOrWhiteSpace(cardRes.Data.Last4Digits))
                     response.Data.SavedCardLast4 = cardRes.Data.Last4Digits;
                 if (!string.IsNullOrWhiteSpace(cardRes.Data.CardBrand))
                     response.Data.SavedCardBrand = cardRes.Data.CardBrand;
+            }
+            else
+            {
+                response.Data.SavedCardLast4 = null;
+                response.Data.SavedCardBrand = null;
             }
 
             return response;

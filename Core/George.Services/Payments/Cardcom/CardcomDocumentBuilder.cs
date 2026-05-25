@@ -5,6 +5,7 @@ namespace George.Services.Payments.Cardcom;
 public static class CardcomDocumentBuilder
 {
     public const string DefaultDocumentType = "TaxInvoiceAndReceipt";
+    public const string RefundDocumentType = "TaxInvoiceAndReceiptRefund";
 
     public static CardcomTransactionDocument Build(
         Order order,

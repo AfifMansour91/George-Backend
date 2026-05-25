@@ -193,8 +193,15 @@ public partial class Order
     public string? InvoiceNumber { get; set; }
 
     /// <summary>Cardcom document PDF/view URL when an invoice was issued.</summary>
-    [StringLength(1000)]
     public string? CardcomDocumentUrl { get; set; }
+
+    /// <summary>Credit note / refund invoice number after Cardcom refund document.</summary>
+    [StringLength(100)]
+    public string? RefundInvoiceNumber { get; set; }
+
+    /// <summary>Cardcom credit note PDF/view URL after refund.</summary>
+    [StringLength(1000)]
+    public string? CardcomRefundDocumentUrl { get; set; }
 
     /// <summary>Last payment webhook <c>orderId</c> (WooCommerce / gateway echo).</summary>
     [StringLength(64)]

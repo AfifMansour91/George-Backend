@@ -447,39 +447,6 @@ namespace George.Data
                 result.AverageOrderTotal = totals.Sum() / totals.Count;
             }
 
-            foreach (var o in orders)
-            {
-                if (!IsCardcomCreditPaymentMethod(o.PaymentMethod))
-                    continue;
-
-                var hasTokenOnOrder = o.CustomerPaymentMethodId != null
-                    || !string.IsNullOrWhiteSpace(o.CardcomTokenLast4)
-                    || string.Equals(o.PaymentSettleStatus, PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(o.PaymentSettleStatus, PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase);
-
-                if (!hasTokenOnOrder)
-                    continue;
-
-                var last4 = o.CardcomTokenLast4;
-                var brand = o.CardcomCardBrand;
-                if (o.CustomerPaymentMethodId is int pmId)
-                {
-                    var pm = await _dbContext.CustomerPaymentMethod.AsNoTracking()
-                        .FirstOrDefaultAsync(m => m.Id == pmId && !m.IsRetired, cancelToken)
-                        .ConfigureAwait(false);
-                    if (pm != null)
-                    {
-                        last4 = pm.Last4Digits ?? last4;
-                        brand = pm.CardBrand ?? brand;
-                    }
-                }
-
-                result.HasSavedCard = true;
-                result.SavedCardLast4 = last4;
-                result.SavedCardBrand = brand;
-                break;
-            }
-
             return result;
         }
 
