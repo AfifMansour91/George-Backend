@@ -98,11 +98,26 @@ public class PaymentService : ServiceBase
         if (order == null)
             return CreateResponse(response, StatusCode.ItemNotFound);
 
+        if (OrderNeedsImmediateCharge(order)
+            && string.Equals(order.PaymentSettleStatus, PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase)
+            && IsUnsettledOrderPayment(order.PaymentStatus))
+        {
+            await TryAutoFinalizeReadyOrderPaymentAsync(orderId, cancelToken);
+            order = await _paymentStorage.GetOrderForPaymentAsync(orderId, cancelToken) ?? order;
+        }
+
         var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
         if (creds == null || creds.ProviderId != PaymentGatewayProviderId.Cardcom)
             return CreateResponse(response, StatusCode.InvalidRequest, "Cardcom is not configured for this site.");
 
         var authAmount = ComputeAuthorizationAmount(order, creds);
+        var chargeNow = OrderNeedsImmediateCharge(order);
+        var sessionAmount = chargeNow
+            ? Math.Round(Math.Max(order.Total ?? 0m, 0m), 2, MidpointRounding.AwayFromZero)
+            : authAmount;
+
+        if (chargeNow && sessionAmount <= 0)
+            return CreateResponse(response, StatusCode.InvalidRequest, "Order total must be positive.");
 
         if (order.PaymentSettleStatus == PaymentSettleStatus.Initiated
             && !string.IsNullOrWhiteSpace(order.CardcomLowProfileId))
@@ -113,16 +128,19 @@ public class PaymentService : ServiceBase
 
         if (order.PaymentSettleStatus is PaymentSettleStatus.Authorized or PaymentSettleStatus.Captured)
         {
-            response.Data = new PaymentSessionRes
+            if (!(OrderNeedsImmediateCharge(order) && IsUnsettledOrderPayment(order.PaymentStatus)))
             {
-                OrderId = order.Id,
-                PaymentUrl = !string.IsNullOrWhiteSpace(order.CardcomLowProfileId)
-                    ? BuildCardcomLowProfileUrl(creds, order.CardcomLowProfileId)
-                    : null,
-                LowProfileId = order.CardcomLowProfileId,
-                AuthorizedAmount = order.PaymentAuthorizedAmount ?? authAmount,
-            };
-            return response;
+                response.Data = new PaymentSessionRes
+                {
+                    OrderId = order.Id,
+                    PaymentUrl = !string.IsNullOrWhiteSpace(order.CardcomLowProfileId)
+                        ? BuildCardcomLowProfileUrl(creds, order.CardcomLowProfileId)
+                        : null,
+                    LowProfileId = order.CardcomLowProfileId,
+                    AuthorizedAmount = order.PaymentAuthorizedAmount ?? authAmount,
+                };
+                return response;
+            }
         }
 
         var isMoto = string.Equals(channel, "moto", StringComparison.OrdinalIgnoreCase);
@@ -133,13 +151,12 @@ public class PaymentService : ServiceBase
         var create = await _cardcom.CreateHostedSessionAsync(creds, new CreateHostedSessionRequest
         {
             OrderId = order.Id,
-            Amount = authAmount,
+            Amount = sessionAmount,
             ReturnValue = returnValue,
             ProductName = $"הזמנה {order.OrderNumber}",
             Language = "he",
-            // J5 hold + token at checkout; charge at picking (CreateTokenOnly + JValidateType 5).
             SaveCard = true,
-            UseAuthorizationHold = true,
+            UseAuthorizationHold = !chargeNow,
             UseVirtualTerminal = isMoto,
             SuccessRedirectUrl = $"{appBase}/customer/pay/{order.Id}/return?status=success",
             FailedRedirectUrl = $"{appBase}/customer/pay/{order.Id}/return?status=failed",
@@ -149,14 +166,14 @@ public class PaymentService : ServiceBase
         }, cancelToken);
 
         await LogEventAsync(order.Id, "InitHostedSession", create.Success ? "0" : create.ErrorCode,
-            create.ErrorDescription, null, null, authAmount, create.RawJson, cancelToken);
+            create.ErrorDescription, null, null, sessionAmount, create.RawJson, cancelToken);
 
         if (!create.Success)
             return CreateResponse(response, StatusCode.InvalidRequest, create.ErrorDescription ?? "Failed to create payment session.");
 
         order.PaymentSettleStatus = PaymentSettleStatus.Initiated;
         order.CardcomLowProfileId = create.LowProfileId;
-        order.PaymentAuthorizedAmount = authAmount;
+        order.PaymentAuthorizedAmount = sessionAmount;
         order.PaymentGateway = PaymentGatewayProviderId.Cardcom;
         order.ExternalPaymentStatus = null;
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
@@ -166,9 +183,53 @@ public class PaymentService : ServiceBase
             OrderId = order.Id,
             PaymentUrl = create.PaymentUrl,
             LowProfileId = create.LowProfileId,
-            AuthorizedAmount = authAmount,
+            AuthorizedAmount = sessionAmount,
         };
         return response;
+    }
+
+    private static bool IsUnsettledOrderPayment(string? paymentStatus)
+    {
+        var s = (paymentStatus ?? "").Trim();
+        return s.Equals("Unpaid", StringComparison.OrdinalIgnoreCase)
+            || s.Equals("Pending", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Ready orders awaiting payment should charge immediately (not J5 hold).</summary>
+    private static bool OrderNeedsImmediateCharge(Order order)
+    {
+        if (!string.Equals(order.Status?.Trim(), "Ready", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (!IsUnsettledOrderPayment(order.PaymentStatus))
+            return false;
+        var settle = (order.PaymentSettleStatus ?? PaymentSettleStatus.None).Trim();
+        return !string.Equals(settle, PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsImmediateChargeOperation(string? operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation)) return false;
+        return operation.Contains("Charge", StringComparison.OrdinalIgnoreCase)
+            && !operation.Contains("CreateTokenOnly", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task TryAutoFinalizeReadyOrderPaymentAsync(int orderId, CancellationToken cancelToken)
+    {
+        try
+        {
+            var result = await FinalizePickingPaymentAsync(orderId, cancelToken);
+            if (!result.IsSuccessful)
+            {
+                _logger.LogWarning(
+                    "Auto-finalize after ready auth failed for order {OrderId}: {Message}",
+                    orderId,
+                    result.DisplayMessage);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Auto-finalize after ready auth failed for order {OrderId}", orderId);
+        }
     }
 
     public async Task<IApiResponse<SendPaymentSmsRes>> SendPaymentSmsAsync(
@@ -825,6 +886,36 @@ public class PaymentService : ServiceBase
         return response;
     }
 
+    public async Task<IApiResponse<bool>> RemoveSavedCardForCustomerAsync(
+        int siteId,
+        string? phone,
+        int? customerId = null,
+        int? customerPaymentMethodId = null,
+        CancellationToken cancelToken = default)
+    {
+        var response = new ApiResponse<bool>();
+
+        if (customerPaymentMethodId is int pmId)
+        {
+            var retired = await _paymentStorage.RetirePaymentMethodAsync(pmId, siteId, cancelToken);
+            if (!retired)
+                return CreateResponse(response, StatusCode.ItemNotFound);
+            response.Data = true;
+            return response;
+        }
+
+        var resolved = await _paymentStorage.ResolveSavedCardByPhoneAsync(siteId, phone, customerId, cancelToken);
+        if (resolved == null || !resolved.Value.HasCard || resolved.Value.CustomerPaymentMethodId is not int resolvedPmId)
+            return CreateResponse(response, StatusCode.InvalidRequest,
+                "No removable saved card found for this customer.");
+
+        var ok = await _paymentStorage.RetirePaymentMethodAsync(resolvedPmId, siteId, cancelToken);
+        if (!ok)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+        response.Data = true;
+        return response;
+    }
+
     public async Task<IApiResponse<List<PaymentEventRes>>> GetPaymentEventsAsync(int orderId, CancellationToken cancelToken = default)
     {
         var response = new ApiResponse<List<PaymentEventRes>>();
@@ -940,7 +1031,6 @@ public class PaymentService : ServiceBase
         order.GatewayPaymentTransactionId = payload.TranzactionId;
         order.PaymentReference = payload.TranzactionId;
         order.PaymentGateway = PaymentGatewayProviderId.Cardcom;
-        order.PaymentSettleStatus = PaymentSettleStatus.Authorized;
         order.PaymentAuthorizedAmount = payload.Amount ?? order.PaymentAuthorizedAmount;
         var callbackDisplay = _cardcom.ExtractCardDisplayFields(payload.RawJson ?? callbackJson);
         order.CardcomTokenLast4 = CoalesceNonEmpty(payload.Last4Digits, callbackDisplay.Last4Digits);
@@ -950,6 +1040,34 @@ public class PaymentService : ServiceBase
         if (!string.IsNullOrWhiteSpace(payload.DocumentUrl))
             order.CardcomDocumentUrl = payload.DocumentUrl;
 
+        var immediateCharge = IsImmediateChargeOperation(payload.Operation);
+        if (immediateCharge)
+        {
+            order.PaymentStatus = "Paid";
+            order.PaymentSettleStatus = PaymentSettleStatus.Captured;
+            order.PaidAt = DateTime.UtcNow;
+            order.ExternalPaymentStatus = "success";
+            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+
+            try
+            {
+                await PersistCardcomTokenAsync(order, payload, payload.RawJson ?? callbackJson, cancelToken);
+                await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+                await TryBackfillPaymentMethodDisplayForOrderAsync(order, cancelToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Cardcom token persist failed for order {OrderId}; charge was saved.",
+                    order.Id);
+            }
+
+            await TryPersistTokenFromLastSuccessEventAsync(order, cancelToken);
+            await TrySendInvoiceSmsAfterCaptureAsync(order, creds, cancelToken);
+            return;
+        }
+
+        order.PaymentSettleStatus = PaymentSettleStatus.Authorized;
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
 
         try
@@ -966,6 +1084,9 @@ public class PaymentService : ServiceBase
         }
 
         await TryPersistTokenFromLastSuccessEventAsync(order, cancelToken);
+
+        if (OrderNeedsImmediateCharge(order))
+            await TryAutoFinalizeReadyOrderPaymentAsync(order.Id, cancelToken);
     }
 
     private ValidateCallbackResult ResolveCallbackPayload(ValidateCallbackResult validated)

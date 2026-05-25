@@ -65,6 +65,19 @@ public class PaymentStorage : StorageBase
         await _dbContext.CustomerPaymentMethod
             .FirstOrDefaultAsync(m => m.Id == id && !m.IsRetired, cancelToken);
 
+    public async Task<bool> RetirePaymentMethodAsync(int paymentMethodId, int siteId, CancellationToken cancelToken)
+    {
+        var pm = await _dbContext.CustomerPaymentMethod
+            .FirstOrDefaultAsync(m => m.Id == paymentMethodId && m.SiteId == siteId && !m.IsRetired, cancelToken);
+        if (pm == null)
+            return false;
+
+        pm.IsRetired = true;
+        pm.IsDefault = false;
+        await _dbContext.SaveChangesAsync(cancelToken);
+        return true;
+    }
+
     public async Task<bool> CustomerExistsAsync(int customerId, CancellationToken cancelToken) =>
         await _dbContext.Set<Customer>().AnyAsync(c => c.Id == customerId && !c.IsDeleted, cancelToken);
 

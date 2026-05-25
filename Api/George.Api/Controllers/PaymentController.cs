@@ -113,6 +113,19 @@ public class PaymentController : GeorgeControllerBase, IAuthUserProvider
             _paymentSvc.GetSavedCardForCustomerAsync(siteId, phone, customerId, cancelToken));
     }
 
+    [HttpDelete("Site/{siteId:int}/SavedCard")]
+    [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> RemoveSavedCardAsync(
+        [FromRoute] int siteId,
+        [FromQuery] string? phone,
+        [FromQuery] int? customerId = null,
+        [FromQuery] int? customerPaymentMethodId = null,
+        CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() =>
+            _paymentSvc.RemoveSavedCardForCustomerAsync(siteId, phone, customerId, customerPaymentMethodId, cancelToken));
+    }
+
     [HttpGet("Site/{siteId:int}/Settings")]
     [ProducesResponseType(typeof(IApiResponse<SitePaymentSettingsRes>), (int)HttpStatusCode.OK)]
     public async Task<IActionResult> GetSiteSettingsAsync([FromRoute] int siteId, CancellationToken cancelToken = default)
