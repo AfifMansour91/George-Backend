@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Authorization;
@@ -105,7 +106,11 @@ namespace George.Api.Core
 			// Authentication
 			AddAuthenticationAndAuthorization(services);
 
-			services.AddDataProtection();
+			var dataProtectionKeysPath = Path.Combine(AppContext.BaseDirectory, "App_Data", "DataProtection-Keys");
+			Directory.CreateDirectory(dataProtectionKeysPath);
+			services.AddDataProtection()
+				.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
+				.SetApplicationName("George");
 
 			// HTTP
 			AddHttpServices(services);

@@ -353,7 +353,8 @@ public class PaymentService : ServiceBase
 
         if (pm == null) return;
 
-        var token = _tokenProtector.Unprotect(pm.EncryptedToken);
+        if (!_tokenProtector.TryUnprotect(pm.EncryptedToken, out var token))
+            return;
         var cardExp = pm.CardExpirationMMYY ?? "";
         if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(cardExp))
             return;
@@ -726,6 +727,10 @@ public class PaymentService : ServiceBase
         if (creds == null)
             return CreateResponse(response, StatusCode.InvalidRequest, "Payment gateway not configured.");
 
+        if (creds.ApiPasswordStoredButUnreadable)
+            return CreateResponse(response, StatusCode.InvalidRequest,
+                "Cardcom API password is stored but cannot be read. Open Integrations → Cardcom settings, re-enter the API password, and save.");
+
         var orderTotal = order.Total ?? 0m;
         var amount = req.Amount ?? orderTotal;
         if (amount <= 0)
@@ -734,17 +739,19 @@ public class PaymentService : ServiceBase
         if (orderTotal > 0 && amount > orderTotal)
             return CreateResponse(response, StatusCode.InvalidRequest, "Refund amount cannot exceed order total.");
 
-        if (string.IsNullOrWhiteSpace(creds.ApiPassword)
-            && string.IsNullOrWhiteSpace(order.GatewayPaymentTransactionId))
+        var originalTxId = order.GatewayPaymentTransactionId ?? order.PaymentReference;
+        if (string.IsNullOrWhiteSpace(creds.ApiPassword) && string.IsNullOrWhiteSpace(originalTxId))
             return CreateResponse(response, StatusCode.InvalidRequest,
                 "Cardcom API password or capture transaction id is required for refunds.");
 
-        var (token, cardExp, _) = await ResolveChargeTokenAsync(order, cancelToken);
+        string? token = null;
+        string? cardExp = null;
+        (token, cardExp, _) = await ResolveChargeTokenAsync(order, cancelToken);
 
         var tx = await _cardcom.RefundAsync(creds, new RefundRequest
         {
             Amount = amount,
-            OriginalTranzactionId = order.GatewayPaymentTransactionId ?? order.PaymentReference,
+            OriginalTranzactionId = originalTxId,
             Token = token,
             CardExpirationMMYY = cardExp,
             ExternalUniqTranId = $"refund-{order.Id}-{DateTime.UtcNow:yyyyMMddHHmmss}",
@@ -754,10 +761,13 @@ public class PaymentService : ServiceBase
             tx.TranzactionId, null, amount, tx.RawJson, cancelToken);
 
         if (!tx.Success)
-            return CreateResponse(response, StatusCode.InvalidRequest, tx.Description ?? "Refund failed.");
+        {
+            var message = CardcomGateway.EnhanceCardcomRefundErrorMessage(tx.Description);
+            return CreateResponse(response, StatusCode.InvalidRequest, message);
+        }
 
         order.PaymentSettleStatus = PaymentSettleStatus.Refunded;
-        order.PaymentStatus = "Unpaid";
+        order.PaymentStatus = "Refunded";
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
 
         await TrySendRefundSmsAsync(order, creds, amount, tx.TranzactionId, cancelToken);
@@ -953,7 +963,12 @@ public class PaymentService : ServiceBase
         var site = await _paymentStorage.GetSitePaymentConfigAsync(siteId, cancelToken);
         if (site == null)
             return CreateResponse(response, StatusCode.ItemNotFound);
-        response.Data = MapSiteSettings(site, includePassword: false);
+        response.Data = MapSiteSettings(site);
+        if (!string.IsNullOrWhiteSpace(site.CardcomApiPasswordEncrypted))
+        {
+            response.Data.CardcomApiPasswordNeedsResave =
+                !_tokenProtector.TryUnprotect(site.CardcomApiPasswordEncrypted, out _);
+        }
         return response;
     }
 
@@ -989,7 +1004,8 @@ public class PaymentService : ServiceBase
             site.CardcomLogoUrl = req.CardcomLogoUrl;
 
         await _paymentStorage.UpdateSitePaymentConfigAsync(site, cancelToken);
-        response.Data = MapSiteSettings(site, includePassword: false);
+        response.Data = MapSiteSettings(site);
+        response.Data.CardcomApiPasswordNeedsResave = false;
         return response;
     }
 
@@ -1432,12 +1448,14 @@ public class PaymentService : ServiceBase
             if (payload?.Et == null || string.IsNullOrWhiteSpace(payload.Exp))
                 return null;
 
-            var token = _tokenProtector.Unprotect(payload.Et);
+            if (!_tokenProtector.TryUnprotect(payload.Et, out var token))
+                return null;
+
             var approval = order.CardcomApprovalNumber;
-            if (!string.IsNullOrWhiteSpace(payload.Ea))
+            if (!string.IsNullOrWhiteSpace(payload.Ea)
+                && _tokenProtector.TryUnprotect(payload.Ea, out var decryptedApproval))
             {
-                try { approval = _tokenProtector.Unprotect(payload.Ea); }
-                catch { /* use order approval */ }
+                approval = decryptedApproval;
             }
 
             return (token, payload.Exp, approval);
@@ -1463,15 +1481,15 @@ public class PaymentService : ServiceBase
             return null;
 
         string? password = null;
+        var apiPasswordStoredButUnreadable = false;
         if (!string.IsNullOrWhiteSpace(site.CardcomApiPasswordEncrypted))
         {
-            try
+            if (_tokenProtector.TryUnprotect(site.CardcomApiPasswordEncrypted, out var decryptedPassword))
+                password = decryptedPassword;
+            else
             {
-                password = _tokenProtector.Unprotect(site.CardcomApiPasswordEncrypted);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
+                apiPasswordStoredButUnreadable = true;
+                _logger.LogWarning(
                     "Could not decrypt Cardcom API password for site {SiteId}. Re-save the password in Cardcom settings.",
                     siteId);
             }
@@ -1484,6 +1502,7 @@ public class PaymentService : ServiceBase
             TerminalNumber = site.CardcomTerminalNumber,
             ApiName = site.CardcomApiName,
             ApiPassword = password,
+            ApiPasswordStoredButUnreadable = apiPasswordStoredButUnreadable,
             SaveCardEnabled = site.CardcomSaveCardEnabled,
             AuthBufferPercent = site.PaymentAuthBufferPercent,
             MaxAuthAmount = site.PaymentMaxAuthAmount,
@@ -1554,11 +1573,19 @@ public class PaymentService : ServiceBase
 
         try
         {
-            var documentUrl = await ResolveRefundDocumentUrlAsync(order, creds, refundTransactionId, cancelToken);
-            if (string.IsNullOrWhiteSpace(documentUrl))
-                return;
+            string? documentUrl = null;
+            try
+            {
+                documentUrl = await ResolveRefundDocumentUrlAsync(order, creds, refundTransactionId, cancelToken);
+            }
+            catch (Exception docEx)
+            {
+                _logger.LogWarning(docEx,
+                    "Refund document URL failed for order {OrderId}; sending refund SMS without document link.",
+                    order.Id);
+            }
 
-            var body = await BuildRefundSmsBodyAsync(order, documentUrl, refundAmount, cancelToken);
+            var body = await BuildRefundSmsBodyAsync(order, documentUrl ?? "", refundAmount, cancelToken);
             var sent = await _smsProvider.SendTextAsync(phone, body, cancelToken);
             if (sent)
             {
@@ -1798,28 +1825,36 @@ public class PaymentService : ServiceBase
         if (order.CustomerPaymentMethodId is int pmId)
         {
             var pm = await _paymentStorage.GetPaymentMethodByIdAsync(pmId, cancelToken);
-            if (pm != null)
+            if (pm != null
+                && _tokenProtector.TryUnprotect(pm.EncryptedToken, out var token)
+                && !string.IsNullOrWhiteSpace(pm.CardExpirationMMYY))
             {
-                var token = _tokenProtector.Unprotect(pm.EncryptedToken);
                 var cardExp = pm.CardExpirationMMYY;
-                if (string.IsNullOrWhiteSpace(approval) && !string.IsNullOrWhiteSpace(pm.EncryptedApprovalNumber))
-                    approval = _tokenProtector.Unprotect(pm.EncryptedApprovalNumber);
-                if (!string.IsNullOrWhiteSpace(token) && !string.IsNullOrWhiteSpace(cardExp))
-                    return (token, cardExp, approval);
+                if (string.IsNullOrWhiteSpace(approval)
+                    && _tokenProtector.TryUnprotect(pm.EncryptedApprovalNumber, out var decryptedApproval))
+                {
+                    approval = decryptedApproval;
+                }
+
+                return (token, cardExp, approval);
             }
         }
 
         if (order.CustomerId is int cid)
         {
             var pm = await _paymentStorage.GetDefaultPaymentMethodAsync(cid, order.SiteId, cancelToken);
-            if (pm != null)
+            if (pm != null
+                && _tokenProtector.TryUnprotect(pm.EncryptedToken, out var token)
+                && !string.IsNullOrWhiteSpace(pm.CardExpirationMMYY))
             {
-                var token = _tokenProtector.Unprotect(pm.EncryptedToken);
                 var cardExp = pm.CardExpirationMMYY;
-                if (string.IsNullOrWhiteSpace(approval) && !string.IsNullOrWhiteSpace(pm.EncryptedApprovalNumber))
-                    approval = _tokenProtector.Unprotect(pm.EncryptedApprovalNumber);
-                if (!string.IsNullOrWhiteSpace(token) && !string.IsNullOrWhiteSpace(cardExp))
-                    return (token, cardExp, approval);
+                if (string.IsNullOrWhiteSpace(approval)
+                    && _tokenProtector.TryUnprotect(pm.EncryptedApprovalNumber, out var decryptedApproval))
+                {
+                    approval = decryptedApproval;
+                }
+
+                return (token, cardExp, approval);
             }
         }
 
@@ -1959,7 +1994,7 @@ public class PaymentService : ServiceBase
         }, cancelToken);
     }
 
-    private static SitePaymentSettingsRes MapSiteSettings(Site site, bool includePassword) =>
+    private static SitePaymentSettingsRes MapSiteSettings(Site site) =>
         new()
         {
             SiteId = site.Id,

@@ -158,6 +158,7 @@ public sealed class SitePaymentCredentials
     public int? TerminalNumber { get; init; }
     public string? ApiName { get; init; }
     public string? ApiPassword { get; init; }
+    public bool ApiPasswordStoredButUnreadable { get; init; }
     public bool SaveCardEnabled { get; init; } = true;
     public int AuthBufferPercent { get; init; } = 25;
     public decimal? MaxAuthAmount { get; init; }

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.DataProtection;
 
 namespace George.Services.Payments;
@@ -15,4 +16,21 @@ public sealed class PaymentTokenProtector
     public string Protect(string plaintext) => _protector.Protect(plaintext);
 
     public string Unprotect(string ciphertext) => _protector.Unprotect(ciphertext);
+
+    public bool TryUnprotect(string? ciphertext, out string plaintext)
+    {
+        plaintext = string.Empty;
+        if (string.IsNullOrWhiteSpace(ciphertext))
+            return false;
+
+        try
+        {
+            plaintext = _protector.Unprotect(ciphertext);
+            return !string.IsNullOrWhiteSpace(plaintext);
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
+    }
 }

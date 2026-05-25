@@ -79,6 +79,8 @@ public class SitePaymentSettingsRes
     public int? CardcomTerminalNumber { get; set; }
     public string? CardcomApiName { get; set; }
     public bool HasCardcomApiPassword { get; set; }
+    /// <summary>Encrypted password exists but cannot be decrypted (e.g. after server restart before keys were persisted).</summary>
+    public bool CardcomApiPasswordNeedsResave { get; set; }
     public bool CardcomSaveCardEnabled { get; set; }
     public int PaymentAuthBufferPercent { get; set; }
     public decimal? PaymentMaxAuthAmount { get; set; }

@@ -268,8 +268,28 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
             && !string.IsNullOrWhiteSpace(credentials.ApiPassword)
             && TryParseTransactionId(request.OriginalTranzactionId, out var txId))
         {
-            return await RefundByTransactionIdAsync(credentials, txId, request.Amount, cancelToken)
+            var byTxId = await RefundByTransactionIdAsync(credentials, txId, request.Amount, cancelToken)
                 .ConfigureAwait(false);
+            if (byTxId.Success)
+                return byTxId;
+
+            if (!string.IsNullOrWhiteSpace(request.Token)
+                && !string.IsNullOrWhiteSpace(request.CardExpirationMMYY))
+            {
+                _logger.LogWarning(
+                    "RefundByTransactionId failed ({Code}: {Description}); retrying via token refund.",
+                    byTxId.ResponseCode, byTxId.Description);
+                var byToken = await DoTransactionAsync(credentials, request.Amount, request.Token,
+                    request.CardExpirationMMYY, approvalNumber: null, isRefund: true, mtiVoid: false,
+                    jValidateHold: false, request.ExternalUniqTranId, document: null, cancelToken)
+                    .ConfigureAwait(false);
+                if (byToken.Success)
+                    return byToken;
+
+                return PreferRefundError(byTxId, byToken);
+            }
+
+            return byTxId;
         }
 
         if (string.IsNullOrWhiteSpace(request.Token) || string.IsNullOrWhiteSpace(request.CardExpirationMMYY))
@@ -288,6 +308,36 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
             approvalNumber: null, isRefund: true, mtiVoid: false, jValidateHold: false, request.ExternalUniqTranId,
             document: null, cancelToken)
             .ConfigureAwait(false);
+    }
+
+    private static PaymentTransactionResult PreferRefundError(
+        PaymentTransactionResult primary,
+        PaymentTransactionResult fallback)
+    {
+        if (IsCardcomRefundPermissionError(primary.Description))
+            return primary;
+        if (IsCardcomRefundPermissionError(fallback.Description))
+            return fallback;
+        return !string.IsNullOrWhiteSpace(fallback.Description) ? fallback : primary;
+    }
+
+    internal static bool IsCardcomRefundPermissionError(string? description)
+    {
+        if (string.IsNullOrWhiteSpace(description))
+            return false;
+        return description.Contains("הרשאת API", StringComparison.OrdinalIgnoreCase)
+            || description.Contains("ביטול עסקה", StringComparison.OrdinalIgnoreCase)
+            || description.Contains("API permission", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static string EnhanceCardcomRefundErrorMessage(string? description)
+    {
+        if (string.IsNullOrWhiteSpace(description))
+            return "Refund failed.";
+        if (!IsCardcomRefundPermissionError(description))
+            return description;
+        return description.Trim()
+            + " פנו ל-Cardcom להפעלת הרשאת זיכוי/ביטול עבור משתמש ה-API (ApiName) שמוגדר בהגדרות Cardcom.";
     }
 
     private async Task<PaymentTransactionResult> RefundByTransactionIdAsync(
