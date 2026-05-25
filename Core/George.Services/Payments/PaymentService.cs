@@ -421,6 +421,53 @@ public class PaymentService : ServiceBase
         order.CardcomTokenLast4 = pm.Last4Digits ?? order.CardcomTokenLast4;
         order.CardcomCardBrand = pm.CardBrand ?? order.CardcomCardBrand;
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await TrySendPhoneNewOrderSmsAfterSavedCardHoldAsync(order, cancelToken);
+    }
+
+    /// <summary>After saved-card J5 hold succeeds, send the same phone new-order SMS template as manual order create.</summary>
+    private async Task TrySendPhoneNewOrderSmsAfterSavedCardHoldAsync(Order order, CancellationToken cancelToken)
+    {
+        if (string.IsNullOrWhiteSpace(order.CustomerPhone))
+            return;
+        if (!string.Equals(order.Source, "Phone", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken);
+        var settings = account?.AccountNotificationSettings;
+        if (settings == null || !settings.NewOrderCustomerSmsOnPhoneOrderEnabled)
+            return;
+
+        var template = settings.NewOrderCustomerMessagePhoneOrder;
+        if (string.IsNullOrWhiteSpace(template))
+            return;
+
+        var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
+        try
+        {
+            if (!SmsProvider.IsInitialized)
+            {
+                _logger.LogWarning(
+                    "SMS provider not initialized; skipping new-order SMS after saved-card hold for order {OrderId}.",
+                    order.Id);
+                return;
+            }
+
+            var sent = await _smsProvider.SendTextAsync(order.CustomerPhone, body, cancelToken);
+            if (sent)
+            {
+                await LogEventAsync(order.Id, "NewOrderSms", "0", MaskPhone(order.CustomerPhone.Trim()), null, null,
+                    order.Total, null, cancelToken);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "New-order SMS after saved-card hold returned false for order {OrderId}.", order.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "New-order SMS after saved-card hold failed for order {OrderId}.", order.Id);
+        }
     }
 
     private async Task MarkSavedCardHoldFailedAsync(Order order, string message, CancellationToken cancelToken)

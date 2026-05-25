@@ -199,7 +199,9 @@ namespace George.Services
                 await _paymentService.TryPlaceAuthorizationHoldIfNeededAsync(loadedAfterStock, cancelToken).ConfigureAwait(false);
             var loadedAfterPayment = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false)
                 ?? loadedAfterStock;
-            await TrySendNewOrderCustomerSmsAsync(loadedAfterPayment!, cancelToken).ConfigureAwait(false);
+            var savedCardOrder = string.Equals(loadedAfterPayment?.PaymentMethod, "SavedCard", StringComparison.OrdinalIgnoreCase);
+            if (loadedAfterPayment != null && !savedCardOrder)
+                await TrySendNewOrderCustomerSmsAsync(loadedAfterPayment, cancelToken).ConfigureAwait(false);
             if (loadedAfterPayment != null)
                 await TryEnqueueNewOrderAutoPrintAsync(loadedAfterPayment, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(loadedAfterPayment);
