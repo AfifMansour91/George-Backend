@@ -103,6 +103,8 @@ namespace George.Services.Response
     {
         public ProductsReportRangeDto CurrentRange { get; set; } = new();
         public List<ProductsReportCategoryOptionDto> Categories { get; set; } = new();
+        public List<ProductsReportCategoryOptionDto> Suppliers { get; set; } = new();
+        public List<ProductsReportCategoryOptionDto> Brands { get; set; } = new();
         /// <summary>Distinct cut / option labels in the period (for table filter).</summary>
         public List<string> CutOptions { get; set; } = new();
         public ProductsReportKpisDto Kpis { get; set; } = new();
