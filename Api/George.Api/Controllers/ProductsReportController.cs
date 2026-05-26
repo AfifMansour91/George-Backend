@@ -29,12 +29,14 @@ namespace George.Api.Controllers
             [FromQuery] DateTime? from = null,
             [FromQuery] DateTime? to = null,
             [FromQuery] int? categoryId = null,
+            [FromQuery] int? supplierId = null,
+            [FromQuery] int? brandId = null,
             [FromQuery] string? excludeCategoryIds = null,
             [FromQuery] string? cutLabel = null,
             CancellationToken cancelToken = default)
         {
             return await SafeCallWithErrorCatchingAsync(() =>
-                _productsReportService.GetReportAsync(siteId, period, from, to, categoryId, excludeCategoryIds, cutLabel, cancelToken));
+                _productsReportService.GetReportAsync(siteId, period, from, to, categoryId, supplierId, brandId, excludeCategoryIds, cutLabel, cancelToken));
         }
 
         [ApiExplorerSettings(IgnoreApi = true)]

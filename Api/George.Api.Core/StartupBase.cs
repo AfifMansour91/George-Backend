@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Authorization;
@@ -104,6 +105,14 @@ namespace George.Api.Core
 
 			// Authentication
 			AddAuthenticationAndAuthorization(services);
+
+			var dataProtectionKeysPath = Configuration["DataProtection:KeysPath"]?.Trim();
+			if (string.IsNullOrWhiteSpace(dataProtectionKeysPath))
+				dataProtectionKeysPath = Path.Combine(AppContext.BaseDirectory, "App_Data", "DataProtection-Keys");
+			Directory.CreateDirectory(dataProtectionKeysPath);
+			services.AddDataProtection()
+				.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
+				.SetApplicationName(Configuration["DataProtection:ApplicationName"]?.Trim() ?? "George");
 
 			// HTTP
 			AddHttpServices(services);
@@ -366,8 +375,10 @@ namespace George.Api.Core
 			services.AddScoped<BrandStorage>();
 			services.AddScoped<AttributeStorage>();
 			services.AddScoped<MediaStorage>();
-			services.AddScoped<OrderStorage>();
-			services.AddScoped<IncomeReportStorage>();
+            services.AddScoped<OrderStorage>();
+            services.AddScoped<PaymentStorage>();
+            services.AddScoped<IncomeReportStorage>();
+            services.AddScoped<RevenueReportStorage>();
 			services.AddScoped<ProductsReportStorage>();
 			services.AddScoped<QuantityConcentrationReportStorage>();
 			services.AddScoped<CustomerStorage>();
@@ -394,7 +405,11 @@ namespace George.Api.Core
 			services.AddScoped<AttributeService>();
 			services.AddScoped<MediaService>();
 			services.AddScoped<OrderService>();
-			services.AddScoped<IncomeReportService>();
+			services.AddScoped<George.Services.Payments.PaymentService>();
+			services.AddScoped<George.Services.Payments.Cardcom.CardcomGateway>();
+			services.AddSingleton<George.Services.Payments.PaymentTokenProtector>();
+            services.AddScoped<IncomeReportService>();
+            services.AddScoped<RevenueReportService>();
 			services.AddScoped<ProductsReportService>();
 			services.AddScoped<InventoryReportService>();
 			services.AddScoped<QuantityConcentrationReportService>();
@@ -454,6 +469,11 @@ namespace George.Api.Core
 
 			// Register http services.
 			services.AddHttpClient<HttpHelper>();
+			services.AddHttpClient(George.Services.Payments.Cardcom.CardcomGateway.HttpClientName, client =>
+			{
+				client.BaseAddress = new Uri("https://secure.cardcom.solutions/api/v11/");
+				client.Timeout = TimeSpan.FromSeconds(60);
+			});
 		}
 
 		protected virtual void AddAutoMapper(IServiceCollection services)

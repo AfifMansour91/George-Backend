@@ -125,6 +125,8 @@ namespace George.Services.Response
         public string Name { get; set; } = "";
         public string CategoryName { get; set; } = "";
         public string QuantityLabel { get; set; } = "";
+        /// <summary>Catalog weighable product (by_weight / by_unit / by_unit_and_weight or IsWeighted).</summary>
+        public bool IsWeighted { get; set; }
         /// <summary>Optional: kg sold when line is weight-based (picked preferred).</summary>
         public decimal? QuantityKg { get; set; }
         /// <summary>Optional: unit count when not purely weight.</summary>

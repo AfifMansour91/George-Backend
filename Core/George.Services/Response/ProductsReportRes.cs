@@ -47,6 +47,8 @@ namespace George.Services.Response
         public decimal? QuantityKg { get; set; }
         public decimal? QuantityUnits { get; set; }
         public decimal Revenue { get; set; }
+        /// <summary>ok | low | out — per variation when resolvable, else parent rollup.</summary>
+        public string StockStatus { get; set; } = "ok";
     }
 
     public class ProductsReportProductRowDto
@@ -101,6 +103,8 @@ namespace George.Services.Response
     {
         public ProductsReportRangeDto CurrentRange { get; set; } = new();
         public List<ProductsReportCategoryOptionDto> Categories { get; set; } = new();
+        public List<ProductsReportCategoryOptionDto> Suppliers { get; set; } = new();
+        public List<ProductsReportCategoryOptionDto> Brands { get; set; } = new();
         /// <summary>Distinct cut / option labels in the period (for table filter).</summary>
         public List<string> CutOptions { get; set; } = new();
         public ProductsReportKpisDto Kpis { get; set; } = new();

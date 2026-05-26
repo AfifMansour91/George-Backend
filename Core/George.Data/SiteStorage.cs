@@ -150,6 +150,17 @@ namespace George.Data
             if (updated.VoucherPrinterSilent.HasValue) dbSite.VoucherPrinterSilent = updated.VoucherPrinterSilent;
             if (updated.VoucherPrinterName != null) dbSite.VoucherPrinterName = updated.VoucherPrinterName;
             if (updated.AskBagsCountAtPickingFinish.HasValue) dbSite.AskBagsCountAtPickingFinish = updated.AskBagsCountAtPickingFinish;
+            if (!string.IsNullOrWhiteSpace(updated.PaymentGatewayProvider))
+                dbSite.PaymentGatewayProvider = updated.PaymentGatewayProvider;
+            if (updated.CardcomTerminalNumber.HasValue) dbSite.CardcomTerminalNumber = updated.CardcomTerminalNumber;
+            if (updated.CardcomApiName != null) dbSite.CardcomApiName = updated.CardcomApiName;
+            if (updated.CardcomApiPasswordEncrypted != null) dbSite.CardcomApiPasswordEncrypted = updated.CardcomApiPasswordEncrypted;
+            if (updated.CardcomSaveCardEnabled) dbSite.CardcomSaveCardEnabled = updated.CardcomSaveCardEnabled;
+            if (updated.PaymentAuthBufferPercent > 0) dbSite.PaymentAuthBufferPercent = updated.PaymentAuthBufferPercent;
+            if (updated.PaymentMaxAuthAmount.HasValue) dbSite.PaymentMaxAuthAmount = updated.PaymentMaxAuthAmount;
+            dbSite.PaymentAllowCaptureAboveAuth = updated.PaymentAllowCaptureAboveAuth;
+            if (updated.CardcomCssUrl != null) dbSite.CardcomCssUrl = updated.CardcomCssUrl;
+            if (updated.CardcomLogoUrl != null) dbSite.CardcomLogoUrl = updated.CardcomLogoUrl;
             dbSite.IsActive = updated.IsActive || dbSite.IsActive;
             dbSite.UpdatedDate = DateTime.UtcNow;
 

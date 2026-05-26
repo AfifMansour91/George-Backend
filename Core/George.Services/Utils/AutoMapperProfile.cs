@@ -400,6 +400,12 @@ namespace George.Services
                     TriggerAfterValue = e.AfterDeliveryTriggerAfterValue,
                     TriggerAfterUnit = e.AfterDeliveryTriggerAfterUnit,
                     CustomerMessageTemplate = e.AfterDeliveryCustomerMessageTemplate
+                },
+                Payments = new PaymentNotificationSettingsRes
+                {
+                    CustomerMessageInvoice = e.PaymentCustomerMessageInvoice,
+                    CustomerMessageRefund = e.PaymentCustomerMessageRefund,
+                    CustomerMessagePaymentLink = e.PaymentCustomerMessagePaymentLink,
                 }
             };
         }

@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using AutoMapper;
 using George.Common;
+using George.Common.Payment;
 using George.Data;
 using George.DB;
 using George.Providers;
@@ -31,6 +32,7 @@ namespace George.Services
         private readonly SmsProvider _smsProvider;
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly PrintJobService _printJobService;
+        private readonly Payments.PaymentService _paymentService;
         private readonly string? _publicAppBaseUrl;
         private static readonly Dictionary<string, string> VoucherSourceLabels = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -60,6 +62,7 @@ namespace George.Services
             SmsProvider smsProvider,
             IServiceScopeFactory serviceScopeFactory,
             PrintJobService printJobService,
+            Payments.PaymentService paymentService,
             IConfiguration configuration)
             : base(logger, mapper, cache)
         {
@@ -71,6 +74,7 @@ namespace George.Services
             _smsProvider = smsProvider;
             _serviceScopeFactory = serviceScopeFactory;
             _printJobService = printJobService;
+            _paymentService = paymentService;
             _publicAppBaseUrl = ResolvePublicAppBaseUrl(configuration);
         }
 
@@ -157,6 +161,7 @@ namespace George.Services
             var order = _mapper.Map<Order>(req);
             RebuildDeliveryAddressFromStreetAndCity(order);
             order.CustomerId = customer.Id; // always set: customer was either found or created above
+            await _paymentService.PrepareOrderPaymentOnCreateAsync(order, cancelToken).ConfigureAwait(false);
             order.CreationTime = DateTime.UtcNow;
             order.CreationUserId = AuthUser.Id;
             order.IsDeleted = false;
@@ -190,12 +195,18 @@ namespace George.Services
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loaded, cancelToken).ConfigureAwait(false);
             await TryApplyInternalOrderCatalogOnCreateAsync(loaded!, cancelToken).ConfigureAwait(false);
             var loadedAfterStock = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false) ?? loaded;
-            await TrySendNewOrderCustomerSmsAsync(loadedAfterStock!, cancelToken).ConfigureAwait(false);
             if (loadedAfterStock != null)
-                await TryEnqueueNewOrderAutoPrintAsync(loadedAfterStock, cancelToken).ConfigureAwait(false);
-            response.Data = _mapper.Map<OrderRes>(loadedAfterStock);
-            if (loadedAfterStock != null)
-                await EnrichOrderResAsync(response.Data, loadedAfterStock, cancelToken).ConfigureAwait(false);
+                await _paymentService.TryPlaceAuthorizationHoldIfNeededAsync(loadedAfterStock, cancelToken).ConfigureAwait(false);
+            var loadedAfterPayment = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false)
+                ?? loadedAfterStock;
+            var savedCardOrder = string.Equals(loadedAfterPayment?.PaymentMethod, "SavedCard", StringComparison.OrdinalIgnoreCase);
+            if (loadedAfterPayment != null && !savedCardOrder)
+                await TrySendNewOrderCustomerSmsAsync(loadedAfterPayment, cancelToken).ConfigureAwait(false);
+            if (loadedAfterPayment != null)
+                await TryEnqueueNewOrderAutoPrintAsync(loadedAfterPayment, cancelToken).ConfigureAwait(false);
+            response.Data = _mapper.Map<OrderRes>(loadedAfterPayment);
+            if (loadedAfterPayment != null)
+                await EnrichOrderResAsync(response.Data, loadedAfterPayment, cancelToken).ConfigureAwait(false);
             return response;
         }
 
@@ -241,7 +252,7 @@ namespace George.Services
             if (string.IsNullOrWhiteSpace(template))
                 return;
 
-            var body = ReplaceOrderPlaceholders(template, order);
+            var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
             try
             {
                 if (!SmsProvider.IsInitialized)
@@ -277,7 +288,7 @@ namespace George.Services
             if (string.IsNullOrWhiteSpace(template))
                 return;
 
-            var body = ReplaceOrderPlaceholders(template, order);
+            var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
             try
             {
                 if (!SmsProvider.IsInitialized)
@@ -312,53 +323,6 @@ namespace George.Services
             return settings.OrderReadyCustomerMessagePickup ?? settings.OrderReadyCustomerMessageShipping;
         }
 
-        /// <summary>
-        /// Match picking: if any line has picked qty &gt; 0, sum only those lines (+ shipping). Otherwise pre-pick — sum all line totals (new order SMS).
-        /// </summary>
-        private static decimal ResolveOrderTotalForPlaceholders(Order order)
-        {
-            var items = order.OrderItem;
-            if (items == null || items.Count == 0)
-                return order.Total ?? 0m;
-
-            var anyPicked = items.Any(i => i.PickedQuantity.HasValue && i.PickedQuantity.Value > 0m);
-            var shipping = order.ShippingCost ?? 0m;
-            if (anyPicked)
-            {
-                var pickedSum = items.Sum(i =>
-                {
-                    if (!i.PickedQuantity.HasValue || i.PickedQuantity.Value <= 0m)
-                        return 0m;
-                    if (i.TotalPrice.HasValue)
-                        return i.TotalPrice.Value;
-                    return i.PickedQuantity.Value * (i.PricePerUnit ?? 0m);
-                });
-                return pickedSum + shipping;
-            }
-
-            var allLines = items.Sum(i => i.TotalPrice ?? i.Quantity * (i.PricePerUnit ?? 0m));
-            if (allLines + shipping > 0m)
-                return allLines + shipping;
-            return order.Total ?? 0m;
-        }
-
-        private static string ReplaceOrderPlaceholders(string template, Order order)
-        {
-            var orderDate = order.CreationTime;
-            var deliveryDate = order.DeliveryDate;
-            var pickupDate = order.PickupDate;
-            var orderTotalStr = ResolveOrderTotalForPlaceholders(order).ToString("N2", CultureInfo.InvariantCulture);
-            return template
-                .Replace("[customer_name]", order.CustomerName ?? "")
-                .Replace("[order_number]", order.OrderNumber ?? "")
-                .Replace("[order_date]", orderDate.ToString("dd/MM/yyyy"))
-                .Replace("[order_total]", orderTotalStr)
-                .Replace("[delivery_date]", deliveryDate.HasValue ? deliveryDate.Value.ToString("dd/MM/yyyy") : "")
-                .Replace("[delivery_time]", order.DeliveryTime ?? "")
-                .Replace("[pickup_date]", pickupDate.HasValue ? pickupDate.Value.ToString("dd/MM/yyyy") : "")
-                .Replace("[pickup_time]", order.PickupTime ?? "");
-        }
-
         /// <summary>Send reminder SMS to customer for a ready order (שלח תזכורת). Uses OrderReady message template from account notification settings.</summary>
         public async Task<IApiResponse<bool>> SendReminderAsync(int orderId, CancellationToken cancelToken = default)
         {
@@ -377,7 +341,7 @@ namespace George.Services
             var template = ResolveOrderReadyCustomerMessageTemplate(settings, order);
             if (string.IsNullOrWhiteSpace(template))
                 return CreateResponse(response, StatusCode.InvalidRequest, "No reminder message template configured for this order.");
-            var body = ReplaceOrderPlaceholders(template, order);
+            var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
             try
             {
                 if (!SmsProvider.IsInitialized)
@@ -429,7 +393,12 @@ namespace George.Services
                 if (req.DeliveryApartment != null) o.DeliveryApartment = req.DeliveryApartment;
                 if (req.DeliveryFloor != null) o.DeliveryFloor = req.DeliveryFloor;
                 if (req.DeliveryEntranceCode != null) o.DeliveryEntranceCode = req.DeliveryEntranceCode;
-                if (req.PaymentStatus != null) o.PaymentStatus = req.PaymentStatus;
+                if (req.PaymentStatus != null)
+                {
+                    o.PaymentStatus = req.PaymentStatus;
+                    if (string.Equals(req.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase) && o.PaidAt == null)
+                        o.PaidAt = DateTime.UtcNow;
+                }
                 if (req.PaymentMethod != null) o.PaymentMethod = req.PaymentMethod;
                 if (req.BagsCount.HasValue) o.BagsCount = req.BagsCount;
                 if (req.ShippingCost.HasValue) o.ShippingCost = req.ShippingCost.Value;
@@ -451,6 +420,11 @@ namespace George.Services
                     cancelToken).ConfigureAwait(false);
             }
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "order update", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
+            if (req.PaymentMethod != null && beforeUpdate != null &&
+                !string.Equals(beforeUpdate.PaymentMethod, updated.PaymentMethod, StringComparison.OrdinalIgnoreCase))
+            {
+                await _paymentService.ClearCardcomOnCashPaymentAsync(updated, cancelToken).ConfigureAwait(false);
+            }
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             if (loaded != null && loaded.CustomerId is int customerId && customerId > 0)
             {
@@ -476,6 +450,18 @@ namespace George.Services
                 }
             }
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(orderId, previousStatus, loaded, cancelToken).ConfigureAwait(false);
+            if (loaded != null)
+            {
+                var paymentMethod = (loaded.PaymentMethod ?? "").Trim();
+                var settle = (loaded.PaymentSettleStatus ?? "").Trim();
+                var needsSavedCardHold = string.Equals(paymentMethod, "SavedCard", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(settle, PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(settle, PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase)
+                    && string.IsNullOrWhiteSpace(loaded.CardcomLowProfileId);
+                if (needsSavedCardHold)
+                    await _paymentService.TryPlaceAuthorizationHoldIfNeededAsync(loaded, cancelToken).ConfigureAwait(false);
+                loaded = await _orderStorage.GetOrderByIdAsync(loaded.Id, cancelToken).ConfigureAwait(false) ?? loaded;
+            }
             if (loaded != null &&
                 !string.Equals(previousStatus, "Ready", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(loaded.Status, "Ready", StringComparison.OrdinalIgnoreCase))
@@ -503,6 +489,8 @@ namespace George.Services
                         restoredProductIds,
                         "order cancel (catalog restored)",
                         cancelToken).ConfigureAwait(false);
+                await _paymentService.TryVoidAuthorizationOnOrderCancelAsync(beforeCancel, cancelToken)
+                    .ConfigureAwait(false);
             }
             var order = await _orderStorage.CancelOrderAsync(orderId, AuthUser.Id, softDelete, cancelToken);
             if (order == null)
@@ -534,6 +522,23 @@ namespace George.Services
             response.Data.OrderCount = profile.OrderCount;
             response.Data.AverageOrderTotal = profile.AverageOrderTotal;
             response.Data.TotalTransactions = profile.TotalTransactions;
+
+            var cardRes = await _paymentService.GetSavedCardForCustomerAsync(siteId, phone, null, cancelToken)
+                .ConfigureAwait(false);
+            response.Data.HasSavedCard = cardRes.Data?.HasCard == true;
+            if (cardRes.Data?.HasCard == true)
+            {
+                if (!string.IsNullOrWhiteSpace(cardRes.Data.Last4Digits))
+                    response.Data.SavedCardLast4 = cardRes.Data.Last4Digits;
+                if (!string.IsNullOrWhiteSpace(cardRes.Data.CardBrand))
+                    response.Data.SavedCardBrand = cardRes.Data.CardBrand;
+            }
+            else
+            {
+                response.Data.SavedCardLast4 = null;
+                response.Data.SavedCardBrand = null;
+            }
+
             return response;
         }
 
@@ -1473,6 +1478,9 @@ namespace George.Services
                     updated.OrderItem?.OrderBy(i => i.SortOrder).ToList());
                 await _orderStorage.ReplaceOrderItemsAsync(existing.Id, updateItems, cancelToken).ConfigureAwait(false);
                 var loaded = await _orderStorage.GetOrderByIdAsync(existing.Id, cancelToken).ConfigureAwait(false);
+                if (loaded != null && payload.HasEmbeddedGatewayPayment())
+                    await TryApplyEmbeddedWooCommerceGatewayPaymentAsync(loaded, payload, cancelToken).ConfigureAwait(false);
+                loaded = await _orderStorage.GetOrderByIdAsync(existing.Id, cancelToken).ConfigureAwait(false);
                 await TryApplyCompletionInventoryWhenOrderCompletedAsync(existing.Id, previousWooStatus, loaded, cancelToken).ConfigureAwait(false);
                 response.Data = _mapper.Map<OrderRes>(loaded!);
                 await EnrichOrderResAsync(response.Data, loaded!, cancelToken).ConfigureAwait(false);
@@ -1543,6 +1551,7 @@ namespace George.Services
             ApplyWooCommerceShippingAddressToOrder(order, payload.ShippingAddress);
             order.CustomerId = customer.Id;
             order.ManagerNote = null;
+            await _paymentService.PrepareOrderPaymentOnCreateAsync(order, cancelToken).ConfigureAwait(false);
             // Use the date when the order was placed in WooCommerce, not when our API received the webhook
             order.CreationTime = payload.OrderDate.HasValue
                 ? (payload.OrderDate.Value.Kind == DateTimeKind.Utc ? payload.OrderDate.Value : payload.OrderDate.Value.ToUniversalTime())
@@ -1583,6 +1592,9 @@ namespace George.Services
                 occurredAtUtc: created.CreationTime,
                 cancelToken).ConfigureAwait(false);
             var loadedOrder = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false);
+            if (loadedOrder != null)
+                await TryApplyEmbeddedWooCommerceGatewayPaymentAsync(loadedOrder, payload, cancelToken).ConfigureAwait(false);
+            loadedOrder = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false);
             await TryApplyWooIncomingOrderCatalogAndBaselinePickingAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loadedOrder, cancelToken).ConfigureAwait(false);
             await TrySendNewOrderCustomerSmsAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
@@ -1780,7 +1792,7 @@ namespace George.Services
                 sb.Append($"<div style=\"font-size:17px;font-weight:700;line-height:19px;\">{title}</div>");
                 foreach (var seg in OrderItemLineDisplay.GetOrderItemAttributeSegments(it, attrOpts))
                 {
-                    sb.Append("<div style=\"padding-right:12px;font-size:11px;font-weight:400;line-height:15px;\">• ");
+                    sb.Append($"<div style=\"padding-right:12px;font-size:{VoucherPrintHtml.ProductMeta}px;font-weight:400;line-height:{VoucherPrintHtml.ProductMetaLineHeight}px;\">• ");
                     sb.Append(EscapeHtml(seg));
                     sb.Append("</div>");
                 }
@@ -1798,7 +1810,7 @@ namespace George.Services
                     var legacyHint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(it, newVoucher);
                     if (!string.IsNullOrWhiteSpace(legacyHint))
                     {
-                        sb.Append("<div style=\"padding-right:12px;font-size:11px;font-weight:400;line-height:15px;\">");
+                        sb.Append($"<div style=\"padding-right:12px;font-size:{VoucherPrintHtml.ProductMeta}px;font-weight:400;line-height:{VoucherPrintHtml.ProductMetaLineHeight}px;\">");
                         sb.Append(EscapeHtml(legacyHint));
                         sb.Append("</div>");
                     }
@@ -1806,7 +1818,7 @@ namespace George.Services
 
                 if (!string.IsNullOrWhiteSpace(it.Notes))
                 {
-                    sb.Append("<div style=\"padding-right:12px;font-size:11px;font-weight:700;line-height:15px;\">הערה: ");
+                    sb.Append($"<div style=\"padding-right:12px;font-size:{VoucherPrintHtml.ItemLineNote}px;font-weight:700;line-height:{VoucherPrintHtml.ItemLineNoteLineHeight}px;\">{VoucherPrintHtml.ItemLineNoteLabelHtml()} ");
                     sb.Append(EscapeHtml(it.Notes!));
                     sb.Append("</div>");
                 }
@@ -2047,7 +2059,7 @@ namespace George.Services
 
         private static string? BuildVoucherLoketLine(OrderItem it, decimal? lineAmt)
         {
-            if (!it.PickedQuantity.HasValue || it.PickedQuantity.Value <= 0m) return null;
+            if (!OrderItemLineDisplay.OrderMeaningfulPick(it)) return null;
             var qty = OrderItemLineDisplay.FormatVoucherPickedDisplay(it);
             if (lineAmt.HasValue) return $"לוקט: {qty} | ₪{lineAmt.Value.ToString("0.00", CultureInfo.InvariantCulture)}";
             return $"לוקט: {qty}";
@@ -2070,6 +2082,7 @@ namespace George.Services
         /// <summary>Match shop-manager <c>getVoucherPickedLineAmount</c>: line total after pick (TotalPrice or picked × PricePerUnit).</summary>
         private static decimal? GetVoucherPickedLineAmount(OrderItem item)
         {
+            if (!OrderItemLineDisplay.OrderMeaningfulPick(item)) return null;
             if (!item.PickedQuantity.HasValue || item.PickedQuantity.Value <= 0m) return null;
             if (item.TotalPrice.HasValue) return item.TotalPrice.Value;
             return item.PickedQuantity.Value * (item.PricePerUnit ?? 0m);
@@ -2079,9 +2092,10 @@ namespace George.Services
         {
             var items = order.OrderItem ?? new List<OrderItem>();
             var shipping = order.ShippingCost ?? 0m;
-            var anyPicked = items.Any(i => i.PickedQuantity.HasValue && i.PickedQuantity.Value > 0m);
+            var newVoucher = string.Equals(order.Status, "New", StringComparison.OrdinalIgnoreCase);
+            var anyPicked = items.Any(OrderItemLineDisplay.OrderMeaningfulPick);
             decimal itemsSum;
-            if (anyPicked)
+            if (!newVoucher && anyPicked)
             {
                 // After picking: compute from actual picked line totals — order.Total is the original pre-picking value and is not updated after picking.
                 itemsSum = items.Sum(i => GetVoucherPickedLineAmount(i) ?? 0m);
@@ -2172,17 +2186,28 @@ namespace George.Services
                     siteId, externalKey, payment.Status);
                 return CreateResponse(response, StatusCode.ItemNotFound, "Order not found.");
             }
-            var treatAsPaid = IsSuccessfulWooCommerceGatewayPaymentStatus(payment.Status)
-                && HasWooCommercePaidTransactionWhenRequired(payment);
+            var isFinalCapture = payment.IsFinalGatewayCapture();
             _logger.LogInformation(
-                "WooCommerce OrderPayment processing. siteId={SiteId}, externalOrderKey={ExternalOrderKey}, internalOrderId={InternalOrderId}, gatewayStatus={GatewayStatus}, treatAsPaid={TreatAsPaid}, gatewayTx={GatewayTx}, invoice={Invoice}, paymentGateway={PaymentGateway}",
-                siteId, externalKey, order.Id, payment.Status, treatAsPaid,
+                "WooCommerce OrderPayment processing. siteId={SiteId}, externalOrderKey={ExternalOrderKey}, internalOrderId={InternalOrderId}, gatewayStatus={GatewayStatus}, isFinalCapture={IsFinalCapture}, gatewayTx={GatewayTx}, invoice={Invoice}, paymentGateway={PaymentGateway}",
+                siteId, externalKey, order.Id, payment.Status, isFinalCapture,
                 payment.Payment?.TransactionId?.Trim(),
                 payment.InvoiceNumber,
                 payment.Payment?.PaymentGateway);
             var updated = await _orderStorage.UpdateOrderAsync(order.Id, o =>
             {
-                ApplyGatewayPaymentWebhookToOrder(o, payment, treatAsPaid);
+                o.GatewayPaymentOrderId = WooCommerceOrderPaymentPayload.GatewayTokenToString(payment.OrderId);
+                o.GatewayPaymentExternalOrderId = WooCommerceOrderPaymentPayload.GatewayTokenToString(payment.ExternalOrderId);
+                o.GatewayPaymentSiteId = string.IsNullOrWhiteSpace(payment.SiteId) ? null : payment.SiteId.Trim();
+                _paymentService.ApplyWooCommerceGatewayPaymentFields(
+                    o,
+                    payment.Payment,
+                    payment.Status,
+                    payment.IsFinished,
+                    o.GatewayPaymentOrderId,
+                    o.GatewayPaymentExternalOrderId,
+                    o.GatewayPaymentSiteId);
+                if (!string.IsNullOrWhiteSpace(payment.PaymentReference))
+                    o.PaymentReference = payment.PaymentReference;
             }, cancelToken).ConfigureAwait(false);
             if (updated == null)
             {
@@ -2192,51 +2217,46 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.ItemNotFound);
             }
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken).ConfigureAwait(false);
+            if (loaded != null)
+            {
+                _paymentService.ApplyWooCommerceGatewayPaymentFields(
+                    loaded,
+                    payment.Payment,
+                    payment.Status,
+                    payment.IsFinished,
+                    loaded.GatewayPaymentOrderId,
+                    loaded.GatewayPaymentExternalOrderId,
+                    loaded.GatewayPaymentSiteId);
+                await _paymentService.PersistOrderPaymentStateAsync(loaded, cancelToken).ConfigureAwait(false);
+                await _paymentService.LogWooCommerceGatewayPaymentEventAsync(
+                    loaded.Id,
+                    payment.Payment,
+                    payment.Status,
+                    payment.IsFinished,
+                    cancelToken).ConfigureAwait(false);
+                loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken).ConfigureAwait(false);
+            }
             response.Data = _mapper.Map<OrderRes>(loaded!);
             _logger.LogInformation(
-                "WooCommerce OrderPayment completed. siteId={SiteId}, internalOrderId={InternalOrderId}, externalOrderKey={ExternalOrderKey}, paymentStatus={PaymentStatus}, externalPaymentStatus={ExternalPaymentStatus}",
-                siteId, loaded!.Id, externalKey, loaded.PaymentStatus, loaded.ExternalPaymentStatus);
+                "WooCommerce OrderPayment completed. siteId={SiteId}, internalOrderId={InternalOrderId}, externalOrderKey={ExternalOrderKey}, paymentStatus={PaymentStatus}, paymentSettleStatus={PaymentSettleStatus}, externalPaymentStatus={ExternalPaymentStatus}",
+                siteId, loaded!.Id, externalKey, loaded.PaymentStatus, loaded.PaymentSettleStatus, loaded.ExternalPaymentStatus);
             return response;
         }
 
-        private static void ApplyGatewayPaymentWebhookToOrder(Order o, WooCommerceOrderPaymentPayload p, bool treatAsPaid)
+        private async Task TryApplyEmbeddedWooCommerceGatewayPaymentAsync(
+            Order order,
+            WooCommerceOrderPayload payload,
+            CancellationToken cancelToken)
         {
-            o.GatewayPaymentOrderId = WooCommerceOrderPaymentPayload.GatewayTokenToString(p.OrderId);
-            o.GatewayPaymentExternalOrderId = WooCommerceOrderPaymentPayload.GatewayTokenToString(p.ExternalOrderId);
-            o.GatewayPaymentSiteId = string.IsNullOrWhiteSpace(p.SiteId) ? null : p.SiteId.Trim();
-            o.IsFinished = string.IsNullOrWhiteSpace(p.IsFinished) ? null : p.IsFinished.Trim();
-            o.GatewayPaymentTransactionId = string.IsNullOrWhiteSpace(p.Payment?.TransactionId) ? null : p.Payment!.TransactionId.Trim();
-            o.PaymentGateway = string.IsNullOrWhiteSpace(p.Payment?.PaymentGateway) ? null : p.Payment!.PaymentGateway.Trim();
-            if (!string.IsNullOrWhiteSpace(p.InvoiceNumber))
-                o.InvoiceNumber = p.InvoiceNumber;
-            if (!string.IsNullOrWhiteSpace(p.PaymentReference))
-                o.PaymentReference = p.PaymentReference;
-            if (treatAsPaid)
-            {
-                o.PaymentStatus = "Paid";
-                o.PaidAt = DateTime.UtcNow;
-            }
-            if (!string.IsNullOrWhiteSpace(p.Status))
-                o.ExternalPaymentStatus = p.Status.Trim();
-            o.CardcomPaymentJson = null;
-        }
-
-        /// <summary>When <paramref name="status"/> is empty, treat as success (legacy webhooks). Otherwise avoid marking paid on clear failure tokens.</summary>
-        private static bool IsSuccessfulWooCommerceGatewayPaymentStatus(string? status)
-        {
-            if (string.IsNullOrWhiteSpace(status)) return true;
-            var s = status.Trim().ToLowerInvariant();
-            if (s is "failed" or "fail" or "error" or "declined" or "rejected" or "cancelled" or "canceled") return false;
-            if (s.Contains("declin", StringComparison.Ordinal) || s.Contains("fail", StringComparison.Ordinal)) return false;
-            return true;
-        }
-
-        /// <summary>When root <c>payment</c> is sent, a non-empty <c>transactionId</c> is required to mark paid; legacy bodies without <c>payment</c> unchanged.</summary>
-        private static bool HasWooCommercePaidTransactionWhenRequired(WooCommerceOrderPaymentPayload payment)
-        {
-            if (!payment.RequiresGatewayTransactionIdForPaid())
-                return true;
-            return !string.IsNullOrWhiteSpace(payment.ResolveGatewayTransactionIdForPaid());
+            if (!payload.HasEmbeddedGatewayPayment())
+                return;
+            var gatewayStatus = payload.GetResolvedGatewayPaymentStatus();
+            await _paymentService.CompleteWooCommerceGatewayPaymentAsync(
+                order,
+                payload.Payment,
+                gatewayStatus,
+                payload.GatewayIsFinished,
+                cancelToken).ConfigureAwait(false);
         }
 
         /// <summary>

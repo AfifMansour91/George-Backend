@@ -252,6 +252,9 @@ namespace George.Data
                 existing.AfterDeliveryTriggerAfterValue = settings.AfterDeliveryTriggerAfterValue;
                 existing.AfterDeliveryTriggerAfterUnit = settings.AfterDeliveryTriggerAfterUnit;
                 existing.AfterDeliveryCustomerMessageTemplate = settings.AfterDeliveryCustomerMessageTemplate;
+                existing.PaymentCustomerMessageInvoice = settings.PaymentCustomerMessageInvoice;
+                existing.PaymentCustomerMessageRefund = settings.PaymentCustomerMessageRefund;
+                existing.PaymentCustomerMessagePaymentLink = settings.PaymentCustomerMessagePaymentLink;
                 existing.UpdatedDate = DateTime.UtcNow;
             }
             else

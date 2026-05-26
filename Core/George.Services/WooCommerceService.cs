@@ -2168,6 +2168,22 @@ namespace George.Services
             }
         }
 
+        /// <summary>WooCommerce REST requires integer stock_quantity on variations; George may store kg decimals for weighable products.</summary>
+        private static int ToWooVariationStockQuantity(decimal? stockQuantity, bool trackQuantity)
+        {
+            if (!trackQuantity)
+                return (stockQuantity ?? 0) > 0 ? 1 : 0;
+            return (int)Math.Round(stockQuantity ?? 0, MidpointRounding.AwayFromZero);
+        }
+
+        private static string FormatWooPrice(decimal? price) =>
+            price.HasValue ? price.Value.ToString("F2", CultureInfo.InvariantCulture) : "0";
+
+        private static readonly JsonSerializerOptions WooVariationJsonOptions = new()
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        };
+
         private async Task SyncProductVariantsAsync(
             string baseUrl,
             int siteId,
@@ -2179,10 +2195,12 @@ namespace George.Services
             CancellationToken cancelToken)
         {
             var variants = product.ProductVariant?.Where(v => !v.IsDeleted).ToList() ?? new List<ProductVariant>();
-            // Same weighable rule as parent product payload: do not send WC native variation weight when product is שקיל (clears stale shipping weights).
+            // Weighable products normally omit WC native weight (OCWSU meta). Exception: "משקל לפי וריאציה" — OCWSU reads _ocwsu_get_weight_from_variation from each variation's weight field.
             var setupTypeNameForVariants = product.SetupType?.Name ?? "";
             var isWeightedBySetupForVariants = setupTypeNameForVariants is "by_weight" or "by_unit" or "by_unit_and_weight";
             var isWeightedForVariations = product.IsWeighted == true || (product.IsWeighted != false && isWeightedBySetupForVariants);
+            var weightFromVariation = product.WeightConfig?.WeightByVariant == true
+                || string.Equals(product.WeightConfig?.UnitWeightMode?.Name, "by_variant", StringComparison.OrdinalIgnoreCase);
 
             // Fetch existing WooCommerce variations so we can match by attributes (avoid duplicates) and delete removed ones
             var existingWoo = await GetExistingWooCommerceVariationsAsync(baseUrl, wooProductId, httpClient, cancelToken);
@@ -2259,27 +2277,45 @@ namespace George.Services
                     }
 
                     var variantWooSku = GetWooCommerceSku(siteId, variant.Sku);
-                    var variationWeightForWoo = isWeightedForVariations
+                    var variationWeightForWoo = isWeightedForVariations && !weightFromVariation
                         ? ""
                         : (variant.Weight.HasValue && variant.Weight.Value > 0
                             ? variant.Weight.Value.ToString(CultureInfo.InvariantCulture)
                             : "");
                     var wooVariation = new Dictionary<string, object>
                     {
-                        ["regular_price"] = variant.Price?.ToString() ?? product.Price?.ToString() ?? "0",
+                        ["regular_price"] = FormatWooPrice(variant.Price ?? product.Price),
                         ["sku"] = variantWooSku,
                         ["manage_stock"] = manageVariationStockInWoo,
                         ["stock_status"] = variantStockStatus,
                         ["weight"] = variationWeightForWoo,
                         ["attributes"] = variationAttributesList
                     };
-                    // Omit sale_price when absent so Woo does not reject the payload; send only when there is a positive sale.
-                    if (variant.SalePrice.HasValue && variant.SalePrice.Value > 0)
-                        wooVariation["sale_price"] = variant.SalePrice.Value.ToString(CultureInfo.InvariantCulture);
+                    // Always send sale_price / schedule on PUT so Woo clears stale values when sale is removed or changed per variation.
+                    var variationSale = variant.SalePrice;
+                    if (!variationSale.HasValue || variationSale.Value <= 0)
+                    {
+                        // Parent sale applies only when the variant row has no own sale (saved at product level in George).
+                        if (product.SalePrice.HasValue && product.SalePrice.Value > 0)
+                            variationSale = product.SalePrice;
+                    }
+
+                    if (variationSale.HasValue && variationSale.Value > 0)
+                    {
+                        wooVariation["sale_price"] = FormatWooPrice(variationSale);
+                        if (product.SalePriceStartDate.HasValue)
+                            wooVariation["date_on_sale_from"] = product.SalePriceStartDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
+                        if (product.SalePriceEndDate.HasValue)
+                            wooVariation["date_on_sale_to"] = product.SalePriceEndDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
+                    }
+                    else
+                    {
+                        wooVariation["sale_price"] = "";
+                        wooVariation["date_on_sale_from"] = "";
+                        wooVariation["date_on_sale_to"] = "";
+                    }
                     if (manageVariationStockInWoo)
-                        wooVariation["stock_quantity"] = variationTrackQuantity
-                            ? variant.StockQuantity ?? 0
-                            : ((variant.StockQuantity ?? 0) > 0 ? 1m : 0m);
+                        wooVariation["stock_quantity"] = ToWooVariationStockQuantity(variant.StockQuantity, variationTrackQuantity);
                     if (!string.IsNullOrEmpty(variant.ImageUrl))
                     {
                         var vUrl = variant.ImageUrl.Trim();
@@ -2338,7 +2374,7 @@ namespace George.Services
                     if (wooVariationIdToUse.HasValue)
                     {
                         var updateUrl = $"{baseUrl}/products/{wooProductId}/variations/{wooVariationIdToUse.Value}";
-                        var updateJson = JsonSerializer.Serialize(wooVariation);
+                        var updateJson = JsonSerializer.Serialize(wooVariation, WooVariationJsonOptions);
                         using var updateContent = new StringContent(updateJson, Encoding.UTF8, "application/json");
                         var updateResponse = await httpClient.PutAsync(updateUrl, updateContent, cancelToken);
                         if (updateResponse.IsSuccessStatusCode)
@@ -2360,7 +2396,7 @@ namespace George.Services
                     if (!wooVariationId.HasValue)
                     {
                         var createUrl = $"{baseUrl}/products/{wooProductId}/variations";
-                        var createJson = JsonSerializer.Serialize(wooVariation);
+                        var createJson = JsonSerializer.Serialize(wooVariation, WooVariationJsonOptions);
                         using var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
                         var createResponse = await httpClient.PostAsync(createUrl, createContent, cancelToken);
                         if (createResponse.IsSuccessStatusCode)

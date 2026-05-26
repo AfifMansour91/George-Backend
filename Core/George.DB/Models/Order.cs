@@ -192,6 +192,17 @@ public partial class Order
     [StringLength(100)]
     public string? InvoiceNumber { get; set; }
 
+    /// <summary>Cardcom document PDF/view URL when an invoice was issued.</summary>
+    public string? CardcomDocumentUrl { get; set; }
+
+    /// <summary>Credit note / refund invoice number after Cardcom refund document.</summary>
+    [StringLength(100)]
+    public string? RefundInvoiceNumber { get; set; }
+
+    /// <summary>Cardcom credit note PDF/view URL after refund.</summary>
+    [StringLength(1000)]
+    public string? CardcomRefundDocumentUrl { get; set; }
+
     /// <summary>Last payment webhook <c>orderId</c> (WooCommerce / gateway echo).</summary>
     [StringLength(64)]
     public string? GatewayPaymentOrderId { get; set; }
@@ -229,6 +240,37 @@ public partial class Order
     /// <summary>Gateway-reported <c>status</c> from payment webhook (e.g. success / failed).</summary>
     [StringLength(100)]
     public string? ExternalPaymentStatus { get; set; }
+
+    /// <summary>Provider-agnostic payment lifecycle (None, Initiated, Authorized, Captured, etc.).</summary>
+    [StringLength(40)]
+    public string PaymentSettleStatus { get; set; } = "None";
+
+    /// <summary>Amount authorized at checkout (J5 hold).</summary>
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? PaymentAuthorizedAmount { get; set; }
+
+    [StringLength(64)]
+    public string? CardcomLowProfileId { get; set; }
+
+    [StringLength(32)]
+    public string? CardcomSuspendedDealId { get; set; }
+
+    [StringLength(32)]
+    public string? CardcomApprovalNumber { get; set; }
+
+    [StringLength(8)]
+    public string? CardcomTokenLast4 { get; set; }
+
+    [StringLength(32)]
+    public string? CardcomCardBrand { get; set; }
+
+    public int? CustomerPaymentMethodId { get; set; }
+
+    [ForeignKey(nameof(CustomerPaymentMethodId))]
+    public virtual CustomerPaymentMethod? CustomerPaymentMethod { get; set; }
+
+    [InverseProperty("Order")]
+    public virtual ICollection<OrderPaymentEvent> OrderPaymentEvent { get; set; } = new List<OrderPaymentEvent>();
 
     [ForeignKey("AccountId")]
     [InverseProperty("Order")]

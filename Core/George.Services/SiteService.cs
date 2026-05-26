@@ -108,6 +108,15 @@ namespace George.Services
                 model.AccountId = existingSite.AccountId;
             }
 
+            // Print settings: apply explicitly from request (bool? must persist false, not skip)
+            if (req.AutoPrintEnabled.HasValue) model.AutoPrintEnabled = req.AutoPrintEnabled;
+            if (req.PrintNewOrderImmediate.HasValue) model.PrintNewOrderImmediate = req.PrintNewOrderImmediate;
+            if (req.PrintMovedToTreatment.HasValue) model.PrintMovedToTreatment = req.PrintMovedToTreatment;
+            if (req.PrintAfterPicking.HasValue) model.PrintAfterPicking = req.PrintAfterPicking;
+            if (req.PrintFutureImmediate.HasValue) model.PrintFutureImmediate = req.PrintFutureImmediate;
+            if (req.PrintFutureAtTimeEnabled.HasValue) model.PrintFutureAtTimeEnabled = req.PrintFutureAtTimeEnabled;
+            if (req.PrintFutureAtTime != null) model.PrintFutureAtTime = req.PrintFutureAtTime;
+
             // Update the data in the DB.
             model = await _siteStorage.UpdateSiteAsync(model, req.BusinessTypeIds, cancelToken).ConfigureAwait(false);
             if (model != null)

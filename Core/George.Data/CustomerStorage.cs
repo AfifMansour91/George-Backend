@@ -22,6 +22,14 @@ public class CustomerStorage : StorageBase
 
     private IQueryable<Customer> CustomerSet => _dbContext.Set<Customer>().Where(c => !c.IsDeleted);
 
+    public async Task<Customer?> GetCustomerByPhoneAsync(int siteId, string? phone, CancellationToken cancelToken = default)
+    {
+        var normalized = NormalizePhone(phone);
+        if (normalized.Length < 4) return null;
+        return await CustomerSet.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.SiteId == siteId && c.NormalizedPhone == normalized, cancelToken);
+    }
+
     /// <summary>Find customer for this site by normalized phone (including soft-deleted rows—reactivates if needed), or create if not found. Used when creating an order so every order has a linked customer. When marketingSms is provided, it is set on create or update so the customer record reflects consent. Structured delivery fields are persisted when non-null (same semantics as city/defaultAddress).</summary>
     public async Task<Customer> GetOrCreateCustomerByPhoneAsync(
         int siteId,
