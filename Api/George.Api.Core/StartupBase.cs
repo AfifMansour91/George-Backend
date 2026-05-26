@@ -106,11 +106,13 @@ namespace George.Api.Core
 			// Authentication
 			AddAuthenticationAndAuthorization(services);
 
-			var dataProtectionKeysPath = Path.Combine(AppContext.BaseDirectory, "App_Data", "DataProtection-Keys");
+			var dataProtectionKeysPath = Configuration["DataProtection:KeysPath"]?.Trim();
+			if (string.IsNullOrWhiteSpace(dataProtectionKeysPath))
+				dataProtectionKeysPath = Path.Combine(AppContext.BaseDirectory, "App_Data", "DataProtection-Keys");
 			Directory.CreateDirectory(dataProtectionKeysPath);
 			services.AddDataProtection()
 				.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
-				.SetApplicationName("George");
+				.SetApplicationName(Configuration["DataProtection:ApplicationName"]?.Trim() ?? "George");
 
 			// HTTP
 			AddHttpServices(services);

@@ -664,6 +664,9 @@ public class PaymentService : ServiceBase
         if (order.PaymentSettleStatus != PaymentSettleStatus.Captured)
             return CreateResponse(response, StatusCode.InvalidRequest, "Order must be paid before issuing an invoice.");
 
+        if (creds.ApiPasswordStoredButUnreadable)
+            return CardcomApiPasswordUnreadableResponse(response);
+
         if (string.IsNullOrWhiteSpace(creds.ApiPassword))
             return CreateResponse(response, StatusCode.InvalidRequest,
                 "Cardcom API password is required to issue invoices. Set it in Integrations → Cardcom settings.");
@@ -878,8 +881,7 @@ public class PaymentService : ServiceBase
             return CreateResponse(response, StatusCode.InvalidRequest, "Payment gateway not configured.");
 
         if (creds.ApiPasswordStoredButUnreadable)
-            return CreateResponse(response, StatusCode.InvalidRequest,
-                "Cardcom API password is stored but cannot be read. Open Integrations → Cardcom settings, re-enter the API password, and save.");
+            return CardcomApiPasswordUnreadableResponse(response);
 
         var orderTotal = order.Total ?? 0m;
         var amount = req.Amount ?? orderTotal;
@@ -1198,9 +1200,20 @@ public class PaymentService : ServiceBase
 
         await _paymentStorage.UpdateSitePaymentConfigAsync(site, cancelToken);
         response.Data = MapSiteSettings(site);
-        response.Data.CardcomApiPasswordNeedsResave = false;
+        if (!string.IsNullOrWhiteSpace(req.CardcomApiPassword))
+            response.Data.CardcomApiPasswordNeedsResave = false;
+        else if (!string.IsNullOrWhiteSpace(site.CardcomApiPasswordEncrypted))
+            response.Data.CardcomApiPasswordNeedsResave =
+                !_tokenProtector.TryUnprotect(site.CardcomApiPasswordEncrypted, out _);
         return response;
     }
+
+    private const string CardcomApiPasswordUnreadableMessage =
+        "Cardcom API password is stored but cannot be read. Open Integrations → Cardcom settings, re-enter the API password, and save. " +
+        "When debugging QA/PROD from local, set Payment:EncryptionKey in appsettings to the same value as that environment.";
+
+    private IApiResponse<T> CardcomApiPasswordUnreadableResponse<T>(IApiResponse<T> response) =>
+        CreateResponse(response, StatusCode.InvalidRequest, CardcomApiPasswordUnreadableMessage);
 
     private async Task ApplyValidatedCallbackAsync(Order order, string lowProfileId, CancellationToken cancelToken)
     {
