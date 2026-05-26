@@ -77,6 +77,30 @@ public class OrderItemLineDisplayTests
     }
 
     [Fact]
+    public void OrderMeaningfulPick_false_for_stock_baseline_without_user_confirm()
+    {
+        var item = new OrderItem
+        {
+            Quantity = 2,
+            PickedQuantity = 2,
+            PickingUserConfirmed = false,
+        };
+        Assert.False(OrderItemLineDisplay.OrderMeaningfulPick(item));
+    }
+
+    [Fact]
+    public void OrderMeaningfulPick_true_after_user_confirmed_pick()
+    {
+        var item = new OrderItem
+        {
+            Quantity = 2,
+            PickedQuantity = 1.8m,
+            PickingUserConfirmed = true,
+        };
+        Assert.True(OrderItemLineDisplay.OrderMeaningfulPick(item));
+    }
+
+    [Fact]
     public void Attribute_line_includes_size_and_cut_with_dedupe()
     {
         var item = new OrderItem

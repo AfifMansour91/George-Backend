@@ -494,6 +494,12 @@ public static class OrderItemLineDisplay
         return line.Length > 0 ? line : null;
     }
 
+    /// <summary>Matches TS <c>orderItemIsPickedForUi</c> — ליקוט אמיתי בלבד, לא baseline מלאי.</summary>
+    public static bool OrderItemIsPickedForUi(OrderItem item) => item.PickingUserConfirmed;
+
+    /// <summary>Matches TS <c>orderMeaningfulPick</c> — שורת "לוקט" בבון רק אחרי אישור ליקוט.</summary>
+    public static bool OrderMeaningfulPick(OrderItem item) => OrderItemIsPickedForUi(item);
+
     /// <summary>Matches TS voucher <c>formatPickedQuantity</c> (unitWeightGrams &gt; 0 ⇒ kg).</summary>
     public static string FormatVoucherPickedDisplay(OrderItem item)
     {

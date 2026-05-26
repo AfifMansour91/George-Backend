@@ -1792,7 +1792,7 @@ namespace George.Services
                 sb.Append($"<div style=\"font-size:17px;font-weight:700;line-height:19px;\">{title}</div>");
                 foreach (var seg in OrderItemLineDisplay.GetOrderItemAttributeSegments(it, attrOpts))
                 {
-                    sb.Append("<div style=\"padding-right:12px;font-size:11px;font-weight:400;line-height:15px;\">• ");
+                    sb.Append($"<div style=\"padding-right:12px;font-size:{VoucherPrintHtml.ProductMeta}px;font-weight:400;line-height:{VoucherPrintHtml.ProductMetaLineHeight}px;\">• ");
                     sb.Append(EscapeHtml(seg));
                     sb.Append("</div>");
                 }
@@ -1810,7 +1810,7 @@ namespace George.Services
                     var legacyHint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(it, newVoucher);
                     if (!string.IsNullOrWhiteSpace(legacyHint))
                     {
-                        sb.Append("<div style=\"padding-right:12px;font-size:11px;font-weight:400;line-height:15px;\">");
+                        sb.Append($"<div style=\"padding-right:12px;font-size:{VoucherPrintHtml.ProductMeta}px;font-weight:400;line-height:{VoucherPrintHtml.ProductMetaLineHeight}px;\">");
                         sb.Append(EscapeHtml(legacyHint));
                         sb.Append("</div>");
                     }
@@ -1818,7 +1818,7 @@ namespace George.Services
 
                 if (!string.IsNullOrWhiteSpace(it.Notes))
                 {
-                    sb.Append("<div style=\"padding-right:12px;font-size:11px;font-weight:700;line-height:15px;\">הערה: ");
+                    sb.Append($"<div style=\"padding-right:12px;font-size:{VoucherPrintHtml.ItemLineNote}px;font-weight:700;line-height:{VoucherPrintHtml.ItemLineNoteLineHeight}px;\">{VoucherPrintHtml.ItemLineNoteLabelHtml()} ");
                     sb.Append(EscapeHtml(it.Notes!));
                     sb.Append("</div>");
                 }
@@ -2059,7 +2059,7 @@ namespace George.Services
 
         private static string? BuildVoucherLoketLine(OrderItem it, decimal? lineAmt)
         {
-            if (!it.PickedQuantity.HasValue || it.PickedQuantity.Value <= 0m) return null;
+            if (!OrderItemLineDisplay.OrderMeaningfulPick(it)) return null;
             var qty = OrderItemLineDisplay.FormatVoucherPickedDisplay(it);
             if (lineAmt.HasValue) return $"לוקט: {qty} | ₪{lineAmt.Value.ToString("0.00", CultureInfo.InvariantCulture)}";
             return $"לוקט: {qty}";
@@ -2082,6 +2082,7 @@ namespace George.Services
         /// <summary>Match shop-manager <c>getVoucherPickedLineAmount</c>: line total after pick (TotalPrice or picked × PricePerUnit).</summary>
         private static decimal? GetVoucherPickedLineAmount(OrderItem item)
         {
+            if (!OrderItemLineDisplay.OrderMeaningfulPick(item)) return null;
             if (!item.PickedQuantity.HasValue || item.PickedQuantity.Value <= 0m) return null;
             if (item.TotalPrice.HasValue) return item.TotalPrice.Value;
             return item.PickedQuantity.Value * (item.PricePerUnit ?? 0m);
@@ -2091,9 +2092,10 @@ namespace George.Services
         {
             var items = order.OrderItem ?? new List<OrderItem>();
             var shipping = order.ShippingCost ?? 0m;
-            var anyPicked = items.Any(i => i.PickedQuantity.HasValue && i.PickedQuantity.Value > 0m);
+            var newVoucher = string.Equals(order.Status, "New", StringComparison.OrdinalIgnoreCase);
+            var anyPicked = items.Any(OrderItemLineDisplay.OrderMeaningfulPick);
             decimal itemsSum;
-            if (anyPicked)
+            if (!newVoucher && anyPicked)
             {
                 // After picking: compute from actual picked line totals — order.Total is the original pre-picking value and is not updated after picking.
                 itemsSum = items.Sum(i => GetVoucherPickedLineAmount(i) ?? 0m);
