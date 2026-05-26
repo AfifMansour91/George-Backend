@@ -75,6 +75,19 @@ public class PaymentStorage : StorageBase
         pm.IsRetired = true;
         pm.IsDefault = false;
         await _dbContext.SaveChangesAsync(cancelToken);
+
+        var remaining = await _dbContext.CustomerPaymentMethod
+            .Where(m => m.CustomerId == pm.CustomerId && m.SiteId == siteId && !m.IsRetired)
+            .OrderByDescending(m => m.CreationTime)
+            .ToListAsync(cancelToken);
+        if (remaining.Count > 0)
+        {
+            foreach (var m in remaining)
+                m.IsDefault = false;
+            remaining[0].IsDefault = true;
+            await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
         return true;
     }
 
@@ -218,11 +231,36 @@ public class PaymentStorage : StorageBase
             .Where(m => m.CustomerId == method.CustomerId && m.SiteId == method.SiteId && !m.IsRetired)
             .ToListAsync(cancelToken);
 
-        foreach (var m in existing)
+        var normalizedLast4 = NormalizeLast4Digits(method.Last4Digits);
+        if (!string.IsNullOrWhiteSpace(normalizedLast4))
         {
-            m.IsDefault = false;
-            m.IsRetired = true;
+            var sameLast4 = existing.FirstOrDefault(m =>
+                string.Equals(NormalizeLast4Digits(m.Last4Digits), normalizedLast4, StringComparison.Ordinal));
+            if (sameLast4 != null)
+            {
+                foreach (var m in existing)
+                    m.IsDefault = false;
+                sameLast4.IsDefault = true;
+                sameLast4.EncryptedToken = method.EncryptedToken;
+                sameLast4.TokenExDate = method.TokenExDate;
+                sameLast4.CardExpirationMMYY = method.CardExpirationMMYY;
+                sameLast4.EncryptedApprovalNumber = method.EncryptedApprovalNumber;
+                if (!string.IsNullOrWhiteSpace(method.CardBrand))
+                    sameLast4.CardBrand = method.CardBrand.Trim();
+                await _dbContext.SaveChangesAsync(cancelToken);
+                await ForceUpdatePaymentMethodDisplayFieldsAsync(
+                    sameLast4.Id,
+                    sameLast4.Last4Digits,
+                    sameLast4.CardBrand,
+                    sameLast4.TokenExDate,
+                    onlyIfEmpty: false,
+                    cancelToken);
+                return sameLast4;
+            }
         }
+
+        foreach (var m in existing)
+            m.IsDefault = false;
 
         method.IsDefault = true;
         method.CreationTime = DateTime.UtcNow;
@@ -265,13 +303,23 @@ public class PaymentStorage : StorageBase
         tracked.RefundInvoiceNumber = order.RefundInvoiceNumber;
         tracked.CardcomRefundDocumentUrl = order.CardcomRefundDocumentUrl;
         tracked.PaidAt = order.PaidAt;
-        tracked.ExternalPaymentStatus = order.ExternalPaymentStatus;
+        tracked.ExternalPaymentStatus = TruncateExternalPaymentStatus(order.ExternalPaymentStatus);
         tracked.UpdatedDate = DateTime.UtcNow;
         await _dbContext.SaveChangesAsync(cancelToken);
     }
 
     private static string NormalizePhoneDigits(string? phone) =>
         string.IsNullOrWhiteSpace(phone) ? "" : new string(phone.Where(char.IsDigit).ToArray());
+
+    /// <summary>dbo.Order.ExternalPaymentStatus is NVARCHAR(100).</summary>
+    private static string? TruncateExternalPaymentStatus(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return value;
+        const int max = 100;
+        var trimmed = value.Trim();
+        return trimmed.Length <= max ? trimmed : trimmed[..(max - 3)] + "...";
+    }
 
     private static bool IsCardcomCreditPaymentMethod(string? method)
     {

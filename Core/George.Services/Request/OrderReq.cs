@@ -22,6 +22,8 @@ public class CreateOrderReq
     /// <summary>Kiosk: customer consent for marketing SMS. When set, persisted on the customer record.</summary>
     public bool? MarketingSms { get; set; }
     public int? CustomerId { get; set; }
+    /// <summary>When PaymentMethod is SavedCard, optional specific saved card to charge (defaults to customer default).</summary>
+    public int? CustomerPaymentMethodId { get; set; }
     public string? DeliveryAddress { get; set; }
     public string? DeliveryStreet { get; set; }
     public string? DeliveryCity { get; set; }

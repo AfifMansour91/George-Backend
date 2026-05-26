@@ -482,10 +482,17 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         return ParseTransactionResult(json);
     }
 
+    /// <summary>
+    /// Cardcom <c>TransactionInfo.ResponseCode</c>: 0 = success; 700/701 = success for J2/J5 (authorization hold).
+    /// See https://secure.cardcom.solutions/Api/v11/Docs (Transactions/Transaction response).
+    /// </summary>
+    public static bool IsCardcomTransactionResponseSuccess(int responseCode) =>
+        responseCode is 0 or 700 or 701;
+
     private static PaymentTransactionResult ParseTransactionResult(string json)
     {
         var responseCode = GetInt(json, "ResponseCode");
-        var success = responseCode == 0;
+        var success = IsCardcomTransactionResponseSuccess(responseCode);
         var docNum = NormalizeDocumentNumber(GetString(json, "DocumentNumber"));
         var docUrl = GetString(json, "DocumentUrl");
 

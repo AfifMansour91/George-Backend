@@ -56,7 +56,15 @@ public class PaymentService : ServiceBase
         var method = order.PaymentMethod ?? "";
         if (string.Equals(method, "SavedCard", StringComparison.OrdinalIgnoreCase) && order.CustomerId is int customerId)
         {
-            var pm = await _paymentStorage.GetDefaultPaymentMethodAsync(customerId, order.SiteId, cancelToken);
+            CustomerPaymentMethod? pm = null;
+            if (order.CustomerPaymentMethodId is int requestedPmId)
+            {
+                pm = await _paymentStorage.GetPaymentMethodByIdAsync(requestedPmId, cancelToken);
+                if (pm != null && (pm.CustomerId != customerId || pm.SiteId != order.SiteId))
+                    pm = null;
+            }
+
+            pm ??= await _paymentStorage.GetDefaultPaymentMethodAsync(customerId, order.SiteId, cancelToken);
             if (pm != null)
             {
                 order.CustomerPaymentMethodId = pm.Id;
@@ -378,7 +386,7 @@ public class PaymentService : ServiceBase
         if (!_tokenProtector.TryUnprotect(pm.EncryptedToken, out var token))
         {
             await MarkSavedCardHoldFailedAsync(order,
-                "Saved card cannot be read (server encryption keys changed). Remove the saved card and have the customer pay again to save a new card.",
+                "Saved card unreadable (encryption changed). Remove card and pay again.",
                 cancelToken);
             return;
         }
@@ -406,7 +414,7 @@ public class PaymentService : ServiceBase
         if (!hold.Success)
         {
             order.PaymentSettleStatus = PaymentSettleStatus.Failed;
-            order.ExternalPaymentStatus = hold.Description;
+            order.ExternalPaymentStatus = TruncatePaymentStatusMessage(hold.Description ?? "Authorization hold failed");
             await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
             return;
         }
@@ -474,10 +482,20 @@ public class PaymentService : ServiceBase
     {
         _logger.LogWarning("Saved card authorization hold skipped for order {OrderId}: {Message}", order.Id, message);
         order.PaymentSettleStatus = PaymentSettleStatus.Failed;
-        order.ExternalPaymentStatus = message;
+        order.ExternalPaymentStatus = TruncatePaymentStatusMessage(message);
         order.PaymentGateway = PaymentGatewayProviderId.Cardcom;
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
-        await LogEventAsync(order.Id, "TokenAuthorizationHold", "-1", message, null, null, order.Total, null, cancelToken);
+        var logDescription = message.Length > 500 ? message[..500] : message;
+        await LogEventAsync(order.Id, "TokenAuthorizationHold", "-1", logDescription, null, null, order.Total, null, cancelToken);
+    }
+
+    private static string TruncatePaymentStatusMessage(string message)
+    {
+        const int max = 100;
+        var trimmed = (message ?? "").Trim();
+        if (trimmed.Length <= max)
+            return trimmed;
+        return trimmed[..(max - 3)] + "...";
     }
 
     public async Task<IApiResponse<bool>> RetrySavedCardAuthorizationHoldAsync(
@@ -1060,6 +1078,14 @@ public class PaymentService : ServiceBase
         CancellationToken cancelToken = default)
     {
         var response = new ApiResponse<bool>();
+
+        if (customerPaymentMethodId is int requestedPmId
+            && await TryRetireOrConfirmAlreadyRetiredAsync(requestedPmId, siteId, cancelToken))
+        {
+            response.Data = true;
+            return response;
+        }
+
         var customerIds = new HashSet<int>();
 
         if (customerId is int cid && await _paymentStorage.CustomerExistsAsync(cid, cancelToken))
@@ -1074,13 +1100,6 @@ public class PaymentService : ServiceBase
             retiredTotal += await _paymentStorage.RetireAllPaymentMethodsForCustomerAsync(id, siteId, cancelToken);
 
         if (retiredTotal > 0)
-        {
-            response.Data = true;
-            return response;
-        }
-
-        if (customerPaymentMethodId is int requestedPmId
-            && await TryRetireOrConfirmAlreadyRetiredAsync(requestedPmId, siteId, cancelToken))
         {
             response.Data = true;
             return response;
