@@ -42,6 +42,19 @@ public static class ProductCatalogStockClassification
         return "ok";
     }
 
+    /// <summary>Stock status for a products-report cut / variation row (resolved variant id when known).</summary>
+    public static string ClassifyCutRowStock(Product p, Account? account, int? variantId)
+    {
+        if (variantId is > 0)
+        {
+            var v = ActiveVariants(p).FirstOrDefault(x => x.Id == variantId);
+            if (v != null)
+                return ClassifySingleVariant(p, v, account);
+        }
+
+        return ClassifyStock(p, account);
+    }
+
     /// <summary>Per-variation status when parent uses variation stock (aligned with <see cref="ClassifyStockVariation"/>).</summary>
     public static string ClassifySingleVariant(Product p, ProductVariant v, Account? account)
     {

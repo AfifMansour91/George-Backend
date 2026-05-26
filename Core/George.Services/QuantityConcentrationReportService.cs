@@ -569,14 +569,7 @@ namespace George.Services
             return false;
         }
 
-        private static string AttrDedupeKey(string s)
-        {
-            var t = s.Trim().Normalize(NormalizationForm.FormKC);
-            t = Regex.Replace(t, @"[\u201C\u201D\u201E\u0022״]", "\"");
-            t = t.Replace('׳', '\'');
-            t = Regex.Replace(t, @"\s+", " ");
-            return t.ToLowerInvariant();
-        }
+        private static string AttrDedupeKey(string s) => ProductCatalogVariantResolution.AttrDedupeKey(s);
 
         public static string BuildLineLabel(OrderItem line, string? productName = null) =>
             OrderItemReportLineLabel.BuildLineLabel(line, productName);
@@ -691,49 +684,11 @@ namespace George.Services
 
         private static decimal Round2(decimal d) => Math.Round(d, 2, MidpointRounding.AwayFromZero);
 
-        private static ProductVariant? FindVariant(Product p, OrderItem line)
-        {
-            if (line.ProductVariantId is int vid && vid > 0)
-            {
-                return p.ProductVariant?.FirstOrDefault(v => !v.IsDeleted && v.Id == vid);
-            }
+        private static ProductVariant? FindVariant(Product p, OrderItem line) =>
+            ProductCatalogVariantResolution.FindVariantForOrderLine(p, line);
 
-            if (line.WooCommerceVariationId is int woo && woo > 0)
-            {
-                return p.ProductVariant?.FirstOrDefault(v => !v.IsDeleted && v.WooCommerceVariationId == woo);
-            }
-
-            var optionLabel = OrderItemReportLineLabel.ResolveOptionDisplayLabel(line, p.Name);
-            if (string.IsNullOrWhiteSpace(optionLabel))
-                return null;
-
-            var key = AttrDedupeKey(optionLabel);
-            foreach (var v in ProductCatalogStockClassification.ActiveVariants(p))
-            {
-                if (AttrDedupeKey(FormatVariantLabel(v)) == key)
-                    return v;
-                var opts = v.ProductVariantOptionValue?.Where(o => !string.IsNullOrWhiteSpace(o.OptionValue)).ToList();
-                if (opts is { Count: > 0 }
-                    && opts.Any(o => key.Contains(AttrDedupeKey(o.OptionValue), StringComparison.Ordinal)))
-                    return v;
-            }
-
-            return null;
-        }
-
-        private static string FormatVariantLabel(ProductVariant v)
-        {
-            var opts = v.ProductVariantOptionValue?.OrderBy(o => o.OptionName).ToList()
-                       ?? new List<ProductVariantOptionValue>();
-            string raw;
-            if (opts.Count == 0)
-                raw = $"#{v.Id}";
-            else if (opts.Count == 1)
-                raw = opts[0].OptionValue.Trim();
-            else
-                raw = string.Join(" · ", opts.Select(o => $"{o.OptionName}: {o.OptionValue}"));
-            return raw;
-        }
+        private static string FormatVariantLabel(ProductVariant v) =>
+            ProductCatalogVariantResolution.FormatVariantDisplayLabel(v);
 
         /// <summary>Unit count in total-qty column only for non-weighted products; parent units column is separate.</summary>
         private static bool ShowUnitsInTotalQuantityForTotalQtyColumn(Product p, decimal sumUnits)

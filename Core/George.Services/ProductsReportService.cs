@@ -458,6 +458,8 @@ namespace George.Services
                         : (decimal?)null;
                     var trendUp = b != null && b.revenue > 0m ? a.revenue >= b.revenue : (bool?)null;
 
+                    products.TryGetValue(pid, out var p);
+
                     var cuts = a.byCut
                         .Where(x => !string.IsNullOrWhiteSpace(x.Key))
                         .OrderByDescending(x => x.Value.revenue)
@@ -467,10 +469,10 @@ namespace George.Services
                             QuantityKg = x.Value.kg > 0m ? Round2(x.Value.kg) : null,
                             QuantityUnits = x.Value.units > 0m ? Round2(x.Value.units) : null,
                             Revenue = Round2(x.Value.revenue),
+                            StockStatus = ResolveCutRowStockStatus(p, account, x.Value),
                         })
                         .ToList();
 
-                    products.TryGetValue(pid, out var p);
                     var catId = p != null ? PrimaryCategoryId(p) : null;
                     var catName = p != null && catId != null
                         ? p.ProductCategory?.FirstOrDefault(x => x.CategoryId == catId)?.Category?.Name ?? ""
@@ -504,7 +506,15 @@ namespace George.Services
             public decimal revenue;
             public decimal kg;
             public decimal units;
-            public readonly Dictionary<string, (decimal revenue, decimal kg, decimal units)> byCut = new(StringComparer.OrdinalIgnoreCase);
+            public readonly Dictionary<string, CutAgg> byCut = new(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private sealed class CutAgg
+        {
+            public decimal revenue;
+            public decimal kg;
+            public decimal units;
+            public readonly HashSet<int> VariantIds = new();
         }
 
         private static Dictionary<int, Agg> AggregateByProduct(
@@ -544,10 +554,13 @@ namespace George.Services
                     if (!string.IsNullOrEmpty(cutLabel))
                     {
                         if (!a.byCut.TryGetValue(cutLabel, out var c))
-                            c = (0m, 0m, 0m);
+                            c = new CutAgg();
                         c.revenue += merch;
                         c.kg += kgLine;
                         c.units += unitLine;
+                        var variant = ProductCatalogVariantResolution.FindVariantForOrderLine(p, line);
+                        if (variant != null)
+                            c.VariantIds.Add(variant.Id);
                         a.byCut[cutLabel] = c;
                     }
 
@@ -560,6 +573,13 @@ namespace George.Services
 
         private static string? ResolveProductsReportCutLabel(OrderItem line, string? productName) =>
             OrderItemReportLineLabel.ResolveOptionDisplayLabel(line, productName);
+
+        private static string ResolveCutRowStockStatus(Product? p, Account? account, CutAgg cut)
+        {
+            if (p == null) return "ok";
+            int? variantId = cut.VariantIds.Count > 0 ? cut.VariantIds.Min() : null;
+            return ProductCatalogStockClassification.ClassifyCutRowStock(p, account, variantId);
+        }
 
         private static (decimal kg, decimal units) SplitLineQty(OrderItem line, Product p)
         {

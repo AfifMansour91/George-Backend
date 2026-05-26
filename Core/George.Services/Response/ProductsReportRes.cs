@@ -47,6 +47,8 @@ namespace George.Services.Response
         public decimal? QuantityKg { get; set; }
         public decimal? QuantityUnits { get; set; }
         public decimal Revenue { get; set; }
+        /// <summary>ok | low | out — per variation when resolvable, else parent rollup.</summary>
+        public string StockStatus { get; set; } = "ok";
     }
 
     public class ProductsReportProductRowDto
