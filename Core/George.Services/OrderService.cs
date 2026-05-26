@@ -393,7 +393,12 @@ namespace George.Services
                 if (req.DeliveryApartment != null) o.DeliveryApartment = req.DeliveryApartment;
                 if (req.DeliveryFloor != null) o.DeliveryFloor = req.DeliveryFloor;
                 if (req.DeliveryEntranceCode != null) o.DeliveryEntranceCode = req.DeliveryEntranceCode;
-                if (req.PaymentStatus != null) o.PaymentStatus = req.PaymentStatus;
+                if (req.PaymentStatus != null)
+                {
+                    o.PaymentStatus = req.PaymentStatus;
+                    if (string.Equals(req.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase) && o.PaidAt == null)
+                        o.PaidAt = DateTime.UtcNow;
+                }
                 if (req.PaymentMethod != null) o.PaymentMethod = req.PaymentMethod;
                 if (req.BagsCount.HasValue) o.BagsCount = req.BagsCount;
                 if (req.ShippingCost.HasValue) o.ShippingCost = req.ShippingCost.Value;
