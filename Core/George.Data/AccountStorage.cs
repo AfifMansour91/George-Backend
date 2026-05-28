@@ -147,6 +147,8 @@ namespace George.Data
             dbAcc.Zip = updated.Zip;
             dbAcc.Phone = updated.Phone;
             dbAcc.Website = updated.Website;
+            dbAcc.CompanyNumber = updated.CompanyNumber;
+            dbAcc.VoucherHeaderShowLogo = updated.VoucherHeaderShowLogo;
 
             // Update low-stock threshold defaults (null = keep existing, already resolved in service)
             dbAcc.DefaultLowStockThresholdWeighted = updated.DefaultLowStockThresholdWeighted;

@@ -236,6 +236,10 @@ namespace George.Services
                 Zip = req.Zip ?? existingAccount.Zip,
                 Phone = req.Phone ?? existingAccount.Phone,
                 Website = req.Website ?? existingAccount.Website,
+                CompanyNumber = req.CompanyNumber != null
+                    ? (string.IsNullOrWhiteSpace(req.CompanyNumber) ? null : req.CompanyNumber.Trim())
+                    : existingAccount.CompanyNumber,
+                VoucherHeaderShowLogo = req.VoucherHeaderShowLogo ?? existingAccount.VoucherHeaderShowLogo,
                 UpdatedDate = DateTime.UtcNow,
                 DefaultLowStockThresholdWeighted = req.DefaultLowStockThresholdWeighted ?? existingAccount.DefaultLowStockThresholdWeighted,
                 DefaultLowStockThresholdUnits = req.DefaultLowStockThresholdUnits ?? existingAccount.DefaultLowStockThresholdUnits,

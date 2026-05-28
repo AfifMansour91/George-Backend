@@ -188,6 +188,7 @@ namespace George.Services
                     dest.DeliveryDate = ToUnspecifiedCalendarDate(src.DeliveryDate);
                     dest.PickupDate = ToUnspecifiedCalendarDate(src.PickupDate);
                     dest.AccountName = src.Account?.Name;
+                    dest.VoucherAccountHeader = VoucherAccountHeaderBuilder.FromAccount(src.Account);
                 });
             CreateMap<OrderItem, OrderItemRes>();
             CreateMap<CreateOrderReq, Order>()

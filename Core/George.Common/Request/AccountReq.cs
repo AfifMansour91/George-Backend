@@ -244,6 +244,12 @@ namespace George.Common.Request
         public string? Phone { get; set; }
         public string? Website { get; set; }
 
+        /// <summary>ח.פ for voucher header.</summary>
+        public string? CompanyNumber { get; set; }
+
+        /// <summary>Show logo on printed vouchers.</summary>
+        public bool? VoucherHeaderShowLogo { get; set; }
+
         public KioskSettingsReq? KioskSettings { get; set; }
 
         /// <summary>Sprint 2: Notification settings (התראות). When provided, replaces existing.</summary>

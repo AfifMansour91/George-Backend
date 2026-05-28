@@ -36,6 +36,12 @@ namespace George.Services.Response
         
         public string? LogoUrl { get; set; }
         public string? Website { get; set; }
+
+        /// <summary>ח.פ — printed on vouchers when set.</summary>
+        public string? CompanyNumber { get; set; }
+
+        /// <summary>Show account logo at the top of printed vouchers.</summary>
+        public bool VoucherHeaderShowLogo { get; set; }
         
         public bool IsKosherShop { get; set; }
         

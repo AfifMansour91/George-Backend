@@ -79,6 +79,13 @@ public partial class Account
     [StringLength(500)]
     public string? Website { get; set; }
 
+    /// <summary>Company registration number (ח.פ) shown on printed vouchers when set.</summary>
+    [StringLength(50)]
+    public string? CompanyNumber { get; set; }
+
+    /// <summary>When true and LogoUrl is set, show logo at the top of printed vouchers.</summary>
+    public bool VoucherHeaderShowLogo { get; set; }
+
     public bool KioskEnabled { get; set; }
 
     /// <summary>Default low-stock threshold for weighted-style (kg) products in this account.</summary>

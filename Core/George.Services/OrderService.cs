@@ -1715,13 +1715,11 @@ namespace George.Services
             sb.AppendLine("<div id=\"voucher-root\">");
             if (!newVoucher)
             {
-                var siteDisplay = order.Account?.Name?.Trim();
-                if (!string.IsNullOrEmpty(siteDisplay))
-                {
-                    sb.Append("  <div style=\"margin-bottom:8px;border-bottom:1px solid #000;padding-bottom:8px;text-align:center;font-size:15px;font-weight:700;line-height:19px;\">");
-                    sb.Append(EscapeHtml(siteDisplay));
-                    sb.AppendLine("</div>");
-                }
+                var voucherHeaderHtml = VoucherAccountHeaderBuilder.BuildHtml(
+                    VoucherAccountHeaderBuilder.FromAccount(order.Account),
+                    EscapeHtml);
+                if (!string.IsNullOrEmpty(voucherHeaderHtml))
+                    sb.AppendLine($"  {voucherHeaderHtml}");
             }
 
             sb.Append("  <div style=\"padding-bottom:8px;margin-bottom:0;\">");

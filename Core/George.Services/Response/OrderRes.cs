@@ -11,8 +11,11 @@ public class OrderRes
     public int? UpdateUserId { get; set; }
     public int AccountId { get; set; }
     public int SiteId { get; set; }
-    /// <summary>Account display name (from Account.Name). Used by voucher header when client does not pass an override.</summary>
+    /// <summary>Account display name (from Account.Name). Legacy single-line voucher header.</summary>
     public string? AccountName { get; set; }
+
+    /// <summary>Structured account block for voucher header (name, ח.פ, address, phone, website, optional logo).</summary>
+    public VoucherAccountHeaderRes? VoucherAccountHeader { get; set; }
     public string OrderNumber { get; set; } = null!;
     public string Source { get; set; } = null!;
     public string Status { get; set; } = "New";
