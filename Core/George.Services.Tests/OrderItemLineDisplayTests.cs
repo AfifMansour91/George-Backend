@@ -51,18 +51,27 @@ public class OrderItemLineDisplayTests
     }
 
     [Fact]
-    public void Legacy_unit_weight_hint_when_quantity_mode_missing()
+    public void Legacy_unit_weight_hint_only_for_variable_weight_per_unit_choice()
     {
-        var item = new OrderItem
+        var variable = new OrderItem
         {
-            Title = "Fish",
+            Title = "דג | בחירת משקל ליחידה",
             Quantity = 1,
             UnitWeightGrams = 500,
             OrderLineQuantityMode = null,
         };
-        var hint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(item, newVoucher: true);
+        var hint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(variable, newVoucher: true);
         Assert.NotNull(hint);
         Assert.Contains("משקל יחידה", hint, StringComparison.Ordinal);
+
+        var averageUnit = new OrderItem
+        {
+            Title = "Fish",
+            Quantity = 1,
+            UnitWeightGrams = 500,
+            OrderLineQuantityMode = "units",
+        };
+        Assert.Null(OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(averageUnit, newVoucher: true));
     }
 
     [Fact]

@@ -42,6 +42,7 @@ namespace George.Services
             ["Phone"] = "טלפוני",
         };
         private const string VoucherQrCaption = "פתיחת הזמנה";
+        private const string VoucherStatusLabel = "סטטוס:";
         private const string VoucherDateLabel = "תאריך אספקה:";
         private const string VoucherTimeLabel = "שעה:";
         private const string VoucherShippingLabel = "משלוח";
@@ -1723,9 +1724,16 @@ namespace George.Services
                 }
             }
 
-            sb.Append("  <div style=\"display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:8px;font-size:12px;line-height:13px;\">");
+            sb.Append("  <div style=\"padding-bottom:8px;margin-bottom:0;\">");
+            sb.Append("<div style=\"display:flex;justify-content:space-between;align-items:flex-end;font-size:12px;line-height:13px;\">");
             sb.Append($"<span style=\"font-weight:400;\">{EscapeHtml(created)}</span>");
             sb.Append($"<span style=\"font-weight:700;\">{EscapeHtml(sourceTop)}</span>");
+            sb.Append("</div>");
+            var voucherStatus = VoucherOrderStatusLabel(order);
+            if (!string.IsNullOrEmpty(voucherStatus))
+            {
+                sb.Append($"<div style=\"margin-top:4px;text-align:center;font-size:10px;font-weight:400;line-height:13px;\">{VoucherStatusLabel} {EscapeHtml(voucherStatus)}</div>");
+            }
             sb.AppendLine("</div>");
 
             var headerCityBlock = showHeaderCity
@@ -1781,7 +1789,7 @@ namespace George.Services
             sb.AppendLine($"    <span style=\"font-size:20px;font-weight:800;line-height:24px;\">{VoucherItemsTitle} ({itemCount})</span>");
             sb.AppendLine("  </div>");
 
-            var attrOpts = new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true };
+            var attrOpts = new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true, VoucherPerUnitWeightVariableOnly = true };
             foreach (var it in items)
             {
                 var title = EscapeHtml(OrderItemLineDisplay.GetOrderItemProductName(it));
@@ -1797,23 +1805,12 @@ namespace George.Services
                     sb.Append("</div>");
                 }
 
-                var lineAmt = GetVoucherPickedLineAmount(it);
-                var loket = BuildVoucherLoketLine(it, lineAmt);
-                if (!string.IsNullOrEmpty(loket))
+                var legacyHint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(it, newVoucher);
+                if (!string.IsNullOrWhiteSpace(legacyHint))
                 {
-                    sb.Append("<div style=\"padding-right:12px;font-size:11px;font-weight:700;line-height:15px;\">");
-                    sb.Append(EscapeHtml(loket));
+                    sb.Append($"<div style=\"padding-right:12px;font-size:{VoucherPrintHtml.ProductMeta}px;font-weight:400;line-height:{VoucherPrintHtml.ProductMetaLineHeight}px;\">");
+                    sb.Append(EscapeHtml(legacyHint));
                     sb.Append("</div>");
-                }
-                else
-                {
-                    var legacyHint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(it, newVoucher);
-                    if (!string.IsNullOrWhiteSpace(legacyHint))
-                    {
-                        sb.Append($"<div style=\"padding-right:12px;font-size:{VoucherPrintHtml.ProductMeta}px;font-weight:400;line-height:{VoucherPrintHtml.ProductMetaLineHeight}px;\">");
-                        sb.Append(EscapeHtml(legacyHint));
-                        sb.Append("</div>");
-                    }
                 }
 
                 if (!string.IsNullOrWhiteSpace(it.Notes))
@@ -1821,6 +1818,13 @@ namespace George.Services
                     sb.Append($"<div style=\"padding-right:12px;font-size:{VoucherPrintHtml.ItemLineNote}px;font-weight:700;line-height:{VoucherPrintHtml.ItemLineNoteLineHeight}px;\">{VoucherPrintHtml.ItemLineNoteLabelHtml()} ");
                     sb.Append(EscapeHtml(it.Notes!));
                     sb.Append("</div>");
+                }
+
+                var lineAmt = GetVoucherPickedLineAmount(it);
+                var pickedRowHtml = BuildVoucherPickedRowTableHtml(it, lineAmt);
+                if (!string.IsNullOrEmpty(pickedRowHtml))
+                {
+                    sb.Append(pickedRowHtml);
                 }
 
                 sb.Append("</div></div>");
@@ -2057,12 +2061,60 @@ namespace George.Services
             return settled ? $"שולם ({m})" : $"תשלום ({m})";
         }
 
-        private static string? BuildVoucherLoketLine(OrderItem it, decimal? lineAmt)
+        private static string? VoucherOrderStatusLabel(Order order)
+        {
+            var status = order.Status?.Trim() ?? "";
+            if (string.Equals(status, "New", StringComparison.OrdinalIgnoreCase)) return "חדשה";
+            var items = order.OrderItem ?? new List<OrderItem>();
+            var anyPicked = items.Any(OrderItemLineDisplay.OrderMeaningfulPick);
+            if (anyPicked ||
+                string.Equals(status, "Ready", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase))
+                return null;
+            if (string.Equals(status, "InTreatment", StringComparison.OrdinalIgnoreCase)) return "בטיפול";
+            return string.IsNullOrEmpty(status) ? null : status;
+        }
+
+        private static string VoucherPriceValueHtml(string label, string valStyle)
+        {
+            if (label == "—") return $"<div style=\"{valStyle}\">{EscapeHtml(label)}</div>";
+            var m = System.Text.RegularExpressions.Regex.Match(label, @"^(₪[\d.]+)\s*(\/\s*.+)$");
+            if (!m.Success) return $"<div style=\"{valStyle}white-space:nowrap;\">{EscapeHtml(label)}</div>";
+            var amount = m.Groups[1].Value;
+            var suffix = m.Groups[2].Value.Trim();
+            if (decimal.TryParse(amount.Replace("₪", "", StringComparison.Ordinal), NumberStyles.Number, CultureInfo.InvariantCulture, out var n) && n >= 100m)
+            {
+                return
+                    $"<div style=\"{valStyle}line-height:13px;\">" +
+                    $"<div style=\"white-space:nowrap;\"><bdi dir=\"ltr\">{EscapeHtml(amount)}</bdi></div>" +
+                    $"<div style=\"font-size:10px;font-weight:700;white-space:nowrap;\">{EscapeHtml(suffix)}</div>" +
+                    "</div>";
+            }
+            return $"<div style=\"{valStyle}white-space:nowrap;\"><bdi dir=\"ltr\">{EscapeHtml(amount)}</bdi>{EscapeHtml(suffix)}</div>";
+        }
+
+        private static string? BuildVoucherPickedRowTableHtml(OrderItem it, decimal? lineAmt)
         {
             if (!OrderItemLineDisplay.OrderMeaningfulPick(it)) return null;
             var qty = OrderItemLineDisplay.FormatVoucherPickedDisplay(it);
-            if (lineAmt.HasValue) return $"לוקט: {qty} | ₪{lineAmt.Value.ToString("0.00", CultureInfo.InvariantCulture)}";
-            return $"לוקט: {qty}";
+            var priceLabel = OrderItemLineDisplay.FormatOrderLinePricePerKgForPicking(it);
+            var price = string.IsNullOrWhiteSpace(priceLabel) ? "—" : priceLabel;
+            var total = lineAmt.HasValue
+                ? $"₪{lineAmt.Value.ToString("0.00", CultureInfo.InvariantCulture)}"
+                : "—";
+            const string grid =
+                "display:grid;grid-template-columns:1fr 1fr 1fr;direction:rtl;gap:2px 4px;margin-top:4px;padding-right:12px;text-align:center;width:100%;box-sizing:border-box;";
+            const string head =
+                "font-size:10px;font-weight:700;line-height:13px;border-bottom:1px solid #000;padding-bottom:2px;";
+            const string val = "font-size:11px;font-weight:700;line-height:14px;padding-top:2px;";
+            var priceCell = VoucherPriceValueHtml(price, val);
+            return
+                $"<div style=\"{grid}\">" +
+                $"<div style=\"{head}\">מחיר</div><div style=\"{head}\">לוקט</div><div style=\"{head}\">סה\"כ</div>" +
+                priceCell +
+                $"<div style=\"{val}\">{EscapeHtml(qty)}</div>" +
+                $"<div style=\"{val}\"><bdi dir=\"ltr\">{EscapeHtml(total)}</bdi></div>" +
+                "</div>";
         }
 
         private static string EscapeHtmlAttr(string? s)
