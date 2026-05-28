@@ -1726,7 +1726,7 @@ namespace George.Services
 
             sb.Append("  <div style=\"padding-bottom:8px;margin-bottom:0;\">");
             sb.Append("<div style=\"display:flex;justify-content:space-between;align-items:flex-end;font-size:12px;line-height:13px;\">");
-            sb.Append($"<span style=\"font-weight:400;\">{EscapeHtml(created)}</span>");
+            sb.Append($"<span style=\"font-weight:400;white-space:nowrap;word-break:normal;overflow-wrap:normal;\">{EscapeHtml(created)}</span>");
             sb.Append($"<span style=\"font-weight:700;\">{EscapeHtml(sourceTop)}</span>");
             sb.Append("</div>");
             var voucherStatus = VoucherOrderStatusLabel(order);
@@ -1767,11 +1767,11 @@ namespace George.Services
                 sb.Append($"<span>{EscapeHtml(dateLabel)}</span><span>{EscapeHtml(timeLabel)}</span></div>");
                 sb.Append("<div style=\"display:flex;justify-content:space-between;align-items:center;gap:8px;\">");
                 sb.Append(deliveryDate.HasValue
-                    ? $"<span style=\"font-size:20px;font-weight:700;line-height:24px;\">{EscapeHtml(FormatVoucherDateWithWeekday(deliveryDate.Value))}</span>"
-                    : "<span style=\"font-size:20px;font-weight:700;\">—</span>");
+                    ? $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\">{EscapeHtml(FormatVoucherDateWithWeekday(deliveryDate.Value))}</span>"
+                    : $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\">—</span>");
                 sb.Append(!string.IsNullOrWhiteSpace(deliveryTime)
-                    ? $"<span style=\"font-size:20px;font-weight:700;line-height:24px;\">{EscapeHtml(deliveryTime!)}</span>"
-                    : "<span style=\"font-size:20px;font-weight:700;\">—</span>");
+                    ? $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\" dir=\"ltr\">{EscapeHtml(deliveryTime!)}</span>"
+                    : $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\">—</span>");
                 sb.AppendLine("</div></div>");
             }
 
@@ -1862,11 +1862,11 @@ namespace George.Services
             "ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת",
         };
 
-        /// <summary>Voucher / print: e.g. <c>שני 11/03/26</c>.</summary>
+        /// <summary>Voucher delivery date: weekday + dd/MM (no year).</summary>
         private static string FormatVoucherDateWithWeekday(DateTime date)
         {
             var dayName = HebrewWeekdayNames[(int)date.DayOfWeek];
-            var shortDate = date.ToString("dd/MM/yy", CultureInfo.InvariantCulture);
+            var shortDate = date.ToString("dd/MM", CultureInfo.InvariantCulture);
             return $"{dayName} {shortDate}";
         }
 
@@ -1874,8 +1874,12 @@ namespace George.Services
         {
             var local = creationTime.ToLocalTime();
             var time = local.ToString("HH:mm", CultureInfo.InvariantCulture);
-            return $"{FormatVoucherDateWithWeekday(local)} {time}";
+            var shortDate = local.ToString("dd/MM", CultureInfo.InvariantCulture);
+            return $"{shortDate} {time}";
         }
+
+        private const string VoucherDeliveryDatetimeValueStyle =
+            "font-size:20px;font-weight:700;line-height:24px;white-space:nowrap;word-break:normal;overflow-wrap:normal;";
 
         private static string CombineOrderLevelNotes(Order order)
         {
