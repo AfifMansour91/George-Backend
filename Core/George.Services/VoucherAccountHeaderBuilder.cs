@@ -9,16 +9,25 @@ public static class VoucherAccountHeaderBuilder
     {
         if (account == null) return null;
 
+        var companyName = string.IsNullOrWhiteSpace(account.Name) ? null : account.Name.Trim();
+        if (companyName == null && !account.VoucherHeaderDetailsEnabled)
+            return null;
+
         var header = new VoucherAccountHeaderRes
         {
-            ShowLogo = account.VoucherHeaderShowLogo,
-            LogoUrl = string.IsNullOrWhiteSpace(account.LogoUrl) ? null : account.LogoUrl.Trim(),
-            CompanyName = string.IsNullOrWhiteSpace(account.Name) ? null : account.Name.Trim(),
-            CompanyNumber = string.IsNullOrWhiteSpace(account.CompanyNumber) ? null : account.CompanyNumber.Trim(),
-            AddressLine = BuildAddressLine(account.Address, account.City),
-            Phone = string.IsNullOrWhiteSpace(account.Phone) ? null : account.Phone.Trim(),
-            Website = string.IsNullOrWhiteSpace(account.Website) ? null : account.Website.Trim(),
+            DetailsEnabled = account.VoucherHeaderDetailsEnabled,
+            CompanyName = companyName,
         };
+
+        if (account.VoucherHeaderDetailsEnabled)
+        {
+            header.ShowLogo = account.VoucherHeaderShowLogo;
+            header.LogoUrl = string.IsNullOrWhiteSpace(account.LogoUrl) ? null : account.LogoUrl.Trim();
+            header.CompanyNumber = string.IsNullOrWhiteSpace(account.CompanyNumber) ? null : account.CompanyNumber.Trim();
+            header.AddressLine = BuildAddressLine(account.Address, account.City);
+            header.Phone = string.IsNullOrWhiteSpace(account.Phone) ? null : account.Phone.Trim();
+            header.Website = string.IsNullOrWhiteSpace(account.Website) ? null : account.Website.Trim();
+        }
 
         return HasContent(header) ? header : null;
     }
@@ -26,9 +35,10 @@ public static class VoucherAccountHeaderBuilder
     public static bool HasContent(VoucherAccountHeaderRes? header)
     {
         if (header == null) return false;
+        if (!string.IsNullOrWhiteSpace(header.CompanyName)) return true;
+        if (!header.DetailsEnabled) return false;
         if (header.ShowLogo && !string.IsNullOrWhiteSpace(header.LogoUrl)) return true;
-        return !string.IsNullOrWhiteSpace(header.CompanyName)
-            || !string.IsNullOrWhiteSpace(header.CompanyNumber)
+        return !string.IsNullOrWhiteSpace(header.CompanyNumber)
             || !string.IsNullOrWhiteSpace(header.AddressLine)
             || !string.IsNullOrWhiteSpace(header.Phone)
             || !string.IsNullOrWhiteSpace(header.Website);
@@ -36,6 +46,12 @@ public static class VoucherAccountHeaderBuilder
 
     public static IReadOnlyList<string> BuildLines(VoucherAccountHeaderRes header)
     {
+        if (!header.DetailsEnabled)
+        {
+            var nameOnly = header.CompanyName?.Trim();
+            return string.IsNullOrEmpty(nameOnly) ? Array.Empty<string>() : new[] { nameOnly };
+        }
+
         var lines = new List<string>();
         if (!string.IsNullOrWhiteSpace(header.CompanyName))
             lines.Add(header.CompanyName.Trim());
@@ -53,6 +69,15 @@ public static class VoucherAccountHeaderBuilder
     public static string? BuildHtml(VoucherAccountHeaderRes? header, Func<string, string> escapeHtml)
     {
         if (header == null || !HasContent(header)) return null;
+
+        if (!header.DetailsEnabled)
+        {
+            var legacyName = header.CompanyName?.Trim();
+            if (string.IsNullOrEmpty(legacyName)) return null;
+            return "<div style=\"margin-bottom:8px;border-bottom:1px solid #000;padding-bottom:8px;text-align:center;font-size:15px;font-weight:700;line-height:19px;\">"
+                + escapeHtml(legacyName)
+                + "</div>";
+        }
 
         var sb = new System.Text.StringBuilder();
         sb.Append("<div style=\"margin-bottom:8px;border-bottom:1px solid #000;padding-bottom:8px;text-align:center;\">");

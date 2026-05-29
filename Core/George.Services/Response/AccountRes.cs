@@ -42,6 +42,9 @@ namespace George.Services.Response
 
         /// <summary>Show account logo at the top of printed vouchers.</summary>
         public bool VoucherHeaderShowLogo { get; set; }
+
+        /// <summary>Print full voucher header details; when false, legacy single company name line.</summary>
+        public bool VoucherHeaderDetailsEnabled { get; set; }
         
         public bool IsKosherShop { get; set; }
         

@@ -250,6 +250,9 @@ namespace George.Common.Request
         /// <summary>Show logo on printed vouchers.</summary>
         public bool? VoucherHeaderShowLogo { get; set; }
 
+        /// <summary>Print full voucher header; when false, legacy single company name line.</summary>
+        public bool? VoucherHeaderDetailsEnabled { get; set; }
+
         public KioskSettingsReq? KioskSettings { get; set; }
 
         /// <summary>Sprint 2: Notification settings (התראות). When provided, replaces existing.</summary>

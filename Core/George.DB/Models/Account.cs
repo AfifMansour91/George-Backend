@@ -86,6 +86,9 @@ public partial class Account
     /// <summary>When true and LogoUrl is set, show logo at the top of printed vouchers.</summary>
     public bool VoucherHeaderShowLogo { get; set; }
 
+    /// <summary>When true, print full header (ח.פ, address, phone, website, optional logo). When false, legacy single company name line.</summary>
+    public bool VoucherHeaderDetailsEnabled { get; set; }
+
     public bool KioskEnabled { get; set; }
 
     /// <summary>Default low-stock threshold for weighted-style (kg) products in this account.</summary>

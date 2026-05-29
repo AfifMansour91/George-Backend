@@ -240,6 +240,7 @@ namespace George.Services
                     ? (string.IsNullOrWhiteSpace(req.CompanyNumber) ? null : req.CompanyNumber.Trim())
                     : existingAccount.CompanyNumber,
                 VoucherHeaderShowLogo = req.VoucherHeaderShowLogo ?? existingAccount.VoucherHeaderShowLogo,
+                VoucherHeaderDetailsEnabled = req.VoucherHeaderDetailsEnabled ?? existingAccount.VoucherHeaderDetailsEnabled,
                 UpdatedDate = DateTime.UtcNow,
                 DefaultLowStockThresholdWeighted = req.DefaultLowStockThresholdWeighted ?? existingAccount.DefaultLowStockThresholdWeighted,
                 DefaultLowStockThresholdUnits = req.DefaultLowStockThresholdUnits ?? existingAccount.DefaultLowStockThresholdUnits,
