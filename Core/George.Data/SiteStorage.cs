@@ -132,6 +132,14 @@ namespace George.Data
             {
                 dbSite.InternalApiKey = updated.InternalApiKey;
             }
+            if (updated.WoltDispatchToken != null)
+            {
+                dbSite.WoltDispatchToken = updated.WoltDispatchToken;
+            }
+            if (updated.WoltEnabled.HasValue)
+            {
+                dbSite.WoltEnabled = updated.WoltEnabled;
+            }
             // Shop settings (Sprint 2)
             if (updated.WeightTolerancePercent.HasValue) dbSite.WeightTolerancePercent = updated.WeightTolerancePercent;
             if (updated.DepreciationEnabled.HasValue) dbSite.DepreciationEnabled = updated.DepreciationEnabled;

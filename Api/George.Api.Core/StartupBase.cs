@@ -422,6 +422,7 @@ namespace George.Api.Core
 			services.AddScoped<TemplateAttributeService>();
 			services.AddScoped<TemplateProductService>();
 			services.AddScoped<WooCommerceService>();
+			services.AddScoped<WoltDispatchService>();
 			services.AddScoped<KioskCustomerService>();
 
 			// Let the derived add its own dependencies.

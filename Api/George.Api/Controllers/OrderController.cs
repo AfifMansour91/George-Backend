@@ -13,10 +13,15 @@ namespace George.Api.Controllers
     public class OrderController : GeorgeControllerBase, IAuthUserProvider
     {
         private readonly OrderService _orderSvc;
+        private readonly WoltDispatchService _woltDispatchSvc;
 
-        public OrderController(OrderService orderSvc, ILogger<OrderController> logger) : base(logger)
+        public OrderController(
+            OrderService orderSvc,
+            WoltDispatchService woltDispatchSvc,
+            ILogger<OrderController> logger) : base(logger)
         {
             _orderSvc = orderSvc;
+            _woltDispatchSvc = woltDispatchSvc;
         }
 
         [HttpGet]
@@ -127,6 +132,14 @@ namespace George.Api.Controllers
         public async Task<IActionResult> SendReminderAsync([FromRoute] int orderId, CancellationToken cancelToken = default)
         {
             return await SafeCallWithErrorCatchingAsync(() => _orderSvc.SendReminderAsync(orderId, cancelToken));
+        }
+
+        /// <summary>Dispatch or refresh Wolt Drive courier for a WooCommerce shipping order (OC Wolt plugin dispatch API).</summary>
+        [HttpPost("{orderId:int}/WoltDispatch")]
+        [ProducesResponseType(typeof(IApiResponse<WoltDispatchRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> DispatchWoltAsync([FromRoute] int orderId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _woltDispatchSvc.DispatchOrderAsync(orderId, cancelToken));
         }
 
         [ApiExplorerSettings(IgnoreApi = true)]

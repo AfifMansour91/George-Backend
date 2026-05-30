@@ -105,5 +105,13 @@ public class OrderRes
     public string? CardcomTokenLast4 { get; set; }
     /// <summary>Card brand from Cardcom (e.g. Visa).</summary>
     public string? CardcomCardBrand { get; set; }
+
+    /// <summary>Public Wolt tracking page URL after dispatch.</summary>
+    public string? WoltTrackingUrl { get; set; }
+    public string? WoltTrackingId { get; set; }
+    public string? WoltStatus { get; set; }
+    public string? WoltDeliveryId { get; set; }
+    public DateTime? WoltDispatchedAt { get; set; }
+
     public List<OrderItemRes> Items { get; set; } = new();
 }

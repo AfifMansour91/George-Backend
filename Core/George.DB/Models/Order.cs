@@ -266,6 +266,29 @@ public partial class Order
 
     public int? CustomerPaymentMethodId { get; set; }
 
+    /// <summary>Public Wolt tracking page URL after dispatch.</summary>
+    [StringLength(1000)]
+    public string? WoltTrackingUrl { get; set; }
+
+    /// <summary>Short Wolt tracking code (SMS-friendly).</summary>
+    [StringLength(64)]
+    public string? WoltTrackingId { get; set; }
+
+    /// <summary>Wolt courier state (e.g. INFO_RECEIVED, PICKED_UP, DELIVERED).</summary>
+    [StringLength(64)]
+    public string? WoltStatus { get; set; }
+
+    /// <summary>Wolt internal delivery id (24 hex chars).</summary>
+    [StringLength(64)]
+    public string? WoltDeliveryId { get; set; }
+
+    [Precision(0)]
+    public DateTime? WoltDispatchedAt { get; set; }
+
+    /// <summary>Last successful dispatch API response snapshot (audit / refresh).</summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? WoltDeliveryJson { get; set; }
+
     [ForeignKey(nameof(CustomerPaymentMethodId))]
     public virtual CustomerPaymentMethod? CustomerPaymentMethod { get; set; }
 

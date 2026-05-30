@@ -22,6 +22,10 @@ namespace George.Services.Request
         public string? WooCommerceKey { get; set; }
         public string? WooCommerceSecret { get; set; }
         public bool? WooCommerceEnabled { get; set; }
+        /// <summary>OC Wolt Drive dispatch API bearer token (WP admin → Wolt Drive → Webhook).</summary>
+        public string? WoltDispatchToken { get; set; }
+        /// <summary>When true, Wolt courier features are enabled for this site.</summary>
+        public bool? WoltEnabled { get; set; }
         /// <summary>Internal API key for external integrations (e.g. WooCommerce plugin) to call our Order/OrderPayment APIs. Set manually or use GenerateSiteApiKey.</summary>
         public string? InternalApiKey { get; set; }
 

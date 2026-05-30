@@ -66,6 +66,13 @@ public partial class Site
 
     public bool? WooCommerceEnabled { get; set; }
 
+    /// <summary>Bearer token for OC Wolt Drive dispatch API (<c>POST .../wp-json/ocws-wolt/v1/dispatch</c>). Generated in WP admin → Wolt Drive → Webhook.</summary>
+    [StringLength(500)]
+    public string? WoltDispatchToken { get; set; }
+
+    /// <summary>When true, Wolt dispatch UI and API are enabled for this site (requires plugin probe + token).</summary>
+    public bool? WoltEnabled { get; set; }
+
     /// <summary>API key for WooCommerce to call our APIs (X-Api-Key header). Per-site.</summary>
     [StringLength(100)]
     public string? InternalApiKey { get; set; }
