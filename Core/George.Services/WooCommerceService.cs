@@ -38,6 +38,11 @@ namespace George.Services
         /// <summary>Semaphore per (siteId, attributeName) so parallel product syncs don't create the same global attribute multiple times.</summary>
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> AttributeEnsureLocks = new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.Ordinal);
 
+        /// <summary>Cached result of <c>GET {site}/wp-json/ed/v1/capabilities</c> → <c>product_labels</c>.</summary>
+        private static readonly ConcurrentDictionary<string, bool> EdProductLabelsCapabilityCache = new(StringComparer.OrdinalIgnoreCase);
+
+        private static readonly TimeSpan EdCapabilitiesProbeTimeout = TimeSpan.FromSeconds(15);
+
         private readonly SiteStorage _siteStorage;
         private readonly CategoryStorage _categoryStorage;
         private readonly ProductStorage _productStorage;
@@ -1398,11 +1403,10 @@ namespace George.Services
                     // Modern formats (AVIF/HEIF/WebP) and negotiation CDNs (e.g. Wolt imageproxy) often fail WooCommerce URL sideload on WordPress; upload JPEG via wp/v2/media then attach by id.
                     if (await ImageRequiresJpegMediaUploadForWooAsync(url, friendlyName, cancelToken).ConfigureAwait(false))
                     {
-                        var compatFile = $"george-woo-{product.Id}-{i}.jpg";
+                        var compatFile = GeorgeWooProductImageCompatFileName(product.Id, pi.MediaId, i);
                         if (existingWooImages != null)
                         {
-                            var compatMatch = existingWooImages.FirstOrDefault(ex =>
-                                string.Equals((ex.name ?? "").Trim(), compatFile, StringComparison.OrdinalIgnoreCase));
+                            var compatMatch = FindExistingWooImageByAttachmentName(existingWooImages, compatFile);
                             if (compatMatch.id != 0)
                             {
                                 images.Add(new { id = compatMatch.id, position });
@@ -1444,13 +1448,18 @@ namespace George.Services
 
                     // WordPress sideload derives the upload file type from the filename; extensionless URLs (e.g. CDN asset IDs) fail with "not allowed to upload this file type".
                     var sideloadFileName = await ResolveWooImageSideloadFileNameAsync(url, friendlyName, cancelToken).ConfigureAwait(false);
+                    sideloadFileName = GeorgeWooProductImageSideloadFileName(product.Id, pi.MediaId, sideloadFileName);
 
                     if (existingWooImages != null)
                     {
-                        // Match by attachment name (with/without extension) so re-sync does not duplicate after Woo rewrites src to local URLs.
-                        var match = existingWooImages.FirstOrDefault(ex => WooProductImageAttachmentNameMatchesHint(ex.name, friendlyName, sideloadFileName));
-                        if (match.id == 0)
-                            match = existingWooImages.FirstOrDefault(ex => string.Equals((ex.src ?? "").Trim(), url, StringComparison.OrdinalIgnoreCase));
+                        // Prefer exact attachment name (includes Media id when known) so replacing an image uploads new bytes instead of reusing an old Woo attachment matched only by display name / slot index.
+                        var match = FindExistingWooImageByAttachmentName(existingWooImages, sideloadFileName);
+                        if (match.id == 0 && !pi.MediaId.HasValue)
+                        {
+                            match = existingWooImages.FirstOrDefault(ex => WooProductImageAttachmentNameMatchesHint(ex.name, friendlyName, sideloadFileName));
+                            if (match.id == 0)
+                                match = existingWooImages.FirstOrDefault(ex => string.Equals((ex.src ?? "").Trim(), url, StringComparison.OrdinalIgnoreCase));
+                        }
                         if (match.id != 0)
                             images.Add(new { id = match.id, position });
                         else
@@ -1816,20 +1825,27 @@ namespace George.Services
 
         /// <summary>
         /// POSTs boolean ACF-backed flags to <c>{site}/wp-json/ed/v1/...</c> (Omer's endpoints). Uses a separate HTTP client without WooCommerce REST credentials.
+        /// Skipped when <c>GET {site}/wp-json/ed/v1/capabilities</c> reports <c>product_labels: false</c> or the endpoint is unavailable.
         /// </summary>
         private async Task SyncProductEdAcfStoreLabelsAsync(string wcV3BaseUrl, int wooProductId, Product product, CancellationToken cancelToken)
         {
             var idx = wcV3BaseUrl.IndexOf("/wp-json", StringComparison.OrdinalIgnoreCase);
             var siteRoot = idx > 0 ? wcV3BaseUrl.Substring(0, idx).TrimEnd('/') : wcV3BaseUrl.TrimEnd('/');
+
+            using var http = _httpClientFactory.CreateClient();
+            http.Timeout = EdCapabilitiesProbeTimeout;
+            http.DefaultRequestHeaders.Clear();
+
+            if (!await SiteSupportsEdProductLabelsAsync(siteRoot, http, cancelToken).ConfigureAwait(false))
+                return;
+
+            http.Timeout = TimeSpan.FromSeconds(60);
+
             var now = DateTime.UtcNow;
             var passoverEffective = product.LabelKosherForPassover &&
                                     (!product.LabelKosherForPassoverEndDate.HasValue || product.LabelKosherForPassoverEndDate.Value > now);
             var newEffective = product.LabelNew &&
                                (!product.LabelNewEndDate.HasValue || product.LabelNewEndDate.Value > now);
-
-            using var http = _httpClientFactory.CreateClient();
-            http.Timeout = TimeSpan.FromSeconds(60);
-            http.DefaultRequestHeaders.Clear();
 
             async Task PostBool(string path, string fieldKey, bool value)
             {
@@ -1853,11 +1869,69 @@ namespace George.Services
             await PostBool("product-not-kosher", "not_kosher", product.LabelNotKosher).ConfigureAwait(false);
             await PostBool("product-kosher-for-passover", "kosher_for_passover", passoverEffective).ConfigureAwait(false);
             await PostBool("product-bestseller", "bestseller", product.LabelBestseller).ConfigureAwait(false);
+            await PostBool("product-low-availability", "low_availability", product.LabelLowAvailability).ConfigureAwait(false);
             await PostBool("product-readytocook", "readytocook", product.LabelReadyToCook).ConfigureAwait(false);
             await PostBool("product-natural", "natural", product.LabelNatural).ConfigureAwait(false);
             await PostBool("product-sugarfree", "sugarfree", product.LabelSugarFree).ConfigureAwait(false);
             await PostBool("product-lactosefree", "lactosefree", product.LabelLactoseFree).ConfigureAwait(false);
             await PostBool("product-new", "new", newEffective).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Returns whether the WooCommerce site exposes product label sync via <c>GET /wp-json/ed/v1/capabilities</c> (<c>product_labels: true</c>).
+        /// Result is cached per site root for the lifetime of the process.
+        /// </summary>
+        private async Task<bool> SiteSupportsEdProductLabelsAsync(string siteRoot, HttpClient http, CancellationToken cancelToken)
+        {
+            if (EdProductLabelsCapabilityCache.TryGetValue(siteRoot, out var cached))
+                return cached;
+
+            var supported = await ProbeEdProductLabelsCapabilityAsync(siteRoot, http, cancelToken).ConfigureAwait(false);
+            EdProductLabelsCapabilityCache[siteRoot] = supported;
+            return supported;
+        }
+
+        private async Task<bool> ProbeEdProductLabelsCapabilityAsync(string siteRoot, HttpClient http, CancellationToken cancelToken)
+        {
+            var url = $"{siteRoot}/wp-json/ed/v1/capabilities";
+            try
+            {
+                using var resp = await http.GetAsync(url, cancelToken).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation(
+                        "ED/v1 product label sync disabled for {SiteRoot}: capabilities probe returned HTTP {Status}.",
+                        siteRoot, (int)resp.StatusCode);
+                    return false;
+                }
+
+                var body = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+                using var doc = JsonDocument.Parse(body);
+                if (doc.RootElement.TryGetProperty("product_labels", out var productLabelsEl) &&
+                    (productLabelsEl.ValueKind == JsonValueKind.True || productLabelsEl.ValueKind == JsonValueKind.False))
+                {
+                    var supported = productLabelsEl.GetBoolean();
+                    if (!supported)
+                    {
+                        _logger.LogInformation(
+                            "ED/v1 product label sync disabled for {SiteRoot}: capabilities.product_labels is false.",
+                            siteRoot);
+                    }
+                    return supported;
+                }
+
+                _logger.LogInformation(
+                    "ED/v1 product label sync disabled for {SiteRoot}: capabilities response missing product_labels.",
+                    siteRoot);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogInformation(ex,
+                    "ED/v1 product label sync disabled for {SiteRoot}: capabilities probe failed.",
+                    siteRoot);
+                return false;
+            }
         }
 
         /// <summary>
@@ -2321,7 +2395,7 @@ namespace George.Services
                         var vUrl = variant.ImageUrl.Trim();
                         if (await ImageRequiresJpegMediaUploadForWooAsync(vUrl, variant.Sku, cancelToken).ConfigureAwait(false))
                         {
-                            var compatFile = $"george-woo-var-{product.Id}-{variant.Id}.jpg";
+                            var compatFile = GeorgeWooVariationImageCompatFileName(product.Id, variant.Id, vUrl);
                             int? mediaId = null;
                             if (wooVariationIdToUse.HasValue)
                                 mediaId = await TryGetWooVariationCompatImageMediaIdAsync(baseUrl, wooProductId, wooVariationIdToUse.Value, compatFile, httpClient, cancelToken).ConfigureAwait(false);
@@ -2662,6 +2736,42 @@ namespace George.Services
             if (!string.IsNullOrWhiteSpace(friendlyNameHint) && string.Equals(attachmentName, friendlyNameHint.Trim(), StringComparison.OrdinalIgnoreCase)) return true;
             if (!string.IsNullOrWhiteSpace(friendlyNameHint) && FileNamesEqualIgnoringExtension(attachmentName, friendlyNameHint.Trim())) return true;
             return FileNamesEqualIgnoringExtension(attachmentName, sideloadFileName);
+        }
+
+        /// <summary>
+        /// Stable Woo JPEG attachment name per George <see cref="ProductImage.MediaId"/> so replacing a product image uploads fresh bytes
+        /// instead of reusing an old attachment matched only by list position (<c>george-woo-{productId}-{index}.jpg</c>).
+        /// </summary>
+        private static string GeorgeWooProductImageCompatFileName(int productId, int? mediaId, int sortOrder) =>
+            mediaId is > 0
+                ? $"george-woo-{productId}-m{mediaId.Value}-p{sortOrder}.jpg"
+                : $"george-woo-{productId}-p{sortOrder}.jpg";
+
+        private static string GeorgeWooProductImageSideloadFileName(int productId, int? mediaId, string resolvedSideloadFileName)
+        {
+            if (mediaId is not > 0) return resolvedSideloadFileName;
+            var ext = Path.GetExtension(resolvedSideloadFileName);
+            if (string.IsNullOrEmpty(ext) || !FileNameHasRecognizedImageExtension(resolvedSideloadFileName))
+                ext = ".jpg";
+            return $"george-{productId}-m{mediaId.Value}{ext}";
+        }
+
+        private static string GeorgeWooVariationImageCompatFileName(int productId, int variantId, string imageUrl)
+        {
+            var fingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                Encoding.UTF8.GetBytes(imageUrl.Trim()))[..12]).ToLowerInvariant();
+            return $"george-woo-var-{productId}-{variantId}-{fingerprint}.jpg";
+        }
+
+        private static (int id, string? src, string? name) FindExistingWooImageByAttachmentName(
+            List<(int id, string? src, string? name)>? existingWooImages,
+            string attachmentName)
+        {
+            if (existingWooImages == null || string.IsNullOrWhiteSpace(attachmentName))
+                return (0, null, null);
+            var match = existingWooImages.FirstOrDefault(ex =>
+                string.Equals((ex.name ?? "").Trim(), attachmentName.Trim(), StringComparison.OrdinalIgnoreCase));
+            return match.id != 0 ? match : (0, null, null);
         }
 
         /// <summary>

@@ -114,6 +114,9 @@ namespace George.Services.Request
         /// <summary>רב מכר</summary>
         public bool? LabelBestseller { get; set; }
 
+        /// <summary>זמינות נמוכה</summary>
+        public bool? LabelLowAvailability { get; set; }
+
         /// <summary>מוכן לבישול</summary>
         public bool? LabelReadyToCook { get; set; }
 

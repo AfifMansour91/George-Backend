@@ -140,6 +140,9 @@ public partial class Product
     /// <summary>Storefront label: רב מכר → Woo ed/v1 product-bestseller.</summary>
     public bool LabelBestseller { get; set; }
 
+    /// <summary>Storefront label: זמינות נמוכה → Woo ed/v1 product-low-availability (<c>low_availability</c>).</summary>
+    public bool LabelLowAvailability { get; set; }
+
     /// <summary>Storefront label: מוכן לבישול → Woo ed/v1 product-readytocook.</summary>
     public bool LabelReadyToCook { get; set; }
 

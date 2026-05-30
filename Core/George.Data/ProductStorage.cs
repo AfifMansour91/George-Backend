@@ -442,6 +442,7 @@ namespace George.Data
             dbProduct.LabelGlutenFree = updated.LabelGlutenFree;
             dbProduct.LabelNotKosher = updated.LabelNotKosher;
             dbProduct.LabelBestseller = updated.LabelBestseller;
+            dbProduct.LabelLowAvailability = updated.LabelLowAvailability;
             dbProduct.LabelReadyToCook = updated.LabelReadyToCook;
             dbProduct.LabelNatural = updated.LabelNatural;
             dbProduct.LabelSugarFree = updated.LabelSugarFree;

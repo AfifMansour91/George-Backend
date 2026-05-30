@@ -108,6 +108,8 @@ namespace George.Services.Response
 
         public bool LabelBestseller { get; set; }
 
+        public bool LabelLowAvailability { get; set; }
+
         public bool LabelReadyToCook { get; set; }
 
         public bool LabelNatural { get; set; }
