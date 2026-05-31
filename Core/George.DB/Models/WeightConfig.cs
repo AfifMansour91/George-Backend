@@ -1,3 +1,4 @@
+using George.Common;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -36,6 +37,8 @@ public partial class WeightConfig
     public bool? ShowPricePer100g { get; set; }
 
     public bool? ShowUnitPrice { get; set; }
+
+    public OcwsuSoldByLabelKey? SoldByLabel { get; set; }
 
     [InverseProperty("WeightConfig")]
     public virtual ICollection<Product> Product { get; set; } = new List<Product>();

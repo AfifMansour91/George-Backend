@@ -1,4 +1,6 @@
 using George.Common;
+using George.Common.Utils;
+using Newtonsoft.Json;
 using System.ComponentModel.DataAnnotations;
 
 namespace George.Services.Request
@@ -33,6 +35,9 @@ namespace George.Services.Request
         public bool? WeightByVariant { get; set; }
         public bool? ShowPricePer100g { get; set; }
         public bool? ShowUnitPrice { get; set; }
+
+        [JsonConverter(typeof(OcwsuSoldByLabelKeyJsonConverter))]
+        public OcwsuSoldByLabelKey? SoldByLabel { get; set; }
     }
 
     public class ProductReq

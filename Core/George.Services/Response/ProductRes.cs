@@ -1,3 +1,7 @@
+using George.Common;
+using George.Common.Utils;
+using Newtonsoft.Json;
+
 namespace George.Services.Response
 {
     public class ProductOptionRes
@@ -30,6 +34,9 @@ namespace George.Services.Response
         public bool? WeightByVariant { get; set; }
         public bool? ShowPricePer100g { get; set; }
         public bool? ShowUnitPrice { get; set; }
+
+        [JsonConverter(typeof(OcwsuSoldByLabelKeyJsonConverter))]
+        public OcwsuSoldByLabelKey? SoldByLabel { get; set; }
     }
 
     public class ProductRes

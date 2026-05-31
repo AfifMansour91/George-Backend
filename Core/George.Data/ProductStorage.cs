@@ -1000,6 +1000,7 @@ namespace George.Data
                 WeightByVariant = req.WeightByVariant,
                 ShowPricePer100g = req.ShowPricePer100g,
                 ShowUnitPrice = req.ShowUnitPrice,
+                SoldByLabel = req.SoldByLabel,
                 IsDeleted = false
             };
 

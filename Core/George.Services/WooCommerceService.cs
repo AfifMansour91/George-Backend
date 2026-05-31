@@ -9,6 +9,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Net.Http.Headers;
 using George.Common;
+using George.Common.Utils;
 using George.Data;
 using George.DB;
 using George.Services.Request;
@@ -1521,6 +1522,17 @@ namespace George.Services
                         metaData.Add(new { key = "ocwsu_product_weight_units_", value = ocwsuWeightUnits });
                         metaData.Add(new { key = "_ocwsu_display_price_per_100g", value = weightConfig.ShowPricePer100g == true ? "yes" : "no" });
                         metaData.Add(new { key = "ocwsu_display_price_per_100g_", value = weightConfig.ShowPricePer100g == true ? "yes" : "no" });
+                        if (soldByUnits == "yes")
+                        {
+                            var showUnitPrice = weightConfig.ShowUnitPrice == true;
+                            metaData.Add(new { key = "_ocwsu_display_price_per_fixed_unit", value = showUnitPrice ? "yes" : "no" });
+                            metaData.Add(new { key = "ocwsu_display_price_per_fixed_unit_", value = showUnitPrice ? "yes" : "no" });
+                            var soldByLabelValue = showUnitPrice
+                                ? OcwsuSoldByLabel.ToApiValue(weightConfig.SoldByLabel ?? OcwsuSoldByLabel.DefaultKey)
+                                : "";
+                            metaData.Add(new { key = "_ocwsu_display_price_per_fixed_unit_label", value = soldByLabelValue });
+                            metaData.Add(new { key = "ocwsu_display_price_per_fixed_unit_label_", value = soldByLabelValue });
+                        }
                         metaData.Add(new { key = "_ocwsu_min_weight", value = weightConfig.StartWeight ?? "" });
                         metaData.Add(new { key = "ocwsu_min_weight_", value = weightConfig.StartWeight ?? "" });
                         metaData.Add(new { key = "_ocwsu_weight_step", value = weightConfig.Step ?? "" });
@@ -1794,6 +1806,15 @@ namespace George.Services
                     {
                         _logger.LogWarning(ex, "ED/v1 ACF label sync failed for product {ProductId} Woo id {WooId}; main WooCommerce product sync succeeded.", product.Id, wooCommerceId.Value);
                     }
+
+                    try
+                    {
+                        await SyncProductOcwsuFixedUnitPriceDisplayAsync(baseUrl, wooCommerceId.Value, product, cancelToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "ED/v1 OCWSU fixed unit price display sync failed for product {ProductId} Woo id {WooId}; main WooCommerce product sync succeeded.", product.Id, wooCommerceId.Value);
+                    }
                 }
 
                 // Only count as success when we actually got a WooCommerce ID (created or updated)
@@ -1875,6 +1896,134 @@ namespace George.Services
             await PostBool("product-sugarfree", "sugarfree", product.LabelSugarFree).ConfigureAwait(false);
             await PostBool("product-lactosefree", "lactosefree", product.LabelLactoseFree).ConfigureAwait(false);
             await PostBool("product-new", "new", newEffective).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// POSTs <c>display_price_per_fixed_unit</c> and label to
+        /// <c>{site}/wp-json/ed/v1/product-ocwsu-fixed-unit-price-display</c>.
+        /// </summary>
+        private async Task SyncProductOcwsuFixedUnitPriceDisplayAsync(string wcV3BaseUrl, int wooProductId, Product product, CancellationToken cancelToken)
+        {
+            var setupTypeName = product.SetupType?.Name ?? "";
+            var isWeightedBySetup = setupTypeName is "by_weight" or "by_unit" or "by_unit_and_weight";
+            var isWeighted = product.IsWeighted == true || (product.IsWeighted != false && isWeightedBySetup);
+            if (!isWeighted || product.WeightConfig == null)
+                return;
+
+            var soldByUnits = setupTypeName is "by_unit" or "by_unit_and_weight";
+            if (!soldByUnits)
+                return;
+
+            var wc = product.WeightConfig;
+            var showUnitPrice = wc.ShowUnitPrice == true;
+
+            var idx = wcV3BaseUrl.IndexOf("/wp-json", StringComparison.OrdinalIgnoreCase);
+            var siteRoot = idx > 0 ? wcV3BaseUrl.Substring(0, idx).TrimEnd('/') : wcV3BaseUrl.TrimEnd('/');
+
+            using var http = _httpClientFactory.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(60);
+            http.DefaultRequestHeaders.Clear();
+
+            var url = $"{siteRoot}/wp-json/ed/v1/product-ocwsu-fixed-unit-price-display";
+            var payload = new Dictionary<string, object>
+            {
+                ["product_id"] = wooProductId,
+                ["display_price_per_fixed_unit"] = showUnitPrice
+            };
+            if (showUnitPrice)
+            {
+                var labelKey = wc.SoldByLabel ?? OcwsuSoldByLabel.DefaultKey;
+                payload["display_price_per_fixed_unit_label"] = OcwsuSoldByLabel.ToApiValue(labelKey);
+            }
+            else
+            {
+                payload["display_price_per_fixed_unit_label"] = "";
+            }
+            var json = JsonSerializer.Serialize(payload);
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var resp = await http.PostAsync(url, content, cancelToken).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var err = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+                _logger.LogWarning(
+                    "ED/v1 POST product-ocwsu-fixed-unit-price-display failed for Woo product {WooId}: {Status} {Body}",
+                    wooProductId, (int)resp.StatusCode, err);
+            }
+        }
+
+        /// <summary>Manual sync of OCWSU fixed-unit price display for one catalog product on a site.</summary>
+        public async Task<IApiResponse<OcwsuFixedUnitPriceDisplayRes>> SyncOcwsuFixedUnitPriceDisplayAsync(
+            SyncOcwsuFixedUnitPriceDisplayReq request,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<OcwsuFixedUnitPriceDisplayRes>();
+
+            var site = await _siteStorage.GetSiteAsync(request.SiteId, cancelToken).ConfigureAwait(false);
+            if (site == null || string.IsNullOrWhiteSpace(site.WooCommerceUrl))
+                return CreateResponse(response, StatusCode.ItemNotFound, "Site not found or WooCommerce URL is not configured.");
+
+            var product = await _productStorage.GetProductAsync(request.ProductId, cancelToken).ConfigureAwait(false);
+            if (product == null)
+                return CreateResponse(response, StatusCode.ItemNotFound, "Product not found.");
+
+            var wooProductId = product.WooCommerceId;
+            if (!wooProductId.HasValue || wooProductId.Value <= 0)
+                return CreateResponse(response, StatusCode.InvalidRequest, "Product is not linked to a WooCommerce product id.");
+
+            var displayUnitPrice = request.DisplayPricePerFixedUnit
+                ?? product.WeightConfig?.ShowUnitPrice == true;
+            var labelKey = request.DisplayPricePerFixedUnitLabel
+                ?? product.WeightConfig?.SoldByLabel
+                ?? OcwsuSoldByLabel.DefaultKey;
+
+            var siteRoot = site.WooCommerceUrl.TrimEnd('/');
+            var idx = siteRoot.IndexOf("/wp-json", StringComparison.OrdinalIgnoreCase);
+            if (idx > 0)
+                siteRoot = siteRoot.Substring(0, idx).TrimEnd('/');
+
+            using var http = _httpClientFactory.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(60);
+
+            var url = $"{siteRoot}/wp-json/ed/v1/product-ocwsu-fixed-unit-price-display";
+            var payload = new Dictionary<string, object>
+            {
+                ["product_id"] = wooProductId.Value,
+                ["display_price_per_fixed_unit"] = displayUnitPrice
+            };
+            if (displayUnitPrice)
+                payload["display_price_per_fixed_unit_label"] = OcwsuSoldByLabel.ToApiValue(labelKey);
+            else
+                payload["display_price_per_fixed_unit_label"] = "";
+            var json = JsonSerializer.Serialize(payload);
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var resp = await http.PostAsync(url, content, cancelToken).ConfigureAwait(false);
+            var body = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+                return CreateResponse(response, StatusCode.InvalidRequest, $"WooCommerce OCWSU sync failed ({(int)resp.StatusCode}): {body}");
+
+            OcwsuFixedUnitPriceDisplayRes? parsed = null;
+            try
+            {
+                parsed = JsonSerializer.Deserialize<OcwsuFixedUnitPriceDisplayRes>(body, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse OCWSU fixed unit price display response for product {ProductId}", request.ProductId);
+            }
+
+            response.Data = parsed ?? new OcwsuFixedUnitPriceDisplayRes
+            {
+                ProductId = wooProductId.Value,
+                DisplayPricePerFixedUnit = displayUnitPrice,
+                DisplayPricePerFixedUnitLabel = labelKey,
+                Success = true
+            };
+            response.Data.ProductId = wooProductId.Value;
+            response.Data.Success = true;
+            return response;
         }
 
         /// <summary>

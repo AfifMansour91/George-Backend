@@ -1,3 +1,4 @@
+using George.Common.Utils;
 using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
@@ -1033,6 +1034,12 @@ public partial class GeorgeDBContextBase : DbContext
             entity.HasOne(d => d.Unit).WithMany(p => p.WeightConfig).HasConstraintName("FK_WeightConfig_Unit");
 
             entity.HasOne(d => d.UnitWeightMode).WithMany(p => p.WeightConfig).HasConstraintName("FK_WeightConfig_UnitWeightMode");
+
+            entity.Property(e => e.SoldByLabel)
+                .HasMaxLength(32)
+                .HasConversion(
+                    v => v.HasValue ? OcwsuSoldByLabel.ToApiValue(v.Value) : null,
+                    v => string.IsNullOrWhiteSpace(v) ? null : OcwsuSoldByLabel.ParseNullable(v));
         });
 
         OnModelCreatingPartial(modelBuilder);

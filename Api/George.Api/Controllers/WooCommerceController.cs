@@ -71,6 +71,17 @@ namespace George.Api.Controllers
                 _wooCommerceService.SyncToWooCommerceAsync(request, cancelToken));
         }
 
+        /// <summary>Sync OCWSU fixed-unit price display (הצג מחיר יחידה + נמכר לפי) to WooCommerce ed/v1.</summary>
+        [HttpPost("SyncOcwsuFixedUnitPriceDisplay")]
+        [ProducesResponseType(typeof(IApiResponse<OcwsuFixedUnitPriceDisplayRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> SyncOcwsuFixedUnitPriceDisplayAsync(
+            [FromBody] SyncOcwsuFixedUnitPriceDisplayReq request,
+            CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _wooCommerceService.SyncOcwsuFixedUnitPriceDisplayAsync(request, cancelToken));
+        }
+
         /// <summary>Syncs categories only and returns product IDs to sync. Client can then call Sync once per product (or batch) to avoid long-lived streams and QUIC errors.</summary>
         [HttpPost("SyncCategoriesAndGetProductIds")]
         [ProducesResponseType(typeof(IApiResponse<List<int>>), (int)HttpStatusCode.OK)]

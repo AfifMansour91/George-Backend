@@ -1,3 +1,7 @@
+using George.Common;
+using George.Common.Utils;
+using Newtonsoft.Json;
+
 namespace George.Data.Dto
 {
     public class ProductOptionDto
@@ -29,6 +33,7 @@ namespace George.Data.Dto
         public bool? WeightByVariant { get; set; }
         public bool? ShowPricePer100g { get; set; }
         public bool? ShowUnitPrice { get; set; }
+        public OcwsuSoldByLabelKey? SoldByLabel { get; set; }
     }
 
     public class ProductLookupDto

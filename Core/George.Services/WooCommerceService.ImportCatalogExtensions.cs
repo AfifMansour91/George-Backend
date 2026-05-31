@@ -416,6 +416,8 @@ public partial class WooCommerceService
             var unitType = MetaStringAny(meta, "_ocwsu_unit_weight_type", "ocwsu_unit_weight_type_");
             var wOpts = MetaStringAny(meta, "_ocwsu_unit_weight_options", "ocwsu_unit_weight_options_");
             var show100 = MetaStringAny(meta, "_ocwsu_display_price_per_100g", "ocwsu_display_price_per_100g_");
+            var showUnitPrice = MetaStringAny(meta, "_ocwsu_display_price_per_fixed_unit", "ocwsu_display_price_per_fixed_unit_");
+            var soldByLabel = MetaStringAny(meta, "_ocwsu_display_price_per_fixed_unit_label", "ocwsu_display_price_per_fixed_unit_label_");
             var getFromVar = IsMetaYes(MetaStringAny(meta, "_ocwsu_get_weight_from_variation", "ocwsu_get_weight_from_variation_"));
 
             WeightConfig wc;
@@ -437,6 +439,10 @@ public partial class WooCommerceService
             wc.UnitWeight = string.IsNullOrWhiteSpace(unitW) ? wc.UnitWeight : unitW.Trim();
             wc.WeightOptions = string.IsNullOrWhiteSpace(wOpts) ? wc.WeightOptions : wOpts.Replace("\n", ",").Trim();
             wc.ShowPricePer100g = IsMetaYes(show100) ? true : wc.ShowPricePer100g;
+            if (showUnitPrice != null)
+                wc.ShowUnitPrice = IsMetaYes(showUnitPrice);
+            if (!string.IsNullOrWhiteSpace(soldByLabel))
+                wc.SoldByLabel = George.Common.Utils.OcwsuSoldByLabel.Parse(soldByLabel);
             wc.WeightByVariant = getFromVar ? true : wc.WeightByVariant;
             wc.UnitWeightModeId = ResolveUnitWeightModeId(lk.UnitWeightModes, unitType, getFromVar) ?? wc.UnitWeightModeId;
             if (string.Equals(unitType, "fixed", StringComparison.OrdinalIgnoreCase))

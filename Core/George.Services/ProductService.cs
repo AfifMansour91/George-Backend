@@ -1168,7 +1168,8 @@ namespace George.Services
                     WeightOptions = product.WeightConfig.WeightOptions,
                     WeightByVariant = product.WeightConfig.WeightByVariant,
                     ShowPricePer100g = product.WeightConfig.ShowPricePer100g,
-                    ShowUnitPrice = product.WeightConfig.ShowUnitPrice
+                    ShowUnitPrice = product.WeightConfig.ShowUnitPrice,
+                    SoldByLabel = product.WeightConfig.SoldByLabel
                 };
             }
 
@@ -1220,7 +1221,8 @@ namespace George.Services
                     WeightOptions = req.WeightConfig.WeightOptions,
                     WeightByVariant = req.WeightConfig.WeightByVariant,
                     ShowPricePer100g = req.WeightConfig.ShowPricePer100g,
-                    ShowUnitPrice = req.WeightConfig.ShowUnitPrice
+                    ShowUnitPrice = req.WeightConfig.ShowUnitPrice,
+                    SoldByLabel = req.WeightConfig.SoldByLabel
                 } : null
             };
         }
