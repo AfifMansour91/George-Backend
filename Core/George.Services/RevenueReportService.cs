@@ -145,11 +145,13 @@ namespace George.Services
                 return (fromUtc.AddYears(-1), toUtcExclusive.AddYears(-1));
             }
 
-            if (cmp is "prev_month" or "month")
+            var p = (period ?? "month").Trim().ToLowerInvariant();
+            if (p is "month" or "last_month")
             {
                 return (fromUtc.AddMonths(-1), toUtcExclusive.AddMonths(-1));
             }
 
+            // today, week, custom: previous period of the same length (day / week / custom span)
             var len = toUtcExclusive - fromUtc;
             return (fromUtc - len, fromUtc);
         }
@@ -391,7 +393,7 @@ namespace George.Services
                     return new RevenueReportTrendPointDto
                     {
                         Date = k.date,
-                        Label = has ? b.label : k.label,
+                        Label = k.label,
                         Income = Round2(has ? b.income : 0m),
                     };
                 })
@@ -634,16 +636,19 @@ namespace George.Services
             };
         }
 
-        private static string FormatBucketLabel(DateTime israelLocal, string grouping)
+        private static string FormatBucketLabel(DateTime israelLocal, string grouping, DateTime endLocalExclusive)
         {
             var local = israelLocal.Date;
             return grouping switch
             {
-                "weekly" => $"שבוע {ISOWeek.GetWeekOfYear(local)}",
+                "weekly" => FormatWeekRangeLabel(local, endLocalExclusive),
                 "monthly" => local.ToString("MM/yyyy"),
                 _ => local.ToString("dd/MM"),
             };
         }
+
+        private static string FormatBucketLabel(DateTime israelLocal, string grouping) =>
+            FormatBucketLabel(israelLocal, grouping, israelLocal.AddDays(1));
 
         private static string BucketKey(DateTime dtUtc, string grouping) =>
             FormatBucketKey(ToIsraelLocal(dtUtc), grouping);
@@ -664,8 +669,9 @@ namespace George.Services
             while (cursor < endLocalExclusive)
             {
                 var key = FormatBucketKey(cursor, grouping);
-                var label = FormatBucketLabel(cursor, grouping);
-                yield return (key, key, label);
+                var label = FormatBucketLabel(cursor, grouping, endLocalExclusive);
+                var dateIso = cursor.ToString("yyyy-MM-dd");
+                yield return (key, dateIso, label);
                 cursor = grouping switch
                 {
                     "weekly" => cursor.AddDays(7),
@@ -673,6 +679,16 @@ namespace George.Services
                     _ => cursor.AddDays(1),
                 };
             }
+        }
+
+        private static string FormatWeekRangeLabel(DateTime weekStart, DateTime endLocalExclusive)
+        {
+            var lastDayInRange = endLocalExclusive.AddDays(-1);
+            var weekEnd = weekStart.AddDays(6);
+            if (weekEnd > lastDayInRange) weekEnd = lastDayInRange;
+            if (weekEnd < weekStart) weekEnd = weekStart;
+            if (weekStart.Date == weekEnd.Date) return weekStart.ToString("dd/MM");
+            return $"{weekStart:dd/MM}–{weekEnd:dd/MM}";
         }
 
         /// <summary>Axis buckets plus any order buckets outside the default range (e.g. late-evening charge).</summary>
