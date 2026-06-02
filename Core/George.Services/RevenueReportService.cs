@@ -241,12 +241,28 @@ namespace George.Services
             return d > 0m ? d : 0m;
         }
 
-        private static decimal ChargedAmount(Order o) =>
-            IsCancelled(o) ? 0m : (string.Equals(o.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase) ? OrderTotal(o) : 0m);
+        /// <summary>Order was charged at least once (still true after refund).</summary>
+        private static bool WasEverCharged(Order o) =>
+            o.PaidAt != null
+            || string.Equals(o.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(o.PaymentStatus, "Refunded", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Gross charged — includes paid/refunded rows even if later cancelled.</summary>
+        private static decimal GrossChargedAmount(Order o) =>
+            WasEverCharged(o) ? OrderTotal(o) : 0m;
 
         private static decimal CreditAmount(Order o) => HasCredit(o) ? OrderTotal(o) : 0m;
 
-        private static decimal CancellationAmount(Order o) => IsCancelled(o) ? OrderTotal(o) : 0m;
+        /// <summary>Cancellation KPI — every cancelled order (may also appear in credits KPI).</summary>
+        private static decimal CancellationKpiAmount(Order o) =>
+            IsCancelled(o) ? OrderTotal(o) : 0m;
+
+        /// <summary>Net deduction only when cancelled after charge without a credit note (avoids double-count with credit).</summary>
+        private static decimal CancellationNetDeduction(Order o) =>
+            IsCancelled(o) && !HasCredit(o) && WasEverCharged(o) ? OrderTotal(o) : 0m;
+
+        private static decimal OrderNetContribution(Order o) =>
+            GrossChargedAmount(o) - CreditAmount(o) - CancellationNetDeduction(o);
 
         private static string MapDisplayStatus(Order o)
         {
@@ -323,20 +339,18 @@ namespace George.Services
 
         private static RevenueReportKpisDto BuildKpis(List<Order> current, List<Order> baseline, bool byCharge)
         {
-            var charged = current.Sum(ChargedAmount);
+            var net = current.Sum(OrderNetContribution);
             var credits = current.Sum(CreditAmount);
-            var cancels = current.Sum(CancellationAmount);
-            var net = charged - credits - cancels;
+            var cancels = current.Sum(CancellationKpiAmount);
             var orderCount = byCharge
-                ? current.Count(o => ChargedAmount(o) > 0 || IsCancelled(o) || HasCredit(o))
+                ? current.Count(o => GrossChargedAmount(o) > 0 || IsCancelled(o) || HasCredit(o))
                 : current.Count;
 
-            var bCharged = baseline.Sum(ChargedAmount);
+            var bNet = baseline.Sum(OrderNetContribution);
             var bCredits = baseline.Sum(CreditAmount);
-            var bCancels = baseline.Sum(CancellationAmount);
-            var bNet = bCharged - bCredits - bCancels;
+            var bCancels = baseline.Sum(CancellationKpiAmount);
             var bOrderCount = byCharge
-                ? baseline.Count(o => ChargedAmount(o) > 0 || IsCancelled(o) || HasCredit(o))
+                ? baseline.Count(o => GrossChargedAmount(o) > 0 || IsCancelled(o) || HasCredit(o))
                 : baseline.Count;
 
             var partial = current.Count(o => HasCredit(o) && !IsFullCredit(o));
@@ -387,14 +401,14 @@ namespace George.Services
                 var dt = ReportDate(o, byCharge);
                 var key = BucketKey(dt, grouping);
                 var label = BucketLabel(dt, grouping);
-                var add = ChargedAmount(o) - CreditAmount(o) - CancellationAmount(o);
+                var add = OrderNetContribution(o);
                 if (!buckets.ContainsKey(key))
                     buckets[key] = (label, 0m);
                 var cur = buckets[key];
                 buckets[key] = (cur.label, cur.income + add);
             }
 
-            return EnumerateBuckets(fromUtc, toUtcExclusive, grouping)
+            return BuildBucketAxis(fromUtc, toUtcExclusive, grouping, buckets)
                 .Select(k =>
                 {
                     var has = buckets.TryGetValue(k.key, out var b);
@@ -422,18 +436,26 @@ namespace George.Services
                     })
                     .ToList();
 
-            return EnumerateBuckets(fromUtc, toUtcExclusive, "daily").Select(k =>
+            var dayAxisBuckets = new Dictionary<string, (string label, decimal income)>();
+            foreach (var o in orders)
+            {
+                var dt = ReportDate(o, byCharge);
+                var key = BucketKey(dt, "daily");
+                if (!dayAxisBuckets.ContainsKey(key))
+                    dayAxisBuckets[key] = (BucketLabel(dt, "daily"), 0m);
+            }
+
+            return BuildBucketAxis(fromUtc, toUtcExclusive, "daily", dayAxisBuckets).Select(k =>
             {
                 var dayOrders = orders.Where(o => BucketKey(ReportDate(o, byCharge), "daily") == k.key).ToList();
-                var charged = dayOrders.Sum(ChargedAmount);
                 var credits = dayOrders.Sum(CreditAmount);
-                var cancels = dayOrders.Sum(CancellationAmount);
+                var cancels = dayOrders.Sum(CancellationKpiAmount);
                 return new RevenueReportDayRowDto
                 {
                     Date = k.date,
                     Label = k.label,
                     Orders = dayOrders.Count,
-                    Revenue = Round2(charged - credits - cancels),
+                    Revenue = Round2(dayOrders.Sum(OrderNetContribution)),
                     Credits = Round2(credits),
                     Cancellations = Round2(cancels),
                     Discounts = Round2(dayOrders.Sum(OrderDiscount)),
@@ -480,7 +502,7 @@ namespace George.Services
             Dictionary<int, Product> products,
             HashSet<int> categoryFilter)
         {
-            var netTotal = orders.Sum(o => ChargedAmount(o) - CreditAmount(o) - CancellationAmount(o));
+            var netTotal = orders.Sum(OrderNetContribution);
             if (netTotal <= 0) netTotal = 1m;
 
             var paymentGroups = orders
@@ -489,7 +511,7 @@ namespace George.Services
                 {
                     Key = g.Key,
                     Name = g.Key,
-                    Income = Round2(g.Sum(o => ChargedAmount(o) - CreditAmount(o) - CancellationAmount(o))),
+                    Income = Round2(g.Sum(OrderNetContribution)),
                     OrderCount = g.Count(),
                 })
                 .ToList();
@@ -501,7 +523,7 @@ namespace George.Services
                 {
                     Key = g.Key,
                     Name = g.Key,
-                    Income = Round2(g.Sum(o => ChargedAmount(o) - CreditAmount(o) - CancellationAmount(o))),
+                    Income = Round2(g.Sum(OrderNetContribution)),
                     OrderCount = g.Count(),
                 })
                 .ToList();
@@ -513,7 +535,7 @@ namespace George.Services
                 {
                     Key = g.Key,
                     Name = g.Key == RevenueReportStorage.CityEmptyFilterKey ? "" : g.Key,
-                    Income = Round2(g.Sum(o => ChargedAmount(o) - CreditAmount(o) - CancellationAmount(o))),
+                    Income = Round2(g.Sum(OrderNetContribution)),
                     OrderCount = g.Count(),
                 })
                 .OrderByDescending(s => s.Income)
@@ -523,7 +545,7 @@ namespace George.Services
             var catRevenue = new Dictionary<int, (string name, decimal income, int count)>();
             foreach (var o in orders)
             {
-                var share = ChargedAmount(o) - CreditAmount(o) - CancellationAmount(o);
+                var share = OrderNetContribution(o);
                 if (share <= 0) continue;
                 foreach (var line in o.OrderItem)
                 {
@@ -622,11 +644,12 @@ namespace George.Services
                 .Select(s => new RevenueReportFilterOptionDto { Key = s, Name = s })
                 .ToList();
 
-        private static string BucketKey(DateTime dt, string grouping)
+        private static DateTime ToIsraelLocal(DateTime utc) =>
+            TimeZoneInfo.ConvertTimeFromUtc(AssumeUtc(utc), IsraelTimeZone);
+
+        private static string FormatBucketKey(DateTime israelLocal, string grouping)
         {
-            var local = TimeZoneInfo.ConvertTimeFromUtc(
-                dt.Kind == DateTimeKind.Utc ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Utc),
-                IsraelTimeZone);
+            var local = israelLocal.Date;
             return grouping switch
             {
                 "weekly" => $"{local.Year}-W{ISOWeek.GetWeekOfYear(local):D2}",
@@ -635,11 +658,9 @@ namespace George.Services
             };
         }
 
-        private static string BucketLabel(DateTime dt, string grouping)
+        private static string FormatBucketLabel(DateTime israelLocal, string grouping)
         {
-            var local = TimeZoneInfo.ConvertTimeFromUtc(
-                dt.Kind == DateTimeKind.Utc ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Utc),
-                IsraelTimeZone);
+            var local = israelLocal.Date;
             return grouping switch
             {
                 "weekly" => $"שבוע {ISOWeek.GetWeekOfYear(local)}",
@@ -648,17 +669,27 @@ namespace George.Services
             };
         }
 
+        private static string BucketKey(DateTime dtUtc, string grouping) =>
+            FormatBucketKey(ToIsraelLocal(dtUtc), grouping);
+
+        private static string BucketLabel(DateTime dtUtc, string grouping) =>
+            FormatBucketLabel(ToIsraelLocal(dtUtc), grouping);
+
+        /// <summary>Israel-calendar axis for the report window (matches order bucketing).</summary>
         private static IEnumerable<(string key, string date, string label)> EnumerateBuckets(
             DateTime fromUtc, DateTime toUtcExclusive, string grouping)
         {
-            var cursor = fromUtc.Date;
-            var end = toUtcExclusive.Date;
-            while (cursor < end)
+            var startLocal = ToIsraelLocal(fromUtc).Date;
+            var endLocalExclusive = toUtcExclusive > fromUtc
+                ? ToIsraelLocal(toUtcExclusive.AddTicks(-1)).Date.AddDays(1)
+                : startLocal;
+
+            var cursor = startLocal;
+            while (cursor < endLocalExclusive)
             {
-                var key = BucketKey(cursor, grouping);
-                var label = BucketLabel(cursor, grouping);
-                var date = grouping == "daily" ? cursor.ToString("yyyy-MM-dd") : key;
-                yield return (key, date, label);
+                var key = FormatBucketKey(cursor, grouping);
+                var label = FormatBucketLabel(cursor, grouping);
+                yield return (key, key, label);
                 cursor = grouping switch
                 {
                     "weekly" => cursor.AddDays(7),
@@ -666,6 +697,30 @@ namespace George.Services
                     _ => cursor.AddDays(1),
                 };
             }
+        }
+
+        /// <summary>Axis buckets plus any order buckets outside the default range (e.g. late-evening charge).</summary>
+        private static List<(string key, string date, string label)> BuildBucketAxis(
+            DateTime fromUtc,
+            DateTime toUtcExclusive,
+            string grouping,
+            Dictionary<string, (string label, decimal income)>? incomeBuckets = null)
+        {
+            var axis = EnumerateBuckets(fromUtc, toUtcExclusive, grouping).ToList();
+            if (incomeBuckets == null || incomeBuckets.Count == 0)
+                return axis;
+
+            var seen = new HashSet<string>(axis.Select(a => a.key));
+            foreach (var key in incomeBuckets.Keys.Where(k => !seen.Contains(k)).OrderBy(k => k, StringComparer.Ordinal))
+            {
+                var label = incomeBuckets[key].label;
+                axis.Add((key, key, label));
+            }
+
+            if (grouping == "daily")
+                axis = axis.OrderBy(a => a.date, StringComparer.Ordinal).ToList();
+
+            return axis;
         }
 
         private static decimal Round2(decimal d) => Math.Round(d, 2, MidpointRounding.AwayFromZero);
