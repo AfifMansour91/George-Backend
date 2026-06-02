@@ -29,6 +29,8 @@ namespace George.Data
 
             if (filter?.SiteId.HasValue == true)
                 query = query.Where(o => o.SiteId == filter.SiteId!.Value);
+            else if (filter?.AccountId.HasValue == true)
+                query = query.Where(o => o.AccountId == filter.AccountId!.Value);
 
             if (filter?.Status != null && filter.Status.Count > 0)
             {
