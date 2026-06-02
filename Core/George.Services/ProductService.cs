@@ -337,14 +337,34 @@ namespace George.Services
             {
                 return CreateResponse(response, StatusCode.InvalidRequest, "ProductIds required");
             }
+
+            var previousSequence = await _productStorage.GetProductIdsInDisplayOrderAsync(req.ProductIds, cancelToken);
+            var previousIndexById = previousSequence.Select((id, index) => (id, index)).ToDictionary(x => x.id, x => x.index);
+            var changedProductIds = new List<int>();
+            for (var i = 0; i < req.ProductIds.Count; i++)
+            {
+                var id = req.ProductIds[i];
+                if (!previousIndexById.TryGetValue(id, out var previousIndex) || previousIndex != i)
+                    changedProductIds.Add(id);
+            }
+
             await _productStorage.UpdateProductOrderAsync(req.ProductIds, cancelToken);
             response.Data = true;
 
-            // Sync only menu_order to WooCommerce (lightweight: one small PUT per product; no full product sync)
-            var siteToProductIds = await _productStorage.GetProductIdsBySiteForProductIdsAsync(req.ProductIds, cancelToken);
+            if (changedProductIds.Count == 0)
+                return response;
+
+            _logger.LogInformation(
+                "Product reorder: syncing menu_order for {ChangedCount} of {TotalCount} products to WooCommerce",
+                changedProductIds.Count,
+                req.ProductIds.Count);
+
+            // Sync only menu_order to WooCommerce for products whose order actually changed (not the entire catalog).
+            var siteToProductIds = await _productStorage.GetProductIdsBySiteForProductIdsAsync(changedProductIds, cancelToken);
             if (siteToProductIds.Count > 0)
             {
                 var productIdsCopy = req.ProductIds.ToList();
+                var changedSet = changedProductIds.ToHashSet();
                 _ = Task.Run(async () =>
                 {
                     try
@@ -352,14 +372,17 @@ namespace George.Services
                         using var scope = _serviceScopeFactory.CreateScope();
                         var siteStorage = scope.ServiceProvider.GetRequiredService<George.Data.SiteStorage>();
                         var wooService = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
-                        foreach (var (siteId, _) in siteToProductIds)
+                        foreach (var (siteId, siteProductIds) in siteToProductIds)
                         {
                             try
                             {
                                 var site = await siteStorage.GetSiteAsync(siteId, CancellationToken.None);
                                 if (site == null || !site.WooCommerceEnabled.HasValue || !site.WooCommerceEnabled.Value)
                                     continue;
-                                await wooService.SyncMenuOrderOnlyAsync(siteId, productIdsCopy, CancellationToken.None);
+                                var changedOnSite = siteProductIds.Where(changedSet.Contains).ToHashSet();
+                                if (changedOnSite.Count == 0)
+                                    continue;
+                                await wooService.SyncMenuOrderOnlyAsync(siteId, productIdsCopy, changedOnSite, CancellationToken.None);
                             }
                             catch (Exception ex)
                             {

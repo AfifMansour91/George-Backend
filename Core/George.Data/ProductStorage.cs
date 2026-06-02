@@ -614,7 +614,20 @@ namespace George.Data
             return true;
         }
 
-        /// <summary>Sets DisplayOrder for the given product IDs (order in list = index). Single query + single save for performance.</summary>
+        /// <summary>Product IDs from the given set, sorted the same way as the product list API (DisplayOrder asc, CreationTime desc).</summary>
+        public async Task<List<int>> GetProductIdsInDisplayOrderAsync(List<int> productIds, CancellationToken cancelToken)
+        {
+            if (productIds == null || !productIds.Any()) return new List<int>();
+            var idSet = productIds.ToHashSet();
+            return await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => idSet.Contains(p.Id))
+                .OrderBy(p => p.DisplayOrder ?? int.MaxValue)
+                .ThenByDescending(p => p.CreationTime)
+                .Select(p => p.Id)
+                .ToListAsync(cancelToken);
+        }
+
         public async Task UpdateProductOrderAsync(List<int> productIds, CancellationToken cancelToken)
         {
             if (productIds == null || !productIds.Any()) return;
@@ -675,7 +688,11 @@ namespace George.Data
         }
 
         /// <summary>Returns (WooCommerceId, DisplayOrder) for products in orderedProductIds that belong to the site and have a WooCommerceId. DisplayOrder = index in orderedProductIds. Used for menu-order-only sync.</summary>
-        public async Task<List<(int WooCommerceId, int DisplayOrder)>> GetWooCommerceIdAndDisplayOrderForSiteAsync(List<int> orderedProductIds, int siteId, CancellationToken cancelToken)
+        public async Task<List<(int WooCommerceId, int DisplayOrder)>> GetWooCommerceIdAndDisplayOrderForSiteAsync(
+            List<int> orderedProductIds,
+            int siteId,
+            CancellationToken cancelToken,
+            IReadOnlySet<int>? onlyProductIds = null)
         {
             if (orderedProductIds == null || !orderedProductIds.Any()) return new List<(int, int)>();
             var productIdsSet = orderedProductIds.Distinct().ToHashSet();
@@ -688,7 +705,10 @@ namespace George.Data
             var result = new List<(int, int)>();
             for (var i = 0; i < orderedProductIds.Count; i++)
             {
-                if (idToWooId.TryGetValue(orderedProductIds[i], out var wooId))
+                var productId = orderedProductIds[i];
+                if (onlyProductIds != null && !onlyProductIds.Contains(productId))
+                    continue;
+                if (idToWooId.TryGetValue(productId, out var wooId))
                     result.Add((wooId, i));
             }
             return result;

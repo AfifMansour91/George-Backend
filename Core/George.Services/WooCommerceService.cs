@@ -2345,15 +2345,20 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Syncs only menu_order to WooCommerce for the given ordered product IDs (e.g. after reorder). Much faster than full product sync.
+        /// Syncs only menu_order to WooCommerce for the given ordered product IDs (e.g. after reorder).
+        /// When <paramref name="onlyProductIds"/> is set, PUTs are sent only for those products (typically ones whose order changed).
         /// </summary>
-        public async Task SyncMenuOrderOnlyAsync(int siteId, List<int> orderedProductIds, CancellationToken cancelToken)
+        public async Task SyncMenuOrderOnlyAsync(
+            int siteId,
+            List<int> orderedProductIds,
+            IReadOnlySet<int>? onlyProductIds,
+            CancellationToken cancelToken)
         {
             if (orderedProductIds == null || !orderedProductIds.Any()) return;
             var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
             if (site == null || string.IsNullOrEmpty(site.WooCommerceUrl) || string.IsNullOrEmpty(site.WooCommerceKey) || string.IsNullOrEmpty(site.WooCommerceSecret))
                 return;
-            var orders = await _productStorage.GetWooCommerceIdAndDisplayOrderForSiteAsync(orderedProductIds, siteId, cancelToken);
+            var orders = await _productStorage.GetWooCommerceIdAndDisplayOrderForSiteAsync(orderedProductIds, siteId, cancelToken, onlyProductIds);
             if (orders.Count == 0) return;
             var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
             var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
@@ -2361,12 +2366,14 @@ namespace George.Services
             httpClient.Timeout = TimeSpan.FromMinutes(2);
             httpClient.DefaultRequestHeaders.Clear();
             httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
-            const int concurrency = 10;
+            const int concurrency = 3;
             for (var i = 0; i < orders.Count; i += concurrency)
             {
                 var batch = orders.Skip(i).Take(concurrency).ToList();
                 var tasks = batch.Select(o => UpdateWooCommerceProductMenuOrderAsync(baseUrl, o.WooCommerceId, o.DisplayOrder, httpClient, cancelToken));
                 await Task.WhenAll(tasks);
+                if (i + concurrency < orders.Count)
+                    await Task.Delay(150, cancelToken);
             }
         }
 
