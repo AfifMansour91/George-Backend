@@ -163,7 +163,7 @@ namespace George.Services
             DateTime toUtcExclusive;
             try
             {
-                (fromUtc, toUtcExclusive) = ResolveCurrentRange(period, customFrom, customTo, utcNow);
+                (fromUtc, toUtcExclusive) = ReportPeriodRange.ResolveCurrentRange(period, customFrom, customTo, utcNow);
             }
             catch
             {
@@ -221,39 +221,6 @@ namespace George.Services
 
             response.Data = res;
             return response;
-        }
-
-        private static (DateTime fromUtc, DateTime toUtcExclusive) ResolveCurrentRange(
-            string period,
-            DateTime? customFrom,
-            DateTime? customTo,
-            DateTime utcNow)
-        {
-            var p = (period ?? "month").Trim().ToLowerInvariant();
-            var today = utcNow.Date;
-            switch (p)
-            {
-                case "today":
-                    return (today, today.AddDays(1));
-                case "week":
-                {
-                    // שבוע קלנדרי: מיום שני 00:00 עד סוף היום (UTC), כמו שבוע נוכחי חלקי
-                    var dow = (int)today.DayOfWeek;
-                    var daysFromMonday = dow == (int)DayOfWeek.Sunday ? 6 : dow - (int)DayOfWeek.Monday;
-                    var monday = today.AddDays(-daysFromMonday);
-                    return (monday, today.AddDays(1));
-                }
-                case "month":
-                    return (new DateTime(today.Year, today.Month, 1, 0, 0, 0, DateTimeKind.Utc), today.AddDays(1));
-                case "custom":
-                    if (customFrom == null || customTo == null)
-                        throw new ArgumentException("customFrom/customTo required for custom period.");
-                    var from = DateTime.SpecifyKind(customFrom.Value.Date, DateTimeKind.Utc);
-                    var toEx = DateTime.SpecifyKind(customTo.Value.Date.AddDays(1), DateTimeKind.Utc);
-                    return (from, toEx);
-                default:
-                    return (new DateTime(today.Year, today.Month, 1, 0, 0, 0, DateTimeKind.Utc), today.AddDays(1));
-            }
         }
 
         private static (DateTime baselineFrom, DateTime baselineToExclusive) ResolveBaselineRange(
