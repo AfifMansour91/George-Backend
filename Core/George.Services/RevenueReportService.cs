@@ -87,13 +87,13 @@ namespace George.Services
             var baselineAll = await _storage.GetOrdersInWindowAsync(siteId, baselineFrom, baselineToEx, byCharge, cancelToken)
                 .ConfigureAwait(false);
 
-            var current = ApplyFilters(currentAll, search, channelFilter, paymentFilter, statusFilter, cityFilter, categoryFilter, null);
-            var baseline = ApplyFilters(baselineAll, search, channelFilter, paymentFilter, statusFilter, cityFilter, categoryFilter, null);
-
-            var productIds = current.SelectMany(o => o.OrderItem).Select(i => i.ProductId ?? 0)
-                .Concat(baseline.SelectMany(o => o.OrderItem).Select(i => i.ProductId ?? 0))
+            var allProductIds = currentAll.SelectMany(o => o.OrderItem).Select(i => i.ProductId ?? 0)
+                .Concat(baselineAll.SelectMany(o => o.OrderItem).Select(i => i.ProductId ?? 0))
                 .Where(id => id > 0).Distinct();
-            var products = await _storage.GetProductsWithCategoriesAsync(productIds, cancelToken).ConfigureAwait(false);
+            var products = await _storage.GetProductsWithCategoriesAsync(allProductIds, cancelToken).ConfigureAwait(false);
+
+            var current = ApplyFilters(currentAll, search, channelFilter, paymentFilter, statusFilter, cityFilter, categoryFilter, products);
+            var baseline = ApplyFilters(baselineAll, search, channelFilter, paymentFilter, statusFilter, cityFilter, categoryFilter, products);
 
             var grouping = ResolveGrouping(fromUtc, toUtcExclusive);
             var res = new RevenueReportRes
@@ -118,16 +118,16 @@ namespace George.Services
             res.PaymentMethods = BuildPaymentOptions();
             res.Statuses = BuildStatusOptions();
 
-            res.Kpis = BuildKpis(current, baseline, byCharge);
+            res.Kpis = BuildKpis(current, baseline, byCharge, products, categoryFilter);
             if (byCharge)
             {
                 var pipelineOrders = await _storage.GetPipelineOrdersAsync(siteId, cancelToken).ConfigureAwait(false);
                 res.Pipeline = BuildPipeline(pipelineOrders);
             }
 
-            res.TrendPoints = BuildTrend(current, fromUtc, toUtcExclusive, grouping, byCharge);
-            res.BaselineTrendPoints = BuildTrend(baseline, baselineFrom, baselineToEx, grouping, byCharge);
-            res.DayRows = BuildDayRows(current, fromUtc, toUtcExclusive, grouping, byCharge);
+            res.TrendPoints = BuildTrend(current, fromUtc, toUtcExclusive, grouping, byCharge, products, categoryFilter);
+            res.BaselineTrendPoints = BuildTrend(baseline, baselineFrom, baselineToEx, grouping, byCharge, products, categoryFilter);
+            res.DayRows = BuildDayRows(current, fromUtc, toUtcExclusive, grouping, byCharge, products, categoryFilter);
             res.DayTotals = SumDayTotals(res.DayRows);
             res.OrderRows = BuildOrderRows(current, byCharge);
             res.Segments = BuildSegments(current, products, categoryFilter);
@@ -202,7 +202,9 @@ namespace George.Services
             string.Equals(o.Status, "Cancelled", StringComparison.OrdinalIgnoreCase);
 
         private static bool HasCredit(Order o) =>
-            !string.IsNullOrWhiteSpace(o.RefundInvoiceNumber);
+            !string.IsNullOrWhiteSpace(o.RefundInvoiceNumber)
+            || !string.IsNullOrWhiteSpace(o.CardcomRefundDocumentUrl)
+            || string.Equals(o.PaymentStatus, "Refunded", StringComparison.OrdinalIgnoreCase);
 
         private static bool IsFullCredit(Order o) =>
             string.Equals(o.PaymentStatus, "Refunded", StringComparison.OrdinalIgnoreCase);
@@ -244,8 +246,8 @@ namespace George.Services
 
         private static string MapDisplayStatus(Order o)
         {
-            if (IsCancelled(o)) return "cancelled";
             if (HasCredit(o)) return "credited";
+            if (IsCancelled(o)) return "cancelled";
             if (string.Equals(o.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase)
                 && (o.Status is "Completed" or "Delivered" or "Ready"))
                 return "delivered";
@@ -312,21 +314,72 @@ namespace George.Services
                 });
             }
 
+            if (categories.Count > 0)
+                q = q.Where(o => OrderMatchesCategories(o, products, categories));
+
             return q.ToList();
         }
 
-        private static RevenueReportKpisDto BuildKpis(List<Order> current, List<Order> baseline, bool byCharge)
+        private static bool OrderMatchesCategories(Order o, Dictionary<int, Product> products, HashSet<int> categoryIds)
         {
-            var net = current.Sum(OrderNetContribution);
-            var credits = current.Sum(CreditAmount);
-            var cancels = current.Sum(CancellationKpiAmount);
+            foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
+            {
+                if (line.ProductId is not > 0 || !products.TryGetValue(line.ProductId.Value, out var p)) continue;
+                var cid = PrimaryCategoryId(p);
+                if (cid != null && categoryIds.Contains(cid.Value)) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>Share of order merchandise belonging to selected categories (0..1).</summary>
+        private static decimal CategoryFilterShare(Order o, Dictionary<int, Product> products, HashSet<int> categoryIds)
+        {
+            if (categoryIds.Count == 0) return 1m;
+            var items = o.OrderItem ?? Enumerable.Empty<OrderItem>();
+            var totalMerch = items.Sum(LineMerch);
+            if (totalMerch <= 0m) return 0m;
+            decimal matched = 0m;
+            foreach (var line in items)
+            {
+                if (line.ProductId is not > 0 || !products.TryGetValue(line.ProductId.Value, out var p)) continue;
+                var cid = PrimaryCategoryId(p);
+                if (cid != null && categoryIds.Contains(cid.Value))
+                    matched += LineMerch(line);
+            }
+
+            return matched / totalMerch;
+        }
+
+        private static decimal AllocatedNet(Order o, Dictionary<int, Product> products, HashSet<int> categoryIds) =>
+            OrderNetContribution(o) * CategoryFilterShare(o, products, categoryIds);
+
+        private static decimal AllocatedCredit(Order o, Dictionary<int, Product> products, HashSet<int> categoryIds) =>
+            CreditAmount(o) * CategoryFilterShare(o, products, categoryIds);
+
+        private static decimal AllocatedCancellation(Order o, Dictionary<int, Product> products, HashSet<int> categoryIds) =>
+            CancellationKpiAmount(o) * CategoryFilterShare(o, products, categoryIds);
+
+        private static decimal AllocatedDiscount(Order o, Dictionary<int, Product> products, HashSet<int> categoryIds) =>
+            OrderDiscount(o) * CategoryFilterShare(o, products, categoryIds);
+
+        private static RevenueReportKpisDto BuildKpis(
+            List<Order> current,
+            List<Order> baseline,
+            bool byCharge,
+            Dictionary<int, Product> products,
+            HashSet<int> categoryIds)
+        {
+            var net = current.Sum(o => AllocatedNet(o, products, categoryIds));
+            var credits = current.Sum(o => AllocatedCredit(o, products, categoryIds));
+            var cancels = current.Sum(o => AllocatedCancellation(o, products, categoryIds));
             var orderCount = byCharge
                 ? current.Count(o => GrossChargedAmount(o) > 0 || IsCancelled(o) || HasCredit(o))
                 : current.Count;
 
-            var bNet = baseline.Sum(OrderNetContribution);
-            var bCredits = baseline.Sum(CreditAmount);
-            var bCancels = baseline.Sum(CancellationKpiAmount);
+            var bNet = baseline.Sum(o => AllocatedNet(o, products, categoryIds));
+            var bCredits = baseline.Sum(o => AllocatedCredit(o, products, categoryIds));
+            var bCancels = baseline.Sum(o => AllocatedCancellation(o, products, categoryIds));
             var bOrderCount = byCharge
                 ? baseline.Count(o => GrossChargedAmount(o) > 0 || IsCancelled(o) || HasCredit(o))
                 : baseline.Count;
@@ -371,7 +424,13 @@ namespace George.Services
         }
 
         private static List<RevenueReportTrendPointDto> BuildTrend(
-            List<Order> orders, DateTime fromUtc, DateTime toUtcExclusive, string grouping, bool byCharge)
+            List<Order> orders,
+            DateTime fromUtc,
+            DateTime toUtcExclusive,
+            string grouping,
+            bool byCharge,
+            Dictionary<int, Product> products,
+            HashSet<int> categoryIds)
         {
             var buckets = new Dictionary<string, (string label, decimal income)>();
             foreach (var o in orders)
@@ -379,7 +438,7 @@ namespace George.Services
                 var dt = ReportDate(o, byCharge);
                 var key = BucketKey(dt, grouping);
                 var label = BucketLabel(dt, grouping);
-                var add = OrderNetContribution(o);
+                var add = AllocatedNet(o, products, categoryIds);
                 if (!buckets.ContainsKey(key))
                     buckets[key] = (label, 0m);
                 var cur = buckets[key];
@@ -401,10 +460,16 @@ namespace George.Services
         }
 
         private static List<RevenueReportDayRowDto> BuildDayRows(
-            List<Order> orders, DateTime fromUtc, DateTime toUtcExclusive, string grouping, bool byCharge)
+            List<Order> orders,
+            DateTime fromUtc,
+            DateTime toUtcExclusive,
+            string grouping,
+            bool byCharge,
+            Dictionary<int, Product> products,
+            HashSet<int> categoryIds)
         {
             if (grouping != "daily")
-                return BuildTrend(orders, fromUtc, toUtcExclusive, grouping, byCharge)
+                return BuildTrend(orders, fromUtc, toUtcExclusive, grouping, byCharge, products, categoryIds)
                     .Select(t => new RevenueReportDayRowDto
                     {
                         Date = t.Date,
@@ -426,17 +491,17 @@ namespace George.Services
             return BuildBucketAxis(fromUtc, toUtcExclusive, "daily", dayAxisBuckets).Select(k =>
             {
                 var dayOrders = orders.Where(o => BucketKey(ReportDate(o, byCharge), "daily") == k.key).ToList();
-                var credits = dayOrders.Sum(CreditAmount);
-                var cancels = dayOrders.Sum(CancellationKpiAmount);
+                var credits = dayOrders.Sum(o => AllocatedCredit(o, products, categoryIds));
+                var cancels = dayOrders.Sum(o => AllocatedCancellation(o, products, categoryIds));
                 return new RevenueReportDayRowDto
                 {
                     Date = k.date,
                     Label = k.label,
                     Orders = dayOrders.Count,
-                    Revenue = Round2(dayOrders.Sum(OrderNetContribution)),
+                    Revenue = Round2(dayOrders.Sum(o => AllocatedNet(o, products, categoryIds))),
                     Credits = Round2(credits),
                     Cancellations = Round2(cancels),
-                    Discounts = Round2(dayOrders.Sum(OrderDiscount)),
+                    Discounts = Round2(dayOrders.Sum(o => AllocatedDiscount(o, products, categoryIds))),
                 };
             }).ToList();
         }
@@ -480,7 +545,7 @@ namespace George.Services
             Dictionary<int, Product> products,
             HashSet<int> categoryFilter)
         {
-            var netTotal = orders.Sum(OrderNetContribution);
+            var netTotal = orders.Sum(o => AllocatedNet(o, products, categoryFilter));
             if (netTotal <= 0) netTotal = 1m;
 
             var paymentGroups = orders
@@ -489,7 +554,7 @@ namespace George.Services
                 {
                     Key = g.Key,
                     Name = g.Key,
-                    Income = Round2(g.Sum(OrderNetContribution)),
+                    Income = Round2(g.Sum(o => AllocatedNet(o, products, categoryFilter))),
                     OrderCount = g.Count(),
                 })
                 .ToList();
@@ -501,7 +566,7 @@ namespace George.Services
                 {
                     Key = g.Key,
                     Name = g.Key,
-                    Income = Round2(g.Sum(OrderNetContribution)),
+                    Income = Round2(g.Sum(o => AllocatedNet(o, products, categoryFilter))),
                     OrderCount = g.Count(),
                 })
                 .ToList();
@@ -513,7 +578,7 @@ namespace George.Services
                 {
                     Key = g.Key,
                     Name = g.Key == RevenueReportStorage.CityEmptyFilterKey ? "" : g.Key,
-                    Income = Round2(g.Sum(OrderNetContribution)),
+                    Income = Round2(g.Sum(o => AllocatedNet(o, products, categoryFilter))),
                     OrderCount = g.Count(),
                 })
                 .OrderByDescending(s => s.Income)
@@ -523,8 +588,8 @@ namespace George.Services
             var catRevenue = new Dictionary<int, (string name, decimal income, int count)>();
             foreach (var o in orders)
             {
-                var share = OrderNetContribution(o);
-                if (share <= 0) continue;
+                var orderNet = OrderNetContribution(o);
+                if (orderNet <= 0) continue;
                 foreach (var line in o.OrderItem)
                 {
                     if (line.ProductId is not > 0 || !products.TryGetValue(line.ProductId.Value, out var p)) continue;
@@ -534,7 +599,7 @@ namespace George.Services
                     var merch = LineMerch(line);
                     var totalMerch = o.OrderItem.Sum(LineMerch);
                     if (totalMerch <= 0) continue;
-                    var part = share * (merch / totalMerch);
+                    var part = orderNet * (merch / totalMerch);
                     var catName = p.ProductCategory?.FirstOrDefault(x => x.CategoryId == cid)?.Category?.Name ?? "";
                     if (!catRevenue.ContainsKey(cid.Value))
                         catRevenue[cid.Value] = (catName, 0m, 0);
@@ -618,7 +683,7 @@ namespace George.Services
             }.Select(x => new RevenueReportFilterOptionDto { Key = x.Item1, Name = x.Item2 }).ToList();
 
         private static List<RevenueReportFilterOptionDto> BuildStatusOptions() =>
-            new[] { "delivered", "credited", "cancelled", "pending" }
+            new[] { "delivered", "credited", "cancelled" }
                 .Select(s => new RevenueReportFilterOptionDto { Key = s, Name = s })
                 .ToList();
 
