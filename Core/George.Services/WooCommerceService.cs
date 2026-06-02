@@ -122,9 +122,8 @@ namespace George.Services
 
                 _logger.LogInformation("WooCommerce sync started for site {SiteId} (product filter: {Filter})", req.SiteId, req.ProductIds != null ? string.Join(",", req.ProductIds) : "all");
 
-                // Sync categories first
-                var categoryMap = await SyncCategoriesAsync(baseUrl, req.SiteId, httpClient, cancelToken);
-                _logger.LogInformation("WooCommerce sync: categories completed for site {SiteId}, {Count} categories mapped", req.SiteId, categoryMap.Count);
+                var categoryMap = await ResolveCategoryMapForSyncAsync(req, baseUrl, httpClient, cancelToken);
+                _logger.LogInformation("WooCommerce sync: categories ready for site {SiteId}, {Count} categories mapped", req.SiteId, categoryMap.Count);
 
                 // Sync products
                 var syncResults = await SyncProductsAsync(
@@ -208,8 +207,8 @@ namespace George.Services
 
             _logger.LogInformation("WooCommerce sync (with progress) started for site {SiteId}", req.SiteId);
 
-            var categoryMap = await SyncCategoriesAsync(baseUrl, req.SiteId, httpClient, cancelToken);
-            _logger.LogInformation("WooCommerce sync: categories completed for site {SiteId}, {Count} categories mapped", req.SiteId, categoryMap.Count);
+            var categoryMap = await ResolveCategoryMapForSyncAsync(req, baseUrl, httpClient, cancelToken);
+            _logger.LogInformation("WooCommerce sync: categories ready for site {SiteId}, {Count} categories mapped", req.SiteId, categoryMap.Count);
 
             var syncResults = await SyncProductsAsync(
                 baseUrl,
@@ -551,6 +550,108 @@ namespace George.Services
             if (categoryMap.Count < categories.Count)
                 _logger.LogWarning("WooCommerce sync categories: site {SiteId}, {Mapped} of {Total} categories mapped (some failed)", siteId, categoryMap.Count, categories.Count);
             return categoryMap;
+        }
+
+        /// <summary>
+        /// Product-scoped sync uses WooCommerce IDs already stored on categories (no full category push).
+        /// Full-catalog sync (no product filter) still runs <see cref="SyncCategoriesAsync"/>.
+        /// Missing categories for the products being synced are pushed on demand only.
+        /// </summary>
+        private async Task<Dictionary<int, int>> ResolveCategoryMapForSyncAsync(
+            WooCommerceSyncReq req,
+            string baseUrl,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            if (req.ProductIds == null || !req.ProductIds.Any())
+                return await SyncCategoriesAsync(baseUrl, req.SiteId, httpClient, cancelToken);
+
+            var categoryMap = await LoadCategoryMapFromDbAsync(req.SiteId, cancelToken);
+            var neededCategoryIds = await _productStorage.GetCategoryIdsForProductsOnSiteAsync(req.ProductIds, req.SiteId, cancelToken);
+            var missing = neededCategoryIds.Where(id => !categoryMap.ContainsKey(id)).ToList();
+
+            if (missing.Count > 0)
+            {
+                _logger.LogInformation(
+                    "WooCommerce sync: syncing {MissingCount} uncached categories for site {SiteId} (product-scoped sync)",
+                    missing.Count,
+                    req.SiteId);
+                await SyncMissingCategoriesAsync(baseUrl, req.SiteId, missing, categoryMap, httpClient, cancelToken);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "WooCommerce sync: using cached category map for site {SiteId}, {Count} categories (product-scoped sync, no category API calls)",
+                    req.SiteId,
+                    categoryMap.Count);
+            }
+
+            return categoryMap;
+        }
+
+        private async Task<Dictionary<int, int>> LoadCategoryMapFromDbAsync(int siteId, CancellationToken cancelToken)
+        {
+            var categoriesResult = await _categoryStorage.GetCategoriesAsync(
+                new CategoryFilter { SiteId = siteId },
+                new PagingExDto { Skip = 0, Take = 10000, IncludeTotal = false },
+                cancelToken);
+
+            return categoriesResult.Items
+                .Where(c => !c.IsDeleted && c.IsActive && c.WooCommerceId.HasValue && c.WooCommerceId.Value > 0)
+                .ToDictionary(c => c.Id, c => c.WooCommerceId!.Value);
+        }
+
+        private async Task SyncMissingCategoriesAsync(
+            string baseUrl,
+            int siteId,
+            IReadOnlyList<int> missingCategoryIds,
+            Dictionary<int, int> categoryMap,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            if (missingCategoryIds == null || missingCategoryIds.Count == 0)
+                return;
+
+            var categoriesResult = await _categoryStorage.GetCategoriesAsync(
+                new CategoryFilter { SiteId = siteId },
+                new PagingExDto { Skip = 0, Take = 10000, IncludeTotal = false },
+                cancelToken);
+            var byId = categoriesResult.Items
+                .Where(c => !c.IsDeleted && c.IsActive)
+                .ToDictionary(c => c.Id);
+
+            async Task SyncOneAsync(int categoryId)
+            {
+                if (categoryMap.ContainsKey(categoryId))
+                    return;
+                if (!byId.TryGetValue(categoryId, out var category))
+                    return;
+
+                if (category.ParentCategoryId.HasValue && !categoryMap.ContainsKey(category.ParentCategoryId.Value))
+                    await SyncOneAsync(category.ParentCategoryId.Value);
+
+                int? parentWooId = null;
+                if (category.ParentCategoryId.HasValue &&
+                    categoryMap.TryGetValue(category.ParentCategoryId.Value, out var parentWoo))
+                    parentWooId = parentWoo;
+
+                try
+                {
+                    var wooCatId = await SyncCategoryAsync(baseUrl, category, parentWooId, httpClient, cancelToken);
+                    if (wooCatId.HasValue)
+                    {
+                        categoryMap[category.Id] = wooCatId.Value;
+                        await _categoryStorage.UpdateCategoryWooCommerceIdAsync(category.Id, wooCatId.Value, cancelToken);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to sync missing category {CategoryId} ({CategoryName})", category.Id, category.Name);
+                }
+            }
+
+            foreach (var id in missingCategoryIds.Distinct())
+                await SyncOneAsync(id);
         }
 
         /// <summary>

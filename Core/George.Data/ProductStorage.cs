@@ -647,6 +647,20 @@ namespace George.Data
             await _dbContext.SaveChangesAsync(cancelToken);
         }
 
+        /// <summary>Returns distinct category IDs assigned to the given products on a site.</summary>
+        public async Task<List<int>> GetCategoryIdsForProductsOnSiteAsync(List<int> productIds, int siteId, CancellationToken cancelToken)
+        {
+            if (productIds == null || !productIds.Any() || siteId <= 0)
+                return new List<int>();
+            var idSet = productIds.Distinct().ToList();
+            return await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => idSet.Contains(p.Id) && !p.IsDeleted && p.Site.Any(s => s.Id == siteId))
+                .SelectMany(p => p.ProductCategory.Select(pc => pc.CategoryId))
+                .Distinct()
+                .ToListAsync(cancelToken);
+        }
+
         /// <summary>Returns siteId -> list of product IDs for products that belong to that site. Used to sync order to WooCommerce per site.</summary>
         public async Task<Dictionary<int, List<int>>> GetProductIdsBySiteForProductIdsAsync(List<int> productIds, CancellationToken cancelToken)
         {
