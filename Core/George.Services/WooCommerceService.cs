@@ -908,15 +908,21 @@ namespace George.Services
             var slug = SlugifyAttributeName(attribute.Name);
             var wooAttrData = new { name = attribute.Name, slug, type = "select", order_by = "menu_order", has_archives = false };
 
-            // First, check if we have a stored WooCommerceId and try to update
-            if (attribute.WooCommerceId.HasValue)
+            // Mapped attribute: only ensure new option values exist as terms (no attribute PUT on every product save).
+            if (attribute.WooCommerceId is > 0)
             {
-                var (updatedId, updatedSlug) = await TryUpdateProductAttributeAsync(baseUrl, attribute.WooCommerceId.Value, wooAttrData, httpClient, cancelToken);
-                if (updatedId.HasValue)
-                {
-                    await SyncAttributeTermsAsync(baseUrl, updatedId.Value, attribute, httpClient, cancelToken);
-                    return (updatedId.Value, updatedSlug ?? slug);
-                }
+                var requiredTerms = attribute.AttributeValue?
+                    .Select(av => av.Value)
+                    .Where(v => !string.IsNullOrWhiteSpace(v))
+                    .Select(v => v!.Trim())
+                    .ToList() ?? new List<string>();
+                return await SyncMappedAttributeTermsOnlyAsync(
+                    baseUrl,
+                    attribute.WooCommerceId.Value,
+                    attribute.Name,
+                    requiredTerms,
+                    httpClient,
+                    cancelToken);
             }
 
             // If update failed or no WooCommerceId, try to find existing attribute by name/slug
@@ -971,9 +977,90 @@ namespace George.Services
         /// <summary>Per-request timeout for attribute term POST so a single slow/hanging request doesn't block sync (default HttpClient timeout is 30 min).</summary>
         private static readonly TimeSpan AttributeTermRequestTimeout = TimeSpan.FromSeconds(220);
 
+        private async Task<HashSet<string>> GetWooCommerceAttributeTermNamesAsync(
+            string baseUrl,
+            int wooAttrId,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            const int perPage = 100;
+            for (var page = 1; page <= 10; page++)
+            {
+                var url = $"{baseUrl}/products/attributes/{wooAttrId}/terms?per_page={perPage}&page={page}";
+                var response = await httpClient.GetAsync(url, cancelToken);
+                if (!response.IsSuccessStatusCode)
+                    break;
+                var body = await response.Content.ReadAsStringAsync(cancelToken);
+                var list = TryDeserialize<List<WooCommerceAttributeTermListItem>>(body);
+                if (list == null || list.Count == 0)
+                    break;
+                foreach (var t in list)
+                {
+                    if (!string.IsNullOrWhiteSpace(t.name))
+                        names.Add(t.name.Trim());
+                }
+                if (list.Count < perPage)
+                    break;
+            }
+            return names;
+        }
+
+        private async Task<string?> GetWooCommerceAttributeSlugAsync(
+            string baseUrl,
+            int wooAttrId,
+            string fallbackSlug,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            var getUrl = $"{baseUrl}/products/attributes/{wooAttrId}";
+            var response = await httpClient.GetAsync(getUrl, cancelToken);
+            if (!response.IsSuccessStatusCode)
+                return fallbackSlug;
+            var body = await response.Content.ReadAsStringAsync(cancelToken);
+            var attr = TryDeserialize<WooCommerceAttributeResponse>(body);
+            return !string.IsNullOrWhiteSpace(attr?.slug) ? attr.slug : fallbackSlug;
+        }
+
+        /// <summary>Product save path: attribute already mapped in DB — skip attribute PUT; POST only new term values.</summary>
+        private async Task<(int? id, string? slug)> SyncMappedAttributeTermsOnlyAsync(
+            string baseUrl,
+            int wooAttrId,
+            string attributeName,
+            IReadOnlyList<string> requiredTermValues,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            var fallbackSlug = SlugifyAttributeName(attributeName);
+            var slug = await GetWooCommerceAttributeSlugAsync(baseUrl, wooAttrId, fallbackSlug, httpClient, cancelToken);
+
+            var existingTerms = await GetWooCommerceAttributeTermNamesAsync(baseUrl, wooAttrId, httpClient, cancelToken);
+            var missing = requiredTermValues
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Select(v => v.Trim())
+                .Where(v => !existingTerms.Contains(v))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (missing.Count > 0)
+            {
+                _logger.LogInformation(
+                    "WooCommerce sync: posting {Count} new attribute terms for attribute {WooAttrId} ({Name})",
+                    missing.Count, wooAttrId, attributeName);
+                await SyncAttributeTermValuesAsync(baseUrl, wooAttrId, missing, httpClient, cancelToken);
+            }
+
+            return (wooAttrId, slug);
+        }
+
         private async Task SyncAttributeTermsAsync(string baseUrl, int wooAttrId, Attribute attribute, HttpClient httpClient, CancellationToken cancelToken)
         {
             var values = attribute.AttributeValue?.Select(av => av.Value).Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? new List<string>();
+            await SyncAttributeTermValuesAsync(baseUrl, wooAttrId, values, httpClient, cancelToken);
+        }
+
+        private async Task SyncAttributeTermValuesAsync(string baseUrl, int wooAttrId, IReadOnlyList<string> values, HttpClient httpClient, CancellationToken cancelToken)
+        {
             foreach (var value in values)
             {
                 var name = value?.Trim();
@@ -984,7 +1071,6 @@ namespace George.Services
                 var termPayload = new WooCommerceAttributeTermPayload { name = name };
                 var opts = new JsonSerializerOptions { PropertyNamingPolicy = null };
                 var termBody = JsonSerializer.Serialize(termPayload, opts);
-                _logger.LogInformation("WooCommerce attribute term POST body: {Body}", termBody);
                 using var termContent = new StringContent(termBody, Encoding.UTF8, "application/json");
 
                 HttpResponseMessage? termRes = null;
@@ -1080,6 +1166,18 @@ namespace George.Services
                             GuidId = Guid.NewGuid()
                         },
                         attributeValues,
+                        cancelToken);
+                }
+
+                // Already linked to Woo: skip full attribute sync; POST only new option values from this product.
+                if (attribute.WooCommerceId is > 0)
+                {
+                    return await SyncMappedAttributeTermsOnlyAsync(
+                        baseUrl,
+                        attribute.WooCommerceId.Value,
+                        attribute.Name,
+                        attributeValues,
+                        httpClient,
                         cancelToken);
                 }
 
@@ -2533,15 +2631,35 @@ namespace George.Services
             var weightFromVariation = product.WeightConfig?.WeightByVariant == true
                 || string.Equals(product.WeightConfig?.UnitWeightMode?.Name, "by_variant", StringComparison.OrdinalIgnoreCase);
 
-            // Fetch existing WooCommerce variations so we can match by attributes (avoid duplicates) and delete removed ones
-            var existingWoo = await GetExistingWooCommerceVariationsAsync(baseUrl, wooProductId, httpClient, cancelToken);
-            var existingIdsSet = existingWoo.Select(x => x.id).ToHashSet();
-            // signature -> list of Woo variation ids (so we can match one per our variant and delete the rest as duplicates)
+            var allVariantsHaveWooId = variants.Count > 0 &&
+                variants.All(v => v.WooCommerceVariationId is > 0);
+            var needSignatureLookup = variants.Any(v => !v.WooCommerceVariationId.HasValue || v.WooCommerceVariationId <= 0);
+
+            List<(int id, string signature)> existingWoo;
+            if (allVariantsHaveWooId && !needSignatureLookup)
+            {
+                existingWoo = new List<(int id, string signature)>();
+                _logger.LogDebug(
+                    "WooCommerce sync: skipping variation list fetch for product {ProductId} ({Count} variants with stored Woo ids)",
+                    product.Id, variants.Count);
+            }
+            else
+            {
+                var maxPages = variants.Count <= 100 ? 1 : MaxVariationFetchPages;
+                existingWoo = await GetExistingWooCommerceVariationsAsync(baseUrl, wooProductId, httpClient, cancelToken, maxPages);
+            }
+
+            var existingIdsSet = existingWoo.Count > 0
+                ? existingWoo.Select(x => x.id).ToHashSet()
+                : (allVariantsHaveWooId
+                    ? variants.Select(v => v.WooCommerceVariationId!.Value).ToHashSet()
+                    : new HashSet<int>());
             var signatureToIds = existingWoo
                 .GroupBy(x => x.signature ?? "")
                 .ToDictionary(g => g.Key, g => g.Select(x => x.id).ToList());
 
             var usedWooVariationIds = new HashSet<int>();
+            var variantSyncWork = new List<(ProductVariant variant, int? wooVariationIdToUse, Dictionary<string, object> wooPayload)>();
             var wpJsonBaseForMedia = GetWordPressRestBaseUrlFromWooV3BaseUrl(baseUrl);
 
             // Per-variation stock in Woo whenever George uses stock_management_type "variation" (qty or binary in/out).
@@ -2592,11 +2710,12 @@ namespace George.Services
                     var ourSignature = BuildOurVariationSignature(variantOptionValues, attributeMap);
                     int? wooVariationIdToUse = null;
 
-                    // 1) Prefer our stored WooCommerce variation id if it still exists in WooCommerce
-                    if (variant.WooCommerceVariationId.HasValue && existingIdsSet.Contains(variant.WooCommerceVariationId.Value))
+                    // 1) Prefer our stored WooCommerce variation id (trust DB when all variants mapped; else verify against Woo list)
+                    if (variant.WooCommerceVariationId is > 0 &&
+                        (allVariantsHaveWooId || existingIdsSet.Contains(variant.WooCommerceVariationId!.Value)))
                     {
-                        wooVariationIdToUse = variant.WooCommerceVariationId.Value;
-                        usedWooVariationIds.Add(wooVariationIdToUse.Value);
+                        wooVariationIdToUse = variant.WooCommerceVariationId!.Value;
+                        usedWooVariationIds.Add(variant.WooCommerceVariationId!.Value);
                     }
                     // 2) Else match by attribute signature (same combination = same variation; avoids creating duplicates)
                     else if (!string.IsNullOrEmpty(ourSignature) && signatureToIds.TryGetValue(ourSignature, out var idList) && idList.Count > 0)
@@ -2700,61 +2819,48 @@ namespace George.Services
                         }
                     }
 
-                    int? wooVariationId = null;
-
-                    if (wooVariationIdToUse.HasValue)
-                    {
-                        var updateUrl = $"{baseUrl}/products/{wooProductId}/variations/{wooVariationIdToUse.Value}";
-                        var updateJson = JsonSerializer.Serialize(wooVariation, WooVariationJsonOptions);
-                        using var updateContent = new StringContent(updateJson, Encoding.UTF8, "application/json");
-                        var updateResponse = await httpClient.PutAsync(updateUrl, updateContent, cancelToken);
-                        if (updateResponse.IsSuccessStatusCode)
-                        {
-                            var updated = await JsonSerializer.DeserializeAsync<WooCommerceVariationResponse>(
-                                await updateResponse.Content.ReadAsStreamAsync(cancelToken),
-                                cancellationToken: cancelToken);
-                            wooVariationId = updated?.id;
-                        }
-                        else
-                        {
-                            var err = await updateResponse.Content.ReadAsStringAsync(cancelToken);
-                            _logger.LogWarning(
-                                "WooCommerce variation PUT failed ({Status}) product {ProductId} variation {WooVariationId}: {Error}",
-                                (int)updateResponse.StatusCode, product.Id, wooVariationIdToUse.Value, err);
-                        }
-                    }
-
-                    if (!wooVariationId.HasValue)
-                    {
-                        var createUrl = $"{baseUrl}/products/{wooProductId}/variations";
-                        var createJson = JsonSerializer.Serialize(wooVariation, WooVariationJsonOptions);
-                        using var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
-                        var createResponse = await httpClient.PostAsync(createUrl, createContent, cancelToken);
-                        if (createResponse.IsSuccessStatusCode)
-                        {
-                            var created = await JsonSerializer.DeserializeAsync<WooCommerceVariationResponse>(
-                                await createResponse.Content.ReadAsStreamAsync(cancelToken),
-                                cancellationToken: cancelToken);
-                            wooVariationId = created?.id;
-                        }
-                        else
-                        {
-                            var errorContent = await createResponse.Content.ReadAsStringAsync(cancelToken);
-                            _logger.LogWarning("Failed to create variation for product {ProductId}: {Error}", product.Id, errorContent);
-                        }
-                    }
-
-                    if (wooVariationId.HasValue && variant.WooCommerceVariationId != wooVariationId.Value)
-                        await _productStorage.UpdateProductVariantWooCommerceIdAsync(variant.Id, wooVariationId.Value, cancelToken);
+                    variantSyncWork.Add((variant, wooVariationIdToUse, wooVariation));
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to sync variation {VariantId} for product {ProductId}", variant.Id, product.Id);
+                    _logger.LogError(ex, "Failed to prepare variation {VariantId} for product {ProductId}", variant.Id, product.Id);
                 }
             }
 
-            // Delete WooCommerce variations that we no longer have (removed in our product) or duplicates (same signature).
-            // Run deletes in parallel with limited concurrency to avoid blocking and to speed up.
+            const int variationSyncConcurrency = 4;
+            for (var i = 0; i < variantSyncWork.Count; i += variationSyncConcurrency)
+            {
+                var batch = variantSyncWork.Skip(i).Take(variationSyncConcurrency).ToList();
+                var batchResults = await Task.WhenAll(batch.Select(async work =>
+                {
+                    var (variant, wooVariationIdToUse, wooVariation) = work;
+                    try
+                    {
+                        var wooVariationId = await PushVariantPayloadToWooCommerceAsync(
+                            baseUrl, wooProductId, product.Id, wooVariationIdToUse, wooVariation, httpClient, cancelToken);
+                        return (variant, wooVariationId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to sync variation {VariantId} for product {ProductId}", variant.Id, product.Id);
+                        return (variant, (int?)null);
+                    }
+                }));
+
+                foreach (var (variant, wooVariationId) in batchResults)
+                {
+                    if (wooVariationId.HasValue && variant.WooCommerceVariationId != wooVariationId.Value)
+                        await _productStorage.UpdateProductVariantWooCommerceIdAsync(variant.Id, wooVariationId.Value, cancelToken);
+                }
+            }
+
+            // Orphan cleanup: when all variants were mapped we only loaded one page of Woo ids — fetch full list if needed.
+            if (allVariantsHaveWooId && !needSignatureLookup && variants.Count > VariationsPerPage)
+            {
+                var fullWooList = await GetExistingWooCommerceVariationsAsync(baseUrl, wooProductId, httpClient, cancelToken);
+                existingIdsSet = fullWooList.Select(x => x.id).ToHashSet();
+            }
+
             var toDelete = existingIdsSet.Where(id => !usedWooVariationIds.Contains(id)).ToList();
             const int deleteConcurrency = 5;
             for (var i = 0; i < toDelete.Count; i += deleteConcurrency)
@@ -2786,14 +2892,62 @@ namespace George.Services
         private const int MaxVariationFetchPages = 5;
         private const int VariationsPerPage = 100;
 
+        private async Task<int?> PushVariantPayloadToWooCommerceAsync(
+            string baseUrl,
+            int wooProductId,
+            int productId,
+            int? wooVariationIdToUse,
+            Dictionary<string, object> wooVariation,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            if (wooVariationIdToUse.HasValue)
+            {
+                var updateUrl = $"{baseUrl}/products/{wooProductId}/variations/{wooVariationIdToUse.Value}";
+                var updateJson = JsonSerializer.Serialize(wooVariation, WooVariationJsonOptions);
+                using var updateContent = new StringContent(updateJson, Encoding.UTF8, "application/json");
+                var updateResponse = await httpClient.PutAsync(updateUrl, updateContent, cancelToken);
+                if (updateResponse.IsSuccessStatusCode)
+                {
+                    var updated = await JsonSerializer.DeserializeAsync<WooCommerceVariationResponse>(
+                        await updateResponse.Content.ReadAsStreamAsync(cancelToken),
+                        cancellationToken: cancelToken);
+                    return updated?.id;
+                }
+
+                var err = await updateResponse.Content.ReadAsStringAsync(cancelToken);
+                _logger.LogWarning(
+                    "WooCommerce variation PUT failed ({Status}) product {ProductId} variation {WooVariationId}: {Error}",
+                    (int)updateResponse.StatusCode, productId, wooVariationIdToUse.Value, err);
+            }
+
+            var createUrl = $"{baseUrl}/products/{wooProductId}/variations";
+            var createJson = JsonSerializer.Serialize(wooVariation, WooVariationJsonOptions);
+            using var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
+            var createResponse = await httpClient.PostAsync(createUrl, createContent, cancelToken);
+            if (createResponse.IsSuccessStatusCode)
+            {
+                var created = await JsonSerializer.DeserializeAsync<WooCommerceVariationResponse>(
+                    await createResponse.Content.ReadAsStreamAsync(cancelToken),
+                    cancellationToken: cancelToken);
+                return created?.id;
+            }
+
+            var errorContent = await createResponse.Content.ReadAsStringAsync(cancelToken);
+            _logger.LogWarning("Failed to create variation for product {ProductId}: {Error}", productId, errorContent);
+            return null;
+        }
+
         private static async Task<List<(int id, string signature)>> GetExistingWooCommerceVariationsAsync(
             string baseUrl,
             int wooProductId,
             HttpClient httpClient,
-            CancellationToken cancelToken)
+            CancellationToken cancelToken,
+            int? maxPages = null)
         {
             var result = new List<(int id, string signature)>();
-            for (var page = 1; page <= MaxVariationFetchPages; page++)
+            var pageLimit = maxPages ?? MaxVariationFetchPages;
+            for (var page = 1; page <= pageLimit; page++)
             {
                 var url = $"{baseUrl}/products/{wooProductId}/variations?per_page={VariationsPerPage}&page={page}";
                 var response = await httpClient.GetAsync(url, cancelToken);
@@ -3361,6 +3515,11 @@ namespace George.Services
             public int id { get; set; }
             public string? name { get; set; }
             public string? slug { get; set; }
+        }
+
+        private class WooCommerceAttributeTermListItem
+        {
+            public string? name { get; set; }
         }
 
         /// <summary>POST body for WooCommerce attribute term creation. "name" is required by the API.</summary>
