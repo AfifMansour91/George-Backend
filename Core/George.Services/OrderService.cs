@@ -1741,7 +1741,7 @@ namespace George.Services
                 : "";
             var headerCore =
                 $"<div style=\"font-size:28px;font-weight:900;line-height:32px;\">#{EscapeHtml(orderNo)}</div>" +
-                $"<div style=\"font-size:32px;font-weight:900;line-height:36px;letter-spacing:-0.5px;\">{EscapeHtml(headerShort)}</div>" +
+                $"<div style=\"font-size:28px;font-weight:700;line-height:32px;letter-spacing:-0.5px;white-space:nowrap;-webkit-font-smoothing:antialiased;font-synthesis:none;text-rendering:geometricPrecision;\">{EscapeHtml(headerShort)}</div>" +
                 headerCityBlock;
 
             if (showTopQr)
