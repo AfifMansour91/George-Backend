@@ -258,6 +258,222 @@ namespace George.Services
             CancellationToken cancelToken) =>
             RunImportFromWooAsync(req, importProgress, cancelToken);
 
+        /// <summary>
+        /// One-time alignment: reads <c>menu_order</c> from WooCommerce and sets George <see cref="Product.DisplayOrder"/>
+        /// to match the live site order (sequential 0..n-1 sorted by Woo menu_order). Does not change Woo.
+        /// </summary>
+        public async Task<IApiResponse<WooCommerceProductOrderSyncRes>> ImportProductOrderFromWooCommerceAsync(
+            int siteId,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<WooCommerceProductOrderSyncRes> { Data = new WooCommerceProductOrderSyncRes() };
+            try
+            {
+                var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+                if (site == null)
+                    return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
+                if (string.IsNullOrWhiteSpace(site.WooCommerceUrl) ||
+                    string.IsNullOrWhiteSpace(site.WooCommerceKey) ||
+                    string.IsNullOrWhiteSpace(site.WooCommerceSecret))
+                {
+                    return CreateResponse(response, StatusCode.InvalidRequest,
+                        "WooCommerce integration not configured. Please set up your credentials in Store Settings.");
+                }
+
+                var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
+                var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
+                using var httpClient = _httpClientFactory.CreateClient();
+                httpClient.Timeout = WooCommerceHttpTimeout;
+                httpClient.DefaultRequestHeaders.Clear();
+                httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+
+                var wooProducts = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products?status=any", cancelToken);
+                var wooIdToProductId = await _productStorage.GetWooCommerceIdToProductIdForSiteAsync(siteId, cancelToken);
+
+                var matched = wooProducts
+                    .Where(wp => wp.id > 0 && wooIdToProductId.ContainsKey(wp.id))
+                    .OrderBy(wp => wp.menu_order)
+                    .ThenBy(wp => wp.id)
+                    .ToList();
+
+                var updates = new Dictionary<int, int>();
+                for (var i = 0; i < matched.Count; i++)
+                    updates[wooIdToProductId[matched[i].id]] = i;
+
+                var updatedCount = await _productStorage.UpdateDisplayOrdersForProductsAsync(updates, cancelToken);
+                response.Data.UpdatedCount = updatedCount;
+                response.Data.SkippedCount = Math.Max(0, wooProducts.Count - matched.Count);
+                response.Data.Message = updatedCount == 0
+                    ? "No matching products found to update display order."
+                    : $"Updated display order for {updatedCount} product(s) from WooCommerce menu_order.";
+                _logger.LogInformation(
+                    "WooCommerce product order import for site {SiteId}: updated {Updated}, skipped {Skipped} Woo rows without local match",
+                    siteId,
+                    updatedCount,
+                    response.Data.SkippedCount);
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Import product order from WooCommerce failed for site {SiteId}", siteId);
+                return CreateResponse(response, StatusCode.UnknownError, ex.Message);
+            }
+        }
+
+        /// <summary>Read-only: fetch WooCommerce products sorted by menu_order for order debugging (no import).</summary>
+        public async Task<IApiResponse<ProductOrderPreviewRes>> PreviewWooProductOrderAsync(
+            int siteId,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<ProductOrderPreviewRes>
+            {
+                Data = new ProductOrderPreviewRes { Source = "woocommerce" }
+            };
+            try
+            {
+                var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+                if (site == null)
+                    return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
+                if (string.IsNullOrWhiteSpace(site.WooCommerceUrl) ||
+                    string.IsNullOrWhiteSpace(site.WooCommerceKey) ||
+                    string.IsNullOrWhiteSpace(site.WooCommerceSecret))
+                {
+                    return CreateResponse(response, StatusCode.InvalidRequest,
+                        "WooCommerce integration not configured. Please set up your credentials in Store Settings.");
+                }
+
+                var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
+                var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
+                using var httpClient = _httpClientFactory.CreateClient();
+                httpClient.Timeout = WooCommerceHttpTimeout;
+                httpClient.DefaultRequestHeaders.Clear();
+                httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+
+                var wooProducts = await FetchWooPagedAsync<WooImportProductItem>(
+                    httpClient,
+                    $"{baseUrl}/products?status=any",
+                    cancelToken);
+                var wooIdToProductId = await _productStorage.GetWooCommerceIdToProductIdForSiteAsync(siteId, cancelToken);
+
+                var sorted = wooProducts
+                    .Where(wp => wp.id > 0)
+                    .OrderBy(wp => wp.menu_order)
+                    .ThenBy(wp => wp.id)
+                    .ToList();
+
+                for (var i = 0; i < sorted.Count; i++)
+                {
+                    var wp = sorted[i];
+                    wooIdToProductId.TryGetValue(wp.id, out var georgeId);
+                    response.Data.Products.Add(new ProductOrderPreviewItem
+                    {
+                        ListIndex = i,
+                        GeorgeProductId = georgeId > 0 ? georgeId : null,
+                        WooCommerceProductId = wp.id,
+                        Name = wp.name ?? "",
+                        MenuOrder = wp.menu_order,
+                        Sku = wp.sku,
+                        Status = wp.status
+                    });
+                }
+
+                response.Data.Count = response.Data.Products.Count;
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Preview WooCommerce product order failed for site {SiteId}", siteId);
+                return CreateResponse(response, StatusCode.UnknownError, ex.Message);
+            }
+        }
+
+        /// <summary>Read-only: George products on site sorted by DisplayOrder for order debugging.</summary>
+        public async Task<IApiResponse<ProductOrderPreviewRes>> PreviewLocalProductOrderAsync(
+            int siteId,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<ProductOrderPreviewRes>
+            {
+                Data = new ProductOrderPreviewRes { Source = "george" }
+            };
+            try
+            {
+                if (siteId <= 0)
+                    return CreateResponse(response, StatusCode.InvalidRequest, "SiteId required");
+                var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+                if (site == null)
+                    return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
+
+                var rows = await _productStorage.GetProductOrderPreviewRowsForSiteAsync(siteId, cancelToken);
+                for (var i = 0; i < rows.Count; i++)
+                {
+                    var row = rows[i];
+                    response.Data.Products.Add(new ProductOrderPreviewItem
+                    {
+                        ListIndex = i,
+                        GeorgeProductId = row.Id,
+                        WooCommerceProductId = row.WooCommerceId,
+                        Name = row.Name,
+                        DisplayOrder = row.DisplayOrder,
+                        Sku = row.Sku
+                    });
+                }
+
+                response.Data.Count = response.Data.Products.Count;
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Preview local product order failed for site {SiteId}", siteId);
+                return CreateResponse(response, StatusCode.UnknownError, ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Pushes George catalog sort order to WooCommerce <c>menu_order</c> for all linked products on the site.
+        /// Use after reordering in My Products when Woo drifted from George.
+        /// </summary>
+        public async Task<IApiResponse<WooCommerceProductOrderSyncRes>> PushProductOrderToWooCommerceAsync(
+            int siteId,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<WooCommerceProductOrderSyncRes> { Data = new WooCommerceProductOrderSyncRes() };
+            try
+            {
+                var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+                if (site == null)
+                    return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
+                if (string.IsNullOrWhiteSpace(site.WooCommerceUrl) ||
+                    string.IsNullOrWhiteSpace(site.WooCommerceKey) ||
+                    string.IsNullOrWhiteSpace(site.WooCommerceSecret))
+                {
+                    return CreateResponse(response, StatusCode.InvalidRequest,
+                        "WooCommerce integration not configured. Please set up your credentials in Store Settings.");
+                }
+
+                var orderedProductIds = await _productStorage.GetProductIdsForSiteAsync(siteId, cancelToken);
+                if (orderedProductIds.Count == 0)
+                {
+                    response.Data.Message = "No products to sync order for.";
+                    return response;
+                }
+
+                await SyncMenuOrderOnlyAsync(siteId, orderedProductIds, onlyProductIds: null, cancelToken);
+                response.Data.UpdatedCount = orderedProductIds.Count;
+                response.Data.Message = $"Pushed display order for {orderedProductIds.Count} product(s) to WooCommerce menu_order.";
+                _logger.LogInformation(
+                    "WooCommerce product order push for site {SiteId}: {Count} products",
+                    siteId,
+                    orderedProductIds.Count);
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Push product order to WooCommerce failed for site {SiteId}", siteId);
+                return CreateResponse(response, StatusCode.UnknownError, ex.Message);
+            }
+        }
+
         private async Task<IApiResponse<WooCommerceImportFromWooRes>> RunImportFromWooAsync(
             WooCommerceSyncReq req,
             IProgress<WooCommerceImportProgress>? importProgress,
@@ -1792,13 +2008,16 @@ namespace George.Services
                     ["catalog_visibility"] = catalogVisibility,
                     ["weight"] = productWeightForWoo,
                     ["shipping_class"] = shippingClass,
-                    ["menu_order"] = product.DisplayOrder ?? 0,
                     ["images"] = images,
                     ["categories"] = allCategoryIds,
                     ["tags"] = tags,
                     ["status"] = wooStatus,
                     ["meta_data"] = metaData
                 };
+
+                // menu_order is pushed only on Woo product CREATE (see dedicated PUT below). Updates must not
+                // touch sort — George DisplayOrder often diverges from Woo (defaults, stale import) and
+                // pushing on edit reshuffles the live catalog.
 
                 if (!string.IsNullOrWhiteSpace(product.Slug))
                     wooProduct["slug"] = product.Slug.Trim();
@@ -1924,6 +2143,7 @@ namespace George.Services
                 // Create or update product
                 int? wooCommerceId = null;
                 string action = "created";
+                var updatedExistingWooProduct = false;
 
                 if (existingWooId.HasValue)
                 {
@@ -1940,6 +2160,7 @@ namespace George.Services
                             cancellationToken: cancelToken);
                         wooCommerceId = updated?.id;
                         action = "updated";
+                        updatedExistingWooProduct = true;
                     }
                     else
                     {
@@ -1951,7 +2172,9 @@ namespace George.Services
 
                 if (!wooCommerceId.HasValue)
                 {
-                    // Create new product
+                    if (product.DisplayOrder.HasValue)
+                        wooProduct["menu_order"] = product.DisplayOrder.Value;
+
                     var createUrl = $"{baseUrl}/products";
                     var createJson = JsonSerializer.Serialize(wooProduct);
                     var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
@@ -1975,12 +2198,12 @@ namespace George.Services
                     await _productStorage.UpdateProductWooCommerceIdAsync(product.Id, wooCommerceId.Value, cancelToken);
                 }
 
-                // Apply menu_order: send a dedicated PUT so WooCommerce reliably persists it (main payload may not include/apply it in all versions)
-                if (wooCommerceId.HasValue)
+                // Apply menu_order only on create (not on update) via dedicated PUT so Woo persists sort reliably.
+                if (wooCommerceId.HasValue && product.DisplayOrder.HasValue && !updatedExistingWooProduct)
                 {
                     try
                     {
-                        await UpdateWooCommerceProductMenuOrderAsync(baseUrl, wooCommerceId.Value, product.DisplayOrder ?? 0, httpClient, cancelToken);
+                        await UpdateWooCommerceProductMenuOrderAsync(baseUrl, wooCommerceId.Value, product.DisplayOrder.Value, httpClient, cancelToken);
                     }
                     catch (Exception ex)
                     {

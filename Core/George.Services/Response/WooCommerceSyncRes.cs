@@ -74,6 +74,34 @@ namespace George.Services.Response
         public List<WooCommerceImportFeedDuplicateRow> WooProductFeedDuplicates { get; set; } = new();
     }
 
+    /// <summary>Result of importing or pushing product display order only (menu_order ↔ DisplayOrder).</summary>
+    public class WooCommerceProductOrderSyncRes
+    {
+        public string Message { get; set; } = string.Empty;
+        public int UpdatedCount { get; set; }
+        public int SkippedCount { get; set; }
+    }
+
+    /// <summary>Read-only row for comparing product sort order (George vs WooCommerce). No DB writes.</summary>
+    public class ProductOrderPreviewItem
+    {
+        public int ListIndex { get; set; }
+        public int? GeorgeProductId { get; set; }
+        public int? WooCommerceProductId { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public int? DisplayOrder { get; set; }
+        public int? MenuOrder { get; set; }
+        public string? Sku { get; set; }
+        public string? Status { get; set; }
+    }
+
+    public class ProductOrderPreviewRes
+    {
+        public string Source { get; set; } = string.Empty;
+        public int Count { get; set; }
+        public List<ProductOrderPreviewItem> Products { get; set; } = new();
+    }
+
     /// <summary>Progress during Woo → George catalog import (streamed as NDJSON).</summary>
     public class WooCommerceImportProgress
     {

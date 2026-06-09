@@ -113,8 +113,9 @@ namespace George.Data
                 if (filter.Search?.SearchTerm.HasValue() == true)
                 {
                     var term = filter.Search.SearchTerm!.Trim();
-                    query = query.Where(p => p.Name.Contains(term) || 
+                    query = query.Where(p => p.Name.Contains(term) ||
                                            (p.Sku != null && p.Sku.Contains(term)) ||
+                                           p.ProductVariant.Any(v => !v.IsDeleted && v.Sku != null && v.Sku.Contains(term)) ||
                                            (p.ShortDescription != null && p.ShortDescription.Contains(term)));
                 }
 
@@ -645,6 +646,67 @@ namespace George.Data
                 }
             }
             await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
+        /// <summary>Lightweight product rows for order-debug preview (sorted like the product list API).</summary>
+        public async Task<List<(int Id, string Name, int? DisplayOrder, int? WooCommerceId, string? Sku)>> GetProductOrderPreviewRowsForSiteAsync(
+            int siteId,
+            CancellationToken cancelToken)
+        {
+            if (siteId <= 0) return new List<(int, string, int?, int?, string?)>();
+            var rows = await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => !p.IsDeleted && p.Site.Any(s => s.Id == siteId))
+                .OrderBy(p => p.DisplayOrder ?? int.MaxValue)
+                .ThenByDescending(p => p.CreationTime)
+                .Select(p => new
+                {
+                    p.Id,
+                    p.Name,
+                    p.DisplayOrder,
+                    WooCommerceId = p.WooCommerceId,
+                    p.Sku
+                })
+                .ToListAsync(cancelToken);
+            return rows
+                .Select(r => (r.Id, r.Name, r.DisplayOrder, r.WooCommerceId, r.Sku))
+                .ToList();
+        }
+
+        /// <summary>WooCommerce REST product id → local Product.Id for products on the site that have a WooCommerceId.</summary>
+        public async Task<Dictionary<int, int>> GetWooCommerceIdToProductIdForSiteAsync(int siteId, CancellationToken cancelToken)
+        {
+            if (siteId <= 0) return new Dictionary<int, int>();
+            var rows = await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => !p.IsDeleted && p.WooCommerceId != null && p.WooCommerceId > 0 && p.Site.Any(s => s.Id == siteId))
+                .Select(p => new { p.Id, WooId = p.WooCommerceId!.Value })
+                .ToListAsync(cancelToken);
+            return rows.ToDictionary(r => r.WooId, r => r.Id);
+        }
+
+        /// <summary>Batch-update DisplayOrder by product id. Returns number of rows updated.</summary>
+        public async Task<int> UpdateDisplayOrdersForProductsAsync(Dictionary<int, int> productIdToDisplayOrder, CancellationToken cancelToken)
+        {
+            if (productIdToDisplayOrder == null || productIdToDisplayOrder.Count == 0) return 0;
+            var ids = productIdToDisplayOrder.Keys.ToList();
+            var products = await _dbContext.Product
+                .Where(p => ids.Contains(p.Id))
+                .ToListAsync(cancelToken);
+            var now = DateTime.UtcNow;
+            var updated = 0;
+            foreach (var product in products)
+            {
+                if (productIdToDisplayOrder.TryGetValue(product.Id, out var order) && product.DisplayOrder != order)
+                {
+                    product.DisplayOrder = order;
+                    product.UpdatedDate = now;
+                    updated++;
+                }
+            }
+            if (updated > 0)
+                await _dbContext.SaveChangesAsync(cancelToken);
+            return updated;
         }
 
         /// <summary>Returns distinct category IDs assigned to the given products on a site.</summary>

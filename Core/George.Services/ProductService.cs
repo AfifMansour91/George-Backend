@@ -359,7 +359,7 @@ namespace George.Services
                 changedProductIds.Count,
                 req.ProductIds.Count);
 
-            // Sync only menu_order to WooCommerce for products whose order actually changed (not the entire catalog).
+            // Sync only products whose index changed (fast). Full-catalog alignment uses PushProductOrderToWooCommerce in Integrations.
             var siteToProductIds = await _productStorage.GetProductIdsBySiteForProductIdsAsync(changedProductIds, cancelToken);
             if (siteToProductIds.Count > 0)
             {

@@ -173,6 +173,58 @@ namespace George.Api.Controllers
             return new EmptyResult();
         }
 
+        /// <summary>One-time: pull WooCommerce menu_order into George DisplayOrder (does not change Woo).</summary>
+        [HttpPost("ImportProductOrderFromWooCommerce")]
+        [ProducesResponseType(typeof(IApiResponse<WooCommerceProductOrderSyncRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> ImportProductOrderFromWooCommerceAsync(
+            [FromBody] WooCommerceSyncReq request,
+            CancellationToken cancelToken = default)
+        {
+            if (request == null || request.SiteId <= 0)
+                return BadRequest();
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _wooCommerceService.ImportProductOrderFromWooCommerceAsync(request.SiteId, cancelToken));
+        }
+
+        /// <summary>Push George catalog display order to WooCommerce menu_order for all linked products on the site.</summary>
+        [HttpPost("PushProductOrderToWooCommerce")]
+        [ProducesResponseType(typeof(IApiResponse<WooCommerceProductOrderSyncRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> PushProductOrderToWooCommerceAsync(
+            [FromBody] WooCommerceSyncReq request,
+            CancellationToken cancelToken = default)
+        {
+            if (request == null || request.SiteId <= 0)
+                return BadRequest();
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _wooCommerceService.PushProductOrderToWooCommerceAsync(request.SiteId, cancelToken));
+        }
+
+        /// <summary>Read-only: WooCommerce product list sorted by menu_order (JSON preview for order debugging).</summary>
+        [HttpPost("PreviewWooProductOrder")]
+        [ProducesResponseType(typeof(IApiResponse<ProductOrderPreviewRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> PreviewWooProductOrderAsync(
+            [FromBody] WooCommerceSyncReq request,
+            CancellationToken cancelToken = default)
+        {
+            if (request == null || request.SiteId <= 0)
+                return BadRequest();
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _wooCommerceService.PreviewWooProductOrderAsync(request.SiteId, cancelToken));
+        }
+
+        /// <summary>Read-only: George products on site sorted by DisplayOrder (JSON preview for order debugging).</summary>
+        [HttpPost("PreviewLocalProductOrder")]
+        [ProducesResponseType(typeof(IApiResponse<ProductOrderPreviewRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> PreviewLocalProductOrderAsync(
+            [FromBody] WooCommerceSyncReq request,
+            CancellationToken cancelToken = default)
+        {
+            if (request == null || request.SiteId <= 0)
+                return BadRequest();
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _wooCommerceService.PreviewLocalProductOrderAsync(request.SiteId, cancelToken));
+        }
+
         /// <summary>Sync with streaming progress (NDJSON). Response: progress lines then one "done" line with result.</summary>
         [HttpPost("SyncStream")]
         [ProducesResponseType((int)HttpStatusCode.OK)]
