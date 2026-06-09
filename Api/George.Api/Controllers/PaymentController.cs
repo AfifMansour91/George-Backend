@@ -48,6 +48,17 @@ public class PaymentController : GeorgeControllerBase, IAuthUserProvider
         return await SafeCallWithErrorCatchingAsync(() => _paymentSvc.FinalizePickingPaymentAsync(orderId, cancelToken));
     }
 
+    /// <summary>Query Cardcom for a website/Woo order transaction and mark Paid when a final charge is confirmed.</summary>
+    [HttpPost("Order/{orderId:int}/SyncGatewayPayment")]
+    [ProducesResponseType(typeof(IApiResponse<SyncGatewayPaymentRes>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> SyncGatewayPaymentAsync(
+        [FromRoute] int orderId,
+        CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() =>
+            _paymentSvc.SyncWooGatewayPaymentFromCardcomAsync(orderId, cancelToken));
+    }
+
     [HttpPost("Order/{orderId:int}/Invoice/Issue")]
     [ProducesResponseType(typeof(IApiResponse<OrderInvoiceRes>), (int)HttpStatusCode.OK)]
     public async Task<IActionResult> IssueInvoiceAsync(

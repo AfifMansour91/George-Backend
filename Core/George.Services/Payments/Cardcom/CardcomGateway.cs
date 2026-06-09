@@ -388,6 +388,169 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
             document: null, cancelToken)
             .ConfigureAwait(false);
 
+    /// <summary>
+    /// Cardcom <c>Transactions/GetTransactionInfoById</c> — lookup by internal deal / transaction number.
+    /// </summary>
+    public async Task<CardcomTransactionInfoResult> GetTransactionInfoByIdAsync(
+        SitePaymentCredentials credentials,
+        long internalDealNumber,
+        CancellationToken cancelToken = default)
+    {
+        if (credentials.TerminalNumber is not > 0 || string.IsNullOrWhiteSpace(credentials.ApiName))
+        {
+            return new CardcomTransactionInfoResult
+            {
+                Success = false,
+                ResponseCode = -1,
+                Description = "Terminal and API name are required.",
+            };
+        }
+
+        if (string.IsNullOrWhiteSpace(credentials.ApiPassword))
+        {
+            return new CardcomTransactionInfoResult
+            {
+                Success = false,
+                ResponseCode = -1,
+                Description = "Cardcom API password is required.",
+            };
+        }
+
+        var body = new Dictionary<string, object?>
+        {
+            ["TerminalNumber"] = credentials.TerminalNumber.Value,
+            ["UserName"] = credentials.ApiName,
+            ["UserPassword"] = credentials.ApiPassword,
+            ["InternalDealNumber"] = internalDealNumber,
+        };
+
+        var json = await PostJsonAsync("Transactions/GetTransactionInfoById", body, cancelToken).ConfigureAwait(false);
+        if (json == null)
+        {
+            return new CardcomTransactionInfoResult
+            {
+                Success = false,
+                ResponseCode = -1,
+                Description = "Empty response from Cardcom.",
+            };
+        }
+
+        return ParseTransactionInfoResult(json);
+    }
+
+    internal static CardcomTransactionInfoResult ParseTransactionInfoResult(string json)
+    {
+        var responseCode = GetInt(json, "ResponseCode");
+        var dealType = GetString(json, "DealType");
+        var isRefund = TryGetBool(json, "IsRefund");
+        var isHold = IsCardcomTransactionInfoAuthorizationHold(responseCode, dealType, json);
+        var isFinalCharge = IsCardcomTransactionInfoFinalCharge(responseCode, dealType, isRefund, isHold);
+        var amount = TryGetDecimal(json, "Amount");
+        var txId = GetString(json, "TranzactionId") ?? GetString(json, "TransactionId");
+
+        return new CardcomTransactionInfoResult
+        {
+            Success = responseCode == 0 || isFinalCharge || isHold,
+            ResponseCode = responseCode,
+            Description = GetString(json, "Description"),
+            TranzactionId = txId,
+            Amount = amount,
+            DealType = dealType,
+            IsRefund = isRefund,
+            RawJson = json,
+            IsFinalCharge = isFinalCharge,
+            IsAuthorizationHold = isHold,
+        };
+    }
+
+    /// <summary>J5 / validate holds use response codes 700/701 or deal types that are not final debits.</summary>
+    internal static bool IsCardcomTransactionInfoAuthorizationHold(int responseCode, string? dealType, string json)
+    {
+        if (responseCode is 700 or 701)
+            return true;
+
+        var j = TryGetInt(json, "JParameter");
+        if (j is < 0)
+            j = TryGetInt(json, "J");
+        if (j == 5)
+            return true;
+
+        var dt = (dealType ?? "").Trim();
+        if (dt.Equals("Information", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
+    }
+
+    internal static bool IsCardcomTransactionInfoFinalCharge(
+        int responseCode,
+        string? dealType,
+        bool? isRefund,
+        bool isAuthorizationHold)
+    {
+        if (isRefund == true || isAuthorizationHold)
+            return false;
+
+        if (responseCode != 0)
+            return false;
+
+        var dt = (dealType ?? "").Trim();
+        if (dt.Length == 0)
+            return true;
+
+        if (dt.Equals("Debit", StringComparison.OrdinalIgnoreCase)
+            || dt.Equals("ForcedCharge", StringComparison.OrdinalIgnoreCase)
+            || dt.Equals("CashTransaction", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (dt.Equals("Refund", StringComparison.OrdinalIgnoreCase)
+            || dt.Equals("Cancel", StringComparison.OrdinalIgnoreCase)
+            || dt.Equals("Discharge", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return false;
+    }
+
+    private static bool? TryGetBool(string json, string name)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (!TryGetObjectProperty(doc.RootElement, name, out var el))
+            return null;
+        return el.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String when bool.TryParse(el.GetString(), out var b) => b,
+            _ => null,
+        };
+    }
+
+    private static decimal? TryGetDecimal(string json, string name)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (!TryGetObjectProperty(doc.RootElement, name, out var el))
+            return null;
+        if (el.ValueKind == JsonValueKind.Number && el.TryGetDecimal(out var d))
+            return d;
+        if (el.ValueKind == JsonValueKind.String
+            && decimal.TryParse(el.GetString(), System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+            return parsed;
+        return null;
+    }
+
+    private static int TryGetInt(string json, string name)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (!TryGetObjectProperty(doc.RootElement, name, out var el))
+            return -1;
+        if (el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out var i))
+            return i;
+        if (el.ValueKind == JsonValueKind.String && int.TryParse(el.GetString(), out var parsed))
+            return parsed;
+        return -1;
+    }
+
     public async Task<TestConnectionResult> TestConnectionAsync(
         SitePaymentCredentials credentials,
         CancellationToken cancelToken = default)

@@ -2371,4 +2371,200 @@ public class PaymentService : ServiceBase
     public Task PersistOrderPaymentStateAsync(Order order, CancellationToken cancelToken) =>
         _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
 
+    /// <summary>
+    /// Website/Woo order stuck unpaid after picking: query Cardcom by stored transaction id and mark Paid when charged.
+    /// </summary>
+    public async Task<IApiResponse<SyncGatewayPaymentRes>> SyncWooGatewayPaymentFromCardcomAsync(
+        int orderId,
+        CancellationToken cancelToken = default)
+    {
+        var response = new ApiResponse<SyncGatewayPaymentRes>();
+        var order = await _paymentStorage.GetOrderForPaymentAsync(orderId, cancelToken);
+        if (order == null)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+
+        var source = (order.Source ?? "").Trim();
+        var isWooChannel = string.Equals(source, "WooCommerce", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(source, "Website", StringComparison.OrdinalIgnoreCase);
+        if (!isWooChannel)
+        {
+            return CreateResponse(response, StatusCode.InvalidRequest,
+                "Gateway payment sync is only available for website/WooCommerce orders.");
+        }
+
+        var settle = (order.PaymentSettleStatus ?? "").Trim();
+        if (string.Equals(order.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(settle, PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase))
+        {
+            response.Data = new SyncGatewayPaymentRes
+            {
+                Outcome = "AlreadyPaid",
+                Message = "Order is already marked as paid.",
+                TransactionId = order.GatewayPaymentTransactionId ?? order.PaymentReference,
+                PaymentStatus = order.PaymentStatus,
+                PaymentSettleStatus = order.PaymentSettleStatus,
+            };
+            return response;
+        }
+
+        var txRaw = CoalesceNonEmpty(order.GatewayPaymentTransactionId, order.PaymentReference);
+        if (string.IsNullOrWhiteSpace(txRaw))
+        {
+            response.Data = new SyncGatewayPaymentRes
+            {
+                Outcome = "MissingTransactionId",
+                Message = "No gateway transaction id on the order. Cannot query Cardcom.",
+                PaymentStatus = order.PaymentStatus,
+                PaymentSettleStatus = order.PaymentSettleStatus,
+            };
+            return CreateResponse(response, StatusCode.InvalidRequest, response.Data.Message);
+        }
+
+        if (!long.TryParse(txRaw.Trim(), out var internalDealNumber) || internalDealNumber <= 0)
+        {
+            response.Data = new SyncGatewayPaymentRes
+            {
+                Outcome = "MissingTransactionId",
+                Message = "Gateway transaction id is not a valid Cardcom deal number.",
+                TransactionId = txRaw,
+                PaymentStatus = order.PaymentStatus,
+                PaymentSettleStatus = order.PaymentSettleStatus,
+            };
+            return CreateResponse(response, StatusCode.InvalidRequest, response.Data.Message);
+        }
+
+        var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
+        if (creds == null || creds.ProviderId != PaymentGatewayProviderId.Cardcom)
+        {
+            response.Data = new SyncGatewayPaymentRes
+            {
+                Outcome = "GatewayNotConfigured",
+                Message = "Cardcom is not configured for this site.",
+                TransactionId = txRaw,
+                PaymentStatus = order.PaymentStatus,
+                PaymentSettleStatus = order.PaymentSettleStatus,
+            };
+            return CreateResponse(response, StatusCode.InvalidRequest, response.Data.Message);
+        }
+
+        if (creds.ApiPasswordStoredButUnreadable)
+            return CardcomApiPasswordUnreadableResponse(response);
+
+        if (string.IsNullOrWhiteSpace(creds.ApiPassword))
+        {
+            response.Data = new SyncGatewayPaymentRes
+            {
+                Outcome = "GatewayNotConfigured",
+                Message = "Cardcom API password is required to sync payment status.",
+                TransactionId = txRaw,
+                PaymentStatus = order.PaymentStatus,
+                PaymentSettleStatus = order.PaymentSettleStatus,
+            };
+            return CreateResponse(response, StatusCode.InvalidRequest, response.Data.Message);
+        }
+
+        var info = await _cardcom.GetTransactionInfoByIdAsync(creds, internalDealNumber, cancelToken)
+            .ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "SyncWooGatewayPaymentFromCardcom orderId={OrderId} tx={TransactionId} responseCode={ResponseCode} dealType={DealType} isFinalCharge={IsFinalCharge} isHold={IsHold}",
+            order.Id, txRaw, info.ResponseCode, info.DealType, info.IsFinalCharge, info.IsAuthorizationHold);
+
+        if (info.IsRefund == true)
+        {
+            response.Data = new SyncGatewayPaymentRes
+            {
+                Outcome = "NotCharged",
+                Message = info.Description ?? "Transaction was refunded at Cardcom.",
+                TransactionId = txRaw,
+                DealType = info.DealType,
+                Amount = info.Amount,
+                PaymentStatus = order.PaymentStatus,
+                PaymentSettleStatus = order.PaymentSettleStatus,
+            };
+            return response;
+        }
+
+        var hasInvoiceEvidence = !string.IsNullOrWhiteSpace(order.InvoiceNumber);
+        var shouldMarkPaid = info.IsFinalCharge
+            || (info.ResponseCode == 0
+                && !info.IsAuthorizationHold
+                && hasInvoiceEvidence
+                && !string.Equals(info.DealType, "Information", StringComparison.OrdinalIgnoreCase));
+
+        if (info.IsAuthorizationHold && !shouldMarkPaid)
+        {
+            response.Data = new SyncGatewayPaymentRes
+            {
+                Outcome = "AuthorizationHoldOnly",
+                Message = info.Description ?? "Cardcom shows an authorization hold only — not a final charge.",
+                TransactionId = txRaw,
+                DealType = info.DealType,
+                Amount = info.Amount,
+                PaymentStatus = order.PaymentStatus,
+                PaymentSettleStatus = order.PaymentSettleStatus,
+            };
+            return response;
+        }
+
+        if (!shouldMarkPaid)
+        {
+            response.Data = new SyncGatewayPaymentRes
+            {
+                Outcome = info.Success ? "NotCharged" : "GatewayError",
+                Message = info.Description ?? "Cardcom did not confirm a final charge for this transaction.",
+                TransactionId = txRaw,
+                DealType = info.DealType,
+                Amount = info.Amount,
+                PaymentStatus = order.PaymentStatus,
+                PaymentSettleStatus = order.PaymentSettleStatus,
+            };
+            if (!info.Success)
+                return CreateResponse(response, StatusCode.InvalidRequest, response.Data.Message ?? "Cardcom inquiry failed.");
+            return response;
+        }
+
+        var payment = new WooCommerceOrderPaymentGatewayDetails
+        {
+            TransactionId = info.TranzactionId ?? txRaw,
+            PaymentGateway = "cardcom",
+            Amount = info.Amount ?? order.Total,
+            InvoiceNumber = order.InvoiceNumber,
+        };
+
+        ApplyWooCommerceGatewayPaymentFields(
+            order,
+            payment,
+            gatewayStatus: "success",
+            isFinished: "true",
+            gatewayOrderId: order.GatewayPaymentOrderId,
+            gatewayExternalOrderId: order.GatewayPaymentExternalOrderId,
+            gatewaySiteId: order.GatewayPaymentSiteId);
+
+        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken).ConfigureAwait(false);
+
+        await LogEventAsync(
+            order.Id,
+            "CaptureAuthorization",
+            "0",
+            $"Cardcom sync ({info.DealType ?? "charged"})",
+            payment.TransactionId,
+            null,
+            payment.Amount,
+            info.RawJson,
+            cancelToken).ConfigureAwait(false);
+
+        response.Data = new SyncGatewayPaymentRes
+        {
+            Outcome = "Synced",
+            Message = info.Description ?? "Payment status synced from Cardcom.",
+            TransactionId = payment.TransactionId,
+            DealType = info.DealType,
+            Amount = payment.Amount,
+            PaymentStatus = order.PaymentStatus,
+            PaymentSettleStatus = order.PaymentSettleStatus,
+        };
+        return response;
+    }
+
 }

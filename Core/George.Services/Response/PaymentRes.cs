@@ -74,6 +74,19 @@ public class TestConnectionRes
     public string? Message { get; set; }
 }
 
+/// <summary>Result of POST /Payment/Order/{id}/SyncGatewayPayment (Woo + Cardcom inquiry).</summary>
+public class SyncGatewayPaymentRes
+{
+    /// <summary>Synced | AlreadyPaid | MissingTransactionId | NotEligible | GatewayNotConfigured | AuthorizationHoldOnly | NotCharged | GatewayError</summary>
+    public string Outcome { get; set; } = "";
+    public string? Message { get; set; }
+    public string? TransactionId { get; set; }
+    public string? DealType { get; set; }
+    public decimal? Amount { get; set; }
+    public string? PaymentStatus { get; set; }
+    public string? PaymentSettleStatus { get; set; }
+}
+
 public class SitePaymentSettingsRes
 {
     public int SiteId { get; set; }

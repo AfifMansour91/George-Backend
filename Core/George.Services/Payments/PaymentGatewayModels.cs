@@ -151,6 +151,21 @@ public sealed class TestConnectionResult
     public string? Message { get; init; }
 }
 
+/// <summary>Cardcom Transactions/GetTransactionInfoById inquiry.</summary>
+public sealed class CardcomTransactionInfoResult
+{
+    public bool Success { get; init; }
+    public int ResponseCode { get; init; }
+    public string? Description { get; init; }
+    public string? TranzactionId { get; init; }
+    public decimal? Amount { get; init; }
+    public string? DealType { get; init; }
+    public bool? IsRefund { get; init; }
+    public string? RawJson { get; init; }
+    public bool IsFinalCharge { get; init; }
+    public bool IsAuthorizationHold { get; init; }
+}
+
 public sealed class SitePaymentCredentials
 {
     public int SiteId { get; init; }
