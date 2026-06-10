@@ -82,6 +82,16 @@ namespace George.Data
                 .ToListAsync(cancelToken);
         }
 
+        public async Task<List<int>> GetSiteIdsForUserAsync(int userId, CancellationToken cancelToken)
+        {
+            return await _dbContext.User
+                .AsNoTracking()
+                .Where(u => u.Id == userId && !u.IsDeleted)
+                .SelectMany(u => u.Site.Where(s => !s.IsDeleted).Select(s => s.Id))
+                .Distinct()
+                .ToListAsync(cancelToken);
+        }
+
         public async Task<Site> CreateSiteAsync(Site site, List<int>? businessTypeIds, CancellationToken cancelToken)
         {
             _dbContext.Site.Add(site);

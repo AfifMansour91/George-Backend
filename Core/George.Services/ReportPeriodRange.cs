@@ -70,6 +70,39 @@ namespace George.Services
             return IsraelLocalRangeToUtc(prevMonthStart, thisMonthStart);
         }
 
+        /// <summary>Previous Israel calendar day [00:00, 24:00).</summary>
+        public static (DateTime fromUtc, DateTime toUtcExclusive) ResolvePreviousIsraelDayRange(DateTime utcNow)
+        {
+            var today = IsraelCalendarToday(utcNow);
+            return IsraelLocalRangeToUtc(today.AddDays(-1), today);
+        }
+
+        /// <summary>Same weekday one week earlier in Israel calendar.</summary>
+        public static (DateTime fromUtc, DateTime toUtcExclusive) ResolveSameWeekdayIsraelDayRange(DateTime utcNow)
+        {
+            var today = IsraelCalendarToday(utcNow);
+            var day = today.AddDays(-7);
+            return IsraelLocalRangeToUtc(day, day.AddDays(1));
+        }
+
+        /// <summary>Previous period of equal length (for week/month/custom KPI compare).</summary>
+        public static (DateTime fromUtc, DateTime toUtcExclusive) ResolvePreviousPeriodRange(
+            DateTime fromUtc,
+            DateTime toUtcExclusive)
+        {
+            var span = toUtcExclusive - fromUtc;
+            return (fromUtc - span, fromUtc);
+        }
+
+        /// <summary>Shift an entire UTC window back by calendar days (same weekday compare).</summary>
+        public static (DateTime fromUtc, DateTime toUtcExclusive) ShiftRangeByDays(
+            DateTime fromUtc,
+            DateTime toUtcExclusive,
+            int days)
+        {
+            return (fromUtc.AddDays(days), toUtcExclusive.AddDays(days));
+        }
+
         private static (DateTime fromUtc, DateTime toUtcExclusive) IsraelLocalRangeToUtc(
             DateTime fromLocal, DateTime toLocalExclusive)
         {

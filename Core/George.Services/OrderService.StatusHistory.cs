@@ -96,13 +96,21 @@ public partial class OrderService
         int siteId,
         DateTime fromDate,
         DateTime toDate,
+        CancellationToken cancelToken = default) =>
+        await GetOrderHandlingMetricsForSitesAsync(new[] { siteId }, fromDate, toDate, cancelToken)
+            .ConfigureAwait(false);
+
+    public async Task<IApiResponse<OrderHandlingMetricsRes>> GetOrderHandlingMetricsForSitesAsync(
+        IReadOnlyList<int> siteIds,
+        DateTime fromDate,
+        DateTime toDate,
         CancellationToken cancelToken = default)
     {
         var response = new ApiResponse<OrderHandlingMetricsRes>
         {
             Data = new OrderHandlingMetricsRes(),
         };
-        if (siteId <= 0)
+        if (siteIds == null || siteIds.Count == 0 || siteIds.All(id => id <= 0))
             return CreateResponse(response, StatusCode.InvalidRequest, "siteId is required.");
 
         var fromUtc = fromDate.Date.Kind == DateTimeKind.Utc
@@ -112,9 +120,14 @@ public partial class OrderService
         if (toDate.Date.Kind != DateTimeKind.Utc)
             toUtcExclusive = DateTime.SpecifyKind(toUtcExclusive, DateTimeKind.Utc);
 
-        var orders = await _orderStorage
-            .GetOrdersForHandlingMetricsInRangeAsync(siteId, fromUtc, toUtcExclusive, cancelToken)
-            .ConfigureAwait(false);
+        var orders = new List<Order>();
+        foreach (var siteId in siteIds.Where(id => id > 0))
+        {
+            orders.AddRange(await _orderStorage
+                .GetOrdersForHandlingMetricsInRangeAsync(siteId, fromUtc, toUtcExclusive, cancelToken)
+                .ConfigureAwait(false));
+        }
+
         if (orders.Count == 0)
             return response;
 

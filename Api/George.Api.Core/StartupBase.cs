@@ -377,6 +377,7 @@ namespace George.Api.Core
 			services.AddScoped<MediaStorage>();
             services.AddScoped<OrderStorage>();
             services.AddScoped<PaymentStorage>();
+            services.AddScoped<DashboardStorage>();
             services.AddScoped<IncomeReportStorage>();
             services.AddScoped<RevenueReportStorage>();
 			services.AddScoped<ProductsReportStorage>();
@@ -408,7 +409,8 @@ namespace George.Api.Core
 			services.AddScoped<George.Services.Payments.PaymentService>();
 			services.AddScoped<George.Services.Payments.Cardcom.CardcomGateway>();
 			services.AddSingleton<George.Services.Payments.PaymentTokenProtector>();
-            services.AddScoped<IncomeReportService>();
+			services.AddScoped<IncomeReportService>();
+			services.AddScoped<DashboardService>();
             services.AddScoped<RevenueReportService>();
 			services.AddScoped<ProductsReportService>();
 			services.AddScoped<InventoryReportService>();

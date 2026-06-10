@@ -16,7 +16,7 @@ namespace George.Data
         /// <summary>
         /// Orders in the report window.
         /// By order: <see cref="Order.CreationTime"/> in range (all statuses).
-        /// By charge: <see cref="Order.PaidAt"/> in range, or legacy paid rows with <see cref="Order.UpdatedDate"/> only (no creation fallback).
+        /// By charge: <see cref="Order.PaidAt"/> in range, legacy paid rows, or successful charge events.
         /// </summary>
         public async Task<List<Order>> GetOrdersInWindowAsync(
             int siteId,
@@ -31,13 +31,26 @@ namespace George.Data
 
             if (byChargeDate)
             {
+                var chargedOrderIds = await (
+                    from e in _dbContext.OrderPaymentEvent.AsNoTracking()
+                    join o in _dbContext.Order.AsNoTracking() on e.OrderId equals o.Id
+                    where !o.IsDeleted
+                          && o.SiteId == siteId
+                          && e.CreationTime >= fromUtc
+                          && e.CreationTime < toUtcExclusive
+                          && (e.StatusCode == "0" || e.StatusCode == "000" || e.StatusCode == "Success")
+                          && (e.EventType == "ChargeToken" || e.EventType == "CaptureAuthorization")
+                    select o.Id
+                ).Distinct().ToListAsync(cancelToken).ConfigureAwait(false);
+
                 q = q.Where(o =>
                     (o.PaidAt != null && o.PaidAt >= fromUtc && o.PaidAt < toUtcExclusive) ||
                     (o.PaidAt == null
-                        && o.PaymentStatus == "Paid"
+                        && (o.PaymentStatus == "Paid" || o.PaymentStatus == "Captured")
                         && o.UpdatedDate != null
                         && o.UpdatedDate >= fromUtc
-                        && o.UpdatedDate < toUtcExclusive));
+                        && o.UpdatedDate < toUtcExclusive) ||
+                    chargedOrderIds.Contains(o.Id));
             }
             else
             {
