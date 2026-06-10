@@ -54,6 +54,10 @@ public partial class GeorgeDBContextBase : DbContext
 
     public virtual DbSet<OrderPaymentEvent> OrderPaymentEvent { get; set; }
 
+    public virtual DbSet<RealtimeHubLog> RealtimeHubLog { get; set; }
+
+    public virtual DbSet<RealtimeEventLog> RealtimeEventLog { get; set; }
+
     public virtual DbSet<CustomerPaymentMethod> CustomerPaymentMethod { get; set; }
 
     public virtual DbSet<Product> Product { get; set; }
@@ -495,6 +499,16 @@ public partial class GeorgeDBContextBase : DbContext
             entity.HasOne(d => d.Order).WithMany(p => p.OrderPaymentEvent)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_OrderPaymentEvent_Order");
+        });
+
+        modelBuilder.Entity<RealtimeHubLog>(entity =>
+        {
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+        });
+
+        modelBuilder.Entity<RealtimeEventLog>(entity =>
+        {
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
         });
 
         modelBuilder.Entity<CustomerPaymentMethod>(entity =>

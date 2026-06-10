@@ -7,10 +7,12 @@ using George.Services.Utils;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Mvc.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -106,6 +108,8 @@ namespace George.Api.Core
 			// Authentication
 			AddAuthenticationAndAuthorization(services);
 
+			services.AddSignalR();
+
 			var dataProtectionKeysPath = Configuration["DataProtection:KeysPath"]?.Trim();
 			if (string.IsNullOrWhiteSpace(dataProtectionKeysPath))
 				dataProtectionKeysPath = Path.Combine(AppContext.BaseDirectory, "App_Data", "DataProtection-Keys");
@@ -189,6 +193,7 @@ namespace George.Api.Core
 
 			app.UseEndpoints(endpoints => {
 				endpoints.MapControllers();
+				MapSignalRHubs(endpoints);
 			});
 		}
 
@@ -197,28 +202,40 @@ namespace George.Api.Core
 
 		protected virtual void ConfigureCORS(IServiceCollection services)
 		{
-			var allowOrigin = Configuration["Auth:AllowOrigin"];
+			var allowOrigin = Configuration["Auth:AllowOrigin"]?.Trim();
 
-			if (string.IsNullOrWhiteSpace(allowOrigin))
+			services.AddCors(o => o.AddPolicy("AllowAllPolicy", builder =>
 			{
-				services.AddCors(o => o.AddPolicy("AllowAllPolicy", builder => {
+				builder
+					.AllowAnyMethod()
+					.AllowAnyHeader();
+
+				// SignalR cross-origin needs a concrete Allow-Origin (not *) when credentials are used.
+				// REST clients use Bearer headers; hub uses access_token query + withCredentials:false on the client.
+				if (string.IsNullOrWhiteSpace(allowOrigin) || allowOrigin == "*")
+				{
 					builder.SetIsOriginAllowed(_ => true)
-							.AllowAnyOrigin()
-							.AllowAnyMethod()
-							.AllowAnyHeader();
-				}));
-			}
-			else
-			{
-				var origins = allowOrigin.Split(',');
-				services.AddCors(o => o.AddPolicy("AllowAllPolicy", builder => {
-					builder.WithOrigins(origins)
-						.SetIsOriginAllowed(_ => true)
-						.AllowAnyOrigin()
-						.AllowAnyMethod()
-						.AllowAnyHeader();
-				}));
-			}
+						.AllowCredentials();
+				}
+				else
+				{
+					var origins = allowOrigin
+						.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+						.Where(o => !string.Equals(o, "*", StringComparison.Ordinal))
+						.ToArray();
+
+					if (origins.Length == 0)
+					{
+						builder.SetIsOriginAllowed(_ => true)
+							.AllowCredentials();
+					}
+					else
+					{
+						builder.WithOrigins(origins)
+							.AllowCredentials();
+					}
+				}
+			}));
 		}
 
 		protected virtual void SetRequestLimits(IServiceCollection services)
@@ -376,6 +393,7 @@ namespace George.Api.Core
 			services.AddScoped<AttributeStorage>();
 			services.AddScoped<MediaStorage>();
             services.AddScoped<OrderStorage>();
+            services.AddScoped<RealtimeLogStorage>();
             services.AddScoped<PaymentStorage>();
             services.AddScoped<DashboardStorage>();
             services.AddScoped<IncomeReportStorage>();
@@ -406,6 +424,8 @@ namespace George.Api.Core
 			services.AddScoped<AttributeService>();
 			services.AddScoped<MediaService>();
 			services.AddScoped<OrderService>();
+			services.AddScoped<SiteAccessService>();
+			services.AddScoped<George.Services.Orders.IOrderRealtimeNotifier, George.Services.Orders.NullOrderRealtimeNotifier>();
 			services.AddScoped<George.Services.Payments.PaymentService>();
 			services.AddScoped<George.Services.Payments.Cardcom.CardcomGateway>();
 			services.AddSingleton<George.Services.Payments.PaymentTokenProtector>();
@@ -455,6 +475,17 @@ namespace George.Api.Core
 						IssuerSigningKey = new SymmetricSecurityKey(key),
 						ClockSkew = TimeSpan.Zero
 					};
+					options.Events = new JwtBearerEvents
+					{
+						OnMessageReceived = context =>
+						{
+							var accessToken = context.Request.Query["access_token"];
+							var path = context.HttpContext.Request.Path;
+							if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/orders"))
+								context.Token = accessToken;
+							return Task.CompletedTask;
+						}
+					};
 				})
 				.AddScheme<AuthenticationSchemeOptions, PrintAgentApiKeyAuthenticationHandler>(PrintAgentApiKeyAuthenticationHandler.SchemeName, _ => { })
 				.AddScheme<AuthenticationSchemeOptions, WooCommerceApiKeyAuthenticationHandler>(WooCommerceApiKeyAuthenticationHandler.SchemeName, _ => { });
@@ -489,6 +520,10 @@ namespace George.Api.Core
 
 			var mapper = config.CreateMapper();
 			services.AddSingleton(mapper);
+		}
+
+		protected virtual void MapSignalRHubs(IEndpointRouteBuilder endpoints)
+		{
 		}
 
 		protected virtual void AddHostedServices(IServiceCollection services)

@@ -108,6 +108,7 @@ namespace George.Services
 
 			// Set parameters.
 			res.Parameters.Environment = SysConfig.Data.EnvironmentName;
+			res.Parameters.OrdersRealtimeEnabled = SysConfig.Data.OrdersRealtimeEnabled;
 
 			// Get the data from the DB.
 

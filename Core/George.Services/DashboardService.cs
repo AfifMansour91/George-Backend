@@ -365,7 +365,7 @@ public class DashboardService : ServiceBase
         }
 
         bucket.PreviewNames = matching
-            .OrderByDescending(o => o.OrderNumber ?? o.Id)
+            .OrderByDescending(o => o.Id)
             .Take(3)
             .Select(o =>
             {

@@ -1,5 +1,9 @@
 
+using George.Api.Hubs;
+using George.Api.Services;
 using George.Services;
+using George.Services.Orders;
+using Microsoft.AspNetCore.Routing;
 
 namespace George.Api
 {
@@ -29,6 +33,17 @@ namespace George.Api
 		protected override void Initialize(IServiceCollection services)
 		{
 			base.Initialize(services);
+		}
+
+		protected override void AddCustomDependencies(IServiceCollection services)
+		{
+			base.AddCustomDependencies(services);
+			services.AddScoped<IOrderRealtimeNotifier, SignalROrderRealtimeNotifier>();
+		}
+
+		protected override void MapSignalRHubs(IEndpointRouteBuilder endpoints)
+		{
+			endpoints.MapHub<OrdersHub>("/hubs/orders");
 		}
 	}
 }

@@ -11,6 +11,7 @@ using George.Common.Payment;
 using George.Data;
 using George.DB;
 using George.Providers;
+using George.Services.Orders;
 using George.Services.Request;
 using George.Services.Response;
 using Microsoft.Extensions.Configuration;
@@ -33,6 +34,7 @@ namespace George.Services
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly PrintJobService _printJobService;
         private readonly Payments.PaymentService _paymentService;
+        private readonly IOrderRealtimeNotifier _orderRealtimeNotifier;
         private readonly string? _publicAppBaseUrl;
         private static readonly Dictionary<string, string> VoucherSourceLabels = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -64,6 +66,7 @@ namespace George.Services
             IServiceScopeFactory serviceScopeFactory,
             PrintJobService printJobService,
             Payments.PaymentService paymentService,
+            IOrderRealtimeNotifier orderRealtimeNotifier,
             IConfiguration configuration)
             : base(logger, mapper, cache)
         {
@@ -76,6 +79,7 @@ namespace George.Services
             _serviceScopeFactory = serviceScopeFactory;
             _printJobService = printJobService;
             _paymentService = paymentService;
+            _orderRealtimeNotifier = orderRealtimeNotifier;
             _publicAppBaseUrl = ResolvePublicAppBaseUrl(configuration);
         }
 
@@ -208,6 +212,8 @@ namespace George.Services
             response.Data = _mapper.Map<OrderRes>(loadedAfterPayment);
             if (loadedAfterPayment != null)
                 await EnrichOrderResAsync(response.Data, loadedAfterPayment, cancelToken).ConfigureAwait(false);
+            if (response.Data != null)
+                await _orderRealtimeNotifier.NotifyNewOrderAsync(response.Data, cancelToken).ConfigureAwait(false);
             return response;
         }
 
@@ -1603,6 +1609,8 @@ namespace George.Services
                 await TryEnqueueNewOrderAutoPrintAsync(loadedOrder, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(loadedOrder!);
             await EnrichOrderResAsync(response.Data, loadedOrder!, cancelToken).ConfigureAwait(false);
+            if (response.Data != null)
+                await _orderRealtimeNotifier.NotifyNewOrderAsync(response.Data, cancelToken).ConfigureAwait(false);
             return response;
         }
 

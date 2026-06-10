@@ -21,6 +21,8 @@ namespace George.Common
 			public const string AWSBucket = "AWSBucket";
 			public const string AWSAccessKey = "AWSAccessKey";
 			public const string AWSKeySecret = "AWSKeySecret";
+			/// <summary>When true, push NewOrderCreated via SignalR after order create.</summary>
+			public const string OrdersRealtimeEnabled = "OrdersRealtimeEnabled";
 		}
 
 		public class ParameterValue
