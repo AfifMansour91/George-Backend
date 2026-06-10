@@ -21,6 +21,10 @@ namespace George.Services.Response
         public string? WooCommerceKey { get; set; }
         public string? WooCommerceSecret { get; set; }
         public bool? WooCommerceEnabled { get; set; }
+        /// <summary>OC Wolt Drive dispatch API bearer token (WP admin → Wolt Drive → Webhook).</summary>
+        public string? WoltDispatchToken { get; set; }
+        /// <summary>When true, Wolt courier features are enabled for this site.</summary>
+        public bool? WoltEnabled { get; set; }
         public string? InternalApiKey { get; set; }
 
         // Shop settings (Sprint 2)
@@ -50,6 +54,20 @@ namespace George.Services.Response
         /// <summary>URL the storefront/kiosk listens on for promotion lifecycle events.</summary>
         public string? PromotionWebhookUrl { get; set; }
         public string? PromotionWebhookSecret { get; set; }
+
+        /// <summary>When true (default), UI asks for bag count when completing picking.</summary>
+        public bool? AskBagsCountAtPickingFinish { get; set; }
+
+        public string? PaymentGatewayProvider { get; set; }
+        public int? CardcomTerminalNumber { get; set; }
+        public string? CardcomApiName { get; set; }
+        public bool? HasCardcomApiPassword { get; set; }
+        public bool? CardcomSaveCardEnabled { get; set; }
+        public int? PaymentAuthBufferPercent { get; set; }
+        public decimal? PaymentMaxAuthAmount { get; set; }
+        public bool? PaymentAllowCaptureAboveAuth { get; set; }
+        public string? CardcomCssUrl { get; set; }
+        public string? CardcomLogoUrl { get; set; }
 
         /// <summary>When the site's account has kiosk enabled, contains the account kiosk settings (including showOutOfStockProducts, showOutOfStockAtBottom).</summary>
         public KioskSettingsRes? KioskSettings { get; set; }

@@ -166,9 +166,10 @@ namespace George.Common
         public bool LightList { get; set; }
     }
 
-    /// <summary>Sprint 2: Filter for orders list by site.</summary>
+    /// <summary>Sprint 2: Filter for orders list by site or account (all sites in account).</summary>
     public class OrderFilter
     {
+        public int? AccountId { get; set; }
         public int? SiteId { get; set; }
         /// <summary>One or more statuses; bound from repeated query params (e.g. Filter.Status=Completed&amp;Filter.Status=Cancelled).</summary>
         public List<string>? Status { get; set; }       // New | InTreatment | Ready | Completed | Cancelled

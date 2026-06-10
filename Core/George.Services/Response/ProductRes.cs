@@ -1,3 +1,7 @@
+using George.Common;
+using George.Common.Utils;
+using Newtonsoft.Json;
+
 namespace George.Services.Response
 {
     public class ProductOptionRes
@@ -30,6 +34,9 @@ namespace George.Services.Response
         public bool? WeightByVariant { get; set; }
         public bool? ShowPricePer100g { get; set; }
         public bool? ShowUnitPrice { get; set; }
+
+        [JsonConverter(typeof(OcwsuSoldByLabelKeyJsonConverter))]
+        public OcwsuSoldByLabelKey? SoldByLabel { get; set; }
     }
 
     public class ProductRes
@@ -64,6 +71,8 @@ namespace George.Services.Response
         public List<int> CategoryIds { get; set; } = new();
         public List<int> SubcategoryIds { get; set; } = new();
         public List<string> Tags { get; set; } = new();
+        /// <summary>Assigned account brand IDs (ProductBrand join; legacy Product.BrandId included when join is empty).</summary>
+        public List<int> BrandIds { get; set; } = new();
         public string? Brand { get; set; }
         public string? Supplier { get; set; }
         public bool? IsKosher { get; set; }
@@ -77,6 +86,9 @@ namespace George.Services.Response
         public int? DisplayOrder { get; set; }
         public string? SeoTitle { get; set; }
         public string? SeoDescription { get; set; }
+
+        /// <summary>WooCommerce permalink slug.</summary>
+        public string? Slug { get; set; }
 
         /// <summary>Related/accessory product IDs (נלווים).</summary>
         public List<int> RelatedProductIds { get; set; } = new();
@@ -100,6 +112,18 @@ namespace George.Services.Response
         public bool LabelNew { get; set; }
 
         public DateTime? LabelNewEndDate { get; set; }
+
+        public bool LabelBestseller { get; set; }
+
+        public bool LabelLowAvailability { get; set; }
+
+        public bool LabelReadyToCook { get; set; }
+
+        public bool LabelNatural { get; set; }
+
+        public bool LabelSugarFree { get; set; }
+
+        public bool LabelLactoseFree { get; set; }
     }
 }
 

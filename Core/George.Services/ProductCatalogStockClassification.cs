@@ -42,6 +42,19 @@ public static class ProductCatalogStockClassification
         return "ok";
     }
 
+    /// <summary>Stock status for a products-report cut / variation row (resolved variant id when known).</summary>
+    public static string ClassifyCutRowStock(Product p, Account? account, int? variantId)
+    {
+        if (variantId is > 0)
+        {
+            var v = ActiveVariants(p).FirstOrDefault(x => x.Id == variantId);
+            if (v != null)
+                return ClassifySingleVariant(p, v, account);
+        }
+
+        return ClassifyStock(p, account);
+    }
+
     /// <summary>Per-variation status when parent uses variation stock (aligned with <see cref="ClassifyStockVariation"/>).</summary>
     public static string ClassifySingleVariant(Product p, ProductVariant v, Account? account)
     {
@@ -194,13 +207,36 @@ public static class ProductCatalogStockClassification
     /// <summary>
     /// When false, catalog row has no meaningful on-hand number — classify from <see cref="IsOutOfStockStatus"/> only.
     /// </summary>
-    private static bool UsesQuantityThresholds(Product p)
+    public static bool UsesQuantityThresholds(Product p)
     {
         if (ManagementTypeNorm(p) == "status")
             return false;
         if (IsExplicitQuantityManagement(p))
             return true;
         return p.StockQuantity.HasValue;
+    }
+
+    /// <summary>
+    /// My Products / inventory report: show numeric on-hand (not in/out only).
+    /// <c>quantity</c>, or <c>variation</c> with <see cref="Product.VariationStockByQuantity"/> = true.
+    /// </summary>
+    public static bool UsesNumericStockDisplay(Product p)
+    {
+        var apiType = StockManagementTypeForApi(p);
+        if (apiType == "status")
+            return false;
+        if (apiType == "quantity")
+            return true;
+        if (apiType == "variation")
+        {
+            var variants = ActiveVariants(p);
+            return variants.Count > 0 && p.VariationStockByQuantity == true;
+        }
+
+        if (IsVariableUnitWeightProduct(p))
+            return false;
+
+        return UsesQuantityThresholds(p);
     }
 
     private static bool IsVariableUnitWeightProduct(Product p)
@@ -228,7 +264,8 @@ public static class ProductCatalogStockClassification
             .Count(x => x.Length > 0);
     }
 
-    private static bool IsWeightedLikeProduct(Product p)
+    /// <summary>Same rule as SPA <c>stockLevels</c> / products report — not <see cref="Product.IsWeighted"/> alone.</summary>
+    public static bool IsWeightedLikeProduct(Product p)
     {
         if (p.IsWeighted == true)
             return true;

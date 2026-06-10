@@ -71,6 +71,17 @@ namespace George.Api.Controllers
                 _wooCommerceService.SyncToWooCommerceAsync(request, cancelToken));
         }
 
+        /// <summary>Sync OCWSU fixed-unit price display (הצג מחיר יחידה + נמכר לפי) to WooCommerce ed/v1.</summary>
+        [HttpPost("SyncOcwsuFixedUnitPriceDisplay")]
+        [ProducesResponseType(typeof(IApiResponse<OcwsuFixedUnitPriceDisplayRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> SyncOcwsuFixedUnitPriceDisplayAsync(
+            [FromBody] SyncOcwsuFixedUnitPriceDisplayReq request,
+            CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _wooCommerceService.SyncOcwsuFixedUnitPriceDisplayAsync(request, cancelToken));
+        }
+
         /// <summary>Syncs categories only and returns product IDs to sync. Client can then call Sync once per product (or batch) to avoid long-lived streams and QUIC errors.</summary>
         [HttpPost("SyncCategoriesAndGetProductIds")]
         [ProducesResponseType(typeof(IApiResponse<List<int>>), (int)HttpStatusCode.OK)]
@@ -147,7 +158,10 @@ namespace George.Api.Controllers
                     categories = new { created = d.Categories.Created, updated = d.Categories.Updated },
                     products = new { created = d.Products.Created, updated = d.Products.Updated },
                     variations = new { created = d.Variations.Created, updated = d.Variations.Updated },
-                    errors = d.Errors
+                    errors = d.Errors,
+                    wooProductFeedRowCount = d.WooProductFeedRowCount,
+                    wooProductUniqueIdCount = d.WooProductUniqueIdCount,
+                    wooProductFeedDuplicates = d.WooProductFeedDuplicates
                 });
             }
             catch (Exception ex)
@@ -157,6 +171,58 @@ namespace George.Api.Controllers
             }
 
             return new EmptyResult();
+        }
+
+        /// <summary>One-time: pull WooCommerce menu_order into George DisplayOrder (does not change Woo).</summary>
+        [HttpPost("ImportProductOrderFromWooCommerce")]
+        [ProducesResponseType(typeof(IApiResponse<WooCommerceProductOrderSyncRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> ImportProductOrderFromWooCommerceAsync(
+            [FromBody] WooCommerceSyncReq request,
+            CancellationToken cancelToken = default)
+        {
+            if (request == null || request.SiteId <= 0)
+                return BadRequest();
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _wooCommerceService.ImportProductOrderFromWooCommerceAsync(request.SiteId, cancelToken));
+        }
+
+        /// <summary>Push George catalog display order to WooCommerce menu_order for all linked products on the site.</summary>
+        [HttpPost("PushProductOrderToWooCommerce")]
+        [ProducesResponseType(typeof(IApiResponse<WooCommerceProductOrderSyncRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> PushProductOrderToWooCommerceAsync(
+            [FromBody] WooCommerceSyncReq request,
+            CancellationToken cancelToken = default)
+        {
+            if (request == null || request.SiteId <= 0)
+                return BadRequest();
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _wooCommerceService.PushProductOrderToWooCommerceAsync(request.SiteId, cancelToken));
+        }
+
+        /// <summary>Read-only: WooCommerce product list sorted by menu_order (JSON preview for order debugging).</summary>
+        [HttpPost("PreviewWooProductOrder")]
+        [ProducesResponseType(typeof(IApiResponse<ProductOrderPreviewRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> PreviewWooProductOrderAsync(
+            [FromBody] WooCommerceSyncReq request,
+            CancellationToken cancelToken = default)
+        {
+            if (request == null || request.SiteId <= 0)
+                return BadRequest();
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _wooCommerceService.PreviewWooProductOrderAsync(request.SiteId, cancelToken));
+        }
+
+        /// <summary>Read-only: George products on site sorted by DisplayOrder (JSON preview for order debugging).</summary>
+        [HttpPost("PreviewLocalProductOrder")]
+        [ProducesResponseType(typeof(IApiResponse<ProductOrderPreviewRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> PreviewLocalProductOrderAsync(
+            [FromBody] WooCommerceSyncReq request,
+            CancellationToken cancelToken = default)
+        {
+            if (request == null || request.SiteId <= 0)
+                return BadRequest();
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _wooCommerceService.PreviewLocalProductOrderAsync(request.SiteId, cancelToken));
         }
 
         /// <summary>Sync with streaming progress (NDJSON). Response: progress lines then one "done" line with result.</summary>
@@ -290,7 +356,7 @@ namespace George.Api.Controllers
             });
         }
 
-        /// <summary>Record payment from WooCommerce (invoice, Cardcom <c>cardcomPayment</c> JSON, <c>status</c>). Use <c>orderNumber</c> and/or <c>orderId</c> (WooCommerce id). Auth: X-Api-Key or Bearer &lt;key&gt;.</summary>
+        /// <summary>Record payment from WooCommerce (root <c>orderId</c>, <c>orderNumber</c>, <c>payment</c>, <c>status</c>, etc.). Auth: X-Api-Key or Bearer &lt;key&gt;.</summary>
         [HttpPost("OrderPayment")]
         [Authorize(AuthenticationSchemes = WooCommerceApiKeyAuthenticationHandler.SchemeName)]
         [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]
@@ -307,14 +373,19 @@ namespace George.Api.Controllers
                 _logger.LogWarning("WooCommerce OrderPayment: empty body (null payload).");
                 return BadRequest();
             }
-            var hasCardcom = payload.CardcomPayment != null && payload.CardcomPayment.Type != JTokenType.Null;
+            payload.NormalizeWooCommercePaymentRequest();
             _logger.LogInformation(
-                "WooCommerce OrderPayment request received. siteId={SiteId}, orderNumber={OrderNumber}, orderId={OrderId}, gatewayStatus={GatewayStatus}, hasCardcomPayment={HasCardcom}, headers={Headers}",
+                "WooCommerce OrderPayment full payload (after normalize). siteId={SiteId}, fullPayload={FullPayload}",
+                siteId.Value,
+                SerializeOrderPaymentPayloadForLog(payload));
+            var hasPaymentBlock = payload.Payment != null;
+            _logger.LogInformation(
+                "WooCommerce OrderPayment request received. siteId={SiteId}, orderNumber={OrderNumber}, orderId={OrderId}, gatewayStatus={GatewayStatus}, hasPaymentBlock={HasPayment}, headers={Headers}",
                 siteId.Value,
                 payload.OrderNumber,
                 payload.OrderId?.ToString(),
                 payload.Status,
-                hasCardcom,
+                hasPaymentBlock,
                 SerializeForLog(GetRequestHeadersForLog()));
             return await SafeCallWithErrorCatchingAsync(async () =>
             {
@@ -370,6 +441,27 @@ namespace George.Api.Controllers
             catch
             {
                 return data.ToString() ?? "null";
+            }
+        }
+
+        /// <summary>Newtonsoft JSON (contract fields + <c>JToken</c>); internal <c>[JsonIgnore]</c> merge fields may be omitted from this string.</summary>
+        private static string SerializeOrderPaymentPayloadForLog(WooCommerceOrderPaymentPayload payload)
+        {
+            try
+            {
+                return Newtonsoft.Json.JsonConvert.SerializeObject(
+                    payload,
+                    Newtonsoft.Json.Formatting.None,
+                    new Newtonsoft.Json.JsonSerializerSettings
+                    {
+                        NullValueHandling = Newtonsoft.Json.NullValueHandling.Include,
+                        DefaultValueHandling = Newtonsoft.Json.DefaultValueHandling.Include,
+                        ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore
+                    });
+            }
+            catch (Exception ex)
+            {
+                return $"<serialize error: {ex.Message}>";
             }
         }
 

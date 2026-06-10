@@ -72,6 +72,9 @@ namespace George.Services.Request
 
         public List<string>? Tags { get; set; }
 
+        /// <summary>Global brand IDs (many-to-many via TemplateProductBrand). When set (including empty), replaces join rows. Omit for partial updates.</summary>
+        public List<int>? BrandIds { get; set; }
+
         public string? Brand { get; set; }
 
         public string? Supplier { get; set; }
@@ -93,6 +96,8 @@ namespace George.Services.Request
         public string? SeoTitle { get; set; }
 
         public string? SeoDescription { get; set; }
+
+        public string? Slug { get; set; }
 
         public string? SourceProductId { get; set; }
 

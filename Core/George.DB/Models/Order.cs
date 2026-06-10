@@ -192,19 +192,108 @@ public partial class Order
     [StringLength(100)]
     public string? InvoiceNumber { get; set; }
 
+    /// <summary>Cardcom document PDF/view URL when an invoice was issued.</summary>
+    public string? CardcomDocumentUrl { get; set; }
+
+    /// <summary>Credit note / refund invoice number after Cardcom refund document.</summary>
+    [StringLength(100)]
+    public string? RefundInvoiceNumber { get; set; }
+
+    /// <summary>Cardcom credit note PDF/view URL after refund.</summary>
+    [StringLength(1000)]
+    public string? CardcomRefundDocumentUrl { get; set; }
+
+    /// <summary>Last payment webhook <c>orderId</c> (WooCommerce / gateway echo).</summary>
+    [StringLength(64)]
+    public string? GatewayPaymentOrderId { get; set; }
+
+    /// <summary>Last payment webhook <c>externalOrderId</c>.</summary>
+    [StringLength(64)]
+    public string? GatewayPaymentExternalOrderId { get; set; }
+
+    /// <summary>Last payment webhook <c>siteId</c> echo (API key still authorizes site).</summary>
+    [StringLength(50)]
+    public string? GatewayPaymentSiteId { get; set; }
+
+    /// <summary>Last payment webhook <c>isFinished</c> (e.g. charged label).</summary>
+    [StringLength(200)]
+    public string? IsFinished { get; set; }
+
+    /// <summary>Last payment webhook <c>payment.transactionId</c>.</summary>
+    [StringLength(120)]
+    public string? GatewayPaymentTransactionId { get; set; }
+
+    /// <summary>Last payment webhook <c>payment.paymentGateway</c> (any provider).</summary>
+    [StringLength(200)]
+    public string? PaymentGateway { get; set; }
+
     [Precision(0)]
     public DateTime? PaidAt { get; set; }
 
     /// <summary>When true, one-time catalog stock deduction for lines without saved picking has already run when the order reached Completed.</summary>
     public bool CompletionInventoryApplied { get; set; }
 
-    /// <summary>Raw JSON of <c>cardcomPayment</c> from WooCommerce <c>POST /WooCommerce/OrderPayment</c>.</summary>
+    /// <summary>Legacy: raw gateway JSON from older webhooks; prefer gateway payment columns.</summary>
     [Column(TypeName = "nvarchar(max)")]
     public string? CardcomPaymentJson { get; set; }
 
-    /// <summary>Gateway-reported <c>status</c> from the same webhook (e.g. success / failed).</summary>
+    /// <summary>Gateway-reported <c>status</c> from payment webhook (e.g. success / failed).</summary>
     [StringLength(100)]
     public string? ExternalPaymentStatus { get; set; }
+
+    /// <summary>Provider-agnostic payment lifecycle (None, Initiated, Authorized, Captured, etc.).</summary>
+    [StringLength(40)]
+    public string PaymentSettleStatus { get; set; } = "None";
+
+    /// <summary>Amount authorized at checkout (J5 hold).</summary>
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? PaymentAuthorizedAmount { get; set; }
+
+    [StringLength(64)]
+    public string? CardcomLowProfileId { get; set; }
+
+    [StringLength(32)]
+    public string? CardcomSuspendedDealId { get; set; }
+
+    [StringLength(32)]
+    public string? CardcomApprovalNumber { get; set; }
+
+    [StringLength(8)]
+    public string? CardcomTokenLast4 { get; set; }
+
+    [StringLength(32)]
+    public string? CardcomCardBrand { get; set; }
+
+    public int? CustomerPaymentMethodId { get; set; }
+
+    /// <summary>Public Wolt tracking page URL after dispatch.</summary>
+    [StringLength(1000)]
+    public string? WoltTrackingUrl { get; set; }
+
+    /// <summary>Short Wolt tracking code (SMS-friendly).</summary>
+    [StringLength(64)]
+    public string? WoltTrackingId { get; set; }
+
+    /// <summary>Wolt courier state (e.g. INFO_RECEIVED, PICKED_UP, DELIVERED).</summary>
+    [StringLength(64)]
+    public string? WoltStatus { get; set; }
+
+    /// <summary>Wolt internal delivery id (24 hex chars).</summary>
+    [StringLength(64)]
+    public string? WoltDeliveryId { get; set; }
+
+    [Precision(0)]
+    public DateTime? WoltDispatchedAt { get; set; }
+
+    /// <summary>Last successful dispatch API response snapshot (audit / refresh).</summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? WoltDeliveryJson { get; set; }
+
+    [ForeignKey(nameof(CustomerPaymentMethodId))]
+    public virtual CustomerPaymentMethod? CustomerPaymentMethod { get; set; }
+
+    [InverseProperty("Order")]
+    public virtual ICollection<OrderPaymentEvent> OrderPaymentEvent { get; set; } = new List<OrderPaymentEvent>();
 
     [ForeignKey("AccountId")]
     [InverseProperty("Order")]
@@ -212,6 +301,9 @@ public partial class Order
 
     [InverseProperty("Order")]
     public virtual ICollection<OrderItem> OrderItem { get; set; } = new List<OrderItem>();
+
+    [InverseProperty("Order")]
+    public virtual ICollection<OrderStatusHistory> OrderStatusHistory { get; set; } = new List<OrderStatusHistory>();
 
     [ForeignKey("SiteId")]
     [InverseProperty("Order")]

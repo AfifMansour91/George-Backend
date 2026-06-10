@@ -7,9 +7,12 @@ using George.Services.Utils;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Mvc.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -105,6 +108,16 @@ namespace George.Api.Core
 			// Authentication
 			AddAuthenticationAndAuthorization(services);
 
+			services.AddSignalR();
+
+			var dataProtectionKeysPath = Configuration["DataProtection:KeysPath"]?.Trim();
+			if (string.IsNullOrWhiteSpace(dataProtectionKeysPath))
+				dataProtectionKeysPath = Path.Combine(AppContext.BaseDirectory, "App_Data", "DataProtection-Keys");
+			Directory.CreateDirectory(dataProtectionKeysPath);
+			services.AddDataProtection()
+				.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
+				.SetApplicationName(Configuration["DataProtection:ApplicationName"]?.Trim() ?? "George");
+
 			// HTTP
 			AddHttpServices(services);
 
@@ -180,6 +193,7 @@ namespace George.Api.Core
 
 			app.UseEndpoints(endpoints => {
 				endpoints.MapControllers();
+				MapSignalRHubs(endpoints);
 			});
 		}
 
@@ -188,28 +202,40 @@ namespace George.Api.Core
 
 		protected virtual void ConfigureCORS(IServiceCollection services)
 		{
-			var allowOrigin = Configuration["Auth:AllowOrigin"];
+			var allowOrigin = Configuration["Auth:AllowOrigin"]?.Trim();
 
-			if (string.IsNullOrWhiteSpace(allowOrigin))
+			services.AddCors(o => o.AddPolicy("AllowAllPolicy", builder =>
 			{
-				services.AddCors(o => o.AddPolicy("AllowAllPolicy", builder => {
+				builder
+					.AllowAnyMethod()
+					.AllowAnyHeader();
+
+				// SignalR cross-origin needs a concrete Allow-Origin (not *) when credentials are used.
+				// REST clients use Bearer headers; hub uses access_token query + withCredentials:false on the client.
+				if (string.IsNullOrWhiteSpace(allowOrigin) || allowOrigin == "*")
+				{
 					builder.SetIsOriginAllowed(_ => true)
-							.AllowAnyOrigin()
-							.AllowAnyMethod()
-							.AllowAnyHeader();
-				}));
-			}
-			else
-			{
-				var origins = allowOrigin.Split(',');
-				services.AddCors(o => o.AddPolicy("AllowAllPolicy", builder => {
-					builder.WithOrigins(origins)
-						.SetIsOriginAllowed(_ => true)
-						.AllowAnyOrigin()
-						.AllowAnyMethod()
-						.AllowAnyHeader();
-				}));
-			}
+						.AllowCredentials();
+				}
+				else
+				{
+					var origins = allowOrigin
+						.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+						.Where(o => !string.Equals(o, "*", StringComparison.Ordinal))
+						.ToArray();
+
+					if (origins.Length == 0)
+					{
+						builder.SetIsOriginAllowed(_ => true)
+							.AllowCredentials();
+					}
+					else
+					{
+						builder.WithOrigins(origins)
+							.AllowCredentials();
+					}
+				}
+			}));
 		}
 
 		protected virtual void SetRequestLimits(IServiceCollection services)
@@ -368,7 +394,11 @@ namespace George.Api.Core
 			services.AddScoped<MediaStorage>();
 			services.AddScoped<OrderStorage>();
 			services.AddScoped<PromotionStorage>();
+			services.AddScoped<RealtimeLogStorage>();
+			services.AddScoped<PaymentStorage>();
+			services.AddScoped<DashboardStorage>();
 			services.AddScoped<IncomeReportStorage>();
+			services.AddScoped<RevenueReportStorage>();
 			services.AddScoped<ProductsReportStorage>();
 			services.AddScoped<QuantityConcentrationReportStorage>();
 			services.AddScoped<CustomerStorage>();
@@ -397,7 +427,14 @@ namespace George.Api.Core
 			services.AddScoped<OrderService>();
 			services.AddScoped<PromotionService>();
 			services.AddScoped<PromotionWebhookDispatcher>();
+			services.AddScoped<SiteAccessService>();
+			services.AddScoped<George.Services.Orders.IOrderRealtimeNotifier, George.Services.Orders.NullOrderRealtimeNotifier>();
+			services.AddScoped<George.Services.Payments.PaymentService>();
+			services.AddScoped<George.Services.Payments.Cardcom.CardcomGateway>();
+			services.AddSingleton<George.Services.Payments.PaymentTokenProtector>();
 			services.AddScoped<IncomeReportService>();
+			services.AddScoped<DashboardService>();
+            services.AddScoped<RevenueReportService>();
 			services.AddScoped<ProductsReportService>();
 			services.AddScoped<InventoryReportService>();
 			services.AddScoped<QuantityConcentrationReportService>();
@@ -410,6 +447,7 @@ namespace George.Api.Core
 			services.AddScoped<TemplateAttributeService>();
 			services.AddScoped<TemplateProductService>();
 			services.AddScoped<WooCommerceService>();
+			services.AddScoped<WoltDispatchService>();
 			services.AddScoped<KioskCustomerService>();
 
 			// Let the derived add its own dependencies.
@@ -440,6 +478,17 @@ namespace George.Api.Core
 						IssuerSigningKey = new SymmetricSecurityKey(key),
 						ClockSkew = TimeSpan.Zero
 					};
+					options.Events = new JwtBearerEvents
+					{
+						OnMessageReceived = context =>
+						{
+							var accessToken = context.Request.Query["access_token"];
+							var path = context.HttpContext.Request.Path;
+							if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/orders"))
+								context.Token = accessToken;
+							return Task.CompletedTask;
+						}
+					};
 				})
 				.AddScheme<AuthenticationSchemeOptions, PrintAgentApiKeyAuthenticationHandler>(PrintAgentApiKeyAuthenticationHandler.SchemeName, _ => { })
 				.AddScheme<AuthenticationSchemeOptions, WooCommerceApiKeyAuthenticationHandler>(WooCommerceApiKeyAuthenticationHandler.SchemeName, _ => { });
@@ -457,6 +506,11 @@ namespace George.Api.Core
 
 			// Register http services.
 			services.AddHttpClient<HttpHelper>();
+			services.AddHttpClient(George.Services.Payments.Cardcom.CardcomGateway.HttpClientName, client =>
+			{
+				client.BaseAddress = new Uri("https://secure.cardcom.solutions/api/v11/");
+				client.Timeout = TimeSpan.FromSeconds(60);
+			});
 		}
 
 		protected virtual void AddAutoMapper(IServiceCollection services)
@@ -469,6 +523,10 @@ namespace George.Api.Core
 
 			var mapper = config.CreateMapper();
 			services.AddSingleton(mapper);
+		}
+
+		protected virtual void MapSignalRHubs(IEndpointRouteBuilder endpoints)
+		{
 		}
 
 		protected virtual void AddHostedServices(IServiceCollection services)
@@ -490,7 +548,8 @@ namespace George.Api.Core
 				"StoreOS",
 				"0545555555",
                 "StoreOS",
-				"StoreOS");
+                "StoreOS",
+                otpWebOriginHost: Configuration["Auth:OtpSmsWebOriginHost"]);
  
 
             // Set globals.

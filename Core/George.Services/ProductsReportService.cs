@@ -15,6 +15,46 @@ namespace George.Services
 
         private static readonly string[] SliceColors = { "#1E3A5F", "#3B82F6", "#93C5FD", "#F59E0B", "#10B981", "#9CA3AF" };
 
+        private static HashSet<int> ParseExcludeCategoryIds(string? raw)
+        {
+            var set = new HashSet<int>();
+            if (string.IsNullOrWhiteSpace(raw)) return set;
+            foreach (var part in raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (int.TryParse(part, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var id) &&
+                    id > 0)
+                    set.Add(id);
+            }
+            return set;
+        }
+
+        /// <summary>החרגה אם אחת הקטגוריות המקושרות למוצר מופיעה ברשימת החרגה (הורה או צאצא).</summary>
+        private static bool ExcludeProduct(Product p, HashSet<int> exclude)
+        {
+            if (exclude.Count == 0) return false;
+            foreach (var link in p.ProductCategory ?? Enumerable.Empty<ProductCategory>())
+            {
+                if (exclude.Contains(link.CategoryId))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool MatchesProductFilter(
+            Product p,
+            int? categoryId,
+            int? supplierId,
+            int? brandId,
+            HashSet<int> excludeCategoryIds)
+        {
+            if (ExcludeProduct(p, excludeCategoryIds)) return false;
+            if (categoryId != null && PrimaryCategoryId(p) != categoryId) return false;
+            if (supplierId != null && p.SupplierId != supplierId) return false;
+            if (brandId != null && p.BrandId != brandId) return false;
+            return true;
+        }
+
         public ProductsReportService(
             ILogger<ProductsReportService> logger,
             IMapper mapper,
@@ -35,18 +75,25 @@ namespace George.Services
             DateTime? customFrom,
             DateTime? customTo,
             int? categoryId,
+            int? supplierId,
+            int? brandId,
+            string? excludeCategoryIds,
+            string? cutLabel,
             CancellationToken cancelToken = default)
         {
             var response = new ApiResponse<ProductsReportRes>();
             if (siteId <= 0)
                 return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required.");
 
+            var excludeIds = ParseExcludeCategoryIds(excludeCategoryIds);
+            var cutFilter = string.IsNullOrWhiteSpace(cutLabel) ? null : cutLabel.Trim();
+
             var utcNow = DateTime.UtcNow;
             DateTime fromUtc;
             DateTime toUtcExclusive;
             try
             {
-                (fromUtc, toUtcExclusive) = ResolveCurrentRange(period, customFrom, customTo, utcNow);
+                (fromUtc, toUtcExclusive) = ReportPeriodRange.ResolveCurrentRange(period, customFrom, customTo, utcNow);
             }
             catch
             {
@@ -92,6 +139,8 @@ namespace George.Services
             }
 
             var catFilter = categoryId is > 0 ? categoryId : null;
+            var supFilter = supplierId is > 0 ? supplierId : null;
+            var brandFilter = brandId is > 0 ? brandId : null;
 
             var categories = await _categoryStorage.GetCategoriesAsync(
                 new CategoryFilter { SiteId = siteId, IsEnabled = true },
@@ -108,62 +157,72 @@ namespace George.Services
                     .ToList(),
             };
 
-            var soldIdsInPeriod = ComputeSoldProductIdsForPeriod(currentOrders, productDict, catFilter);
-            res.Kpis = BuildKpis(currentOrders, catalogProducts, account, productDict, catFilter, soldIdsInPeriod);
+            var supplierMap = new Dictionary<int, string>();
+            var brandMap = new Dictionary<int, string>();
+            foreach (var p in catalogProducts)
+            {
+                if (p.SupplierId is > 0 && p.Supplier != null && !supplierMap.ContainsKey(p.SupplierId.Value))
+                    supplierMap[p.SupplierId.Value] = p.Supplier.Name ?? "";
+                if (p.BrandId is > 0 && p.Brand != null && !brandMap.ContainsKey(p.BrandId.Value))
+                    brandMap[p.BrandId.Value] = p.Brand.Name ?? "";
+            }
+
+            res.Suppliers = supplierMap
+                .Select(kv => new ProductsReportCategoryOptionDto { Id = kv.Key, Name = kv.Value })
+                .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            res.Brands = brandMap
+                .Select(kv => new ProductsReportCategoryOptionDto { Id = kv.Key, Name = kv.Value })
+                .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var wooToProductId = catalogProducts
+                .Where(p => p.WooCommerceId is > 0)
+                .GroupBy(p => p.WooCommerceId!.Value)
+                .ToDictionary(g => g.Key, g => g.First().Id);
 
             var lastSaleUtcByProduct = await _incomeReportStorage
                 .GetLastPaidCompletedOrderCreationTimeUtcPerProductAsync(
                     siteId,
-                    catalogProducts.Select(p => p.Id),
+                    catalogProducts.Select(p => (p.Id, p.WooCommerceId)),
                     cancelToken)
                 .ConfigureAwait(false);
+            MergeLastSaleTimesFromOrders(lastSaleUtcByProduct, currentOrders, wooToProductId);
+            MergeLastSaleTimesFromOrders(lastSaleUtcByProduct, baselineOrders, wooToProductId);
+
+            var soldIdsInPeriod = ComputeSoldProductIdsForPeriod(currentOrders, productDict, catFilter, supFilter, brandFilter, excludeIds);
+            res.Kpis = BuildKpis(
+                currentOrders,
+                catalogProducts,
+                account,
+                productDict,
+                catFilter,
+                supFilter,
+                brandFilter,
+                soldIdsInPeriod,
+                excludeIds,
+                lastSaleUtcByProduct,
+                utcNow);
+            res.CutOptions = BuildCutOptions(currentOrders, productDict, catFilter, supFilter, brandFilter, excludeIds);
+
             res.UnsoldProducts = BuildUnsoldProductRows(
                 catalogProducts,
                 catFilter,
+                supFilter,
+                brandFilter,
+                excludeIds,
                 account,
                 soldIdsInPeriod,
                 lastSaleUtcByProduct,
                 utcNow);
 
-            res.ProductRows = BuildProductRows(currentOrders, baselineOrders, productDict, catFilter, account);
-            res.CategorySlices = BuildCategorySlices(currentOrders, productDict, catFilter);
-            res.TopOptions = BuildTopOptions(currentOrders, productDict, catFilter);
-            res.UpsellPairs = BuildUpsellPairs(currentOrders, productDict, catFilter);
+            res.ProductRows = BuildProductRows(currentOrders, baselineOrders, productDict, catFilter, supFilter, brandFilter, account, excludeIds, cutFilter);
+            res.CategorySlices = BuildCategorySlices(currentOrders, productDict, catFilter, supFilter, brandFilter, excludeIds, categories.Items);
+            res.TopOptions = BuildTopOptions(currentOrders, productDict, catFilter, supFilter, brandFilter, excludeIds);
+            res.UpsellPairs = BuildUpsellPairs(currentOrders, productDict, catFilter, supFilter, brandFilter, excludeIds);
 
             response.Data = res;
             return response;
-        }
-
-        private static (DateTime fromUtc, DateTime toUtcExclusive) ResolveCurrentRange(
-            string period,
-            DateTime? customFrom,
-            DateTime? customTo,
-            DateTime utcNow)
-        {
-            var p = (period ?? "month").Trim().ToLowerInvariant();
-            var today = utcNow.Date;
-            switch (p)
-            {
-                case "today":
-                    return (today, today.AddDays(1));
-                case "week":
-                {
-                    var dow = (int)today.DayOfWeek;
-                    var daysFromMonday = dow == (int)DayOfWeek.Sunday ? 6 : dow - (int)DayOfWeek.Monday;
-                    var monday = today.AddDays(-daysFromMonday);
-                    return (monday, today.AddDays(1));
-                }
-                case "month":
-                    return (new DateTime(today.Year, today.Month, 1, 0, 0, 0, DateTimeKind.Utc), today.AddDays(1));
-                case "custom":
-                    if (customFrom == null || customTo == null)
-                        throw new ArgumentException("customFrom/customTo required for custom period.");
-                    var from = DateTime.SpecifyKind(customFrom.Value.Date, DateTimeKind.Utc);
-                    var toEx = DateTime.SpecifyKind(customTo.Value.Date.AddDays(1), DateTimeKind.Utc);
-                    return (from, toEx);
-                default:
-                    return (new DateTime(today.Year, today.Month, 1, 0, 0, 0, DateTimeKind.Utc), today.AddDays(1));
-            }
         }
 
         private const int MaxUnsoldProductRows = 500;
@@ -171,7 +230,10 @@ namespace George.Services
         private static HashSet<int> ComputeSoldProductIdsForPeriod(
             List<Order> currentOrders,
             Dictionary<int, Product> productDict,
-            int? categoryId)
+            int? categoryId,
+            int? supplierId,
+            int? brandId,
+            HashSet<int> excludeCategoryIds)
         {
             var soldIds = new HashSet<int>();
             foreach (var o in currentOrders)
@@ -180,7 +242,7 @@ namespace George.Services
                 {
                     if (line.ProductId is not > 0) continue;
                     if (!productDict.TryGetValue(line.ProductId.Value, out var p)) continue;
-                    if (categoryId != null && PrimaryCategoryId(p) != categoryId) continue;
+                    if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
                     if (LineMerchandise(line) <= 0m) continue;
                     soldIds.Add(line.ProductId.Value);
                 }
@@ -192,6 +254,9 @@ namespace George.Services
         private static List<ProductsReportUnsoldRowDto> BuildUnsoldProductRows(
             List<Product> catalogProducts,
             int? categoryId,
+            int? supplierId,
+            int? brandId,
+            HashSet<int> excludeCategoryIds,
             Account? account,
             HashSet<int> soldIdsInPeriod,
             Dictionary<int, DateTime> lastSaleUtcByProduct,
@@ -200,7 +265,7 @@ namespace George.Services
             var list = new List<ProductsReportUnsoldRowDto>();
             foreach (var p in catalogProducts)
             {
-                if (categoryId != null && PrimaryCategoryId(p) != categoryId) continue;
+                if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
                 if (soldIdsInPeriod.Contains(p.Id)) continue;
 
                 var cid = PrimaryCategoryId(p);
@@ -224,7 +289,7 @@ namespace George.Services
                     DaysSinceLastSale = daysSinceLastSale,
                     StockStatus = st,
                     StockQuantity = p.StockQuantity,
-                    IsWeighted = p.IsWeighted == true,
+                    IsWeighted = ProductCatalogStockClassification.IsWeightedLikeProduct(p),
                 });
             }
 
@@ -240,7 +305,12 @@ namespace George.Services
             Account? account,
             Dictionary<int, Product> productDict,
             int? categoryId,
-            HashSet<int> soldIdsInPeriod)
+            int? supplierId,
+            int? brandId,
+            HashSet<int> soldIdsInPeriod,
+            HashSet<int> excludeCategoryIds,
+            Dictionary<int, DateTime> lastSaleUtcByProduct,
+            DateTime utcNow)
         {
             var catRevenue = new Dictionary<int, (string name, decimal rev)>();
             decimal totalRev = 0m;
@@ -250,8 +320,8 @@ namespace George.Services
                 {
                     if (line.ProductId is not > 0) continue;
                     if (!productDict.TryGetValue(line.ProductId.Value, out var p)) continue;
+                    if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
                     var cid = PrimaryCategoryId(p);
-                    if (categoryId != null && cid != categoryId) continue;
                     var m = LineMerchandise(line);
                     if (m <= 0m) continue;
                     totalRev += m;
@@ -277,24 +347,115 @@ namespace George.Services
             var lowCount = 0;
             foreach (var p in catalogProducts)
             {
+                if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
                 var st = ProductCatalogStockClassification.ClassifyStock(p, account);
                 if (st == "out") outCount++;
                 else if (st == "low") lowCount++;
             }
 
             var unsoldInPeriod = catalogProducts.Count(p =>
-                (categoryId == null || PrimaryCategoryId(p) == categoryId) && !soldIdsInPeriod.Contains(p.Id));
+                MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds) && !soldIdsInPeriod.Contains(p.Id));
+
+            var catalogInScope = catalogProducts.Count(p =>
+                MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds));
 
             return new ProductsReportKpisDto
             {
                 DistinctProductsSold = soldIdsInPeriod.Count,
-                CatalogProductCount = catalogProducts.Count,
+                CatalogProductCount = catalogInScope,
                 UnsoldInPeriodCount = unsoldInPeriod,
                 LeadingCategoryName = leadName,
                 LeadingCategoryRevenuePct = leadPct,
                 OutOfStockCount = outCount,
                 LowStockCount = lowCount,
+                DaysSinceLastSaleAmongOutOfStock = MinDaysSinceLastSaleAmongStockBucket(
+                    catalogProducts, account, "out", categoryId, supplierId, brandId, excludeCategoryIds, lastSaleUtcByProduct, utcNow),
+                DaysSinceLastSaleAmongLowStock = MinDaysSinceLastSaleAmongStockBucket(
+                    catalogProducts, account, "low", categoryId, supplierId, brandId, excludeCategoryIds, lastSaleUtcByProduct, utcNow),
             };
+        }
+
+        private static void MergeLastSaleTimesFromOrders(
+            Dictionary<int, DateTime> map,
+            IEnumerable<Order> orders,
+            IReadOnlyDictionary<int, int>? wooCommerceProductIdToProductId = null)
+        {
+            foreach (var o in orders)
+            {
+                var ct = o.CreationTime;
+                if (ct.Kind == DateTimeKind.Local)
+                    ct = ct.ToUniversalTime();
+                else if (ct.Kind == DateTimeKind.Unspecified)
+                    ct = DateTime.SpecifyKind(ct, DateTimeKind.Utc);
+
+                foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
+                {
+                    var pid = line.ProductId;
+                    if (pid is not > 0
+                        && line.WooCommerceProductId is > 0
+                        && wooCommerceProductIdToProductId != null
+                        && wooCommerceProductIdToProductId.TryGetValue(line.WooCommerceProductId.Value, out var mapped))
+                        pid = mapped;
+                    if (pid is not > 0) continue;
+                    if (!map.TryGetValue(pid.Value, out var prev) || ct > prev)
+                        map[pid.Value] = ct;
+                }
+            }
+        }
+
+        private static int? MinDaysSinceLastSaleAmongStockBucket(
+            List<Product> catalogProducts,
+            Account? account,
+            string stockBucket,
+            int? categoryId,
+            int? supplierId,
+            int? brandId,
+            HashSet<int> excludeCategoryIds,
+            Dictionary<int, DateTime> lastSaleUtcByProduct,
+            DateTime utcNow)
+        {
+            int? minDays = null;
+            foreach (var p in catalogProducts)
+            {
+                if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
+                var st = ProductCatalogStockClassification.ClassifyStock(p, account);
+                if (!string.Equals(st, stockBucket, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (!lastSaleUtcByProduct.TryGetValue(p.Id, out var lastUtc))
+                    continue;
+                var d = (int)Math.Floor((utcNow.Date - lastUtc.Date).TotalDays);
+                d = Math.Max(0, d);
+                if (minDays == null || d < minDays)
+                    minDays = d;
+            }
+
+            return minDays;
+        }
+
+        private static List<string> BuildCutOptions(
+            List<Order> orders,
+            Dictionary<int, Product> products,
+            int? categoryId,
+            int? supplierId,
+            int? brandId,
+            HashSet<int> excludeCategoryIds)
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var o in orders)
+            {
+                foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
+                {
+                    if (line.ProductId is not > 0) continue;
+                    if (!products.TryGetValue(line.ProductId.Value, out var p)) continue;
+                    if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
+                    if (LineMerchandise(line) <= 0m) continue;
+                    var label = ResolveProductsReportCutLabel(line, p.Name);
+                    if (!string.IsNullOrWhiteSpace(label))
+                        set.Add(label.Trim());
+                }
+            }
+
+            return set.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
         }
 
         private static List<ProductsReportProductRowDto> BuildProductRows(
@@ -302,10 +463,14 @@ namespace George.Services
             List<Order> baseline,
             Dictionary<int, Product> products,
             int? categoryId,
-            Account? account)
+            int? supplierId,
+            int? brandId,
+            Account? account,
+            HashSet<int> excludeCategoryIds,
+            string? cutLabelFilter)
         {
-            var curAgg = AggregateByProduct(current, products, categoryId);
-            var basAgg = AggregateByProduct(baseline, products, categoryId);
+            var curAgg = AggregateByProduct(current, products, categoryId, supplierId, brandId, excludeCategoryIds, cutLabelFilter);
+            var basAgg = AggregateByProduct(baseline, products, categoryId, supplierId, brandId, excludeCategoryIds, cutLabelFilter);
 
             var rows = curAgg
                 .OrderByDescending(kv => kv.Value.revenue)
@@ -320,6 +485,8 @@ namespace George.Services
                         : (decimal?)null;
                     var trendUp = b != null && b.revenue > 0m ? a.revenue >= b.revenue : (bool?)null;
 
+                    products.TryGetValue(pid, out var p);
+
                     var cuts = a.byCut
                         .Where(x => !string.IsNullOrWhiteSpace(x.Key))
                         .OrderByDescending(x => x.Value.revenue)
@@ -329,10 +496,10 @@ namespace George.Services
                             QuantityKg = x.Value.kg > 0m ? Round2(x.Value.kg) : null,
                             QuantityUnits = x.Value.units > 0m ? Round2(x.Value.units) : null,
                             Revenue = Round2(x.Value.revenue),
+                            StockStatus = ResolveCutRowStockStatus(p, account, x.Value),
                         })
                         .ToList();
 
-                    products.TryGetValue(pid, out var p);
                     var catId = p != null ? PrimaryCategoryId(p) : null;
                     var catName = p != null && catId != null
                         ? p.ProductCategory?.FirstOrDefault(x => x.CategoryId == catId)?.Category?.Name ?? ""
@@ -366,13 +533,25 @@ namespace George.Services
             public decimal revenue;
             public decimal kg;
             public decimal units;
-            public readonly Dictionary<string, (decimal revenue, decimal kg, decimal units)> byCut = new(StringComparer.OrdinalIgnoreCase);
+            public readonly Dictionary<string, CutAgg> byCut = new(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private sealed class CutAgg
+        {
+            public decimal revenue;
+            public decimal kg;
+            public decimal units;
+            public readonly HashSet<int> VariantIds = new();
         }
 
         private static Dictionary<int, Agg> AggregateByProduct(
             List<Order> orders,
             Dictionary<int, Product> products,
-            int? categoryId)
+            int? categoryId,
+            int? supplierId,
+            int? brandId,
+            HashSet<int> excludeCategoryIds,
+            string? cutLabelFilter)
         {
             var map = new Dictionary<int, Agg>();
             foreach (var o in orders)
@@ -381,9 +560,17 @@ namespace George.Services
                 {
                     if (line.ProductId is not > 0) continue;
                     if (!products.TryGetValue(line.ProductId.Value, out var p)) continue;
-                    if (categoryId != null && PrimaryCategoryId(p) != categoryId) continue;
+                    if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
                     var merch = LineMerchandise(line);
                     if (merch <= 0m) continue;
+
+                    var cutLabel = ResolveProductsReportCutLabel(line, p.Name);
+                    if (cutLabelFilter != null)
+                    {
+                        if (cutLabel == null ||
+                            !string.Equals(cutLabel, cutLabelFilter, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                    }
 
                     if (!map.ContainsKey(p.Id))
                         map[p.Id] = new Agg { name = p.Name, imageUrl = FirstImageUrl(p) };
@@ -392,15 +579,17 @@ namespace George.Services
                     a.revenue += merch;
                     a.kg += kgLine;
                     a.units += unitLine;
-                    var cutKey = (line.OrderLineCuttingLabel ?? "").Trim();
-                    if (!string.IsNullOrEmpty(cutKey))
+                    if (!string.IsNullOrEmpty(cutLabel))
                     {
-                        if (!a.byCut.TryGetValue(cutKey, out var c))
-                            c = (0m, 0m, 0m);
+                        if (!a.byCut.TryGetValue(cutLabel, out var c))
+                            c = new CutAgg();
                         c.revenue += merch;
                         c.kg += kgLine;
                         c.units += unitLine;
-                        a.byCut[cutKey] = c;
+                        var variant = ProductCatalogVariantResolution.FindVariantForOrderLine(p, line);
+                        if (variant != null)
+                            c.VariantIds.Add(variant.Id);
+                        a.byCut[cutLabel] = c;
                     }
 
                     map[p.Id] = a;
@@ -410,33 +599,45 @@ namespace George.Services
             return map;
         }
 
+        private static string? ResolveProductsReportCutLabel(OrderItem line, string? productName) =>
+            OrderItemReportLineLabel.ResolveOptionDisplayLabel(line, productName);
+
+        private static string ResolveCutRowStockStatus(Product? p, Account? account, CutAgg cut)
+        {
+            if (p == null) return "ok";
+            int? variantId = cut.VariantIds.Count > 0 ? cut.VariantIds.Min() : null;
+            return ProductCatalogStockClassification.ClassifyCutRowStock(p, account, variantId);
+        }
+
         private static (decimal kg, decimal units) SplitLineQty(OrderItem line, Product p)
         {
             var mode = (line.OrderLineQuantityMode ?? "").Trim().ToLowerInvariant();
             if (mode == "weight")
             {
-                var kg = LineWeightKg(line);
-                return (kg ?? 0m, line.LineUnit ?? 0m);
+                var weightKg = LineWeightKg(line, p);
+                return (weightKg ?? 0m, line.LineUnit ?? 0m);
             }
 
-            if (mode == "units")
-            {
-                var u = line.LineUnit ?? line.Quantity;
-                return (0m, u);
-            }
-
-            if (p.IsWeighted == true)
-            {
-                var kg = LineWeightKg(line);
-                if (kg is > 0m)
-                    return (kg.Value, line.LineUnit ?? 0m);
-            }
-
-            return (LineWeightKg(line) ?? 0m, line.LineUnit ?? line.Quantity);
+            // Piece-count and legacy weighted lines — same kg/units rules as דוח ריכוז כמויות.
+            var (kgLine, unitsFromQc) = QuantityConcentrationReportService.SplitLineQty(line, p);
+            var units = unitsFromQc > 0m ? EffectiveLineUnits(line) : 0m;
+            return (kgLine, units);
         }
 
-        private static decimal? LineWeightKg(OrderItem i)
+        private static decimal EffectiveLineUnits(OrderItem line)
         {
+            if (line.PickingUserConfirmed && line.PickedQuantity is > 0m &&
+                !string.Equals(line.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase))
+                return line.PickedQuantity.Value;
+            return line.LineUnit ?? line.Quantity;
+        }
+
+        private static decimal? LineWeightKg(OrderItem i, Product? p)
+        {
+            if (i.PickingUserConfirmed && i.PickedQuantity is > 0m &&
+                string.Equals(i.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase))
+                return i.PickedQuantity.Value;
+
             if (i.PickedQuantity is > 0m &&
                 string.Equals(i.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase))
                 return i.PickedQuantity.Value;
@@ -454,47 +655,213 @@ namespace George.Services
             return null;
         }
 
+        private static bool IsAncestorOrSelf(int ancestorId, int categoryId, Dictionary<int, int?> parentMap)
+        {
+            var cur = categoryId;
+            for (var guard = 0; guard < 64; guard++)
+            {
+                if (cur == ancestorId) return true;
+                if (!parentMap.TryGetValue(cur, out var p) || p == null) return false;
+                cur = p.Value;
+            }
+
+            return false;
+        }
+
+        private static decimal RollupRevenueForSubtree(int ancestorId, Dictionary<int, decimal> revByCategory, Dictionary<int, int?> parentMap)
+        {
+            decimal s = 0m;
+            foreach (var kv in revByCategory)
+            {
+                if (IsAncestorOrSelf(ancestorId, kv.Key, parentMap))
+                    s += kv.Value;
+            }
+
+            return s;
+        }
+
+        /// <summary>קטגוריות מינימליות בסט המסומן (ללא אב שיש לו צאצא גם מסומן).</summary>
+        private static HashSet<int> MinimalAssignedCategoryNodes(HashSet<int> idSet, Dictionary<int, int?> parentMap)
+        {
+            var minimal = new HashSet<int>();
+            foreach (var x in idSet)
+            {
+                var hasDescendantAlsoAssigned = idSet.Any(y => y != x && IsAncestorOrSelf(x, y, parentMap));
+                if (!hasDescendantAlsoAssigned)
+                    minimal.Add(x);
+            }
+
+            return minimal;
+        }
+
+        /// <summary>שרשרת מהשורש לצאצא — רק צמתים שמופיעים במוצר; משקלול 1..n נותן עדיפות לקטגוריה הספציפית.</summary>
+        private static List<int> AssignedAncestorChainRootToLeaf(int deepestAssigned, HashSet<int> idSet, Dictionary<int, int?> parentMap)
+        {
+            var path = new List<int>();
+            var cur = deepestAssigned;
+            while (true)
+            {
+                if (idSet.Contains(cur))
+                    path.Add(cur);
+                if (!parentMap.TryGetValue(cur, out var p) || p == null)
+                    break;
+                cur = p.Value;
+            }
+
+            path.Reverse();
+            return path;
+        }
+
+        private static void AddCategoryRevenueSplit(
+            Dictionary<int, decimal> revByCat,
+            decimal m,
+            HashSet<int> idSet,
+            Dictionary<int, int?> parentMap)
+        {
+            if (idSet.Count == 0 || m <= 0m)
+                return;
+
+            var minimal = MinimalAssignedCategoryNodes(idSet, parentMap);
+            if (minimal.Count == 0)
+                return;
+
+            if (minimal.Count == 1)
+            {
+                var only = minimal.First();
+                var chain = AssignedAncestorChainRootToLeaf(only, idSet, parentMap);
+                if (chain.Count == 0)
+                    return;
+                var n = chain.Count;
+                var denom = n * (n + 1) / 2m;
+                for (var i = 0; i < n; i++)
+                {
+                    var cid = chain[i];
+                    var w = (i + 1) / denom;
+                    revByCat[cid] = revByCat.GetValueOrDefault(cid) + m * w;
+                }
+
+                return;
+            }
+
+            var share = m / minimal.Count;
+            foreach (var cid in minimal)
+                revByCat[cid] = revByCat.GetValueOrDefault(cid) + share;
+        }
+
+        private static string ResolveCategoryDisplayName(int categoryId, Dictionary<int, string> nameMap, Dictionary<int, Product> products)
+        {
+            if (nameMap.TryGetValue(categoryId, out var n) && !string.IsNullOrWhiteSpace(n))
+                return n;
+            foreach (var p in products.Values)
+            {
+                var link = p.ProductCategory?.FirstOrDefault(pc => pc.CategoryId == categoryId);
+                if (link?.Category?.Name is { Length: > 0 } nm)
+                    return nm;
+            }
+
+            return $"#{categoryId}";
+        }
+
         private static List<ProductsReportCategorySliceDto> BuildCategorySlices(
             List<Order> orders,
             Dictionary<int, Product> products,
-            int? categoryId)
+            int? categoryId,
+            int? supplierId,
+            int? brandId,
+            HashSet<int> excludeCategoryIds,
+            List<Category> allCategories)
         {
-            var byCat = new Dictionary<int, (string name, decimal rev)>();
-            decimal total = 0m;
+            var parentMap = allCategories.ToDictionary(c => c.Id, c => c.ParentCategoryId);
+            var nameMap = allCategories.ToDictionary(c => c.Id, c => c.Name ?? "");
+
+            var revByCat = new Dictionary<int, decimal>();
             foreach (var o in orders)
             {
                 foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
                 {
                     if (line.ProductId is not > 0) continue;
                     if (!products.TryGetValue(line.ProductId.Value, out var p)) continue;
-                    var cid = PrimaryCategoryId(p);
-                    if (cid == null) continue;
-                    if (categoryId != null && cid != categoryId) continue;
+                    if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
                     var m = LineMerchandise(line);
                     if (m <= 0m) continue;
-                    total += m;
-                    var name = p.ProductCategory?.FirstOrDefault(x => x.CategoryId == cid)?.Category?.Name ?? "";
-                    if (!byCat.ContainsKey(cid.Value))
-                        byCat[cid.Value] = (name, 0m);
-                    var t = byCat[cid.Value];
-                    byCat[cid.Value] = (t.name, t.rev + m);
+
+                    var idSet = (p.ProductCategory ?? Enumerable.Empty<ProductCategory>()).Select(x => x.CategoryId).ToHashSet();
+                    if (idSet.Count == 0) continue;
+                    AddCategoryRevenueSplit(revByCat, m, idSet, parentMap);
                 }
             }
 
-            if (total <= 0m) return new List<ProductsReportCategorySliceDto>();
+            if (revByCat.Count == 0 || revByCat.Values.Sum() <= 0m)
+                return new List<ProductsReportCategorySliceDto>();
 
-            var ordered = byCat.OrderByDescending(kv => kv.Value.rev).ToList();
+            var total = revByCat.Values.Sum();
+            var ordered = revByCat.OrderByDescending(kv => kv.Value).ToList();
             var list = new List<ProductsReportCategorySliceDto>();
             for (var i = 0; i < ordered.Count; i++)
             {
-                var tuple = ordered[i].Value;
+                var (cid, rev) = ordered[i];
                 list.Add(new ProductsReportCategorySliceDto
                 {
-                    Name = tuple.name,
+                    CategoryId = cid,
+                    Name = ResolveCategoryDisplayName(cid, nameMap, products),
                     Color = SliceColors[i % SliceColors.Length],
-                    Pct = Math.Round(tuple.rev / total * 100m, 1, MidpointRounding.AwayFromZero),
-                    Revenue = Round2(tuple.rev),
+                    Pct = Math.Round(rev / total * 100m, 1, MidpointRounding.AwayFromZero),
+                    Revenue = Round2(rev),
                 });
+            }
+
+            var childrenByParent = parentMap
+                .Where(kv => kv.Value != null)
+                .GroupBy(kv => kv.Value!.Value)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.Key).ToList());
+
+            foreach (var slice in list)
+            {
+                if (slice.CategoryId is not int pid) continue;
+                if (!childrenByParent.TryGetValue(pid, out var children) || children.Count == 0) continue;
+
+                var parentTotal = revByCat.GetValueOrDefault(pid);
+                var rolls = children.ToDictionary(c => c, c => RollupRevenueForSubtree(c, revByCat, parentMap));
+                var sumR = rolls.Values.Sum();
+
+                var alloc = new Dictionary<int, decimal>();
+                if (sumR <= 0m && parentTotal > 0m)
+                {
+                    var eq = parentTotal / children.Count;
+                    foreach (var c in children)
+                        alloc[c] = eq;
+                }
+                else if (sumR > 0m)
+                {
+                    foreach (var c in children)
+                        alloc[c] = rolls[c] + parentTotal * (rolls[c] / sumR);
+                }
+                else
+                {
+                    foreach (var c in children)
+                        alloc[c] = rolls[c];
+                }
+
+                var sub = new List<ProductsReportCategorySliceDto>();
+                foreach (var c in children.OrderByDescending(c => alloc.GetValueOrDefault(c)))
+                {
+                    var rev = Round2(alloc.GetValueOrDefault(c));
+                    if (rev <= 0m) continue;
+                    sub.Add(new ProductsReportCategorySliceDto
+                    {
+                        CategoryId = c,
+                        Name = ResolveCategoryDisplayName(c, nameMap, products),
+                        Revenue = rev,
+                        Pct = 0m,
+                    });
+                }
+
+                if (sub.Count == 0) continue;
+
+                var baseRev = sub.Sum(s => s.Revenue);
+                foreach (var s in sub)
+                    s.Pct = baseRev > 0m ? Math.Round(s.Revenue / baseRev * 100m, 1, MidpointRounding.AwayFromZero) : 0m;
+                slice.SubSlices = sub;
             }
 
             return list;
@@ -503,7 +870,10 @@ namespace George.Services
         private static List<ProductsReportOptionRankDto> BuildTopOptions(
             List<Order> orders,
             Dictionary<int, Product> products,
-            int? categoryId)
+            int? categoryId,
+            int? supplierId,
+            int? brandId,
+            HashSet<int> excludeCategoryIds)
         {
             var map = new Dictionary<string, (decimal rev, decimal kg, decimal units)>(StringComparer.OrdinalIgnoreCase);
             foreach (var o in orders)
@@ -512,15 +882,17 @@ namespace George.Services
                 {
                     if (line.ProductId is not > 0) continue;
                     if (!products.TryGetValue(line.ProductId.Value, out var p)) continue;
-                    if (categoryId != null && PrimaryCategoryId(p) != categoryId) continue;
-                    var label = (line.OrderLineCuttingLabel ?? "").Trim();
-                    if (string.IsNullOrEmpty(label)) continue;
+                    if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
+
+                    var label = ResolveProductsReportCutLabel(line, p.Name);
+                    if (string.IsNullOrWhiteSpace(label)) continue;
+
                     var m = LineMerchandise(line);
                     if (m <= 0m) continue;
                     var (kg, u) = SplitLineQty(line, p);
-                    if (!map.TryGetValue(label, out var t))
-                        t = (0m, 0m, 0m);
-                    map[label] = (t.rev + m, t.kg + kg, t.units + u);
+                    if (!map.TryGetValue(label, out var t2))
+                        t2 = (0m, 0m, 0m);
+                    map[label] = (t2.rev + m, t2.kg + kg, t2.units + u);
                 }
             }
 
@@ -549,7 +921,10 @@ namespace George.Services
         private static List<ProductsReportUpsellPairDto> BuildUpsellPairs(
             List<Order> orders,
             Dictionary<int, Product> products,
-            int? categoryId)
+            int? categoryId,
+            int? supplierId,
+            int? brandId,
+            HashSet<int> excludeCategoryIds)
         {
             var orderCount = orders.Count;
             if (orderCount == 0) return new List<ProductsReportUpsellPairDto>();
@@ -564,7 +939,7 @@ namespace George.Services
                 {
                     if (line.ProductId is not > 0) continue;
                     if (!products.TryGetValue(line.ProductId.Value, out var p)) continue;
-                    if (categoryId != null && PrimaryCategoryId(p) != categoryId) continue;
+                    if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
                     var m = LineMerchandise(line);
                     if (m <= 0m) continue;
                     lineByPid[line.ProductId.Value] = lineByPid.GetValueOrDefault(line.ProductId.Value) + m;

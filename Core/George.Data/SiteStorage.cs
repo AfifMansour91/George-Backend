@@ -82,6 +82,16 @@ namespace George.Data
                 .ToListAsync(cancelToken);
         }
 
+        public async Task<List<int>> GetSiteIdsForUserAsync(int userId, CancellationToken cancelToken)
+        {
+            return await _dbContext.User
+                .AsNoTracking()
+                .Where(u => u.Id == userId && !u.IsDeleted)
+                .SelectMany(u => u.Site.Where(s => !s.IsDeleted).Select(s => s.Id))
+                .Distinct()
+                .ToListAsync(cancelToken);
+        }
+
         public async Task<Site> CreateSiteAsync(Site site, List<int>? businessTypeIds, CancellationToken cancelToken)
         {
             _dbContext.Site.Add(site);
@@ -132,6 +142,14 @@ namespace George.Data
             {
                 dbSite.InternalApiKey = updated.InternalApiKey;
             }
+            if (updated.WoltDispatchToken != null)
+            {
+                dbSite.WoltDispatchToken = updated.WoltDispatchToken;
+            }
+            if (updated.WoltEnabled.HasValue)
+            {
+                dbSite.WoltEnabled = updated.WoltEnabled;
+            }
             // Shop settings (Sprint 2)
             if (updated.WeightTolerancePercent.HasValue) dbSite.WeightTolerancePercent = updated.WeightTolerancePercent;
             if (updated.DepreciationEnabled.HasValue) dbSite.DepreciationEnabled = updated.DepreciationEnabled;
@@ -149,6 +167,18 @@ namespace George.Data
             if (updated.PrintFutureAtTime != null) dbSite.PrintFutureAtTime = updated.PrintFutureAtTime;
             if (updated.VoucherPrinterSilent.HasValue) dbSite.VoucherPrinterSilent = updated.VoucherPrinterSilent;
             if (updated.VoucherPrinterName != null) dbSite.VoucherPrinterName = updated.VoucherPrinterName;
+            if (updated.AskBagsCountAtPickingFinish.HasValue) dbSite.AskBagsCountAtPickingFinish = updated.AskBagsCountAtPickingFinish;
+            if (!string.IsNullOrWhiteSpace(updated.PaymentGatewayProvider))
+                dbSite.PaymentGatewayProvider = updated.PaymentGatewayProvider;
+            if (updated.CardcomTerminalNumber.HasValue) dbSite.CardcomTerminalNumber = updated.CardcomTerminalNumber;
+            if (updated.CardcomApiName != null) dbSite.CardcomApiName = updated.CardcomApiName;
+            if (updated.CardcomApiPasswordEncrypted != null) dbSite.CardcomApiPasswordEncrypted = updated.CardcomApiPasswordEncrypted;
+            if (updated.CardcomSaveCardEnabled) dbSite.CardcomSaveCardEnabled = updated.CardcomSaveCardEnabled;
+            if (updated.PaymentAuthBufferPercent > 0) dbSite.PaymentAuthBufferPercent = updated.PaymentAuthBufferPercent;
+            if (updated.PaymentMaxAuthAmount.HasValue) dbSite.PaymentMaxAuthAmount = updated.PaymentMaxAuthAmount;
+            dbSite.PaymentAllowCaptureAboveAuth = updated.PaymentAllowCaptureAboveAuth;
+            if (updated.CardcomCssUrl != null) dbSite.CardcomCssUrl = updated.CardcomCssUrl;
+            if (updated.CardcomLogoUrl != null) dbSite.CardcomLogoUrl = updated.CardcomLogoUrl;
             dbSite.IsActive = updated.IsActive || dbSite.IsActive;
             dbSite.UpdatedDate = DateTime.UtcNow;
 

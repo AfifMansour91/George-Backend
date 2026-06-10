@@ -1,3 +1,7 @@
+using George.Common;
+using George.Common.Utils;
+using Newtonsoft.Json;
+
 namespace George.Data.Dto
 {
     public class ProductOptionDto
@@ -29,6 +33,7 @@ namespace George.Data.Dto
         public bool? WeightByVariant { get; set; }
         public bool? ShowPricePer100g { get; set; }
         public bool? ShowUnitPrice { get; set; }
+        public OcwsuSoldByLabelKey? SoldByLabel { get; set; }
     }
 
     public class ProductLookupDto
@@ -39,6 +44,8 @@ namespace George.Data.Dto
         public string? StockStatus { get; set; }
         public string? ShippingClass { get; set; }
         public string? SetupType { get; set; }
+        /// <summary>Account-scoped brand IDs (many-to-many via ProductBrand). Null = leave join unchanged where applicable.</summary>
+        public List<int>? BrandIds { get; set; }
         public string? Brand { get; set; }
         public string? Supplier { get; set; }
         public WeightConfigDto? WeightConfig { get; set; }

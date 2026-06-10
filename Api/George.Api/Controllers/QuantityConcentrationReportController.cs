@@ -28,10 +28,13 @@ namespace George.Api.Controllers
             [FromQuery] DateTime from,
             [FromQuery] DateTime to,
             [FromQuery] int? categoryId = null,
+            /// <summary><c>all</c>, <c>picked</c>, or <c>notPicked</c> (default). Legacy: <c>includePicked=true</c> = all.</summary>
+            [FromQuery] string? pickedFilter = null,
+            [FromQuery] bool includePicked = false,
             CancellationToken cancelToken = default)
         {
             return await SafeCallWithErrorCatchingAsync(() =>
-                _service.GetReportAsync(siteId, from, to, categoryId, cancelToken));
+                _service.GetReportAsync(siteId, from, to, categoryId, pickedFilter, includePicked, cancelToken));
         }
 
         [ApiExplorerSettings(IgnoreApi = true)]

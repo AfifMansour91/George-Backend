@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using George.Common;
@@ -11,6 +12,122 @@ namespace George.Services
 {
     public class IncomeReportService : ServiceBase
     {
+        /// <summary>Matches orders Kanban city filter when <see cref="Order.DeliveryCity"/> is empty.</summary>
+        public const string CityEmptyFilterKey = "__no_city__";
+
+        private static readonly TimeZoneInfo IsraelTimeZone = ResolveIsraelTimeZone();
+        private static readonly CompareInfo HebrewCompare = CultureInfo.GetCultureInfo("he-IL").CompareInfo;
+
+        private static TimeZoneInfo ResolveIsraelTimeZone()
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById("Israel Standard Time");
+            }
+            catch
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById("Asia/Jerusalem");
+            }
+        }
+
+        private static DateTime AssumeUtc(DateTime dt) =>
+            dt.Kind == DateTimeKind.Utc ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+
+        /// <summary>
+        /// נקודת זמן UTC כמו ב־API של הזמנות (מחרוזת ISO עם Z) — ל־<see cref="IncomeReportOrderRowDto.OrderDate"/>.
+        /// </summary>
+        private static DateTime CreationTimeUtcInstant(Order o)
+        {
+            var ct = o.CreationTime;
+            if (ct.Kind == DateTimeKind.Local)
+                return TimeZoneInfo.ConvertTimeToUtc(ct);
+            return AssumeUtc(ct);
+        }
+
+        private static DateTime ToIsraelLocal(DateTime utc) =>
+            TimeZoneInfo.ConvertTimeFromUtc(AssumeUtc(utc), IsraelTimeZone);
+
+        /// <summary>
+        /// שעת יצירת הזמנה בשעון ישראל — מיושר ל־SPA (היסטוריית הזמנה משתמשת ב־<c>new Date(creationTime)</c> שמפרש ISO עם Z כ־UTC וממיר לשעון מקומי).
+        /// ערך <see cref="DateTimeKind.Unspecified"/> מהמסד מטופל כ־UTC (דפוס נפוץ אחרי EF/SQL).
+        /// </summary>
+        private static int OrderCreationHourIsrael(Order o)
+        {
+            var ct = o.CreationTime;
+            if (ct.Kind == DateTimeKind.Local)
+            {
+                var utc = TimeZoneInfo.ConvertTimeToUtc(ct);
+                return ToIsraelLocal(utc).Hour;
+            }
+
+            return ToIsraelLocal(AssumeUtc(ct)).Hour;
+        }
+
+        /// <summary>מחלץ את תחילת חלון האספקה (למשל "11:00" מ־"11:00 - 12:00").</summary>
+        private static bool TryParseSlotStartHour(string? deliveryOrPickupTime, out int hour)
+        {
+            hour = 0;
+            if (string.IsNullOrWhiteSpace(deliveryOrPickupTime))
+                return false;
+            var t = deliveryOrPickupTime.Trim();
+            foreach (var sep in new[] { " - ", " – ", " — ", "-", "–", "—" })
+            {
+                var idx = t.IndexOf(sep, StringComparison.Ordinal);
+                if (idx > 0)
+                {
+                    t = t[..idx].Trim();
+                    break;
+                }
+            }
+
+            var m = Regex.Match(t, @"(?<!\d)(\d{1,2}):(\d{2})(?::\d{2})?");
+            if (!m.Success)
+                m = Regex.Match(deliveryOrPickupTime.Trim(), @"(?<!\d)(\d{1,2}):(\d{2})(?::\d{2})?");
+            if (m.Success && int.TryParse(m.Groups[1].Value, out var h))
+            {
+                if (h is >= 0 and <= 23)
+                {
+                    hour = h;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// שעת חלון אספקה/איסוף — כמו <see cref="OrderArchiveDetail"/> (איסוף: pickup*; משלוח/אקספרס: delivery*).
+        /// עדיפות לתחילת מחרוזת השעה; אחר כך שעה בשדה התאריך אם אינה חצות.
+        /// </summary>
+        private static bool TryGetScheduledDeliveryHourIsrael(Order o, out int hour)
+        {
+            hour = 0;
+            var isPickup = string.Equals(o.DeliveryType, "Pickup", StringComparison.OrdinalIgnoreCase);
+            var cal = isPickup ? o.PickupDate : o.DeliveryDate;
+            var slot = isPickup
+                ? (o.PickupTime ?? o.DeliveryTime)
+                : (o.DeliveryTime ?? o.PickupTime);
+            if (cal == null)
+                return false;
+
+            if (TryParseSlotStartHour(slot, out var hSlot))
+            {
+                hour = hSlot;
+                return true;
+            }
+
+            var dt = cal.Value;
+            if (dt.Hour != 0 || dt.Minute != 0 || dt.Second != 0)
+            {
+                hour = dt.Kind == DateTimeKind.Utc
+                    ? ToIsraelLocal(AssumeUtc(dt)).Hour
+                    : dt.Hour;
+                return true;
+            }
+
+            return false;
+        }
+
         private readonly IncomeReportStorage _incomeReportStorage;
         private readonly CategoryStorage _categoryStorage;
 
@@ -32,6 +149,7 @@ namespace George.Services
             DateTime? customFrom,
             DateTime? customTo,
             int? categoryId,
+            string? city,
             string? coupon,
             string? kpiCompare,
             CancellationToken cancelToken = default)
@@ -45,7 +163,7 @@ namespace George.Services
             DateTime toUtcExclusive;
             try
             {
-                (fromUtc, toUtcExclusive) = ResolveCurrentRange(period, customFrom, customTo, utcNow);
+                (fromUtc, toUtcExclusive) = ReportPeriodRange.ResolveCurrentRange(period, customFrom, customTo, utcNow);
             }
             catch
             {
@@ -58,10 +176,14 @@ namespace George.Services
 
             var couponTrim = string.IsNullOrWhiteSpace(coupon) ? null : coupon.Trim();
 
-            var currentOrders = await _incomeReportStorage.GetReportOrdersAsync(siteId, fromUtc, toUtcExclusive, couponTrim, cancelToken)
+            var currentOrdersAll = await _incomeReportStorage.GetReportOrdersAsync(siteId, fromUtc, toUtcExclusive, couponTrim, cancelToken)
                 .ConfigureAwait(false);
-            var baselineOrders = await _incomeReportStorage.GetReportOrdersAsync(siteId, baselineFrom, baselineToEx, couponTrim, cancelToken)
+            var baselineOrdersAll = await _incomeReportStorage.GetReportOrdersAsync(siteId, baselineFrom, baselineToEx, couponTrim, cancelToken)
                 .ConfigureAwait(false);
+
+            var cityTrim = string.IsNullOrWhiteSpace(city) ? null : city.Trim();
+            var currentOrders = FilterOrdersByCity(currentOrdersAll, cityTrim);
+            var baselineOrders = FilterOrdersByCity(baselineOrdersAll, cityTrim);
 
             var productIds = currentOrders.SelectMany(o => o.OrderItem).Select(i => i.ProductId ?? 0)
                 .Concat(baselineOrders.SelectMany(o => o.OrderItem).Select(i => i.ProductId ?? 0))
@@ -88,6 +210,7 @@ namespace George.Services
                 .Select(c => new IncomeReportCategoryOptionDto { Id = c.Id, Name = c.Name })
                 .OrderBy(c => c.Name)
                 .ToList();
+            res.Cities = BuildCityOptions(currentOrdersAll);
 
             res.Kpis = BuildKpis(currentOrders, baselineOrders, products, catFilter, priorCustomerIds);
             res.DayRows = BuildDayRows(currentOrders, products, catFilter, fromUtc, toUtcExclusive, period);
@@ -98,39 +221,6 @@ namespace George.Services
 
             response.Data = res;
             return response;
-        }
-
-        private static (DateTime fromUtc, DateTime toUtcExclusive) ResolveCurrentRange(
-            string period,
-            DateTime? customFrom,
-            DateTime? customTo,
-            DateTime utcNow)
-        {
-            var p = (period ?? "month").Trim().ToLowerInvariant();
-            var today = utcNow.Date;
-            switch (p)
-            {
-                case "today":
-                    return (today, today.AddDays(1));
-                case "week":
-                {
-                    // שבוע קלנדרי: מיום שני 00:00 עד סוף היום (UTC), כמו שבוע נוכחי חלקי
-                    var dow = (int)today.DayOfWeek;
-                    var daysFromMonday = dow == (int)DayOfWeek.Sunday ? 6 : dow - (int)DayOfWeek.Monday;
-                    var monday = today.AddDays(-daysFromMonday);
-                    return (monday, today.AddDays(1));
-                }
-                case "month":
-                    return (new DateTime(today.Year, today.Month, 1, 0, 0, 0, DateTimeKind.Utc), today.AddDays(1));
-                case "custom":
-                    if (customFrom == null || customTo == null)
-                        throw new ArgumentException("customFrom/customTo required for custom period.");
-                    var from = DateTime.SpecifyKind(customFrom.Value.Date, DateTimeKind.Utc);
-                    var toEx = DateTime.SpecifyKind(customTo.Value.Date.AddDays(1), DateTimeKind.Utc);
-                    return (from, toEx);
-                default:
-                    return (new DateTime(today.Year, today.Month, 1, 0, 0, 0, DateTimeKind.Utc), today.AddDays(1));
-            }
         }
 
         private static (DateTime baselineFrom, DateTime baselineToExclusive) ResolveBaselineRange(
@@ -219,6 +309,22 @@ namespace George.Services
         private static bool OrderHasCategory(Order o, Dictionary<int, Product> products, int categoryId) =>
             CategoryLineMerchSum(o, products, categoryId) > 0m;
 
+        /// <summary>
+        /// מספר שורות פריט (לא סכום כמויות) — לפי כל השורות או רק שורות בקטגוריה הנבחרת.
+        /// </summary>
+        private static int OrderMerchLineCount(Order o, Dictionary<int, Product> products, int? categoryId)
+        {
+            var items = o.OrderItem ?? Enumerable.Empty<OrderItem>();
+            if (categoryId == null)
+                return items.Count(i => !i.IsDeleted && (i.ProductId ?? 0) > 0);
+            return items.Count(line =>
+            {
+                if (line.IsDeleted || !(line.ProductId is > 0)) return false;
+                if (!products.TryGetValue(line.ProductId.Value, out var p)) return false;
+                return PrimaryCategoryId(p) == categoryId;
+            });
+        }
+
         private static IncomeReportKpisDto BuildKpis(
             List<Order> current,
             List<Order> baseline,
@@ -227,13 +333,6 @@ namespace George.Services
             HashSet<int> priorCustomerIds)
         {
             decimal AllocIncome(Order o) => OrderIncome(o) * CategoryIncomeShare(o, products, categoryId);
-            decimal AllocQty(Order o)
-            {
-                var sh = CategoryIncomeShare(o, products, categoryId);
-                if (sh <= 0m) return 0m;
-                var qty = o.OrderItem?.Sum(i => i.Quantity) ?? 0m;
-                return qty * sh;
-            }
 
             var curOrders = current.Where(o => categoryId == null || OrderHasCategory(o, products, categoryId.Value)).ToList();
             var baseOrders = baseline.Where(o => categoryId == null || OrderHasCategory(o, products, categoryId.Value)).ToList();
@@ -246,8 +345,8 @@ namespace George.Services
             var bCount = baseOrders.Count;
             var avgOrder = cCount > 0 ? totalIncome / cCount : 0m;
             var avgBase = bCount > 0 ? baseIncome / bCount : 0m;
-            var avgItems = cCount > 0 ? curOrders.Sum(AllocQty) / cCount : 0m;
-            var avgItemsB = bCount > 0 ? baseOrders.Sum(AllocQty) / bCount : 0m;
+            var avgItems = cCount > 0 ? (decimal)curOrders.Sum(o => OrderMerchLineCount(o, products, categoryId)) / cCount : 0m;
+            var avgItemsB = bCount > 0 ? (decimal)baseOrders.Sum(o => OrderMerchLineCount(o, products, categoryId)) / bCount : 0m;
 
             // חדש מול חוזר לפי *עסקה*: העסקה הראשונה של הלקוח (באתר) = חדש; כל עסקה נוספת = חוזר,
             // גם כששתי ההזמנות באותה תקופת דוח (לפני כן נספרו שתיהן כ"חדש" כי לא היה Order לפני fromUtc).
@@ -303,11 +402,11 @@ namespace George.Services
             if (p == "today")
                 return BuildDayRowsByHour(orders, products, categoryId, fromUtc);
 
-            var dayKeys = orders.Select(o => o.CreationTime.Date).Distinct().OrderBy(d => d);
+            var dayKeys = orders.Select(o => ToIsraelLocal(o.CreationTime).Date).Distinct().OrderBy(d => d);
             var rows = new List<IncomeReportDayRowDto>();
             foreach (var day in dayKeys)
             {
-                var dayOrdersAll = orders.Where(o => o.CreationTime.Date == day).ToList();
+                var dayOrdersAll = orders.Where(o => ToIsraelLocal(o.CreationTime).Date == day).ToList();
                 AppendDayBucketRow(rows, dayOrdersAll, products, categoryId, day.ToString("dd/MM"), day.ToString("yyyy-MM-dd"));
             }
 
@@ -321,12 +420,12 @@ namespace George.Services
             int? categoryId,
             DateTime fromUtc)
         {
-            var day = fromUtc.Date;
-            var dayOrders = orders.Where(o => o.CreationTime.Date == day).ToList();
+            var day = ToIsraelLocal(AssumeUtc(fromUtc)).Date;
+            var dayOrders = orders.Where(o => ToIsraelLocal(o.CreationTime).Date == day).ToList();
             var rows = new List<IncomeReportDayRowDto>();
-            foreach (var hour in dayOrders.Select(o => o.CreationTime.Hour).Distinct().OrderBy(h => h))
+            foreach (var hour in dayOrders.Select(o => ToIsraelLocal(o.CreationTime).Hour).Distinct().OrderBy(h => h))
             {
-                var hourOrdersAll = dayOrders.Where(o => o.CreationTime.Hour == hour).ToList();
+                var hourOrdersAll = dayOrders.Where(o => ToIsraelLocal(o.CreationTime).Hour == hour).ToList();
                 AppendDayBucketRow(rows, hourOrdersAll, products, categoryId, $"{hour:00}:00", $"{day:yyyy-MM-dd}T{hour:00}:00");
             }
 
@@ -426,7 +525,7 @@ namespace George.Services
                 {
                     OrderId = o.Id,
                     OrderNumber = o.OrderNumber ?? "",
-                    OrderDate = o.CreationTime,
+                    OrderDate = CreationTimeUtcInstant(o),
                     CustomerName = o.CustomerName ?? "",
                     Source = o.Source ?? "",
                     ProductRevenue = Round2(OrderLinesMerch(o) * sh),
@@ -447,19 +546,38 @@ namespace George.Services
             var relevant = orders.Where(o => categoryId == null || OrderHasCategory(o, products, categoryId.Value)).ToList();
             decimal dInc = 0m, pInc = 0m;
             var bySource = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            var deliveryOrderIds = new HashSet<int>();
+            var pickupOrderIds = new HashSet<int>();
+            var sourceOrderIds = new Dictionary<string, HashSet<int>>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var o in relevant)
             {
                 var sh = CategoryIncomeShare(o, products, categoryId);
                 var inc = OrderIncome(o) * sh;
-                if (string.Equals(o.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase))
+                var isShip = string.Equals(o.DeliveryType, "Shipping", StringComparison.OrdinalIgnoreCase);
+                if (isShip)
                     dInc += inc;
                 else
                     pInc += inc;
 
+                if (sh > 0m)
+                {
+                    if (isShip) deliveryOrderIds.Add(o.Id);
+                    else pickupOrderIds.Add(o.Id);
+                }
+
                 var sk = MapSourceKey(o.Source);
                 if (!bySource.ContainsKey(sk)) bySource[sk] = 0m;
                 bySource[sk] += inc;
+                if (sh > 0m)
+                {
+                    if (!sourceOrderIds.TryGetValue(sk, out var set))
+                    {
+                        set = new HashSet<int>();
+                        sourceOrderIds[sk] = set;
+                    }
+                    set.Add(o.Id);
+                }
             }
 
             var tot = dInc + pInc;
@@ -469,6 +587,8 @@ namespace George.Services
                 PickupPct = tot > 0m ? Round2(pInc / tot * 100m) : 0m,
                 DeliveryIncome = Round2(dInc),
                 PickupIncome = Round2(pInc),
+                DeliveryOrderCount = deliveryOrderIds.Count,
+                PickupOrderCount = pickupOrderIds.Count,
             };
 
             var srcTotal = bySource.Values.Sum();
@@ -476,12 +596,14 @@ namespace George.Services
             {
                 foreach (var kv in bySource.OrderByDescending(kv => kv.Value))
                 {
+                    sourceOrderIds.TryGetValue(kv.Key, out var ordSet);
                     dto.SourceSlices.Add(new IncomeReportSourceSliceDto
                     {
                         Key = kv.Key,
                         Name = kv.Key,
                         Pct = Round2(kv.Value / srcTotal * 100m),
                         Income = Round2(kv.Value),
+                        OrderCount = ordSet?.Count ?? 0,
                     });
                 }
             }
@@ -507,7 +629,7 @@ namespace George.Services
                 return new List<IncomeReportHourBucketDto>();
 
             return relevant
-                .GroupBy(o => o.CreationTime.Hour)
+                .GroupBy(OrderCreationHourIsrael)
                 .OrderBy(g => g.Key)
                 .Select(g => new IncomeReportHourBucketDto
                 {
@@ -521,13 +643,17 @@ namespace George.Services
 
         private static List<IncomeReportHourBucketDto> BuildDeliveryHourBuckets(List<Order> relevant)
         {
-            var withDate = relevant.Where(o => o.DeliveryDate != null).ToList();
-            var total = withDate.Count;
+            var withHour = relevant.Where(o => TryGetScheduledDeliveryHourIsrael(o, out _)).ToList();
+            var total = withHour.Count;
             if (total == 0)
                 return new List<IncomeReportHourBucketDto>();
 
-            return withDate
-                .GroupBy(o => o.DeliveryDate!.Value.Hour)
+            return withHour
+                .GroupBy(o =>
+                {
+                    TryGetScheduledDeliveryHourIsrael(o, out var h);
+                    return h;
+                })
                 .OrderBy(g => g.Key)
                 .Select(g => new IncomeReportHourBucketDto
                 {
@@ -569,12 +695,18 @@ namespace George.Services
                     var t = kv.Value;
                     var baseRev = bas.TryGetValue(kv.Key, out var br) ? br.revenue : 0m;
                     var trendUp = t.revenue >= baseRev;
+                    products.TryGetValue(kv.Key, out var pProd);
+                    var weighted = pProd != null && ProductCatalogStockClassification.IsWeightedLikeProduct(pProd);
+                    var qtyLabel = FormatTopProductQtyLabel(t.kg, t.units, weighted);
                     return new IncomeReportTopProductDto
                     {
                         ProductId = kv.Key,
                         Name = t.name,
                         CategoryName = t.cat,
-                        QuantityLabel = FormatQty(t.qty),
+                        QuantityLabel = qtyLabel,
+                        IsWeighted = weighted,
+                        QuantityKg = t.kg > 0m ? Round2(t.kg) : null,
+                        QuantityUnits = !weighted && t.units > 0m ? Round2(t.units) : null,
                         Revenue = Round2(t.revenue),
                         TrendUp = trendUp,
                         ImageUrl = t.imageUrl,
@@ -583,12 +715,22 @@ namespace George.Services
                 .ToList();
         }
 
-        private static Dictionary<int, (string name, string cat, decimal qty, decimal revenue, string? imageUrl)> AggregateProductRevenue(
+        private sealed class TopAgg
+        {
+            public string name = "";
+            public string cat = "";
+            public decimal kg;
+            public decimal units;
+            public decimal revenue;
+            public string? imageUrl;
+        }
+
+        private static Dictionary<int, TopAgg> AggregateProductRevenue(
             List<Order> orders,
             Dictionary<int, Product> products,
             int? categoryId)
         {
-            var map = new Dictionary<int, (string name, string cat, decimal qty, decimal revenue, string? imageUrl)>();
+            var map = new Dictionary<int, TopAgg>();
             foreach (var o in orders)
             {
                 foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
@@ -599,16 +741,37 @@ namespace George.Services
                     if (categoryId != null && cid != categoryId) continue;
                     var merch = LineMerchandise(line);
                     if (merch <= 0m) continue;
-                    var share = OrderLinesMerch(o) > 0m ? merch / OrderLinesMerch(o) : 0m;
-                    var alloc = OrderIncome(o) * share;
                     var catName = p.ProductCategory?.FirstOrDefault(x => x.CategoryId == cid)?.Category?.Name ?? "";
                     if (!map.ContainsKey(p.Id))
-                        map[p.Id] = (p.Name, catName, 0m, 0m, FirstImageUrl(p));
+                        map[p.Id] = new TopAgg { name = p.Name ?? "", cat = catName, imageUrl = FirstImageUrl(p) };
                     var t = map[p.Id];
-                    map[p.Id] = (t.name, string.IsNullOrEmpty(t.cat) ? catName : t.cat, t.qty + line.Quantity, t.revenue + alloc, t.imageUrl ?? FirstImageUrl(p));
+                    var (kgLine, unitLine) = QuantityConcentrationReportService.SplitLineQty(line, p);
+                    t.revenue += merch;
+                    t.kg += kgLine;
+                    t.units += unitLine;
+                    if (string.IsNullOrEmpty(t.cat) && !string.IsNullOrEmpty(catName))
+                        t.cat = catName;
+                    map[p.Id] = t;
                 }
             }
+
             return map;
+        }
+
+        private static string FormatTopProductQtyLabel(decimal kg, decimal units, bool weighted)
+        {
+            if (weighted)
+            {
+                if (kg > 0m)
+                    return $"{Round2(kg)} ק\"ג";
+                return "—";
+            }
+
+            if (units > 0m)
+                return units == Math.Floor(units) ? $"{(int)units} יח'" : $"{Round2(units)} יח'";
+            if (kg > 0m)
+                return $"{Round2(kg)} ק\"ג";
+            return "—";
         }
 
         private static string? FirstImageUrl(Product? p)
@@ -686,8 +849,42 @@ namespace George.Services
             return null;
         }
 
-        private static string FormatQty(decimal q) =>
-            q == Math.Floor(q) ? $"{(int)q} יח'" : $"{Round2(q)}";
+        private static List<Order> FilterOrdersByCity(List<Order> orders, string? cityKey)
+        {
+            if (string.IsNullOrWhiteSpace(cityKey))
+                return orders;
+            if (string.Equals(cityKey, CityEmptyFilterKey, StringComparison.Ordinal))
+                return orders.Where(o => string.IsNullOrWhiteSpace(o.DeliveryCity)).ToList();
+            return orders
+                .Where(o => string.Equals(o.DeliveryCity?.Trim(), cityKey, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        private static List<IncomeReportCityOptionDto> BuildCityOptions(List<Order> ordersInPeriod)
+        {
+            var byKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var hasEmpty = false;
+            foreach (var o in ordersInPeriod)
+            {
+                var raw = o.DeliveryCity?.Trim();
+                if (string.IsNullOrEmpty(raw))
+                {
+                    hasEmpty = true;
+                    continue;
+                }
+
+                if (!byKey.ContainsKey(raw))
+                    byKey[raw] = raw;
+            }
+
+            var list = byKey.Values
+                .OrderBy(n => n, Comparer<string>.Create((a, b) => HebrewCompare.Compare(a, b, CompareOptions.None)))
+                .Select(n => new IncomeReportCityOptionDto { Key = n, Name = n })
+                .ToList();
+            if (hasEmpty)
+                list.Insert(0, new IncomeReportCityOptionDto { Key = CityEmptyFilterKey, Name = "" });
+            return list;
+        }
 
         private static decimal Round2(decimal d) => Math.Round(d, 2, MidpointRounding.AwayFromZero);
     }

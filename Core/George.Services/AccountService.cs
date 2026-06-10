@@ -431,7 +431,10 @@ namespace George.Services
                 AfterDeliveryTriggerType = string.IsNullOrWhiteSpace(a?.TriggerType) ? null : a.TriggerType,
                 AfterDeliveryTriggerAfterValue = a?.TriggerAfterValue ?? 1,
                 AfterDeliveryTriggerAfterUnit = string.IsNullOrWhiteSpace(a?.TriggerAfterUnit) ? null : a.TriggerAfterUnit,
-                AfterDeliveryCustomerMessageTemplate = string.IsNullOrWhiteSpace(a?.CustomerMessageTemplate) ? null : a.CustomerMessageTemplate
+                AfterDeliveryCustomerMessageTemplate = string.IsNullOrWhiteSpace(a?.CustomerMessageTemplate) ? null : a.CustomerMessageTemplate,
+                PaymentCustomerMessageInvoice = string.IsNullOrWhiteSpace(req.Payments?.CustomerMessageInvoice) ? null : req.Payments.CustomerMessageInvoice,
+                PaymentCustomerMessageRefund = string.IsNullOrWhiteSpace(req.Payments?.CustomerMessageRefund) ? null : req.Payments.CustomerMessageRefund,
+                PaymentCustomerMessagePaymentLink = string.IsNullOrWhiteSpace(req.Payments?.CustomerMessagePaymentLink) ? null : req.Payments.CustomerMessagePaymentLink,
             };
         }
     }

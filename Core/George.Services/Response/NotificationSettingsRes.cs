@@ -7,6 +7,14 @@ public class NotificationSettingsRes
     public OrderReadySettingsRes? OrderReady { get; set; }
     public OrderNotPickedUpSettingsRes? OrderNotPickedUp { get; set; }
     public AfterDeliverySettingsRes? AfterDelivery { get; set; }
+    public PaymentNotificationSettingsRes? Payments { get; set; }
+}
+
+public class PaymentNotificationSettingsRes
+{
+    public string? CustomerMessageInvoice { get; set; }
+    public string? CustomerMessageRefund { get; set; }
+    public string? CustomerMessagePaymentLink { get; set; }
 }
 
 public class NewOrderSoundTriggerSourcesRes

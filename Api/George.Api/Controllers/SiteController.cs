@@ -14,10 +14,15 @@ namespace George.Api.Controllers
     public class SiteController : GeorgeControllerBase, IAuthUserProvider
     {
         private readonly SiteService _siteSvc;
+        private readonly WoltDispatchService _woltDispatchSvc;
 
-        public SiteController(SiteService siteSvc, ILogger<SiteController> logger) : base(logger)
+        public SiteController(
+            SiteService siteSvc,
+            WoltDispatchService woltDispatchSvc,
+            ILogger<SiteController> logger) : base(logger)
         {
             _siteSvc = siteSvc;
+            _woltDispatchSvc = woltDispatchSvc;
         }
 
         [AllowAnonymous]
@@ -56,6 +61,14 @@ namespace George.Api.Controllers
         public async Task<IActionResult> GetSitesByAccountAsync([FromRoute] int accountId, CancellationToken cancelToken = default)
         {
             return await SafeCallWithErrorCatchingAsync(() => _siteSvc.GetSitesByAccountAsync(accountId, cancelToken));
+        }
+
+        /// <summary>Probe WordPress <c>GET /wp-json/ed/v1/wolt</c> to detect OC Wolt plugin on the store.</summary>
+        [HttpGet("{siteId:int}/WoltPluginProbe")]
+        [ProducesResponseType(typeof(IApiResponse<WoltPluginProbeRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> ProbeWoltPluginAsync([FromRoute] int siteId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _woltDispatchSvc.ProbeWoltPluginAsync(siteId, cancelToken));
         }
 
         [ApiExplorerSettings(IgnoreApi = true)]

@@ -14,6 +14,18 @@ namespace George.Data
         {
         }
 
+        private static List<int> DistinctPositiveIdsPreserveOrder(IEnumerable<int> ids)
+        {
+            var seen = new HashSet<int>();
+            var result = new List<int>();
+            foreach (var id in ids)
+            {
+                if (id <= 0 || !seen.Add(id)) continue;
+                result.Add(id);
+            }
+            return result;
+        }
+
         public async Task<DataListResult<TemplateProduct>> GetTemplateProductsAsync(
             TemplateProductFilter? filter,
             PagingExDto paging,
@@ -24,6 +36,8 @@ namespace George.Data
 
             IQueryable<TemplateProduct> query = _dbContext.TemplateProduct
                 .Include(tp => tp.Brand)
+                .Include(tp => tp.TemplateProductBrand)
+                    .ThenInclude(tpb => tpb.GlobalBrand)
                 .Include(tp => tp.Supplier)
                 .Include(tp => tp.Status)
                 .Include(tp => tp.Visibility)
@@ -131,6 +145,8 @@ namespace George.Data
         {
             return await _dbContext.TemplateProduct
                 .Include(tp => tp.Brand)
+                .Include(tp => tp.TemplateProductBrand)
+                    .ThenInclude(tpb => tpb.GlobalBrand)
                 .Include(tp => tp.Supplier)
                 .Include(tp => tp.Status)
                 .Include(tp => tp.Visibility)
@@ -162,6 +178,7 @@ namespace George.Data
             TemplateProduct templateProduct,
             List<int>? siteIds,
             List<int>? globalCategoryIds,
+            List<int>? globalBrandIds,
             List<string>? tags,
             List<int>? relatedProductIds,
             List<int>? complementaryProductIds,
@@ -204,6 +221,32 @@ namespace George.Data
                         GlobalCategoryId = category.Id,
                         IsPrimary = false
                     });
+                }
+            }
+
+            // Global brands (many-to-many). Omit rows when globalBrandIds is null (legacy Brand FK only).
+            if (globalBrandIds != null)
+            {
+                var ordered = DistinctPositiveIdsPreserveOrder(globalBrandIds);
+                if (ordered.Count > 0)
+                {
+                    var valid = await _dbContext.GlobalBrand
+                        .Where(g => ordered.Contains(g.Id) && !g.IsDeleted)
+                        .Select(g => g.Id)
+                        .ToListAsync(cancelToken)
+                        .ConfigureAwait(false);
+                    var validSet = valid.ToHashSet();
+                    var hasPrimary = false;
+                    foreach (var gid in ordered)
+                    {
+                        if (!validSet.Contains(gid)) continue;
+                        templateProduct.TemplateProductBrand.Add(new TemplateProductBrand
+                        {
+                            GlobalBrandId = gid,
+                            IsPrimary = !hasPrimary,
+                        });
+                        hasPrimary = true;
+                    }
                 }
             }
 
@@ -268,6 +311,7 @@ namespace George.Data
             TemplateProduct updated,
             List<int>? siteIds,
             List<int>? globalCategoryIds,
+            List<int>? globalBrandIds,
             List<string>? tags,
             List<int>? relatedProductIds,
             List<int>? complementaryProductIds,
@@ -277,6 +321,7 @@ namespace George.Data
                 .Include(tp => tp.Site)
                 .Include(tp => tp.Tag)
                 .Include(tp => tp.TemplateProductCategory)
+                .Include(tp => tp.TemplateProductBrand)
                 .Include(tp => tp.RelatedTemplateProduct)
                 .Include(tp => tp.ComplementaryTemplateProduct)
                 .FirstOrDefaultAsync(tp => tp.Id == updated.Id && !tp.IsDeleted, cancelToken);
@@ -312,6 +357,7 @@ namespace George.Data
             dbTemplateProduct.WeightConfigId = updated.WeightConfigId;
             dbTemplateProduct.SeoTitle = updated.SeoTitle;
             dbTemplateProduct.SeoDescription = updated.SeoDescription;
+            dbTemplateProduct.Slug = string.IsNullOrWhiteSpace(updated.Slug) ? null : updated.Slug.Trim();
             dbTemplateProduct.SourceProductId = updated.SourceProductId;
             dbTemplateProduct.UpdatedDate = DateTime.UtcNow;
             dbTemplateProduct.UpdateUserId = updated.UpdateUserId;
@@ -351,6 +397,34 @@ namespace George.Data
                             GlobalCategoryId = category.Id,
                             IsPrimary = false
                         });
+                    }
+                }
+            }
+
+            // Update global brands (many-to-many). Null = leave unchanged.
+            if (globalBrandIds != null)
+            {
+                dbTemplateProduct.TemplateProductBrand.Clear();
+                var ordered = DistinctPositiveIdsPreserveOrder(globalBrandIds);
+                if (ordered.Count > 0)
+                {
+                    var valid = await _dbContext.GlobalBrand
+                        .Where(g => ordered.Contains(g.Id) && !g.IsDeleted)
+                        .Select(g => g.Id)
+                        .ToListAsync(cancelToken)
+                        .ConfigureAwait(false);
+                    var validSet = valid.ToHashSet();
+                    var hasPrimary = false;
+                    foreach (var gid in ordered)
+                    {
+                        if (!validSet.Contains(gid)) continue;
+                        dbTemplateProduct.TemplateProductBrand.Add(new TemplateProductBrand
+                        {
+                            TemplateProductId = dbTemplateProduct.Id,
+                            GlobalBrandId = gid,
+                            IsPrimary = !hasPrimary,
+                        });
+                        hasPrimary = true;
                     }
                 }
             }
@@ -644,6 +718,7 @@ namespace George.Data
                 WeightByVariant = req.WeightByVariant,
                 ShowPricePer100g = req.ShowPricePer100g,
                 ShowUnitPrice = req.ShowUnitPrice,
+                SoldByLabel = req.SoldByLabel,
                 IsDeleted = false
             };
 
@@ -743,8 +818,13 @@ namespace George.Data
                 templateProduct.SetupTypeId = st?.Id;
             }
 
-            // Map brand (template products might not have AccountId, so search more broadly)
-            if (req.Brand.HasValue())
+            // Explicit global brand IDs: legacy TemplateProduct.BrandId is cleared (assignments live on TemplateProductBrand).
+            if (req.BrandIds != null)
+            {
+                templateProduct.BrandId = null;
+            }
+            // Legacy free-text brand (local Brand row, optional AccountId). Only when BrandIds omitted.
+            else if (req.Brand.HasValue())
             {
                 var brand = await _dbContext.Brand
                     .FirstOrDefaultAsync(b => b.Name == req.Brand && !b.IsDeleted, cancelToken);
@@ -764,11 +844,6 @@ namespace George.Data
                     await _dbContext.SaveChangesAsync(cancelToken);
                 }
                 templateProduct.BrandId = brand.Id;
-            }
-            else
-            {
-                // If empty or null, set to null
-                templateProduct.BrandId = null;
             }
 
             // Map supplier

@@ -84,6 +84,7 @@ namespace George.Services
                 templateProduct, 
                 req.SiteIds, 
                 categoryIds,
+                req.BrandIds,
                 req.Tags,
                 req.RelatedProductIds,
                 req.ComplementaryProductIds,
@@ -156,6 +157,7 @@ namespace George.Services
                 templateProduct,
                 req.SiteIds,
                 categoryIdsToApply,
+                req.BrandIds,
                 req.Tags,
                 req.RelatedProductIds,
                 req.ComplementaryProductIds,
@@ -384,6 +386,7 @@ namespace George.Services
                             templateProduct,
                             req.SiteIds ?? productReq.SiteIds,
                             CombineCategoryIds(resolvedCategoryIds, resolvedSubcategoryIds),
+                            productReq.BrandIds,
                             productReq.Tags,
                             productReq.RelatedProductIds,
                             productReq.ComplementaryProductIds,
@@ -441,6 +444,7 @@ namespace George.Services
                             templateProduct,
                             req.SiteIds ?? productReq.SiteIds,
                             CombineCategoryIds(resolvedCategoryIds, resolvedSubcategoryIds),
+                            productReq.BrandIds,
                             productReq.Tags,
                             productReq.RelatedProductIds,
                             productReq.ComplementaryProductIds,
@@ -550,6 +554,7 @@ namespace George.Services
                 IsWeighted = req.IsWeighted,
                 SeoTitle = req.SeoTitle,
                 SeoDescription = req.SeoDescription,
+                Slug = string.IsNullOrWhiteSpace(req.Slug) ? null : req.Slug.Trim(),
                 SourceProductId = req.SourceProductId,
                 ShowAsMl = req.ShowAsMl ?? (req.WeightUnit == "ml" ? true : null),
                 WeightUnit = req.WeightUnit ?? (req.ShowAsMl == true ? "ml" : null)
@@ -581,6 +586,9 @@ namespace George.Services
                 IsWeighted = req.IsWeighted ?? existing.IsWeighted,
                 SeoTitle = req.SeoTitle ?? existing.SeoTitle,
                 SeoDescription = req.SeoDescription ?? existing.SeoDescription,
+                Slug = req.Slug != null
+                    ? (string.IsNullOrWhiteSpace(req.Slug) ? null : req.Slug.Trim())
+                    : existing.Slug,
                 SourceProductId = req.SourceProductId ?? existing.SourceProductId,
                 ShowAsMl = req.ShowAsMl.HasValue ? (req.ShowAsMl ?? (req.WeightUnit == "ml" ? true : null)) : existing.ShowAsMl,
                 WeightUnit = req.WeightUnit != null ? (req.WeightUnit == "ml" || req.ShowAsMl == true ? "ml" : req.WeightUnit) : existing.WeightUnit,
@@ -637,6 +645,7 @@ namespace George.Services
                 DisplayOrder = templateProduct.DisplayOrder,
                 SeoTitle = templateProduct.SeoTitle,
                 SeoDescription = templateProduct.SeoDescription,
+                Slug = templateProduct.Slug,
                 SourceProductId = templateProduct.SourceProductId,
                 ShowAsMl = templateProduct.ShowAsMl ?? (templateProduct.WeightUnit == "ml" ? true : null),
                 WeightUnit = templateProduct.WeightUnit
@@ -694,6 +703,28 @@ namespace George.Services
                 res.ComplementaryProductIds = templateProduct.ComplementaryTemplateProduct.Select(p => p.Id).ToList();
             }
 
+            // Global brands: prefer TemplateProductBrand; fall back to Brand.SourceGlobalBrandId
+            if (templateProduct.TemplateProductBrand != null && templateProduct.TemplateProductBrand.Count > 0)
+            {
+                var ordered = templateProduct.TemplateProductBrand
+                    .OrderByDescending(tpb => tpb.IsPrimary)
+                    .ThenBy(tpb => tpb.GlobalBrandId)
+                    .ToList();
+                var seen = new HashSet<int>();
+                res.BrandIds = new List<int>();
+                foreach (var tpb in ordered)
+                {
+                    if (seen.Add(tpb.GlobalBrandId))
+                        res.BrandIds.Add(tpb.GlobalBrandId);
+                }
+                res.Brand = ordered.FirstOrDefault()?.GlobalBrand?.Name ?? templateProduct.Brand?.Name;
+            }
+            else if (templateProduct.Brand?.SourceGlobalBrandId is int sgid && sgid > 0)
+            {
+                res.BrandIds = new List<int> { sgid };
+                res.Brand = templateProduct.Brand?.Name;
+            }
+
             // Map lookups
             res.Status = templateProduct.Status?.Name;
             res.Visibility = templateProduct.Visibility?.Name;
@@ -701,7 +732,8 @@ namespace George.Services
             res.StockStatus = templateProduct.StockStatus?.Name;
             res.ShippingClass = templateProduct.ShippingClass?.Name;
             res.SetupType = templateProduct.SetupType?.Name;
-            res.Brand = templateProduct.Brand?.Name;
+            if (string.IsNullOrEmpty(res.Brand))
+                res.Brand = templateProduct.Brand?.Name;
             res.Supplier = templateProduct.Supplier?.Name;
 
             // Map options
@@ -751,7 +783,8 @@ namespace George.Services
                     WeightOptions = templateProduct.WeightConfig.WeightOptions,
                     WeightByVariant = templateProduct.WeightConfig.WeightByVariant,
                     ShowPricePer100g = templateProduct.WeightConfig.ShowPricePer100g,
-                    ShowUnitPrice = templateProduct.WeightConfig.ShowUnitPrice
+                    ShowUnitPrice = templateProduct.WeightConfig.ShowUnitPrice,
+                    SoldByLabel = templateProduct.WeightConfig.SoldByLabel
                 };
             }
 
@@ -776,6 +809,7 @@ namespace George.Services
                 StockStatus = req.StockStatus,
                 ShippingClass = req.ShippingClass,
                 SetupType = req.SetupType,
+                BrandIds = req.BrandIds,
                 Brand = req.Brand,
                 Supplier = req.Supplier,
                 WeightConfig = req.WeightConfig != null ? new WeightConfigDto
@@ -789,7 +823,8 @@ namespace George.Services
                     WeightOptions = req.WeightConfig.WeightOptions,
                     WeightByVariant = req.WeightConfig.WeightByVariant,
                     ShowPricePer100g = req.WeightConfig.ShowPricePer100g,
-                    ShowUnitPrice = req.WeightConfig.ShowUnitPrice
+                    ShowUnitPrice = req.WeightConfig.ShowUnitPrice,
+                    SoldByLabel = req.WeightConfig.SoldByLabel
                 } : null
             };
         }

@@ -63,9 +63,55 @@ public class OrderRes
     public string? ExternalOrderId { get; set; }
     /// <summary>Number of bags/cartons packed (set at end of picking).</summary>
     public int? BagsCount { get; set; }
-    /// <summary>JSON from WooCommerce payment webhook (<c>cardcomPayment</c>).</summary>
+    /// <summary>Payment reference / clearance (legacy; often same as gateway transaction id).</summary>
+    public string? PaymentReference { get; set; }
+    /// <summary>Invoice number when paid.</summary>
+    public string? InvoiceNumber { get; set; }
+    /// <summary>Cardcom document URL when an invoice was issued.</summary>
+    public string? CardcomDocumentUrl { get; set; }
+    /// <summary>Credit note number after refund.</summary>
+    public string? RefundInvoiceNumber { get; set; }
+    /// <summary>Cardcom credit note URL after refund.</summary>
+    public string? CardcomRefundDocumentUrl { get; set; }
+    public DateTime? PaidAt { get; set; }
+    /// <summary>Last payment webhook <c>orderId</c>.</summary>
+    public string? GatewayPaymentOrderId { get; set; }
+    /// <summary>Last payment webhook <c>externalOrderId</c>.</summary>
+    public string? GatewayPaymentExternalOrderId { get; set; }
+    /// <summary>Last payment webhook <c>siteId</c> echo.</summary>
+    public string? GatewayPaymentSiteId { get; set; }
+    /// <summary>Last payment webhook <c>isFinished</c>.</summary>
+    public string? IsFinished { get; set; }
+    /// <summary>Last payment webhook <c>payment.transactionId</c>.</summary>
+    public string? GatewayPaymentTransactionId { get; set; }
+    /// <summary>Last payment webhook <c>payment.paymentGateway</c>.</summary>
+    public string? PaymentGateway { get; set; }
+    /// <summary>Legacy raw JSON from older payment webhooks.</summary>
     public string? CardcomPaymentJson { get; set; }
-    /// <summary>Gateway <c>status</c> from WooCommerce payment webhook.</summary>
+    /// <summary>Gateway <c>status</c> from payment webhook.</summary>
     public string? ExternalPaymentStatus { get; set; }
+
+    /// <summary>First transition to New (defaults to <see cref="CreationTime"/>).</summary>
+    public DateTime? NewAt { get; set; }
+    public DateTime? InTreatmentAt { get; set; }
+    public DateTime? ReadyAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+
+    public string PaymentSettleStatus { get; set; } = "None";
+    public decimal? PaymentAuthorizedAmount { get; set; }
+    public string? CardcomLowProfileId { get; set; }
+    public int? CustomerPaymentMethodId { get; set; }
+    /// <summary>Last 4 digits from Cardcom authorization/charge.</summary>
+    public string? CardcomTokenLast4 { get; set; }
+    /// <summary>Card brand from Cardcom (e.g. Visa).</summary>
+    public string? CardcomCardBrand { get; set; }
+
+    /// <summary>Public Wolt tracking page URL after dispatch.</summary>
+    public string? WoltTrackingUrl { get; set; }
+    public string? WoltTrackingId { get; set; }
+    public string? WoltStatus { get; set; }
+    public string? WoltDeliveryId { get; set; }
+    public DateTime? WoltDispatchedAt { get; set; }
+
     public List<OrderItemRes> Items { get; set; } = new();
 }

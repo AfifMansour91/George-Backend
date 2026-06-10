@@ -136,6 +136,15 @@ public partial class AccountNotificationSettings
     [Column("NewOrder_CustomerMessagePhoneOrder")]
     public string? NewOrderCustomerMessagePhoneOrder { get; set; }
 
+    [Column("Payment_CustomerMessageInvoice")]
+    public string? PaymentCustomerMessageInvoice { get; set; }
+
+    [Column("Payment_CustomerMessageRefund")]
+    public string? PaymentCustomerMessageRefund { get; set; }
+
+    [Column("Payment_CustomerMessagePaymentLink")]
+    public string? PaymentCustomerMessagePaymentLink { get; set; }
+
     [ForeignKey("AccountId")]
     [InverseProperty("AccountNotificationSettings")]
     public virtual Account Account { get; set; } = null!;

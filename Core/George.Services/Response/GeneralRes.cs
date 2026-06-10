@@ -7,6 +7,8 @@ namespace George.Services
 		public class ConfigurationParameters
 		{
             public string Environment { get; set; } = null!;
+			/// <summary>SignalR /hubs/orders — new-order push (from SystemConfiguration.OrdersRealtimeEnabled).</summary>
+			public bool OrdersRealtimeEnabled { get; set; }
         }
 
 		public ConfigurationParameters Parameters { get; set; } = new();

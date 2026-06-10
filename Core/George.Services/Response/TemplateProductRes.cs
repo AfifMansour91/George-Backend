@@ -50,6 +50,8 @@ namespace George.Services.Response
         public List<int> CategoryIds { get; set; } = new(); // GlobalCategory IDs
         public List<int> SubcategoryIds { get; set; } = new(); // GlobalCategory IDs
         public List<string> Tags { get; set; } = new();
+        /// <summary>Assigned global brand IDs (TemplateProductBrand). Legacy Brand.SourceGlobalBrandId included when join is empty.</summary>
+        public List<int> BrandIds { get; set; } = new();
         public string? Brand { get; set; }
         public string? Supplier { get; set; }
         public bool? IsKosher { get; set; }
@@ -62,6 +64,7 @@ namespace George.Services.Response
         public int? DisplayOrder { get; set; }
         public string? SeoTitle { get; set; }
         public string? SeoDescription { get; set; }
+        public string? Slug { get; set; }
         public string? SourceProductId { get; set; }
 
         /// <summary>Related/accessory template product IDs (נלווים).</summary>

@@ -1,0 +1,5 @@
+﻿using George.Services.Payments.Cardcom;
+var json = """{"ResponseCode":0,"TranzactionInfo":{"Last4CardDigitsString":"0008","Brand":"Visa"},"TokenInfo":{"TokenExDate":"20281101","CardYear":2028,"CardMonth":10}}""";
+var g = new CardcomGateway(null!, null!);
+var r = g.ParseLpResult(json);
+Console.WriteLine($"Last4={r.Last4Digits} Brand={r.CardBrand} TokenEx={r.TokenExDate} Exp={r.CardExpirationMMYY}");

@@ -93,6 +93,10 @@ public partial class Product
     [StringLength(2000)]
     public string? SeoDescription { get; set; }
 
+    /// <summary>WooCommerce product permalink segment (REST <c>slug</c> / WordPress <c>post_name</c>).</summary>
+    [StringLength(200)]
+    public string? Slug { get; set; }
+
     [StringLength(100)]
     public string? TemplateId { get; set; }
 
@@ -127,11 +131,29 @@ public partial class Product
     [Precision(0)]
     public DateTime? LabelKosherForPassoverEndDate { get; set; }
 
-    /// <summary>Storefront label: חדש (site-only timing; no Woo ACF in current API).</summary>
+    /// <summary>Storefront label: חדש — synced via Woo <c>meta_data</c> (<c>new</c> / ACF <c>field_69f5c7cfeadce</c>) and ED/v1 <c>product-new</c>.</summary>
     public bool LabelNew { get; set; }
 
     [Precision(0)]
     public DateTime? LabelNewEndDate { get; set; }
+
+    /// <summary>Storefront label: רב מכר → Woo ed/v1 product-bestseller.</summary>
+    public bool LabelBestseller { get; set; }
+
+    /// <summary>Storefront label: זמינות נמוכה → Woo ed/v1 product-low-availability (<c>low_availability</c>).</summary>
+    public bool LabelLowAvailability { get; set; }
+
+    /// <summary>Storefront label: מוכן לבישול → Woo ed/v1 product-readytocook.</summary>
+    public bool LabelReadyToCook { get; set; }
+
+    /// <summary>Storefront label: טבעי → Woo ed/v1 product-natural.</summary>
+    public bool LabelNatural { get; set; }
+
+    /// <summary>Storefront label: ללא תוספת סוכר → Woo ed/v1 product-sugarfree.</summary>
+    public bool LabelSugarFree { get; set; }
+
+    /// <summary>Storefront label: ללא לקטוז → Woo ed/v1 product-lactosefree.</summary>
+    public bool LabelLactoseFree { get; set; }
 
     [ForeignKey("BrandId")]
     [InverseProperty("Product")]

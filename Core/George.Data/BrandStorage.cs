@@ -132,8 +132,9 @@ namespace George.Data
             dbBrand.IconUrl = updated.IconUrl;
             dbBrand.SeoTitle = updated.SeoTitle;
             dbBrand.SeoDescription = updated.SeoDescription;
-            dbBrand.WooCommerceBrandId = updated.WooCommerceBrandId;
-            dbBrand.SourceGlobalBrandId = updated.SourceGlobalBrandId;
+            // API bodies usually omit Woo/source ids — never clear sync metadata accidentally.
+            dbBrand.WooCommerceBrandId = updated.WooCommerceBrandId ?? dbBrand.WooCommerceBrandId;
+            dbBrand.SourceGlobalBrandId = updated.SourceGlobalBrandId ?? dbBrand.SourceGlobalBrandId;
             dbBrand.UpdatedDate = DateTime.UtcNow;
             dbBrand.UpdateUserId = updated.UpdateUserId;
 

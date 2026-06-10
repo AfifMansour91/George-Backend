@@ -127,7 +127,7 @@ namespace George.Services
             return response;
         }
 
-        /// <summary>Get related and complementary product IDs for the given product IDs at the site. Used by kiosk upsell step when pos products type is upsells/combined.</summary>
+        /// <summary>Linked product IDs at the site (RelatedProduct = Woo up-sells, ComplementaryProduct = Woo cross-sells), merged for kiosk when POS shows linked-product suggestions.</summary>
         public async Task<IApiResponse<List<int>>> GetUpsellProductIdsAsync(int siteId, List<int> productIds, CancellationToken cancelToken)
         {
             var response = new ApiResponse<List<int>>();
@@ -175,6 +175,7 @@ namespace George.Services
                 product, 
                 req.SiteIds, 
                 CombineCategoryIds(req.CategoryIds, req.SubcategoryIds),
+                ResolveBrandIdsForPersistence(req, product),
                 req.Tags,
                 req.RelatedProductIds,
                 req.ComplementaryProductIds,
@@ -265,6 +266,7 @@ namespace George.Services
                 product,
                 req.SiteIds,
                 categoryIdsToApply,
+                ResolveBrandIdsForPersistence(req, product),
                 req.Tags,
                 req.RelatedProductIds,
                 req.ComplementaryProductIds,
@@ -335,14 +337,34 @@ namespace George.Services
             {
                 return CreateResponse(response, StatusCode.InvalidRequest, "ProductIds required");
             }
+
+            var previousSequence = await _productStorage.GetProductIdsInDisplayOrderAsync(req.ProductIds, cancelToken);
+            var previousIndexById = previousSequence.Select((id, index) => (id, index)).ToDictionary(x => x.id, x => x.index);
+            var changedProductIds = new List<int>();
+            for (var i = 0; i < req.ProductIds.Count; i++)
+            {
+                var id = req.ProductIds[i];
+                if (!previousIndexById.TryGetValue(id, out var previousIndex) || previousIndex != i)
+                    changedProductIds.Add(id);
+            }
+
             await _productStorage.UpdateProductOrderAsync(req.ProductIds, cancelToken);
             response.Data = true;
 
-            // Sync only menu_order to WooCommerce (lightweight: one small PUT per product; no full product sync)
-            var siteToProductIds = await _productStorage.GetProductIdsBySiteForProductIdsAsync(req.ProductIds, cancelToken);
+            if (changedProductIds.Count == 0)
+                return response;
+
+            _logger.LogInformation(
+                "Product reorder: syncing menu_order for {ChangedCount} of {TotalCount} products to WooCommerce",
+                changedProductIds.Count,
+                req.ProductIds.Count);
+
+            // Sync only products whose index changed (fast). Full-catalog alignment uses PushProductOrderToWooCommerce in Integrations.
+            var siteToProductIds = await _productStorage.GetProductIdsBySiteForProductIdsAsync(changedProductIds, cancelToken);
             if (siteToProductIds.Count > 0)
             {
                 var productIdsCopy = req.ProductIds.ToList();
+                var changedSet = changedProductIds.ToHashSet();
                 _ = Task.Run(async () =>
                 {
                     try
@@ -350,14 +372,17 @@ namespace George.Services
                         using var scope = _serviceScopeFactory.CreateScope();
                         var siteStorage = scope.ServiceProvider.GetRequiredService<George.Data.SiteStorage>();
                         var wooService = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
-                        foreach (var (siteId, _) in siteToProductIds)
+                        foreach (var (siteId, siteProductIds) in siteToProductIds)
                         {
                             try
                             {
                                 var site = await siteStorage.GetSiteAsync(siteId, CancellationToken.None);
                                 if (site == null || !site.WooCommerceEnabled.HasValue || !site.WooCommerceEnabled.Value)
                                     continue;
-                                await wooService.SyncMenuOrderOnlyAsync(siteId, productIdsCopy, CancellationToken.None);
+                                var changedOnSite = siteProductIds.Where(changedSet.Contains).ToHashSet();
+                                if (changedOnSite.Count == 0)
+                                    continue;
+                                await wooService.SyncMenuOrderOnlyAsync(siteId, productIdsCopy, changedOnSite, CancellationToken.None);
                             }
                             catch (Exception ex)
                             {
@@ -661,6 +686,7 @@ namespace George.Services
                             product,
                             siteIdsForUpdate,
                             CombineCategoryIds(resolvedCategoryIds, resolvedSubcategoryIds),
+                            ResolveBrandIdsForPersistence(productReq, product),
                             productReq.Tags,
                             productReq.RelatedProductIds,
                             productReq.ComplementaryProductIds,
@@ -727,6 +753,7 @@ namespace George.Services
                             product,
                             targetSiteIds,
                             CombineCategoryIds(resolvedCategoryIds, resolvedSubcategoryIds),
+                            ResolveBrandIdsForPersistence(productReq, product),
                             productReq.Tags,
                             productReq.RelatedProductIds,
                             productReq.ComplementaryProductIds,
@@ -902,11 +929,18 @@ namespace George.Services
                 DisplayOrder = req.DisplayOrder,
                 SeoTitle = req.SeoTitle,
                 SeoDescription = req.SeoDescription,
+                Slug = string.IsNullOrWhiteSpace(req.Slug) ? null : req.Slug.Trim(),
                 ShowAsMl = req.ShowAsMl ?? (req.WeightUnit == "ml" ? true : null),
                 WeightUnit = req.WeightUnit ?? (req.ShowAsMl == true ? "ml" : null),
                 LabelFrozen = req.LabelFrozen ?? false,
                 LabelGlutenFree = req.LabelGlutenFree ?? false,
                 LabelNotKosher = req.LabelNotKosher ?? false,
+                LabelBestseller = req.LabelBestseller ?? false,
+                LabelLowAvailability = req.LabelLowAvailability ?? false,
+                LabelReadyToCook = req.LabelReadyToCook ?? false,
+                LabelNatural = req.LabelNatural ?? false,
+                LabelSugarFree = req.LabelSugarFree ?? false,
+                LabelLactoseFree = req.LabelLactoseFree ?? false,
                 LabelKosherForPassover = labelPassover,
                 LabelKosherForPassoverEndDate = !labelPassover ? null : req.LabelKosherForPassoverEndDate,
                 LabelNew = labelNew,
@@ -942,6 +976,9 @@ namespace George.Services
                 AccountId = existing.AccountId ?? req.AccountId,
                 SeoTitle = req.SeoTitle ?? existing.SeoTitle,
                 SeoDescription = req.SeoDescription ?? existing.SeoDescription,
+                Slug = req.Slug != null
+                    ? (string.IsNullOrWhiteSpace(req.Slug) ? null : req.Slug.Trim())
+                    : existing.Slug,
                 ShowAsMl = req.ShowAsMl.HasValue ? (req.ShowAsMl ?? (req.WeightUnit == "ml" ? true : null)) : existing.ShowAsMl,
                 WeightUnit = req.WeightUnit != null ? (req.WeightUnit == "ml" || req.ShowAsMl == true ? "ml" : req.WeightUnit) : existing.WeightUnit,
                 DisplayOrder = req.DisplayOrder ?? existing.DisplayOrder,
@@ -955,6 +992,12 @@ namespace George.Services
                 LabelFrozen = req.LabelFrozen ?? existing.LabelFrozen,
                 LabelGlutenFree = req.LabelGlutenFree ?? existing.LabelGlutenFree,
                 LabelNotKosher = req.LabelNotKosher ?? existing.LabelNotKosher,
+                LabelBestseller = req.LabelBestseller ?? existing.LabelBestseller,
+                LabelLowAvailability = req.LabelLowAvailability ?? existing.LabelLowAvailability,
+                LabelReadyToCook = req.LabelReadyToCook ?? existing.LabelReadyToCook,
+                LabelNatural = req.LabelNatural ?? existing.LabelNatural,
+                LabelSugarFree = req.LabelSugarFree ?? existing.LabelSugarFree,
+                LabelLactoseFree = req.LabelLactoseFree ?? existing.LabelLactoseFree,
                 LabelKosherForPassover = labelPassover,
                 LabelKosherForPassoverEndDate = !labelPassover ? null : (req.LabelKosherForPassoverEndDate ?? existing.LabelKosherForPassoverEndDate),
                 LabelNew = labelNew,
@@ -1002,10 +1045,17 @@ namespace George.Services
                 WeightUnit = product.WeightUnit,
                 SeoTitle = product.SeoTitle,
                 SeoDescription = product.SeoDescription,
+                Slug = product.Slug,
                 LowStockThreshold = product.LowStockThreshold,
                 LabelFrozen = product.LabelFrozen,
                 LabelGlutenFree = product.LabelGlutenFree,
                 LabelNotKosher = product.LabelNotKosher,
+                LabelBestseller = product.LabelBestseller,
+                LabelLowAvailability = product.LabelLowAvailability,
+                LabelReadyToCook = product.LabelReadyToCook,
+                LabelNatural = product.LabelNatural,
+                LabelSugarFree = product.LabelSugarFree,
+                LabelLactoseFree = product.LabelLactoseFree,
                 LabelKosherForPassover = product.LabelKosherForPassover,
                 LabelKosherForPassoverEndDate = product.LabelKosherForPassoverEndDate,
                 LabelNew = product.LabelNew,
@@ -1060,6 +1110,28 @@ namespace George.Services
                 res.ComplementaryProductIds = product.ComplementaryProduct.Select(p => p.Id).ToList();
             }
 
+            // Brands: prefer many-to-many join; fall back to legacy Product.BrandId
+            if (product.ProductBrand != null && product.ProductBrand.Count > 0)
+            {
+                var orderedBrands = product.ProductBrand
+                    .OrderByDescending(pb => pb.IsPrimary)
+                    .ThenBy(pb => pb.BrandId)
+                    .ToList();
+                var seenIds = new HashSet<int>();
+                res.BrandIds = new List<int>();
+                foreach (var pb in orderedBrands)
+                {
+                    if (seenIds.Add(pb.BrandId))
+                        res.BrandIds.Add(pb.BrandId);
+                }
+                res.Brand = orderedBrands.FirstOrDefault()?.Brand?.Name ?? product.Brand?.Name;
+            }
+            else if (product.BrandId.HasValue)
+            {
+                res.BrandIds = new List<int> { product.BrandId.Value };
+                res.Brand = product.Brand?.Name;
+            }
+
             // Map lookups
             res.Status = product.Status?.Name;
             res.Visibility = product.Visibility?.Name;
@@ -1067,7 +1139,8 @@ namespace George.Services
             res.StockStatus = product.StockStatus?.Name;
             res.ShippingClass = product.ShippingClass?.Name;
             res.SetupType = product.SetupType?.Name;
-            res.Brand = product.Brand?.Name;
+            if (string.IsNullOrEmpty(res.Brand))
+                res.Brand = product.Brand?.Name;
             res.Supplier = product.Supplier?.Name;
 
             // Map options
@@ -1118,7 +1191,8 @@ namespace George.Services
                     WeightOptions = product.WeightConfig.WeightOptions,
                     WeightByVariant = product.WeightConfig.WeightByVariant,
                     ShowPricePer100g = product.WeightConfig.ShowPricePer100g,
-                    ShowUnitPrice = product.WeightConfig.ShowUnitPrice
+                    ShowUnitPrice = product.WeightConfig.ShowUnitPrice,
+                    SoldByLabel = product.WeightConfig.SoldByLabel
                 };
             }
 
@@ -1133,6 +1207,19 @@ namespace George.Services
             return combined;
         }
 
+        /// <summary>
+        /// Null = do not change ProductBrand rows (partial update). Non-null = replace join (may be empty).
+        /// When only legacy <see cref="ProductReq.Brand"/> is sent, rebuild join from resolved <see cref="Product.BrandId"/>.
+        /// </summary>
+        private static List<int>? ResolveBrandIdsForPersistence(ProductReq req, Product productAfterLookups)
+        {
+            if (req.BrandIds != null)
+                return req.BrandIds;
+            if (req.Brand != null && req.Brand.HasValue())
+                return productAfterLookups.BrandId.HasValue ? new List<int> { productAfterLookups.BrandId.Value } : new List<int>();
+            return null;
+        }
+
         private ProductLookupDto MapToLookupDto(ProductReq req)
         {
             return new ProductLookupDto
@@ -1143,6 +1230,7 @@ namespace George.Services
                 StockStatus = req.StockStatus,
                 ShippingClass = req.ShippingClass,
                 SetupType = req.SetupType,
+                BrandIds = req.BrandIds,
                 Brand = req.Brand,
                 Supplier = req.Supplier,
                 WeightConfig = req.WeightConfig != null ? new WeightConfigDto
@@ -1156,7 +1244,8 @@ namespace George.Services
                     WeightOptions = req.WeightConfig.WeightOptions,
                     WeightByVariant = req.WeightConfig.WeightByVariant,
                     ShowPricePer100g = req.WeightConfig.ShowPricePer100g,
-                    ShowUnitPrice = req.WeightConfig.ShowUnitPrice
+                    ShowUnitPrice = req.WeightConfig.ShowUnitPrice,
+                    SoldByLabel = req.WeightConfig.SoldByLabel
                 } : null
             };
         }

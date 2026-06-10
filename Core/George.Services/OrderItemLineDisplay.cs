@@ -10,6 +10,9 @@ public readonly record struct OrderItemAttributeDisplayOptions
 {
     /// <summary>Omit <see cref="OrderItem.OrderLineSizeLabel"/> from attribute segments (voucher / compact surfaces).</summary>
     public bool OmitOrderLineSizeLabel { get; init; }
+
+    /// <summary>Voucher: show per-unit weight only for "בחירת משקל ליחידה" lines.</summary>
+    public bool VoucherPerUnitWeightVariableOnly { get; init; }
 }
 
 /// <summary>
@@ -437,6 +440,8 @@ public static class OrderItemLineDisplay
         var size = options.OmitOrderLineSizeLabel ? null : item.OrderLineSizeLabel?.Trim();
         var perRaw = item.OrderLinePerUnitWeightLabel?.Trim() ?? InferredPerUnitWeightLabel(item);
         var per = !string.IsNullOrEmpty(perRaw) ? SanitizePerUnitWeightLabelIfGramsShownAsKg(item, perRaw) : null;
+        if (options.VoucherPerUnitWeightVariableOnly && !string.IsNullOrEmpty(per) && !IsOrderItemVariableWeightPerUnitChoice(item))
+            per = null;
         var cut = item.OrderLineCuttingLabel?.Trim();
         var title = item.Title?.Trim() ?? "";
         var vtRaw = item.VariantTitle?.Trim();
@@ -494,6 +499,12 @@ public static class OrderItemLineDisplay
         return line.Length > 0 ? line : null;
     }
 
+    /// <summary>Matches TS <c>orderItemIsPickedForUi</c> — ליקוט אמיתי בלבד, לא baseline מלאי.</summary>
+    public static bool OrderItemIsPickedForUi(OrderItem item) => item.PickingUserConfirmed;
+
+    /// <summary>Matches TS <c>orderMeaningfulPick</c> — שורת "לוקט" בבון רק אחרי אישור ליקוט.</summary>
+    public static bool OrderMeaningfulPick(OrderItem item) => OrderItemIsPickedForUi(item);
+
     /// <summary>Matches TS voucher <c>formatPickedQuantity</c> (unitWeightGrams &gt; 0 ⇒ kg).</summary>
     public static string FormatVoucherPickedDisplay(OrderItem item)
     {
@@ -509,18 +520,120 @@ public static class OrderItemLineDisplay
         return FormatPieceCountBadge(q);
     }
 
-    /// <summary>TS voucher extra line when <c>orderLineQuantityMode</c> is missing and line has unit weight.</summary>
+    /// <summary>מוצר "בחירת משקל ליחידה" — לפי כותרת שורה (בון ללא קטלוג).</summary>
+    public static bool IsOrderItemVariableWeightPerUnitChoice(OrderItem item)
+    {
+        var title = item.Title ?? "";
+        if (Regex.IsMatch(title, @"בחירת\s*משקל\s*ליחידה", RegexOptions.IgnoreCase)) return true;
+        if (Regex.IsMatch(title, @"בחר\s*משקל\s*יח", RegexOptions.IgnoreCase)) return true;
+        return false;
+    }
+
+    private static double ResolveWeightModeOrderedKgFromLine(OrderItem item)
+    {
+        var st = item.SaleTotalWeight?.Trim();
+        if (!string.IsNullOrEmpty(st))
+        {
+            var grams = ParseGramsFromHebrewWeightLabel(st);
+            if (grams > 0) return grams / 1000.0;
+            var bare = ParseBareNumberSaleTotalToGrams(st);
+            if (bare > 0) return bare / 1000.0;
+        }
+        var q = (double)item.Quantity;
+        if (q > 0 && q < 500) return q;
+        return 0;
+    }
+
+    /// <summary>משקל מוזמן משוער (ק"ג) — לתמחור ₪/ק"ג בבון.</summary>
+    public static double GetOrderLineOrderedWeightKg(OrderItem item)
+    {
+        var mode = NormMode(item);
+        var q = (double)item.Quantity;
+        if (string.Equals(mode, "weight", StringComparison.OrdinalIgnoreCase))
+            return ResolveWeightModeOrderedKgFromLine(item);
+        if (IsOrderItemWeightedSoldByUnits(item))
+        {
+            var pu = GramsPerUnitFromOrderItem(item);
+            if (pu > 0 && q > 0) return q * pu / 1000.0;
+            var totalG = TotalGramsLegacy(item);
+            return totalG > 0 ? totalG / 1000.0 : 0;
+        }
+        if (mode == null && IsOrderItemPickedByWeight(item))
+        {
+            var st = item.SaleTotalWeight?.Trim();
+            if (!string.IsNullOrEmpty(st))
+            {
+                var grams = ParseGramsFromHebrewWeightLabel(st);
+                if (grams > 0) return grams / 1000.0;
+            }
+            var g = GramsPerUnitFromOrderItem(item);
+            if (g > 0 && q > 0) return q * g / 1000.0;
+        }
+        return 0;
+    }
+
+    /// <summary>מחיר לק"ג לחישוב/תצוגה בבון (ללא קטלוג).</summary>
+    public static decimal? GetOrderItemPricePerKgNumeric(OrderItem item)
+    {
+        var mode = NormMode(item);
+        if (!item.PricePerUnit.HasValue) return null;
+        var n = item.PricePerUnit.Value;
+        if (string.Equals(mode, "weight", StringComparison.OrdinalIgnoreCase))
+            return n;
+        var g = GramsPerUnitFromOrderItem(item);
+        if (g > 0) return n * 1000m / g;
+        if (mode == null && !SaleUnitsIndicatesPieceSale(item.SaleUnits))
+        {
+            var uw = item.UnitWeightGrams.HasValue ? (double)item.UnitWeightGrams.Value : 0;
+            if (uw > 0) return n;
+        }
+        if (IsOrderItemPickedByWeight(item) && item.TotalPrice.HasValue && item.TotalPrice.Value > 0)
+        {
+            var wKg = GetOrderLineOrderedWeightKg(item);
+            if (wKg > 0) return item.TotalPrice.Value / (decimal)wKg;
+        }
+        return null;
+    }
+
+    /// <summary>תצוגת מחיר לעמודת "מחיר" בבון אחרי ליקוט.</summary>
+    public static string? FormatOrderLinePricePerKgForPicking(OrderItem item)
+    {
+        if (IsOrderItemPickedByWeight(item))
+        {
+            var perKg = GetOrderItemPricePerKgNumeric(item);
+            if (perKg.HasValue)
+                return $"₪{perKg.Value.ToString("0.00", CultureInfo.InvariantCulture)} / ק\"ג";
+        }
+        if (!IsOrderItemPickedByWeight(item) && item.PricePerUnit.HasValue)
+            return $"₪{item.PricePerUnit.Value.ToString("0.00", CultureInfo.InvariantCulture)} / יח'";
+        if (item.PricePerUnit.HasValue)
+            return $"₪{item.PricePerUnit.Value.ToString("0.00", CultureInfo.InvariantCulture)} / יח'";
+        return null;
+    }
+
+    /// <summary>בון לפני ליקוט: משקל יחידה רק ל"בחירת משקל ליחידה".</summary>
     public static string? FormatVoucherLegacyUnitWeightHint(OrderItem item, bool newVoucher)
     {
-        if (!string.IsNullOrEmpty(NormMode(item))) return null;
-        if (!(newVoucher || item.PickedQuantity == null)) return null;
-        if (!(item.UnitWeightGrams.HasValue && item.UnitWeightGrams.Value > 0)) return null;
+        if (OrderItemIsPickedForUi(item)) return null;
+        if (!IsOrderItemVariableWeightPerUnitChoice(item)) return null;
 
-        var q = (double)item.Quantity;
-        var uw = (double)item.UnitWeightGrams!.Value;
-        var kgPerUnit = uw / 1000.0;
-        if (q > 1)
-            return $"{q.ToString("0.###", CultureInfo.InvariantCulture).TrimEnd('0').TrimEnd('.')} יח', {(q * kgPerUnit).ToString("0.0", CultureInfo.InvariantCulture)} ק\"ג";
-        return $"משקל יחידה: {kgPerUnit.ToString("0.00", CultureInfo.InvariantCulture)} ק\"ג";
+        var per = item.OrderLinePerUnitWeightLabel?.Trim();
+        if (!string.IsNullOrEmpty(per))
+        {
+            var q = (double)item.Quantity;
+            var qInt = Math.Abs(q - Math.Round(q)) < 0.001 ? (int)Math.Round(q) : (int?)null;
+            var perClean = Regex.Replace(per, @"^\s*~\s*", "");
+            if (qInt is > 1) return $"כל יחידה {perClean} · {qInt} יח׳";
+            return per;
+        }
+
+        var g = GramsPerUnitFromOrderItem(item);
+        if (g <= 0) return null;
+        var qty = (double)item.Quantity;
+        var qtyInt = Math.Abs(qty - Math.Round(qty)) < 0.001 ? (int)Math.Round(qty) : (int?)null;
+        var kg = g / 1000.0;
+        var kgText = g >= 1000 ? kg.ToString("0.0", CultureInfo.InvariantCulture) : kg.ToString("0.00", CultureInfo.InvariantCulture);
+        if (qtyInt is > 1) return $"כל יחידה {kgText} ק״ג · {qtyInt} יח׳";
+        return $"משקל יחידה: {kg.ToString("0.00", CultureInfo.InvariantCulture)} ק״ג";
     }
 }

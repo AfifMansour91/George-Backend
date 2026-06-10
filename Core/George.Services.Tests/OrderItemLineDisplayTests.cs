@@ -51,18 +51,27 @@ public class OrderItemLineDisplayTests
     }
 
     [Fact]
-    public void Legacy_unit_weight_hint_when_quantity_mode_missing()
+    public void Legacy_unit_weight_hint_only_for_variable_weight_per_unit_choice()
     {
-        var item = new OrderItem
+        var variable = new OrderItem
         {
-            Title = "Fish",
+            Title = "דג | בחירת משקל ליחידה",
             Quantity = 1,
             UnitWeightGrams = 500,
             OrderLineQuantityMode = null,
         };
-        var hint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(item, newVoucher: true);
+        var hint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(variable, newVoucher: true);
         Assert.NotNull(hint);
         Assert.Contains("משקל יחידה", hint, StringComparison.Ordinal);
+
+        var averageUnit = new OrderItem
+        {
+            Title = "Fish",
+            Quantity = 1,
+            UnitWeightGrams = 500,
+            OrderLineQuantityMode = "units",
+        };
+        Assert.Null(OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(averageUnit, newVoucher: true));
     }
 
     [Fact]
@@ -74,6 +83,30 @@ public class OrderItemLineDisplayTests
             PickedQuantity = 2.5m,
         };
         Assert.Equal("2.5 ק\"ג", OrderItemLineDisplay.FormatVoucherPickedDisplay(item));
+    }
+
+    [Fact]
+    public void OrderMeaningfulPick_false_for_stock_baseline_without_user_confirm()
+    {
+        var item = new OrderItem
+        {
+            Quantity = 2,
+            PickedQuantity = 2,
+            PickingUserConfirmed = false,
+        };
+        Assert.False(OrderItemLineDisplay.OrderMeaningfulPick(item));
+    }
+
+    [Fact]
+    public void OrderMeaningfulPick_true_after_user_confirmed_pick()
+    {
+        var item = new OrderItem
+        {
+            Quantity = 2,
+            PickedQuantity = 1.8m,
+            PickingUserConfirmed = true,
+        };
+        Assert.True(OrderItemLineDisplay.OrderMeaningfulPick(item));
     }
 
     [Fact]

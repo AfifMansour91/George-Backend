@@ -18,6 +18,8 @@ namespace George.Providers
         private static string _username = string.Empty;
         private static string _sourcePhone = string.Empty;
         private static string _displayName = string.Empty;
+        /// <summary>Host only (e.g. app.example.com), no scheme. Last line of login OTP SMS becomes <c>@host #code</c> for Chrome Web OTP — must match the site origin.</summary>
+        private static string _otpWebOriginHost = string.Empty;
         protected readonly ILogger<SmsProvider> _logger;
         protected readonly HttpHelper _httpHelper;
 
@@ -51,13 +53,14 @@ namespace George.Providers
 
         //*************************    Public Methods    *************************//
 
-        public static void Init(string apiBaseUrl, string authToken, string username, string sourcePhone, string campaignUrl, string? displayName = null)
+        public static void Init(string apiBaseUrl, string authToken, string username, string sourcePhone, string campaignUrl, string? displayName = null, string? otpWebOriginHost = null)
         {
             _apiBaseUrl = apiBaseUrl;
             _authToken = authToken;
             _username = username;
             _sourcePhone = sourcePhone;
             _campaignUrl = campaignUrl;
+            _otpWebOriginHost = NormalizeOtpWebOriginHost(otpWebOriginHost);
 
             if (displayName != null)
                 _displayName = displayName;
@@ -126,12 +129,15 @@ namespace George.Providers
 
             _logger.LogTrace($"Sending OTP SMS to {phone}");
 
-            // Build the otp text
-            string otpText = $"קוד האימות שלך הוא: {otp}";
-
-            // Build the otp text. Append a line with only the code so browsers (Chrome Web OTP, iOS) can offer "tap to fill" from the message.
-            //string otpText = $"קוד הכניסה שלך הוא: {otp}\n{otp}";
-
+            // Human-readable line + standalone code line helps iOS/Android autofill. Optional last line @host #code for Chrome Web OTP (host must match page origin).
+            var lines = new List<string>
+            {
+                $"קוד האימות שלך הוא: {otp}",
+                otp
+            };
+            if (_otpWebOriginHost.Length > 0)
+                lines.Add($"@{_otpWebOriginHost} #{otp}");
+            string otpText = string.Join(Environment.NewLine, lines);
 
             var phones = new List<string>() { phone };
             return await SendAsync(phones, otpText, cancelToken);
@@ -143,6 +149,30 @@ namespace George.Providers
         {
             if (!IsInitialized)
                 throw new GeorgeNotInitializedException("SMS provider is not initialized");
+        }
+
+        /// <summary>Strip scheme/path; return host only or empty if invalid.</summary>
+        private static string NormalizeOtpWebOriginHost(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+            var s = value.Trim();
+            if (s.StartsWith("@"))
+                s = s.Substring(1).TrimStart();
+            try
+            {
+                if (s.Contains("://", StringComparison.Ordinal))
+                {
+                    var uri = new Uri(s);
+                    return uri.Host;
+                }
+            }
+            catch (UriFormatException)
+            {
+                return string.Empty;
+            }
+            var cut = s.Split(new[] { '/', ' ', '?' }, StringSplitOptions.RemoveEmptyEntries);
+            return cut.Length > 0 ? cut[0] : string.Empty;
         }
 
         private static string GenerateTemplateKey(MessageType typeId, int languageId)

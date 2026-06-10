@@ -1,4 +1,6 @@
 using George.Common;
+using George.Common.Utils;
+using Newtonsoft.Json;
 using System.ComponentModel.DataAnnotations;
 
 namespace George.Services.Request
@@ -33,6 +35,9 @@ namespace George.Services.Request
         public bool? WeightByVariant { get; set; }
         public bool? ShowPricePer100g { get; set; }
         public bool? ShowUnitPrice { get; set; }
+
+        [JsonConverter(typeof(OcwsuSoldByLabelKeyJsonConverter))]
+        public OcwsuSoldByLabelKey? SoldByLabel { get; set; }
     }
 
     public class ProductReq
@@ -62,6 +67,8 @@ namespace George.Services.Request
         public List<int>? CategoryIds { get; set; }
         public List<int>? SubcategoryIds { get; set; }
         public List<string>? Tags { get; set; }
+        /// <summary>Account brand IDs (many-to-many). When set (including empty), replaces ProductBrand rows. Omit for partial updates.</summary>
+        public List<int>? BrandIds { get; set; }
         public string? Brand { get; set; }
         public string? Supplier { get; set; }
         public bool? IsKosher { get; set; }
@@ -77,6 +84,9 @@ namespace George.Services.Request
         public int? DisplayOrder { get; set; }
         public string? SeoTitle { get; set; }
         public string? SeoDescription { get; set; }
+
+        /// <summary>WooCommerce permalink slug (product <c>slug</c>).</summary>
+        public string? Slug { get; set; }
 
         /// <summary>Related/accessory product IDs (נלווים).</summary>
         public List<int>? RelatedProductIds { get; set; }
@@ -105,6 +115,24 @@ namespace George.Services.Request
         public bool? LabelNew { get; set; }
 
         public DateTime? LabelNewEndDate { get; set; }
+
+        /// <summary>רב מכר</summary>
+        public bool? LabelBestseller { get; set; }
+
+        /// <summary>זמינות נמוכה</summary>
+        public bool? LabelLowAvailability { get; set; }
+
+        /// <summary>מוכן לבישול</summary>
+        public bool? LabelReadyToCook { get; set; }
+
+        /// <summary>טבעי</summary>
+        public bool? LabelNatural { get; set; }
+
+        /// <summary>ללא תוספת סוכר</summary>
+        public bool? LabelSugarFree { get; set; }
+
+        /// <summary>ללא לקטוז</summary>
+        public bool? LabelLactoseFree { get; set; }
     }
 
     public class CreateProductReq : ProductReq

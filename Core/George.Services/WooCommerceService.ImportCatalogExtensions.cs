@@ -157,6 +157,17 @@ public partial class WooCommerceService
         };
     }
 
+    /// <summary>
+    /// Woo <c>draft</c>/<c>pending</c> products are not sellable in the storefront; import them as George
+    /// <see cref="Product.VisibilityId"/> hidden (מוסתר) with publication status publish so the list shows hidden, not active.
+    /// </summary>
+    private static bool WooImportPostStatusShouldBeCatalogHidden(string? wooPostStatus)
+    {
+        if (string.IsNullOrWhiteSpace(wooPostStatus)) return false;
+        var s = wooPostStatus.Trim().ToLowerInvariant();
+        return s is "draft" or "pending";
+    }
+
     private static int? ResolveStockManagementTypeId(WooImportCatalogLookups lk, bool? manageStock, bool isVariable)
     {
         if (lk.StockManagementTypes.Count == 0)
@@ -244,6 +255,7 @@ public partial class WooCommerceService
         Product product,
         WooImportProductItem wp,
         int accountId,
+        int siteId,
         WooImportCatalogLookups lk,
         IReadOnlyDictionary<int, int> brandMap,
         CancellationToken cancelToken)
@@ -266,6 +278,16 @@ public partial class WooCommerceService
         var stId = ResolveProductStatusId(lk, wp.status);
         if (stId.HasValue) product.StatusId = stId;
 
+        if (WooImportPostStatusShouldBeCatalogHidden(wp.status))
+        {
+            var hiddenVis = ResolveVisibilityId(lk, "hidden");
+            if (hiddenVis.HasValue)
+                product.VisibilityId = hiddenVis.Value;
+            var publishedSt = ResolveProductStatusId(lk, "publish");
+            if (publishedSt.HasValue)
+                product.StatusId = publishedSt.Value;
+        }
+
         if (!string.IsNullOrWhiteSpace(wp.shipping_class))
         {
             var sc = lk.ShippingClasses.FirstOrDefault(x =>
@@ -280,9 +302,35 @@ public partial class WooCommerceService
         product.SeoTitle = MetaStringAny(meta, "_yoast_wpseo_title");
         product.SeoDescription = MetaStringAny(meta, "_yoast_wpseo_metadesc");
 
+        if (!string.IsNullOrWhiteSpace(wp.slug))
+        {
+            var s = wp.slug.Trim();
+            product.Slug = s.Length > 200 ? s[..200] : s;
+        }
+
         var kosherMeta = MetaStringAny(meta, "_is_kosher");
         if (kosherMeta != null)
             product.IsKosher = IsMetaYes(kosherMeta);
+
+        // Storefront label flags: Woo REST meta_data — logical keys, ACF field_* ids, ED/v1 names (see WooCommerceService.StoreLabelsAcf).
+        product.LabelFrozen = WooImportMetaBoolTrueFalse(meta, "frozen", "_frozen");
+        product.LabelGlutenFree = WooImportMetaBoolTrueFalse(meta, "gluten_free", "_gluten_free", "gluten-free");
+        product.LabelNotKosher = WooImportMetaBoolTrueFalse(meta, "not_kosher", "_not_kosher", "not-kosher");
+        product.LabelKosherForPassover = WooImportMetaBoolTrueFalse(meta, "kosher_for_passover", "_kosher_for_passover");
+        var passOverEndRaw = MetaStringAny(meta, "kosher_for_passover_end_date", "_kosher_for_passover_end_date");
+        var passOverEnd = TryParseWooDate(passOverEndRaw);
+        if (passOverEnd.HasValue)
+            product.LabelKosherForPassoverEndDate = passOverEnd;
+        product.LabelBestseller = WooImportMetaBoolTrueFalse(meta, "bestseller", "_bestseller");
+        product.LabelReadyToCook = WooImportMetaBoolTrueFalse(meta, "readytocook", "_readytocook", "ready_to_cook");
+        product.LabelNatural = WooImportMetaBoolTrueFalse(meta, "natural", "_natural");
+        product.LabelSugarFree = WooImportMetaBoolTrueFalse(meta, "sugarfree", "_sugarfree", "sugar_free");
+        product.LabelLactoseFree = WooImportMetaBoolTrueFalse(meta, "lactosefree", "_lactosefree", "lactose_free");
+        product.LabelNew = WooImportMetaBoolTrueFalse(meta, "new", "_new");
+        var newEndRaw = MetaStringAny(meta, "label_new_end_date", "new_end_date", "_label_new_end_date", "_new_end_date");
+        var newEnd = TryParseWooDate(newEndRaw);
+        if (newEnd.HasValue)
+            product.LabelNewEndDate = newEnd;
 
         var showMl = MetaStringAny(meta, "show_as_ml", "_show_as_ml");
         if (!string.IsNullOrWhiteSpace(showMl) && !showMl.StartsWith("field_", StringComparison.OrdinalIgnoreCase))
@@ -368,6 +416,8 @@ public partial class WooCommerceService
             var unitType = MetaStringAny(meta, "_ocwsu_unit_weight_type", "ocwsu_unit_weight_type_");
             var wOpts = MetaStringAny(meta, "_ocwsu_unit_weight_options", "ocwsu_unit_weight_options_");
             var show100 = MetaStringAny(meta, "_ocwsu_display_price_per_100g", "ocwsu_display_price_per_100g_");
+            var showUnitPrice = MetaStringAny(meta, "_ocwsu_display_price_per_fixed_unit", "ocwsu_display_price_per_fixed_unit_");
+            var soldByLabel = MetaStringAny(meta, "_ocwsu_display_price_per_fixed_unit_label", "ocwsu_display_price_per_fixed_unit_label_");
             var getFromVar = IsMetaYes(MetaStringAny(meta, "_ocwsu_get_weight_from_variation", "ocwsu_get_weight_from_variation_"));
 
             WeightConfig wc;
@@ -389,6 +439,10 @@ public partial class WooCommerceService
             wc.UnitWeight = string.IsNullOrWhiteSpace(unitW) ? wc.UnitWeight : unitW.Trim();
             wc.WeightOptions = string.IsNullOrWhiteSpace(wOpts) ? wc.WeightOptions : wOpts.Replace("\n", ",").Trim();
             wc.ShowPricePer100g = IsMetaYes(show100) ? true : wc.ShowPricePer100g;
+            if (showUnitPrice != null)
+                wc.ShowUnitPrice = IsMetaYes(showUnitPrice);
+            if (!string.IsNullOrWhiteSpace(soldByLabel))
+                wc.SoldByLabel = George.Common.Utils.OcwsuSoldByLabel.Parse(soldByLabel);
             wc.WeightByVariant = getFromVar ? true : wc.WeightByVariant;
             wc.UnitWeightModeId = ResolveUnitWeightModeId(lk.UnitWeightModes, unitType, getFromVar) ?? wc.UnitWeightModeId;
             if (string.Equals(unitType, "fixed", StringComparison.OrdinalIgnoreCase))
@@ -401,11 +455,14 @@ public partial class WooCommerceService
         if (wp.images is { Count: > 0 })
         {
             var ordered = wp.images.OrderBy(i => i.position).ToList();
+            var seenUrls = new HashSet<string>(StringComparer.Ordinal);
             var sort = 0;
             foreach (var img in ordered)
             {
                 var url = img.src?.Trim();
                 if (string.IsNullOrWhiteSpace(url)) continue;
+                if (!seenUrls.Add(url))
+                    continue;
                 db.ProductImage.Add(new ProductImage
                 {
                     ProductId = product.Id,
@@ -441,7 +498,98 @@ public partial class WooCommerceService
             }
         }
 
+        await ApplyWooImportLinkedProductsAsync(db, product.Id, wp, accountId, siteId, cancelToken);
+
         await db.SaveChangesAsync(cancelToken);
+    }
+
+    /// <summary>
+    /// WooCommerce linked products: <c>upsell_ids</c> → local <see cref="Product.RelatedProduct"/>,
+    /// <c>cross_sell_ids</c> → <see cref="Product.ComplementaryProduct"/>. Only links products that exist locally with matching <see cref="Product.WooCommerceId"/> on this site.
+    /// </summary>
+    private async Task ApplyWooImportLinkedProductsAsync(
+        GeorgeDBContext db,
+        int productId,
+        WooImportProductItem wp,
+        int accountId,
+        int siteId,
+        CancellationToken cancelToken)
+    {
+        var upsellWoo = wp.upsell_ids;
+        var crossWoo = wp.cross_sell_ids;
+
+        var tracked = await db.Product
+            .Include(p => p.RelatedProduct)
+            .Include(p => p.ComplementaryProduct)
+            .Include(p => p.Site)
+            .FirstAsync(p => p.Id == productId, cancelToken);
+
+        static async Task<List<int>> ResolveOrderedLocalIdsAsync(
+            GeorgeDBContext dbContext,
+            int acctId,
+            int sid,
+            List<int>? wooIds,
+            CancellationToken ct)
+        {
+            var result = new List<int>();
+            if (wooIds == null || wooIds.Count == 0)
+                return result;
+
+            var orderedDistinct = new List<int>();
+            var seenWoo = new HashSet<int>();
+            foreach (var w in wooIds)
+            {
+                if (w <= 0 || !seenWoo.Add(w))
+                    continue;
+                orderedDistinct.Add(w);
+            }
+
+            if (orderedDistinct.Count == 0)
+                return result;
+
+            var map = await dbContext.Product
+                .AsNoTracking()
+                .Where(p =>
+                    !p.IsDeleted
+                    && p.AccountId == acctId
+                    && p.WooCommerceId.HasValue
+                    && orderedDistinct.Contains(p.WooCommerceId.Value)
+                    && p.Site.Any(s => s.Id == sid))
+                .Select(p => new { p.WooCommerceId, p.Id })
+                .ToListAsync(ct);
+
+            var wooToLocal = map.ToDictionary(x => x.WooCommerceId!.Value, x => x.Id);
+            foreach (var woo in orderedDistinct)
+            {
+                if (wooToLocal.TryGetValue(woo, out var localId))
+                    result.Add(localId);
+            }
+
+            return result;
+        }
+
+        var upsellLocalIds = await ResolveOrderedLocalIdsAsync(db, accountId, siteId, upsellWoo, cancelToken);
+        var crossLocalIds = await ResolveOrderedLocalIdsAsync(db, accountId, siteId, crossWoo, cancelToken);
+
+        tracked.RelatedProduct.Clear();
+        foreach (var id in upsellLocalIds.Where(id => id != tracked.Id))
+        {
+            var other = await db.Product.FirstOrDefaultAsync(
+                p => p.Id == id && !p.IsDeleted && p.AccountId == accountId && p.Site.Any(s => s.Id == siteId),
+                cancelToken);
+            if (other != null)
+                tracked.RelatedProduct.Add(other);
+        }
+
+        tracked.ComplementaryProduct.Clear();
+        foreach (var id in crossLocalIds.Where(lid => lid != tracked.Id))
+        {
+            var other = await db.Product.FirstOrDefaultAsync(
+                p => p.Id == id && !p.IsDeleted && p.AccountId == accountId && p.Site.Any(s => s.Id == siteId),
+                cancelToken);
+            if (other != null)
+                tracked.ComplementaryProduct.Add(other);
+        }
     }
 
     private static bool WooImportProductLikelyHasVariations(WooImportProductItem wp) =>

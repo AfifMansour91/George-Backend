@@ -66,6 +66,13 @@ public partial class Site
 
     public bool? WooCommerceEnabled { get; set; }
 
+    /// <summary>Bearer token for OC Wolt Drive dispatch API (<c>POST .../wp-json/ocws-wolt/v1/dispatch</c>). Generated in WP admin → Wolt Drive → Webhook.</summary>
+    [StringLength(500)]
+    public string? WoltDispatchToken { get; set; }
+
+    /// <summary>When true, Wolt dispatch UI and API are enabled for this site (requires plugin probe + token).</summary>
+    public bool? WoltEnabled { get; set; }
+
     /// <summary>API key for WooCommerce to call our APIs (X-Api-Key header). Per-site.</summary>
     [StringLength(100)]
     public string? InternalApiKey { get; set; }
@@ -135,6 +142,39 @@ public partial class Site
     [StringLength(200)]
     public string? PromotionWebhookSecret { get; set; }
 
+    /// <summary>When true (default), staff must confirm bag count before completing picking. When false, skip that prompt.</summary>
+    public bool? AskBagsCountAtPickingFinish { get; set; }
+
+    /// <summary>Active payment provider: none | cardcom.</summary>
+    [StringLength(32)]
+    public string PaymentGatewayProvider { get; set; } = "none";
+
+    public int? CardcomTerminalNumber { get; set; }
+
+    [StringLength(100)]
+    public string? CardcomApiName { get; set; }
+
+    [StringLength(500)]
+    public string? CardcomApiPasswordEncrypted { get; set; }
+
+    public bool CardcomSaveCardEnabled { get; set; } = true;
+
+    public int PaymentAuthBufferPercent { get; set; } = 25;
+
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? PaymentMaxAuthAmount { get; set; }
+
+    public bool PaymentAllowCaptureAboveAuth { get; set; }
+
+    [StringLength(2000)]
+    public string? CardcomProviderExtrasJson { get; set; }
+
+    [StringLength(500)]
+    public string? CardcomCssUrl { get; set; }
+
+    [StringLength(500)]
+    public string? CardcomLogoUrl { get; set; }
+
     [ForeignKey("AccountId")]
     [InverseProperty("Site")]
     public virtual Account Account { get; set; } = null!;
@@ -157,6 +197,9 @@ public partial class Site
 
     [InverseProperty("Site")]
     public virtual ICollection<Promotion> Promotion { get; set; } = new List<Promotion>();
+
+    [InverseProperty("Site")]
+    public virtual ICollection<CustomerPaymentMethod> CustomerPaymentMethod { get; set; } = new List<CustomerPaymentMethod>();
 
     [InverseProperty("Site")]
     public virtual ICollection<SiteOrderReceptionClosed> SiteOrderReceptionClosed { get; set; } = new List<SiteOrderReceptionClosed>();

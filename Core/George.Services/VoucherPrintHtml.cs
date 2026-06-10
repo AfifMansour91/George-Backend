@@ -24,7 +24,16 @@ public static class VoucherPrintHtml
     public const int Lead = 17;
     public const int OrderNumber = 30;
     public const int CustomerName = 34;
-    public const int ProductMeta = 11;
+    /// <summary>Variations / attributes under product name (• lines).</summary>
+    public const int ProductMeta = 15;
+
+    public const int ProductMetaLineHeight = 20;
+
+    /// <summary>Per-line item note under product.</summary>
+    public const int ItemLineNote = 16;
+
+    public const int ItemLineNoteLineHeight = 21;
+
     public const int PickedLine = 13;
     public const int Note = 17;
     public const int ShipLabel = 14;
@@ -36,4 +45,10 @@ public static class VoucherPrintHtml
 
     /// <summary>Legacy prefix; prefer <see cref="ProductBullet"/> + layout in HTML.</summary>
     public const string ProductLinePrefix = "• ";
+
+    public const string ItemLineNoteLabel = "הערה:";
+
+    /// <summary>Underlined "הערה:" for voucher HTML (note body appended separately, escaped).</summary>
+    public static string ItemLineNoteLabelHtml() =>
+        $"<span style=\"text-decoration:underline;\">{ItemLineNoteLabel}</span>";
 }

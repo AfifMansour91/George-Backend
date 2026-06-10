@@ -13,10 +13,15 @@ namespace George.Api.Controllers
     public class OrderController : GeorgeControllerBase, IAuthUserProvider
     {
         private readonly OrderService _orderSvc;
+        private readonly WoltDispatchService _woltDispatchSvc;
 
-        public OrderController(OrderService orderSvc, ILogger<OrderController> logger) : base(logger)
+        public OrderController(
+            OrderService orderSvc,
+            WoltDispatchService woltDispatchSvc,
+            ILogger<OrderController> logger) : base(logger)
         {
             _orderSvc = orderSvc;
+            _woltDispatchSvc = woltDispatchSvc;
         }
 
         [HttpGet]
@@ -28,11 +33,36 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _orderSvc.GetOrdersAsync(request, cancelToken));
         }
 
+        /// <summary>Aggregated handling medians for a site and date range (dashboard). Literal route before {orderId}.</summary>
+        [HttpGet("HandlingMetrics")]
+        [ProducesResponseType(typeof(IApiResponse<OrderHandlingMetricsRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetHandlingMetricsAsync(
+            [FromQuery] int siteId,
+            [FromQuery] string from,
+            [FromQuery] string to,
+            CancellationToken cancelToken = default)
+        {
+            if (!DateTime.TryParse(from, out var fromDate) || !DateTime.TryParse(to, out var toDate))
+                return BadRequest("from and to must be valid dates (yyyy-MM-dd).");
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _orderSvc.GetOrderHandlingMetricsAsync(siteId, fromDate, toDate, cancelToken));
+        }
+
         [HttpGet("{orderId:int}")]
         [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetOrderAsync([FromRoute] int orderId, CancellationToken cancelToken = default)
         {
             return await SafeCallWithErrorCatchingAsync(() => _orderSvc.GetOrderAsync(orderId, cancelToken));
+        }
+
+        /// <summary>Status timeline for handling-time metrics (dashboard).</summary>
+        [HttpGet("{orderId:int}/StatusHistory")]
+        [ProducesResponseType(typeof(IApiResponse<List<OrderStatusHistoryEntryRes>>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetOrderStatusHistoryAsync(
+            [FromRoute] int orderId,
+            CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _orderSvc.GetOrderStatusHistoryAsync(orderId, cancelToken));
         }
 
         [HttpPost]
@@ -72,7 +102,7 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _orderSvc.RemoveOrderItemAsync(orderId, orderItemId, cancelToken));
         }
 
-        /// <summary>Save picking state (שמור וצא). Body: { "items": [ { "orderItemId", "pickedQuantity", "totalPrice" }, ... ] }.</summary>
+        /// <summary>Save picking state (שמור וצא). Body: { "items": [ { "orderItemId", "pickedQuantity", "totalPrice", "pickingUserConfirmed" }, ... ] }.</summary>
         [HttpPut("{orderId:int}/Picking")]
         [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> UpdatePickingAsync([FromRoute] int orderId, [FromBody] UpdatePickingReq? req, CancellationToken cancelToken = default)
@@ -102,6 +132,14 @@ namespace George.Api.Controllers
         public async Task<IActionResult> SendReminderAsync([FromRoute] int orderId, CancellationToken cancelToken = default)
         {
             return await SafeCallWithErrorCatchingAsync(() => _orderSvc.SendReminderAsync(orderId, cancelToken));
+        }
+
+        /// <summary>Dispatch or refresh Wolt Drive courier for a WooCommerce shipping order (OC Wolt plugin dispatch API).</summary>
+        [HttpPost("{orderId:int}/WoltDispatch")]
+        [ProducesResponseType(typeof(IApiResponse<WoltDispatchRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> DispatchWoltAsync([FromRoute] int orderId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _woltDispatchSvc.DispatchOrderAsync(orderId, cancelToken));
         }
 
         [ApiExplorerSettings(IgnoreApi = true)]

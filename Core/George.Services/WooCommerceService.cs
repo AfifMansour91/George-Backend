@@ -9,16 +9,19 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Net.Http.Headers;
 using George.Common;
+using George.Common.Utils;
 using George.Data;
 using George.DB;
 using George.Services.Request;
 using George.Services.Response;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using Attribute = George.DB.Attribute;
 using System.Globalization;
+using ImageMagick;
 
 namespace George.Services
 {
@@ -36,12 +39,19 @@ namespace George.Services
         /// <summary>Semaphore per (siteId, attributeName) so parallel product syncs don't create the same global attribute multiple times.</summary>
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> AttributeEnsureLocks = new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.Ordinal);
 
+        /// <summary>Cached result of <c>GET {site}/wp-json/ed/v1/capabilities</c> → <c>product_labels</c>.</summary>
+        private static readonly ConcurrentDictionary<string, bool> EdProductLabelsCapabilityCache = new(StringComparer.OrdinalIgnoreCase);
+
+        private static readonly TimeSpan EdCapabilitiesProbeTimeout = TimeSpan.FromSeconds(15);
+
         private readonly SiteStorage _siteStorage;
         private readonly CategoryStorage _categoryStorage;
         private readonly ProductStorage _productStorage;
         private readonly AttributeStorage _attributeStorage;
         private readonly OrderStorage _orderStorage;
         private readonly BrandStorage _brandStorage;
+        private readonly MediaStorage _mediaStorage;
+        private readonly IFileStorage _fileStorage;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IServiceScopeFactory _scopeFactory;
 
@@ -55,6 +65,8 @@ namespace George.Services
             AttributeStorage attributeStorage,
             OrderStorage orderStorage,
             BrandStorage brandStorage,
+            MediaStorage mediaStorage,
+            IFileStorage fileStorage,
             IHttpClientFactory httpClientFactory,
             IServiceScopeFactory scopeFactory
         ) : base(logger, mapper, cache)
@@ -65,6 +77,8 @@ namespace George.Services
             _attributeStorage = attributeStorage;
             _orderStorage = orderStorage;
             _brandStorage = brandStorage;
+            _mediaStorage = mediaStorage;
+            _fileStorage = fileStorage;
             _httpClientFactory = httpClientFactory;
             _scopeFactory = scopeFactory;
         }
@@ -108,9 +122,8 @@ namespace George.Services
 
                 _logger.LogInformation("WooCommerce sync started for site {SiteId} (product filter: {Filter})", req.SiteId, req.ProductIds != null ? string.Join(",", req.ProductIds) : "all");
 
-                // Sync categories first
-                var categoryMap = await SyncCategoriesAsync(baseUrl, req.SiteId, httpClient, cancelToken);
-                _logger.LogInformation("WooCommerce sync: categories completed for site {SiteId}, {Count} categories mapped", req.SiteId, categoryMap.Count);
+                var categoryMap = await ResolveCategoryMapForSyncAsync(req, baseUrl, httpClient, cancelToken);
+                _logger.LogInformation("WooCommerce sync: categories ready for site {SiteId}, {Count} categories mapped", req.SiteId, categoryMap.Count);
 
                 // Sync products
                 var syncResults = await SyncProductsAsync(
@@ -194,8 +207,8 @@ namespace George.Services
 
             _logger.LogInformation("WooCommerce sync (with progress) started for site {SiteId}", req.SiteId);
 
-            var categoryMap = await SyncCategoriesAsync(baseUrl, req.SiteId, httpClient, cancelToken);
-            _logger.LogInformation("WooCommerce sync: categories completed for site {SiteId}, {Count} categories mapped", req.SiteId, categoryMap.Count);
+            var categoryMap = await ResolveCategoryMapForSyncAsync(req, baseUrl, httpClient, cancelToken);
+            _logger.LogInformation("WooCommerce sync: categories ready for site {SiteId}, {Count} categories mapped", req.SiteId, categoryMap.Count);
 
             var syncResults = await SyncProductsAsync(
                 baseUrl,
@@ -245,6 +258,222 @@ namespace George.Services
             CancellationToken cancelToken) =>
             RunImportFromWooAsync(req, importProgress, cancelToken);
 
+        /// <summary>
+        /// One-time alignment: reads <c>menu_order</c> from WooCommerce and sets George <see cref="Product.DisplayOrder"/>
+        /// to match the live site order (sequential 0..n-1 sorted by Woo menu_order). Does not change Woo.
+        /// </summary>
+        public async Task<IApiResponse<WooCommerceProductOrderSyncRes>> ImportProductOrderFromWooCommerceAsync(
+            int siteId,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<WooCommerceProductOrderSyncRes> { Data = new WooCommerceProductOrderSyncRes() };
+            try
+            {
+                var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+                if (site == null)
+                    return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
+                if (string.IsNullOrWhiteSpace(site.WooCommerceUrl) ||
+                    string.IsNullOrWhiteSpace(site.WooCommerceKey) ||
+                    string.IsNullOrWhiteSpace(site.WooCommerceSecret))
+                {
+                    return CreateResponse(response, StatusCode.InvalidRequest,
+                        "WooCommerce integration not configured. Please set up your credentials in Store Settings.");
+                }
+
+                var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
+                var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
+                using var httpClient = _httpClientFactory.CreateClient();
+                httpClient.Timeout = WooCommerceHttpTimeout;
+                httpClient.DefaultRequestHeaders.Clear();
+                httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+
+                var wooProducts = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products?status=any", cancelToken);
+                var wooIdToProductId = await _productStorage.GetWooCommerceIdToProductIdForSiteAsync(siteId, cancelToken);
+
+                var matched = wooProducts
+                    .Where(wp => wp.id > 0 && wooIdToProductId.ContainsKey(wp.id))
+                    .OrderBy(wp => wp.menu_order)
+                    .ThenBy(wp => wp.id)
+                    .ToList();
+
+                var updates = new Dictionary<int, int>();
+                for (var i = 0; i < matched.Count; i++)
+                    updates[wooIdToProductId[matched[i].id]] = i;
+
+                var updatedCount = await _productStorage.UpdateDisplayOrdersForProductsAsync(updates, cancelToken);
+                response.Data.UpdatedCount = updatedCount;
+                response.Data.SkippedCount = Math.Max(0, wooProducts.Count - matched.Count);
+                response.Data.Message = updatedCount == 0
+                    ? "No matching products found to update display order."
+                    : $"Updated display order for {updatedCount} product(s) from WooCommerce menu_order.";
+                _logger.LogInformation(
+                    "WooCommerce product order import for site {SiteId}: updated {Updated}, skipped {Skipped} Woo rows without local match",
+                    siteId,
+                    updatedCount,
+                    response.Data.SkippedCount);
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Import product order from WooCommerce failed for site {SiteId}", siteId);
+                return CreateResponse(response, StatusCode.UnknownError, ex.Message);
+            }
+        }
+
+        /// <summary>Read-only: fetch WooCommerce products sorted by menu_order for order debugging (no import).</summary>
+        public async Task<IApiResponse<ProductOrderPreviewRes>> PreviewWooProductOrderAsync(
+            int siteId,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<ProductOrderPreviewRes>
+            {
+                Data = new ProductOrderPreviewRes { Source = "woocommerce" }
+            };
+            try
+            {
+                var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+                if (site == null)
+                    return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
+                if (string.IsNullOrWhiteSpace(site.WooCommerceUrl) ||
+                    string.IsNullOrWhiteSpace(site.WooCommerceKey) ||
+                    string.IsNullOrWhiteSpace(site.WooCommerceSecret))
+                {
+                    return CreateResponse(response, StatusCode.InvalidRequest,
+                        "WooCommerce integration not configured. Please set up your credentials in Store Settings.");
+                }
+
+                var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
+                var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
+                using var httpClient = _httpClientFactory.CreateClient();
+                httpClient.Timeout = WooCommerceHttpTimeout;
+                httpClient.DefaultRequestHeaders.Clear();
+                httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+
+                var wooProducts = await FetchWooPagedAsync<WooImportProductItem>(
+                    httpClient,
+                    $"{baseUrl}/products?status=any",
+                    cancelToken);
+                var wooIdToProductId = await _productStorage.GetWooCommerceIdToProductIdForSiteAsync(siteId, cancelToken);
+
+                var sorted = wooProducts
+                    .Where(wp => wp.id > 0)
+                    .OrderBy(wp => wp.menu_order)
+                    .ThenBy(wp => wp.id)
+                    .ToList();
+
+                for (var i = 0; i < sorted.Count; i++)
+                {
+                    var wp = sorted[i];
+                    wooIdToProductId.TryGetValue(wp.id, out var georgeId);
+                    response.Data.Products.Add(new ProductOrderPreviewItem
+                    {
+                        ListIndex = i,
+                        GeorgeProductId = georgeId > 0 ? georgeId : null,
+                        WooCommerceProductId = wp.id,
+                        Name = wp.name ?? "",
+                        MenuOrder = wp.menu_order,
+                        Sku = wp.sku,
+                        Status = wp.status
+                    });
+                }
+
+                response.Data.Count = response.Data.Products.Count;
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Preview WooCommerce product order failed for site {SiteId}", siteId);
+                return CreateResponse(response, StatusCode.UnknownError, ex.Message);
+            }
+        }
+
+        /// <summary>Read-only: George products on site sorted by DisplayOrder for order debugging.</summary>
+        public async Task<IApiResponse<ProductOrderPreviewRes>> PreviewLocalProductOrderAsync(
+            int siteId,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<ProductOrderPreviewRes>
+            {
+                Data = new ProductOrderPreviewRes { Source = "george" }
+            };
+            try
+            {
+                if (siteId <= 0)
+                    return CreateResponse(response, StatusCode.InvalidRequest, "SiteId required");
+                var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+                if (site == null)
+                    return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
+
+                var rows = await _productStorage.GetProductOrderPreviewRowsForSiteAsync(siteId, cancelToken);
+                for (var i = 0; i < rows.Count; i++)
+                {
+                    var row = rows[i];
+                    response.Data.Products.Add(new ProductOrderPreviewItem
+                    {
+                        ListIndex = i,
+                        GeorgeProductId = row.Id,
+                        WooCommerceProductId = row.WooCommerceId,
+                        Name = row.Name,
+                        DisplayOrder = row.DisplayOrder,
+                        Sku = row.Sku
+                    });
+                }
+
+                response.Data.Count = response.Data.Products.Count;
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Preview local product order failed for site {SiteId}", siteId);
+                return CreateResponse(response, StatusCode.UnknownError, ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Pushes George catalog sort order to WooCommerce <c>menu_order</c> for all linked products on the site.
+        /// Use after reordering in My Products when Woo drifted from George.
+        /// </summary>
+        public async Task<IApiResponse<WooCommerceProductOrderSyncRes>> PushProductOrderToWooCommerceAsync(
+            int siteId,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<WooCommerceProductOrderSyncRes> { Data = new WooCommerceProductOrderSyncRes() };
+            try
+            {
+                var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
+                if (site == null)
+                    return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
+                if (string.IsNullOrWhiteSpace(site.WooCommerceUrl) ||
+                    string.IsNullOrWhiteSpace(site.WooCommerceKey) ||
+                    string.IsNullOrWhiteSpace(site.WooCommerceSecret))
+                {
+                    return CreateResponse(response, StatusCode.InvalidRequest,
+                        "WooCommerce integration not configured. Please set up your credentials in Store Settings.");
+                }
+
+                var orderedProductIds = await _productStorage.GetProductIdsForSiteAsync(siteId, cancelToken);
+                if (orderedProductIds.Count == 0)
+                {
+                    response.Data.Message = "No products to sync order for.";
+                    return response;
+                }
+
+                await SyncMenuOrderOnlyAsync(siteId, orderedProductIds, onlyProductIds: null, cancelToken);
+                response.Data.UpdatedCount = orderedProductIds.Count;
+                response.Data.Message = $"Pushed display order for {orderedProductIds.Count} product(s) to WooCommerce menu_order.";
+                _logger.LogInformation(
+                    "WooCommerce product order push for site {SiteId}: {Count} products",
+                    siteId,
+                    orderedProductIds.Count);
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Push product order to WooCommerce failed for site {SiteId}", siteId);
+                return CreateResponse(response, StatusCode.UnknownError, ex.Message);
+            }
+        }
+
         private async Task<IApiResponse<WooCommerceImportFromWooRes>> RunImportFromWooAsync(
             WooCommerceSyncReq req,
             IProgress<WooCommerceImportProgress>? importProgress,
@@ -275,7 +504,54 @@ namespace George.Services
                 importProgress?.Report(new WooCommerceImportProgress { Phase = "fetch", Total = 2, Completed = 0 });
                 var wooCategories = await FetchWooPagedAsync<WooImportCategoryItem>(httpClient, $"{baseUrl}/products/categories", cancelToken);
                 importProgress?.Report(new WooCommerceImportProgress { Phase = "fetch", Total = 2, Completed = 1 });
-                var wooProducts = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products", cancelToken);
+                // Include draft/private/pending/future (status=any). Woo often keeps trashed posts out of "any" — merge a trash pass so counts match admin "All".
+                var wooProductsRaw = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products?status=any", cancelToken);
+                try
+                {
+                    var trashedRows = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products?status=trash", cancelToken);
+                    if (trashedRows.Count > 0)
+                    {
+                        // Same post id must not appear twice in the merged feed (avoids false "duplicate" counts when any+trash overlap or plugins echo rows).
+                        var idsAlready = wooProductsRaw.Where(w => w.id > 0).Select(w => w.id).ToHashSet();
+                        var trashOnlyNew = trashedRows.Where(t => t.id > 0 && !idsAlready.Contains(t.id)).ToList();
+                        var skippedTrashOverlap = trashedRows.Count - trashOnlyNew.Count;
+                        if (skippedTrashOverlap > 0)
+                        {
+                            _logger.LogInformation(
+                                "WooCommerce import: skipped {Skipped} trash product row(s) whose id already existed in the status=any feed (same Woo id in both lists).",
+                                skippedTrashOverlap);
+                        }
+                        if (trashOnlyNew.Count > 0)
+                        {
+                            var before = wooProductsRaw.Count;
+                            wooProductsRaw = wooProductsRaw.Concat(trashOnlyNew).ToList();
+                            _logger.LogInformation(
+                                "WooCommerce import: merged {TrashRows} trash-only product row(s) into feed ({Before} → {After} rows before REST id de-dupe).",
+                                trashOnlyNew.Count,
+                                before,
+                                wooProductsRaw.Count);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "WooCommerce import: optional products?status=trash fetch failed; continuing with status=any only.");
+                }
+
+                var wooProducts = DedupeWooImportProductsByRestId(wooProductsRaw);
+                var feedRowCountWithId = wooProductsRaw.Count(w => w.id > 0);
+                var uniqueIdCount = wooProducts.Count(w => w.id > 0);
+                response.Data.WooProductFeedRowCount = feedRowCountWithId;
+                response.Data.WooProductUniqueIdCount = uniqueIdCount;
+                response.Data.WooProductFeedDuplicates = BuildWooProductFeedDuplicateRows(wooProductsRaw);
+                if (wooProducts.Count < wooProductsRaw.Count)
+                {
+                    _logger.LogWarning(
+                        "WooCommerce import: product feed contained {Dup} duplicate REST id row(s) ({Raw} rows, {Unique} unique).",
+                        wooProductsRaw.Count - wooProducts.Count,
+                        wooProductsRaw.Count,
+                        wooProducts.Count);
+                }
                 importProgress?.Report(new WooCommerceImportProgress { Phase = "fetch", Total = 2, Completed = 2 });
 
                 using var scope = _scopeFactory.CreateScope();
@@ -300,10 +576,24 @@ namespace George.Services
                 var brandMap = await UpsertBrandsFromWooAsync(db, siteForImport, siteForImport.AccountId, httpClient, baseUrl, response.Data, cancelToken);
                 importProgress?.Report(new WooCommerceImportProgress { Phase = "brands", Total = 1, Completed = 1 });
 
-                await UpsertProductsFromWooAsync(db, siteForImport, baseUrl, httpClient, wooProducts, categoryMap, brandMap, importLookups, response.Data, importProgress, cancelToken);
+                await UpsertProductsFromWooAsync(
+                    db,
+                    siteForImport,
+                    baseUrl,
+                    httpClient,
+                    wooProducts,
+                    categoryMap,
+                    brandMap,
+                    importLookups,
+                    response.Data,
+                    importProgress,
+                    cancelToken);
 
                 await tx.CommitAsync(cancelToken);
-                response.Data.Message = $"Imported from WooCommerce: {wooCategories.Count} categories, {brandMap.Count} brands, and {wooProducts.Count} products processed.";
+                var dupRows = feedRowCountWithId - uniqueIdCount;
+                response.Data.Message = dupRows > 0
+                    ? $"Imported from WooCommerce: {wooCategories.Count} categories, {brandMap.Count} brands, {uniqueIdCount} unique Woo products ({feedRowCountWithId} API rows; {dupRows} duplicate id row(s) in the feed were merged into one product each)."
+                    : $"Imported from WooCommerce: {wooCategories.Count} categories, {brandMap.Count} brands, and {uniqueIdCount} unique Woo products processed.";
                 return response;
             }
             catch (Exception ex)
@@ -476,6 +766,108 @@ namespace George.Services
             if (categoryMap.Count < categories.Count)
                 _logger.LogWarning("WooCommerce sync categories: site {SiteId}, {Mapped} of {Total} categories mapped (some failed)", siteId, categoryMap.Count, categories.Count);
             return categoryMap;
+        }
+
+        /// <summary>
+        /// Product-scoped sync uses WooCommerce IDs already stored on categories (no full category push).
+        /// Full-catalog sync (no product filter) still runs <see cref="SyncCategoriesAsync"/>.
+        /// Missing categories for the products being synced are pushed on demand only.
+        /// </summary>
+        private async Task<Dictionary<int, int>> ResolveCategoryMapForSyncAsync(
+            WooCommerceSyncReq req,
+            string baseUrl,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            if (req.ProductIds == null || !req.ProductIds.Any())
+                return await SyncCategoriesAsync(baseUrl, req.SiteId, httpClient, cancelToken);
+
+            var categoryMap = await LoadCategoryMapFromDbAsync(req.SiteId, cancelToken);
+            var neededCategoryIds = await _productStorage.GetCategoryIdsForProductsOnSiteAsync(req.ProductIds, req.SiteId, cancelToken);
+            var missing = neededCategoryIds.Where(id => !categoryMap.ContainsKey(id)).ToList();
+
+            if (missing.Count > 0)
+            {
+                _logger.LogInformation(
+                    "WooCommerce sync: syncing {MissingCount} uncached categories for site {SiteId} (product-scoped sync)",
+                    missing.Count,
+                    req.SiteId);
+                await SyncMissingCategoriesAsync(baseUrl, req.SiteId, missing, categoryMap, httpClient, cancelToken);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "WooCommerce sync: using cached category map for site {SiteId}, {Count} categories (product-scoped sync, no category API calls)",
+                    req.SiteId,
+                    categoryMap.Count);
+            }
+
+            return categoryMap;
+        }
+
+        private async Task<Dictionary<int, int>> LoadCategoryMapFromDbAsync(int siteId, CancellationToken cancelToken)
+        {
+            var categoriesResult = await _categoryStorage.GetCategoriesAsync(
+                new CategoryFilter { SiteId = siteId },
+                new PagingExDto { Skip = 0, Take = 10000, IncludeTotal = false },
+                cancelToken);
+
+            return categoriesResult.Items
+                .Where(c => !c.IsDeleted && c.IsActive && c.WooCommerceId.HasValue && c.WooCommerceId.Value > 0)
+                .ToDictionary(c => c.Id, c => c.WooCommerceId!.Value);
+        }
+
+        private async Task SyncMissingCategoriesAsync(
+            string baseUrl,
+            int siteId,
+            IReadOnlyList<int> missingCategoryIds,
+            Dictionary<int, int> categoryMap,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            if (missingCategoryIds == null || missingCategoryIds.Count == 0)
+                return;
+
+            var categoriesResult = await _categoryStorage.GetCategoriesAsync(
+                new CategoryFilter { SiteId = siteId },
+                new PagingExDto { Skip = 0, Take = 10000, IncludeTotal = false },
+                cancelToken);
+            var byId = categoriesResult.Items
+                .Where(c => !c.IsDeleted && c.IsActive)
+                .ToDictionary(c => c.Id);
+
+            async Task SyncOneAsync(int categoryId)
+            {
+                if (categoryMap.ContainsKey(categoryId))
+                    return;
+                if (!byId.TryGetValue(categoryId, out var category))
+                    return;
+
+                if (category.ParentCategoryId.HasValue && !categoryMap.ContainsKey(category.ParentCategoryId.Value))
+                    await SyncOneAsync(category.ParentCategoryId.Value);
+
+                int? parentWooId = null;
+                if (category.ParentCategoryId.HasValue &&
+                    categoryMap.TryGetValue(category.ParentCategoryId.Value, out var parentWoo))
+                    parentWooId = parentWoo;
+
+                try
+                {
+                    var wooCatId = await SyncCategoryAsync(baseUrl, category, parentWooId, httpClient, cancelToken);
+                    if (wooCatId.HasValue)
+                    {
+                        categoryMap[category.Id] = wooCatId.Value;
+                        await _categoryStorage.UpdateCategoryWooCommerceIdAsync(category.Id, wooCatId.Value, cancelToken);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to sync missing category {CategoryId} ({CategoryName})", category.Id, category.Name);
+                }
+            }
+
+            foreach (var id in missingCategoryIds.Distinct())
+                await SyncOneAsync(id);
         }
 
         /// <summary>
@@ -732,15 +1124,21 @@ namespace George.Services
             var slug = SlugifyAttributeName(attribute.Name);
             var wooAttrData = new { name = attribute.Name, slug, type = "select", order_by = "menu_order", has_archives = false };
 
-            // First, check if we have a stored WooCommerceId and try to update
-            if (attribute.WooCommerceId.HasValue)
+            // Mapped attribute: only ensure new option values exist as terms (no attribute PUT on every product save).
+            if (attribute.WooCommerceId is > 0)
             {
-                var (updatedId, updatedSlug) = await TryUpdateProductAttributeAsync(baseUrl, attribute.WooCommerceId.Value, wooAttrData, httpClient, cancelToken);
-                if (updatedId.HasValue)
-                {
-                    await SyncAttributeTermsAsync(baseUrl, updatedId.Value, attribute, httpClient, cancelToken);
-                    return (updatedId.Value, updatedSlug ?? slug);
-                }
+                var requiredTerms = attribute.AttributeValue?
+                    .Select(av => av.Value)
+                    .Where(v => !string.IsNullOrWhiteSpace(v))
+                    .Select(v => v!.Trim())
+                    .ToList() ?? new List<string>();
+                return await SyncMappedAttributeTermsOnlyAsync(
+                    baseUrl,
+                    attribute.WooCommerceId.Value,
+                    attribute.Name,
+                    requiredTerms,
+                    httpClient,
+                    cancelToken);
             }
 
             // If update failed or no WooCommerceId, try to find existing attribute by name/slug
@@ -795,9 +1193,90 @@ namespace George.Services
         /// <summary>Per-request timeout for attribute term POST so a single slow/hanging request doesn't block sync (default HttpClient timeout is 30 min).</summary>
         private static readonly TimeSpan AttributeTermRequestTimeout = TimeSpan.FromSeconds(220);
 
+        private async Task<HashSet<string>> GetWooCommerceAttributeTermNamesAsync(
+            string baseUrl,
+            int wooAttrId,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            const int perPage = 100;
+            for (var page = 1; page <= 10; page++)
+            {
+                var url = $"{baseUrl}/products/attributes/{wooAttrId}/terms?per_page={perPage}&page={page}";
+                var response = await httpClient.GetAsync(url, cancelToken);
+                if (!response.IsSuccessStatusCode)
+                    break;
+                var body = await response.Content.ReadAsStringAsync(cancelToken);
+                var list = TryDeserialize<List<WooCommerceAttributeTermListItem>>(body);
+                if (list == null || list.Count == 0)
+                    break;
+                foreach (var t in list)
+                {
+                    if (!string.IsNullOrWhiteSpace(t.name))
+                        names.Add(t.name.Trim());
+                }
+                if (list.Count < perPage)
+                    break;
+            }
+            return names;
+        }
+
+        private async Task<string?> GetWooCommerceAttributeSlugAsync(
+            string baseUrl,
+            int wooAttrId,
+            string fallbackSlug,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            var getUrl = $"{baseUrl}/products/attributes/{wooAttrId}";
+            var response = await httpClient.GetAsync(getUrl, cancelToken);
+            if (!response.IsSuccessStatusCode)
+                return fallbackSlug;
+            var body = await response.Content.ReadAsStringAsync(cancelToken);
+            var attr = TryDeserialize<WooCommerceAttributeResponse>(body);
+            return !string.IsNullOrWhiteSpace(attr?.slug) ? attr.slug : fallbackSlug;
+        }
+
+        /// <summary>Product save path: attribute already mapped in DB — skip attribute PUT; POST only new term values.</summary>
+        private async Task<(int? id, string? slug)> SyncMappedAttributeTermsOnlyAsync(
+            string baseUrl,
+            int wooAttrId,
+            string attributeName,
+            IReadOnlyList<string> requiredTermValues,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            var fallbackSlug = SlugifyAttributeName(attributeName);
+            var slug = await GetWooCommerceAttributeSlugAsync(baseUrl, wooAttrId, fallbackSlug, httpClient, cancelToken);
+
+            var existingTerms = await GetWooCommerceAttributeTermNamesAsync(baseUrl, wooAttrId, httpClient, cancelToken);
+            var missing = requiredTermValues
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Select(v => v.Trim())
+                .Where(v => !existingTerms.Contains(v))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (missing.Count > 0)
+            {
+                _logger.LogInformation(
+                    "WooCommerce sync: posting {Count} new attribute terms for attribute {WooAttrId} ({Name})",
+                    missing.Count, wooAttrId, attributeName);
+                await SyncAttributeTermValuesAsync(baseUrl, wooAttrId, missing, httpClient, cancelToken);
+            }
+
+            return (wooAttrId, slug);
+        }
+
         private async Task SyncAttributeTermsAsync(string baseUrl, int wooAttrId, Attribute attribute, HttpClient httpClient, CancellationToken cancelToken)
         {
             var values = attribute.AttributeValue?.Select(av => av.Value).Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? new List<string>();
+            await SyncAttributeTermValuesAsync(baseUrl, wooAttrId, values, httpClient, cancelToken);
+        }
+
+        private async Task SyncAttributeTermValuesAsync(string baseUrl, int wooAttrId, IReadOnlyList<string> values, HttpClient httpClient, CancellationToken cancelToken)
+        {
             foreach (var value in values)
             {
                 var name = value?.Trim();
@@ -808,7 +1287,6 @@ namespace George.Services
                 var termPayload = new WooCommerceAttributeTermPayload { name = name };
                 var opts = new JsonSerializerOptions { PropertyNamingPolicy = null };
                 var termBody = JsonSerializer.Serialize(termPayload, opts);
-                _logger.LogInformation("WooCommerce attribute term POST body: {Body}", termBody);
                 using var termContent = new StringContent(termBody, Encoding.UTF8, "application/json");
 
                 HttpResponseMessage? termRes = null;
@@ -904,6 +1382,18 @@ namespace George.Services
                             GuidId = Guid.NewGuid()
                         },
                         attributeValues,
+                        cancelToken);
+                }
+
+                // Already linked to Woo: skip full attribute sync; POST only new option values from this product.
+                if (attribute.WooCommerceId is > 0)
+                {
+                    return await SyncMappedAttributeTermsOnlyAsync(
+                        baseUrl,
+                        attribute.WooCommerceId.Value,
+                        attribute.Name,
+                        attributeValues,
+                        httpClient,
                         cancelToken);
                 }
 
@@ -1234,6 +1724,8 @@ namespace George.Services
         {
             try
             {
+                await EnsureAssignedBrandsSyncedToWooForSiteAsync(siteId, product, cancelToken).ConfigureAwait(false);
+
                 // Map stock status
                 var stockStatus = "instock";
                 if (product.StockStatus?.Name == "out_of_stock" || product.Status?.Name == "outOfStock")
@@ -1294,6 +1786,7 @@ namespace George.Services
                     .OrderBy(pi => pi.SortOrder)
                     .Where(pi => IsPublicImageUrl(pi.Url))
                     .ToList() ?? new List<ProductImage>();
+                var wpJsonBaseForMedia = GetWordPressRestBaseUrlFromWooV3BaseUrl(baseUrl);
                 var images = new List<object>();
                 for (var i = 0; i < ourProductImages.Count; i++)
                 {
@@ -1305,27 +1798,91 @@ namespace George.Services
                     {
                         try
                         {
-                            var lastSegment = new Uri(url, UriKind.RelativeOrAbsolute).Segments.LastOrDefault()?.Trim('/');
+                            var lastSegment = new Uri(url, UriKind.Absolute).Segments.LastOrDefault()?.Trim('/');
                             if (!string.IsNullOrEmpty(lastSegment))
                                 friendlyName = lastSegment;
                         }
                         catch { /* ignore URI parse */ }
                     }
+
+                    // Same as media library "download to our storage": persist JPEG to our bucket/disk and point Media + ProductImage at the public URL, then WooCommerce sideloads that URL like any normal product image.
+                    if (pi.MediaId.HasValue && await ImageRequiresJpegMediaUploadForWooAsync(url, friendlyName, cancelToken).ConfigureAwait(false))
+                    {
+                        var mirroredUrl = await TryMirrorProductImageToOurStorageForWooAsync(pi.MediaId.Value, url, cancelToken).ConfigureAwait(false);
+                        if (!string.IsNullOrEmpty(mirroredUrl))
+                        {
+                            url = mirroredUrl;
+                            _logger.LogInformation("Woo sync: mirrored product image to our storage for product {ProductId}, media {MediaId}", product.Id, pi.MediaId.Value);
+                        }
+                    }
+
+                    // Modern formats (AVIF/HEIF/WebP) and negotiation CDNs (e.g. Wolt imageproxy) often fail WooCommerce URL sideload on WordPress; upload JPEG via wp/v2/media then attach by id.
+                    if (await ImageRequiresJpegMediaUploadForWooAsync(url, friendlyName, cancelToken).ConfigureAwait(false))
+                    {
+                        var compatFile = GeorgeWooProductImageCompatFileName(product.Id, pi.MediaId, i);
+                        if (existingWooImages != null)
+                        {
+                            var compatMatch = FindExistingWooImageByAttachmentName(existingWooImages, compatFile);
+                            if (compatMatch.id != 0)
+                            {
+                                images.Add(new { id = compatMatch.id, position });
+                                continue;
+                            }
+                        }
+
+                        byte[] jpegBytes;
+                        try
+                        {
+                            jpegBytes = await DownloadImageAndEncodeAsJpegAsync(url, cancelToken).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Woo sync: could not re-encode image to JPEG for product {ProductId}, url={Url}", product.Id, url);
+                            if (TryAppendWoltJpegFormatQuery(url, out var woltAfterDecodeFail))
+                            {
+                                _logger.LogInformation("Woo sync: using Wolt JPEG URL sideload after decode failure product {ProductId}.", product.Id);
+                                images.Add(new { src = woltAfterDecodeFail, name = compatFile, position });
+                            }
+
+                            continue;
+                        }
+
+                        var uploadResult = await TryUploadJpegToWordPressMediaLibraryAsync(httpClient, wpJsonBaseForMedia, jpegBytes, compatFile, cancelToken).ConfigureAwait(false);
+                        if (uploadResult.MediaId.HasValue)
+                            images.Add(new { id = uploadResult.MediaId.Value, position });
+                        else if (TryAppendWoltJpegFormatQuery(url, out var woltJpegSideloadUrl))
+                        {
+                            _logger.LogInformation(
+                                "Woo sync: wp/v2/media failed ({Status}) for product {ProductId}; using Wolt JPEG URL sideload (format=jpg).",
+                                uploadResult.HttpStatus, product.Id);
+                            images.Add(new { src = woltJpegSideloadUrl, name = compatFile, position });
+                        }
+                        else
+                            _logger.LogWarning("Woo sync: wp/v2/media upload failed for product {ProductId}, file {File}; image skipped.", product.Id, compatFile);
+                        continue;
+                    }
+
+                    // WordPress sideload derives the upload file type from the filename; extensionless URLs (e.g. CDN asset IDs) fail with "not allowed to upload this file type".
+                    var sideloadFileName = await ResolveWooImageSideloadFileNameAsync(url, friendlyName, cancelToken).ConfigureAwait(false);
+                    sideloadFileName = GeorgeWooProductImageSideloadFileName(product.Id, pi.MediaId, sideloadFileName);
+
                     if (existingWooImages != null)
                     {
-                        // Match by name first (system/WooCommerce image name), then by URL
-                        var match = default((int id, string? src, string? name));
-                        if (!string.IsNullOrEmpty(friendlyName))
-                            match = existingWooImages.FirstOrDefault(ex => string.Equals((ex.name ?? "").Trim(), friendlyName, StringComparison.OrdinalIgnoreCase));
-                        if (match.id == 0)
-                            match = existingWooImages.FirstOrDefault(ex => string.Equals((ex.src ?? "").Trim(), url, StringComparison.OrdinalIgnoreCase));
+                        // Prefer exact attachment name (includes Media id when known) so replacing an image uploads new bytes instead of reusing an old Woo attachment matched only by display name / slot index.
+                        var match = FindExistingWooImageByAttachmentName(existingWooImages, sideloadFileName);
+                        if (match.id == 0 && !pi.MediaId.HasValue)
+                        {
+                            match = existingWooImages.FirstOrDefault(ex => WooProductImageAttachmentNameMatchesHint(ex.name, friendlyName, sideloadFileName));
+                            if (match.id == 0)
+                                match = existingWooImages.FirstOrDefault(ex => string.Equals((ex.src ?? "").Trim(), url, StringComparison.OrdinalIgnoreCase));
+                        }
                         if (match.id != 0)
                             images.Add(new { id = match.id, position });
                         else
-                            images.Add(string.IsNullOrEmpty(friendlyName) ? (object)new { src = url, position } : new { src = url, name = friendlyName, position });
+                            images.Add(new { src = url, name = sideloadFileName, position });
                     }
                     else
-                        images.Add(string.IsNullOrEmpty(friendlyName) ? (object)new { src = url, position } : new { src = url, name = friendlyName, position });
+                        images.Add(new { src = url, name = sideloadFileName, position });
                 }
 
                 // Map tags
@@ -1345,6 +1902,7 @@ namespace George.Services
                 // ACF true/false field: value goes in "show_as_ml" (1/0), reference key goes in "_show_as_ml"
                 metaData.Add(new { key = "show_as_ml", value = showAsMl ? "1" : "0" });
                 metaData.Add(new { key = "_show_as_ml", value = "field_699f090751cad" });
+                AppendWooAcfStoreLabelMeta(metaData, product);
                 if (product.CostPrice.HasValue)
                     metaData.Add(new { key = "_cost_price", value = product.CostPrice.Value.ToString() });
                 if (!string.IsNullOrEmpty(product.SeoTitle))
@@ -1379,6 +1937,17 @@ namespace George.Services
                         metaData.Add(new { key = "ocwsu_product_weight_units_", value = ocwsuWeightUnits });
                         metaData.Add(new { key = "_ocwsu_display_price_per_100g", value = weightConfig.ShowPricePer100g == true ? "yes" : "no" });
                         metaData.Add(new { key = "ocwsu_display_price_per_100g_", value = weightConfig.ShowPricePer100g == true ? "yes" : "no" });
+                        if (soldByUnits == "yes")
+                        {
+                            var showUnitPrice = weightConfig.ShowUnitPrice == true;
+                            metaData.Add(new { key = "_ocwsu_display_price_per_fixed_unit", value = showUnitPrice ? "yes" : "no" });
+                            metaData.Add(new { key = "ocwsu_display_price_per_fixed_unit_", value = showUnitPrice ? "yes" : "no" });
+                            var soldByLabelValue = showUnitPrice
+                                ? OcwsuSoldByLabel.ToApiValue(weightConfig.SoldByLabel ?? OcwsuSoldByLabel.DefaultKey)
+                                : "";
+                            metaData.Add(new { key = "_ocwsu_display_price_per_fixed_unit_label", value = soldByLabelValue });
+                            metaData.Add(new { key = "ocwsu_display_price_per_fixed_unit_label_", value = soldByLabelValue });
+                        }
                         metaData.Add(new { key = "_ocwsu_min_weight", value = weightConfig.StartWeight ?? "" });
                         metaData.Add(new { key = "ocwsu_min_weight_", value = weightConfig.StartWeight ?? "" });
                         metaData.Add(new { key = "_ocwsu_weight_step", value = weightConfig.Step ?? "" });
@@ -1422,10 +1991,13 @@ namespace George.Services
                 }
 
                 var wooSku = GetWooCommerceSku(siteId, product.Sku);
-                // Send product weight to WooCommerce only when product is weighable; otherwise leave empty so previous value is not applied.
-                // Fallback: for weighted setups where Product.Weight is empty, use WeightConfig.UnitWeight.
-                //var productWeightForWoo = ResolveProductWeightForWoo(product, isWeighted);
-                var productWeightForWoo = product.Weight.HasValue && product.Weight.Value > 0 ? (product.Weight?.ToString() ?? "") : "";
+                // WooCommerce core "weight" (משלוח / product data) is for non-weighable catalog weight only.
+                // Weighable products use OCWSU meta (_ocwsu_*); if we keep sending Product.Weight here, an old value (e.g. 0.3 kg from before switching to שקיל) never clears in Woo.
+                var productWeightForWoo = isWeighted
+                    ? ""
+                    : (product.Weight.HasValue && product.Weight.Value > 0
+                        ? product.Weight.Value.ToString(CultureInfo.InvariantCulture)
+                        : "");
                 var wooProduct = new Dictionary<string, object>
                 {
                     ["name"] = product.Name,
@@ -1436,7 +2008,6 @@ namespace George.Services
                     ["catalog_visibility"] = catalogVisibility,
                     ["weight"] = productWeightForWoo,
                     ["shipping_class"] = shippingClass,
-                    ["menu_order"] = product.DisplayOrder ?? 0,
                     ["images"] = images,
                     ["categories"] = allCategoryIds,
                     ["tags"] = tags,
@@ -1444,24 +2015,28 @@ namespace George.Services
                     ["meta_data"] = metaData
                 };
 
-                // Brand assignment — flat array of WooCommerce brand IDs (NOT [{"id":...}]) per spec §5.7.
-                // Aggregate IDs from both the legacy single Brand FK and the new ProductBrand join.
+                // menu_order is pushed only on Woo product CREATE (see dedicated PUT below). Updates must not
+                // touch sort — George DisplayOrder often diverges from Woo (defaults, stale import) and
+                // pushing on edit reshuffles the live catalog.
+
+                if (!string.IsNullOrWhiteSpace(product.Slug))
+                    wooProduct["slug"] = product.Slug.Trim();
+
+                // Linked products (WooCommerce admin: מוצרים משודרגים / מוצרים משלימים) — REST keys are upsell_ids / cross_sell_ids.
+                // Local RelatedProduct = up-sells; ComplementaryProduct = cross-sells.
+                var upsellIds = await ResolveWooCommerceIdsForLinkedProductsAsync(baseUrl, siteId, product.RelatedProduct, httpClient, cancelToken).ConfigureAwait(false);
+                var crossSellIds = await ResolveWooCommerceIdsForLinkedProductsAsync(baseUrl, siteId, product.ComplementaryProduct, httpClient, cancelToken).ConfigureAwait(false);
+                wooProduct["upsell_ids"] = upsellIds;
+                wooProduct["cross_sell_ids"] = crossSellIds;
+
+                // Brand assignment — Woo REST expects an array of objects with "id" (see Products API brands write-mode).
+                // Uses DB state after EnsureAssignedBrandsSyncedToWooForSiteAsync so new brands get IDs first.
                 // Only include the "brands" key when at least one brand is synced; otherwise leave the
                 // existing Woo-side assignment alone (avoids accidentally clearing brands when our local
                 // brands haven't been pushed yet).
-                var brandIds = new List<int>();
-                if (product.Brand?.WooCommerceBrandId.HasValue == true)
-                    brandIds.Add(product.Brand.WooCommerceBrandId.Value);
-                if (product.ProductBrand != null)
-                {
-                    foreach (var pb in product.ProductBrand)
-                    {
-                        if (pb.Brand?.WooCommerceBrandId.HasValue == true && !brandIds.Contains(pb.Brand.WooCommerceBrandId.Value))
-                            brandIds.Add(pb.Brand.WooCommerceBrandId.Value);
-                    }
-                }
+                var brandIds = await ResolveWooBrandIdsForProductOnSiteAsync(siteId, product, cancelToken).ConfigureAwait(false);
                 if (brandIds.Count > 0)
-                    wooProduct["brands"] = brandIds;
+                    wooProduct["brands"] = brandIds.Select(id => (object)new Dictionary<string, object> { ["id"] = id }).ToList();
 
                 // For variable products, ensure global attributes exist and use their IDs + actual slugs from WooCommerce
                 var attributeMap = new Dictionary<string, int?>();   // attribute name -> WooCommerce ID
@@ -1489,10 +2064,7 @@ namespace George.Services
                     {
                         foreach (var option in product.ProductOption.Where(po => !po.IsDeleted))
                         {
-                            var attributeValues = option.ProductOptionValue?
-                                .Select(pov => pov.Value)
-                                .Where(v => !string.IsNullOrWhiteSpace(v))
-                                .ToList() ?? new List<string>();
+                            var attributeValues = GetProductOptionValuesForWooSync(option, product);
 
                             if (attributeValues.Any())
                             {
@@ -1531,12 +2103,7 @@ namespace George.Services
                                 ["position"] = index,
                                 ["visible"] = true,
                                 ["variation"] = true,
-                                ["options"] = option.ProductOptionValue?
-                                    .Select(pov => pov.Value)
-                                    .Where(v => !string.IsNullOrWhiteSpace(v))
-                                    .Select(v => v.Trim())
-                                    .Distinct()
-                                    .ToList() ?? new List<string>()
+                                ["options"] = GetProductOptionValuesForWooSync(option, product)
                             };
                             if (!string.IsNullOrEmpty(slug))
                                 dict["name"] = slug;
@@ -1576,6 +2143,7 @@ namespace George.Services
                 // Create or update product
                 int? wooCommerceId = null;
                 string action = "created";
+                var updatedExistingWooProduct = false;
 
                 if (existingWooId.HasValue)
                 {
@@ -1592,6 +2160,7 @@ namespace George.Services
                             cancellationToken: cancelToken);
                         wooCommerceId = updated?.id;
                         action = "updated";
+                        updatedExistingWooProduct = true;
                     }
                     else
                     {
@@ -1603,7 +2172,9 @@ namespace George.Services
 
                 if (!wooCommerceId.HasValue)
                 {
-                    // Create new product
+                    if (product.DisplayOrder.HasValue)
+                        wooProduct["menu_order"] = product.DisplayOrder.Value;
+
                     var createUrl = $"{baseUrl}/products";
                     var createJson = JsonSerializer.Serialize(wooProduct);
                     var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
@@ -1627,12 +2198,12 @@ namespace George.Services
                     await _productStorage.UpdateProductWooCommerceIdAsync(product.Id, wooCommerceId.Value, cancelToken);
                 }
 
-                // Apply menu_order: send a dedicated PUT so WooCommerce reliably persists it (main payload may not include/apply it in all versions)
-                if (wooCommerceId.HasValue)
+                // Apply menu_order only on create (not on update) via dedicated PUT so Woo persists sort reliably.
+                if (wooCommerceId.HasValue && product.DisplayOrder.HasValue && !updatedExistingWooProduct)
                 {
                     try
                     {
-                        await UpdateWooCommerceProductMenuOrderAsync(baseUrl, wooCommerceId.Value, product.DisplayOrder ?? 0, httpClient, cancelToken);
+                        await UpdateWooCommerceProductMenuOrderAsync(baseUrl, wooCommerceId.Value, product.DisplayOrder.Value, httpClient, cancelToken);
                     }
                     catch (Exception ex)
                     {
@@ -1656,6 +2227,15 @@ namespace George.Services
                     catch (Exception ex)
                     {
                         _logger.LogWarning(ex, "ED/v1 ACF label sync failed for product {ProductId} Woo id {WooId}; main WooCommerce product sync succeeded.", product.Id, wooCommerceId.Value);
+                    }
+
+                    try
+                    {
+                        await SyncProductOcwsuFixedUnitPriceDisplayAsync(baseUrl, wooCommerceId.Value, product, cancelToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "ED/v1 OCWSU fixed unit price display sync failed for product {ProductId} Woo id {WooId}; main WooCommerce product sync succeeded.", product.Id, wooCommerceId.Value);
                     }
                 }
 
@@ -1688,18 +2268,27 @@ namespace George.Services
 
         /// <summary>
         /// POSTs boolean ACF-backed flags to <c>{site}/wp-json/ed/v1/...</c> (Omer's endpoints). Uses a separate HTTP client without WooCommerce REST credentials.
+        /// Skipped when <c>GET {site}/wp-json/ed/v1/capabilities</c> reports <c>product_labels: false</c> or the endpoint is unavailable.
         /// </summary>
         private async Task SyncProductEdAcfStoreLabelsAsync(string wcV3BaseUrl, int wooProductId, Product product, CancellationToken cancelToken)
         {
             var idx = wcV3BaseUrl.IndexOf("/wp-json", StringComparison.OrdinalIgnoreCase);
             var siteRoot = idx > 0 ? wcV3BaseUrl.Substring(0, idx).TrimEnd('/') : wcV3BaseUrl.TrimEnd('/');
+
+            using var http = _httpClientFactory.CreateClient();
+            http.Timeout = EdCapabilitiesProbeTimeout;
+            http.DefaultRequestHeaders.Clear();
+
+            if (!await SiteSupportsEdProductLabelsAsync(siteRoot, http, cancelToken).ConfigureAwait(false))
+                return;
+
+            http.Timeout = TimeSpan.FromSeconds(60);
+
             var now = DateTime.UtcNow;
             var passoverEffective = product.LabelKosherForPassover &&
                                     (!product.LabelKosherForPassoverEndDate.HasValue || product.LabelKosherForPassoverEndDate.Value > now);
-
-            using var http = _httpClientFactory.CreateClient();
-            http.Timeout = TimeSpan.FromSeconds(60);
-            http.DefaultRequestHeaders.Clear();
+            var newEffective = product.LabelNew &&
+                               (!product.LabelNewEndDate.HasValue || product.LabelNewEndDate.Value > now);
 
             async Task PostBool(string path, string fieldKey, bool value)
             {
@@ -1722,6 +2311,198 @@ namespace George.Services
             await PostBool("product-gluten-free", "gluten_free", product.LabelGlutenFree).ConfigureAwait(false);
             await PostBool("product-not-kosher", "not_kosher", product.LabelNotKosher).ConfigureAwait(false);
             await PostBool("product-kosher-for-passover", "kosher_for_passover", passoverEffective).ConfigureAwait(false);
+            await PostBool("product-bestseller", "bestseller", product.LabelBestseller).ConfigureAwait(false);
+            await PostBool("product-low-availability", "low_availability", product.LabelLowAvailability).ConfigureAwait(false);
+            await PostBool("product-readytocook", "readytocook", product.LabelReadyToCook).ConfigureAwait(false);
+            await PostBool("product-natural", "natural", product.LabelNatural).ConfigureAwait(false);
+            await PostBool("product-sugarfree", "sugarfree", product.LabelSugarFree).ConfigureAwait(false);
+            await PostBool("product-lactosefree", "lactosefree", product.LabelLactoseFree).ConfigureAwait(false);
+            await PostBool("product-new", "new", newEffective).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// POSTs <c>display_price_per_fixed_unit</c> and label to
+        /// <c>{site}/wp-json/ed/v1/product-ocwsu-fixed-unit-price-display</c>.
+        /// </summary>
+        private async Task SyncProductOcwsuFixedUnitPriceDisplayAsync(string wcV3BaseUrl, int wooProductId, Product product, CancellationToken cancelToken)
+        {
+            var setupTypeName = product.SetupType?.Name ?? "";
+            var isWeightedBySetup = setupTypeName is "by_weight" or "by_unit" or "by_unit_and_weight";
+            var isWeighted = product.IsWeighted == true || (product.IsWeighted != false && isWeightedBySetup);
+            if (!isWeighted || product.WeightConfig == null)
+                return;
+
+            var soldByUnits = setupTypeName is "by_unit" or "by_unit_and_weight";
+            if (!soldByUnits)
+                return;
+
+            var wc = product.WeightConfig;
+            var showUnitPrice = wc.ShowUnitPrice == true;
+
+            var idx = wcV3BaseUrl.IndexOf("/wp-json", StringComparison.OrdinalIgnoreCase);
+            var siteRoot = idx > 0 ? wcV3BaseUrl.Substring(0, idx).TrimEnd('/') : wcV3BaseUrl.TrimEnd('/');
+
+            using var http = _httpClientFactory.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(60);
+            http.DefaultRequestHeaders.Clear();
+
+            var url = $"{siteRoot}/wp-json/ed/v1/product-ocwsu-fixed-unit-price-display";
+            var payload = new Dictionary<string, object>
+            {
+                ["product_id"] = wooProductId,
+                ["display_price_per_fixed_unit"] = showUnitPrice
+            };
+            if (showUnitPrice)
+            {
+                var labelKey = wc.SoldByLabel ?? OcwsuSoldByLabel.DefaultKey;
+                payload["display_price_per_fixed_unit_label"] = OcwsuSoldByLabel.ToApiValue(labelKey);
+            }
+            else
+            {
+                payload["display_price_per_fixed_unit_label"] = "";
+            }
+            var json = JsonSerializer.Serialize(payload);
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var resp = await http.PostAsync(url, content, cancelToken).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var err = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+                _logger.LogWarning(
+                    "ED/v1 POST product-ocwsu-fixed-unit-price-display failed for Woo product {WooId}: {Status} {Body}",
+                    wooProductId, (int)resp.StatusCode, err);
+            }
+        }
+
+        /// <summary>Manual sync of OCWSU fixed-unit price display for one catalog product on a site.</summary>
+        public async Task<IApiResponse<OcwsuFixedUnitPriceDisplayRes>> SyncOcwsuFixedUnitPriceDisplayAsync(
+            SyncOcwsuFixedUnitPriceDisplayReq request,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<OcwsuFixedUnitPriceDisplayRes>();
+
+            var site = await _siteStorage.GetSiteAsync(request.SiteId, cancelToken).ConfigureAwait(false);
+            if (site == null || string.IsNullOrWhiteSpace(site.WooCommerceUrl))
+                return CreateResponse(response, StatusCode.ItemNotFound, "Site not found or WooCommerce URL is not configured.");
+
+            var product = await _productStorage.GetProductAsync(request.ProductId, cancelToken).ConfigureAwait(false);
+            if (product == null)
+                return CreateResponse(response, StatusCode.ItemNotFound, "Product not found.");
+
+            var wooProductId = product.WooCommerceId;
+            if (!wooProductId.HasValue || wooProductId.Value <= 0)
+                return CreateResponse(response, StatusCode.InvalidRequest, "Product is not linked to a WooCommerce product id.");
+
+            var displayUnitPrice = request.DisplayPricePerFixedUnit
+                ?? product.WeightConfig?.ShowUnitPrice == true;
+            var labelKey = request.DisplayPricePerFixedUnitLabel
+                ?? product.WeightConfig?.SoldByLabel
+                ?? OcwsuSoldByLabel.DefaultKey;
+
+            var siteRoot = site.WooCommerceUrl.TrimEnd('/');
+            var idx = siteRoot.IndexOf("/wp-json", StringComparison.OrdinalIgnoreCase);
+            if (idx > 0)
+                siteRoot = siteRoot.Substring(0, idx).TrimEnd('/');
+
+            using var http = _httpClientFactory.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(60);
+
+            var url = $"{siteRoot}/wp-json/ed/v1/product-ocwsu-fixed-unit-price-display";
+            var payload = new Dictionary<string, object>
+            {
+                ["product_id"] = wooProductId.Value,
+                ["display_price_per_fixed_unit"] = displayUnitPrice
+            };
+            if (displayUnitPrice)
+                payload["display_price_per_fixed_unit_label"] = OcwsuSoldByLabel.ToApiValue(labelKey);
+            else
+                payload["display_price_per_fixed_unit_label"] = "";
+            var json = JsonSerializer.Serialize(payload);
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var resp = await http.PostAsync(url, content, cancelToken).ConfigureAwait(false);
+            var body = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+                return CreateResponse(response, StatusCode.InvalidRequest, $"WooCommerce OCWSU sync failed ({(int)resp.StatusCode}): {body}");
+
+            OcwsuFixedUnitPriceDisplayRes? parsed = null;
+            try
+            {
+                parsed = JsonSerializer.Deserialize<OcwsuFixedUnitPriceDisplayRes>(body, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse OCWSU fixed unit price display response for product {ProductId}", request.ProductId);
+            }
+
+            response.Data = parsed ?? new OcwsuFixedUnitPriceDisplayRes
+            {
+                ProductId = wooProductId.Value,
+                DisplayPricePerFixedUnit = displayUnitPrice,
+                DisplayPricePerFixedUnitLabel = labelKey,
+                Success = true
+            };
+            response.Data.ProductId = wooProductId.Value;
+            response.Data.Success = true;
+            return response;
+        }
+
+        /// <summary>
+        /// Returns whether the WooCommerce site exposes product label sync via <c>GET /wp-json/ed/v1/capabilities</c> (<c>product_labels: true</c>).
+        /// Result is cached per site root for the lifetime of the process.
+        /// </summary>
+        private async Task<bool> SiteSupportsEdProductLabelsAsync(string siteRoot, HttpClient http, CancellationToken cancelToken)
+        {
+            if (EdProductLabelsCapabilityCache.TryGetValue(siteRoot, out var cached))
+                return cached;
+
+            var supported = await ProbeEdProductLabelsCapabilityAsync(siteRoot, http, cancelToken).ConfigureAwait(false);
+            EdProductLabelsCapabilityCache[siteRoot] = supported;
+            return supported;
+        }
+
+        private async Task<bool> ProbeEdProductLabelsCapabilityAsync(string siteRoot, HttpClient http, CancellationToken cancelToken)
+        {
+            var url = $"{siteRoot}/wp-json/ed/v1/capabilities";
+            try
+            {
+                using var resp = await http.GetAsync(url, cancelToken).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation(
+                        "ED/v1 product label sync disabled for {SiteRoot}: capabilities probe returned HTTP {Status}.",
+                        siteRoot, (int)resp.StatusCode);
+                    return false;
+                }
+
+                var body = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+                using var doc = JsonDocument.Parse(body);
+                if (doc.RootElement.TryGetProperty("product_labels", out var productLabelsEl) &&
+                    (productLabelsEl.ValueKind == JsonValueKind.True || productLabelsEl.ValueKind == JsonValueKind.False))
+                {
+                    var supported = productLabelsEl.GetBoolean();
+                    if (!supported)
+                    {
+                        _logger.LogInformation(
+                            "ED/v1 product label sync disabled for {SiteRoot}: capabilities.product_labels is false.",
+                            siteRoot);
+                    }
+                    return supported;
+                }
+
+                _logger.LogInformation(
+                    "ED/v1 product label sync disabled for {SiteRoot}: capabilities response missing product_labels.",
+                    siteRoot);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogInformation(ex,
+                    "ED/v1 product label sync disabled for {SiteRoot}: capabilities probe failed.",
+                    siteRoot);
+                return false;
+            }
         }
 
         /// <summary>
@@ -1986,15 +2767,20 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Syncs only menu_order to WooCommerce for the given ordered product IDs (e.g. after reorder). Much faster than full product sync.
+        /// Syncs only menu_order to WooCommerce for the given ordered product IDs (e.g. after reorder).
+        /// When <paramref name="onlyProductIds"/> is set, PUTs are sent only for those products (typically ones whose order changed).
         /// </summary>
-        public async Task SyncMenuOrderOnlyAsync(int siteId, List<int> orderedProductIds, CancellationToken cancelToken)
+        public async Task SyncMenuOrderOnlyAsync(
+            int siteId,
+            List<int> orderedProductIds,
+            IReadOnlySet<int>? onlyProductIds,
+            CancellationToken cancelToken)
         {
             if (orderedProductIds == null || !orderedProductIds.Any()) return;
             var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
             if (site == null || string.IsNullOrEmpty(site.WooCommerceUrl) || string.IsNullOrEmpty(site.WooCommerceKey) || string.IsNullOrEmpty(site.WooCommerceSecret))
                 return;
-            var orders = await _productStorage.GetWooCommerceIdAndDisplayOrderForSiteAsync(orderedProductIds, siteId, cancelToken);
+            var orders = await _productStorage.GetWooCommerceIdAndDisplayOrderForSiteAsync(orderedProductIds, siteId, cancelToken, onlyProductIds);
             if (orders.Count == 0) return;
             var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
             var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
@@ -2002,12 +2788,14 @@ namespace George.Services
             httpClient.Timeout = TimeSpan.FromMinutes(2);
             httpClient.DefaultRequestHeaders.Clear();
             httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
-            const int concurrency = 10;
+            const int concurrency = 3;
             for (var i = 0; i < orders.Count; i += concurrency)
             {
                 var batch = orders.Skip(i).Take(concurrency).ToList();
                 var tasks = batch.Select(o => UpdateWooCommerceProductMenuOrderAsync(baseUrl, o.WooCommerceId, o.DisplayOrder, httpClient, cancelToken));
                 await Task.WhenAll(tasks);
+                if (i + concurrency < orders.Count)
+                    await Task.Delay(150, cancelToken);
             }
         }
 
@@ -2032,6 +2820,22 @@ namespace George.Services
             }
         }
 
+        /// <summary>WooCommerce REST requires integer stock_quantity on variations; George may store kg decimals for weighable products.</summary>
+        private static int ToWooVariationStockQuantity(decimal? stockQuantity, bool trackQuantity)
+        {
+            if (!trackQuantity)
+                return (stockQuantity ?? 0) > 0 ? 1 : 0;
+            return (int)Math.Round(stockQuantity ?? 0, MidpointRounding.AwayFromZero);
+        }
+
+        private static string FormatWooPrice(decimal? price) =>
+            price.HasValue ? price.Value.ToString("F2", CultureInfo.InvariantCulture) : "0";
+
+        private static readonly JsonSerializerOptions WooVariationJsonOptions = new()
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        };
+
         private async Task SyncProductVariantsAsync(
             string baseUrl,
             int siteId,
@@ -2043,16 +2847,43 @@ namespace George.Services
             CancellationToken cancelToken)
         {
             var variants = product.ProductVariant?.Where(v => !v.IsDeleted).ToList() ?? new List<ProductVariant>();
+            // Weighable products normally omit WC native weight (OCWSU meta). Exception: "משקל לפי וריאציה" — OCWSU reads _ocwsu_get_weight_from_variation from each variation's weight field.
+            var setupTypeNameForVariants = product.SetupType?.Name ?? "";
+            var isWeightedBySetupForVariants = setupTypeNameForVariants is "by_weight" or "by_unit" or "by_unit_and_weight";
+            var isWeightedForVariations = product.IsWeighted == true || (product.IsWeighted != false && isWeightedBySetupForVariants);
+            var weightFromVariation = product.WeightConfig?.WeightByVariant == true
+                || string.Equals(product.WeightConfig?.UnitWeightMode?.Name, "by_variant", StringComparison.OrdinalIgnoreCase);
 
-            // Fetch existing WooCommerce variations so we can match by attributes (avoid duplicates) and delete removed ones
-            var existingWoo = await GetExistingWooCommerceVariationsAsync(baseUrl, wooProductId, httpClient, cancelToken);
-            var existingIdsSet = existingWoo.Select(x => x.id).ToHashSet();
-            // signature -> list of Woo variation ids (so we can match one per our variant and delete the rest as duplicates)
+            var allVariantsHaveWooId = variants.Count > 0 &&
+                variants.All(v => v.WooCommerceVariationId is > 0);
+            var needSignatureLookup = variants.Any(v => !v.WooCommerceVariationId.HasValue || v.WooCommerceVariationId <= 0);
+
+            List<(int id, string signature)> existingWoo;
+            if (allVariantsHaveWooId && !needSignatureLookup)
+            {
+                existingWoo = new List<(int id, string signature)>();
+                _logger.LogDebug(
+                    "WooCommerce sync: skipping variation list fetch for product {ProductId} ({Count} variants with stored Woo ids)",
+                    product.Id, variants.Count);
+            }
+            else
+            {
+                var maxPages = variants.Count <= 100 ? 1 : MaxVariationFetchPages;
+                existingWoo = await GetExistingWooCommerceVariationsAsync(baseUrl, wooProductId, httpClient, cancelToken, maxPages);
+            }
+
+            var existingIdsSet = existingWoo.Count > 0
+                ? existingWoo.Select(x => x.id).ToHashSet()
+                : (allVariantsHaveWooId
+                    ? variants.Select(v => v.WooCommerceVariationId!.Value).ToHashSet()
+                    : new HashSet<int>());
             var signatureToIds = existingWoo
                 .GroupBy(x => x.signature ?? "")
                 .ToDictionary(g => g.Key, g => g.Select(x => x.id).ToList());
 
             var usedWooVariationIds = new HashSet<int>();
+            var variantSyncWork = new List<(ProductVariant variant, int? wooVariationIdToUse, Dictionary<string, object> wooPayload)>();
+            var wpJsonBaseForMedia = GetWordPressRestBaseUrlFromWooV3BaseUrl(baseUrl);
 
             // Per-variation stock in Woo whenever George uses stock_management_type "variation" (qty or binary in/out).
             // When VariationStockByQuantity is false, each variant still uses StockQuantity as 0/1 for in/out — we must not send parent stock_status for every line or Woo never reflects per-variation toggles.
@@ -2102,11 +2933,12 @@ namespace George.Services
                     var ourSignature = BuildOurVariationSignature(variantOptionValues, attributeMap);
                     int? wooVariationIdToUse = null;
 
-                    // 1) Prefer our stored WooCommerce variation id if it still exists in WooCommerce
-                    if (variant.WooCommerceVariationId.HasValue && existingIdsSet.Contains(variant.WooCommerceVariationId.Value))
+                    // 1) Prefer our stored WooCommerce variation id (trust DB when all variants mapped; else verify against Woo list)
+                    if (variant.WooCommerceVariationId is > 0 &&
+                        (allVariantsHaveWooId || existingIdsSet.Contains(variant.WooCommerceVariationId!.Value)))
                     {
-                        wooVariationIdToUse = variant.WooCommerceVariationId.Value;
-                        usedWooVariationIds.Add(wooVariationIdToUse.Value);
+                        wooVariationIdToUse = variant.WooCommerceVariationId!.Value;
+                        usedWooVariationIds.Add(variant.WooCommerceVariationId!.Value);
                     }
                     // 2) Else match by attribute signature (same combination = same variation; avoids creating duplicates)
                     else if (!string.IsNullOrEmpty(ourSignature) && signatureToIds.TryGetValue(ourSignature, out var idList) && idList.Count > 0)
@@ -2118,83 +2950,140 @@ namespace George.Services
                     }
 
                     var variantWooSku = GetWooCommerceSku(siteId, variant.Sku);
-                    // Variation weight only when product is weighable (same as product-level weight).
-                    //var variationWeightForWoo = isWeighted ? (variant.Weight?.ToString() ?? "") : "";
+                    var variationWeightForWoo = isWeightedForVariations && !weightFromVariation
+                        ? ""
+                        : (variant.Weight.HasValue && variant.Weight.Value > 0
+                            ? variant.Weight.Value.ToString(CultureInfo.InvariantCulture)
+                            : "");
                     var wooVariation = new Dictionary<string, object>
                     {
-                        ["regular_price"] = variant.Price?.ToString() ?? product.Price?.ToString() ?? "0",
+                        ["regular_price"] = FormatWooPrice(variant.Price ?? product.Price),
                         ["sku"] = variantWooSku,
                         ["manage_stock"] = manageVariationStockInWoo,
                         ["stock_status"] = variantStockStatus,
-                        //["weight"] = variationWeightForWoo,
-                        ["weight"] = variant.Weight?.ToString() ?? "",
+                        ["weight"] = variationWeightForWoo,
                         ["attributes"] = variationAttributesList
                     };
-                    // Omit sale_price when absent so Woo does not reject the payload; send only when there is a positive sale.
-                    if (variant.SalePrice.HasValue && variant.SalePrice.Value > 0)
-                        wooVariation["sale_price"] = variant.SalePrice.Value.ToString(CultureInfo.InvariantCulture);
+                    // Always send sale_price / schedule on PUT so Woo clears stale values when sale is removed or changed per variation.
+                    var variationSale = variant.SalePrice;
+                    if (!variationSale.HasValue || variationSale.Value <= 0)
+                    {
+                        // Parent sale applies only when the variant row has no own sale (saved at product level in George).
+                        if (product.SalePrice.HasValue && product.SalePrice.Value > 0)
+                            variationSale = product.SalePrice;
+                    }
+
+                    if (variationSale.HasValue && variationSale.Value > 0)
+                    {
+                        wooVariation["sale_price"] = FormatWooPrice(variationSale);
+                        if (product.SalePriceStartDate.HasValue)
+                            wooVariation["date_on_sale_from"] = product.SalePriceStartDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
+                        if (product.SalePriceEndDate.HasValue)
+                            wooVariation["date_on_sale_to"] = product.SalePriceEndDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
+                    }
+                    else
+                    {
+                        wooVariation["sale_price"] = "";
+                        wooVariation["date_on_sale_from"] = "";
+                        wooVariation["date_on_sale_to"] = "";
+                    }
                     if (manageVariationStockInWoo)
-                        wooVariation["stock_quantity"] = variationTrackQuantity
-                            ? variant.StockQuantity ?? 0
-                            : ((variant.StockQuantity ?? 0) > 0 ? 1m : 0m);
+                        wooVariation["stock_quantity"] = ToWooVariationStockQuantity(variant.StockQuantity, variationTrackQuantity);
                     if (!string.IsNullOrEmpty(variant.ImageUrl))
-                        wooVariation["image"] = new { src = variant.ImageUrl };
-
-                    int? wooVariationId = null;
-
-                    if (wooVariationIdToUse.HasValue)
                     {
-                        var updateUrl = $"{baseUrl}/products/{wooProductId}/variations/{wooVariationIdToUse.Value}";
-                        var updateJson = JsonSerializer.Serialize(wooVariation);
-                        using var updateContent = new StringContent(updateJson, Encoding.UTF8, "application/json");
-                        var updateResponse = await httpClient.PutAsync(updateUrl, updateContent, cancelToken);
-                        if (updateResponse.IsSuccessStatusCode)
+                        var vUrl = variant.ImageUrl.Trim();
+                        if (await ImageRequiresJpegMediaUploadForWooAsync(vUrl, variant.Sku, cancelToken).ConfigureAwait(false))
                         {
-                            var updated = await JsonSerializer.DeserializeAsync<WooCommerceVariationResponse>(
-                                await updateResponse.Content.ReadAsStreamAsync(cancelToken),
-                                cancellationToken: cancelToken);
-                            wooVariationId = updated?.id;
+                            var compatFile = GeorgeWooVariationImageCompatFileName(product.Id, variant.Id, vUrl);
+                            int? mediaId = null;
+                            if (wooVariationIdToUse.HasValue)
+                                mediaId = await TryGetWooVariationCompatImageMediaIdAsync(baseUrl, wooProductId, wooVariationIdToUse.Value, compatFile, httpClient, cancelToken).ConfigureAwait(false);
+
+                            string? woltSideloadSrc = null;
+                            if (!mediaId.HasValue)
+                            {
+                                try
+                                {
+                                    var jpegBytes = await DownloadImageAndEncodeAsJpegAsync(vUrl, cancelToken).ConfigureAwait(false);
+                                    var uploadResult = await TryUploadJpegToWordPressMediaLibraryAsync(httpClient, wpJsonBaseForMedia, jpegBytes, compatFile, cancelToken).ConfigureAwait(false);
+                                    mediaId = uploadResult.MediaId;
+                                    if (!mediaId.HasValue && TryAppendWoltJpegFormatQuery(vUrl, out var woltJpegSideloadUrl))
+                                    {
+                                        _logger.LogInformation(
+                                            "Woo sync: wp/v2/media failed ({Status}) for product {ProductId} variant {VariantId}; using Wolt JPEG URL sideload.",
+                                            uploadResult.HttpStatus, product.Id, variant.Id);
+                                        woltSideloadSrc = woltJpegSideloadUrl;
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "Woo sync: could not re-encode variation image to JPEG product {ProductId} variant {VariantId}", product.Id, variant.Id);
+                                    if (TryAppendWoltJpegFormatQuery(vUrl, out var woltJpegSideloadUrl))
+                                    {
+                                        _logger.LogInformation(
+                                            "Woo sync: using Wolt JPEG URL sideload after decode failure product {ProductId} variant {VariantId}.",
+                                            product.Id, variant.Id);
+                                        woltSideloadSrc = woltJpegSideloadUrl;
+                                    }
+                                }
+                            }
+
+                            if (mediaId.HasValue)
+                                wooVariation["image"] = new { id = mediaId.Value };
+                            else if (woltSideloadSrc != null)
+                                wooVariation["image"] = new { src = woltSideloadSrc, name = compatFile };
+                            else
+                                _logger.LogWarning("Woo sync: variation image skipped (JPEG upload path) product {ProductId} variant {VariantId}", product.Id, variant.Id);
                         }
                         else
                         {
-                            var err = await updateResponse.Content.ReadAsStringAsync(cancelToken);
-                            _logger.LogWarning(
-                                "WooCommerce variation PUT failed ({Status}) product {ProductId} variation {WooVariationId}: {Error}",
-                                (int)updateResponse.StatusCode, product.Id, wooVariationIdToUse.Value, err);
+                            var variationImageFileName = await ResolveWooImageSideloadFileNameAsync(vUrl, variant.Sku, cancelToken).ConfigureAwait(false);
+                            wooVariation["image"] = new { src = vUrl, name = variationImageFileName };
                         }
                     }
 
-                    if (!wooVariationId.HasValue)
-                    {
-                        var createUrl = $"{baseUrl}/products/{wooProductId}/variations";
-                        var createJson = JsonSerializer.Serialize(wooVariation);
-                        using var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
-                        var createResponse = await httpClient.PostAsync(createUrl, createContent, cancelToken);
-                        if (createResponse.IsSuccessStatusCode)
-                        {
-                            var created = await JsonSerializer.DeserializeAsync<WooCommerceVariationResponse>(
-                                await createResponse.Content.ReadAsStreamAsync(cancelToken),
-                                cancellationToken: cancelToken);
-                            wooVariationId = created?.id;
-                        }
-                        else
-                        {
-                            var errorContent = await createResponse.Content.ReadAsStringAsync(cancelToken);
-                            _logger.LogWarning("Failed to create variation for product {ProductId}: {Error}", product.Id, errorContent);
-                        }
-                    }
-
-                    if (wooVariationId.HasValue && variant.WooCommerceVariationId != wooVariationId.Value)
-                        await _productStorage.UpdateProductVariantWooCommerceIdAsync(variant.Id, wooVariationId.Value, cancelToken);
+                    variantSyncWork.Add((variant, wooVariationIdToUse, wooVariation));
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to sync variation {VariantId} for product {ProductId}", variant.Id, product.Id);
+                    _logger.LogError(ex, "Failed to prepare variation {VariantId} for product {ProductId}", variant.Id, product.Id);
                 }
             }
 
-            // Delete WooCommerce variations that we no longer have (removed in our product) or duplicates (same signature).
-            // Run deletes in parallel with limited concurrency to avoid blocking and to speed up.
+            const int variationSyncConcurrency = 4;
+            for (var i = 0; i < variantSyncWork.Count; i += variationSyncConcurrency)
+            {
+                var batch = variantSyncWork.Skip(i).Take(variationSyncConcurrency).ToList();
+                var batchResults = await Task.WhenAll(batch.Select(async work =>
+                {
+                    var (variant, wooVariationIdToUse, wooVariation) = work;
+                    try
+                    {
+                        var wooVariationId = await PushVariantPayloadToWooCommerceAsync(
+                            baseUrl, wooProductId, product.Id, wooVariationIdToUse, wooVariation, httpClient, cancelToken);
+                        return (variant, wooVariationId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to sync variation {VariantId} for product {ProductId}", variant.Id, product.Id);
+                        return (variant, (int?)null);
+                    }
+                }));
+
+                foreach (var (variant, wooVariationId) in batchResults)
+                {
+                    if (wooVariationId.HasValue && variant.WooCommerceVariationId != wooVariationId.Value)
+                        await _productStorage.UpdateProductVariantWooCommerceIdAsync(variant.Id, wooVariationId.Value, cancelToken);
+                }
+            }
+
+            // Orphan cleanup: when all variants were mapped we only loaded one page of Woo ids — fetch full list if needed.
+            if (allVariantsHaveWooId && !needSignatureLookup && variants.Count > VariationsPerPage)
+            {
+                var fullWooList = await GetExistingWooCommerceVariationsAsync(baseUrl, wooProductId, httpClient, cancelToken);
+                existingIdsSet = fullWooList.Select(x => x.id).ToHashSet();
+            }
+
             var toDelete = existingIdsSet.Where(id => !usedWooVariationIds.Contains(id)).ToList();
             const int deleteConcurrency = 5;
             for (var i = 0; i < toDelete.Count; i += deleteConcurrency)
@@ -2226,14 +3115,62 @@ namespace George.Services
         private const int MaxVariationFetchPages = 5;
         private const int VariationsPerPage = 100;
 
+        private async Task<int?> PushVariantPayloadToWooCommerceAsync(
+            string baseUrl,
+            int wooProductId,
+            int productId,
+            int? wooVariationIdToUse,
+            Dictionary<string, object> wooVariation,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            if (wooVariationIdToUse.HasValue)
+            {
+                var updateUrl = $"{baseUrl}/products/{wooProductId}/variations/{wooVariationIdToUse.Value}";
+                var updateJson = JsonSerializer.Serialize(wooVariation, WooVariationJsonOptions);
+                using var updateContent = new StringContent(updateJson, Encoding.UTF8, "application/json");
+                var updateResponse = await httpClient.PutAsync(updateUrl, updateContent, cancelToken);
+                if (updateResponse.IsSuccessStatusCode)
+                {
+                    var updated = await JsonSerializer.DeserializeAsync<WooCommerceVariationResponse>(
+                        await updateResponse.Content.ReadAsStreamAsync(cancelToken),
+                        cancellationToken: cancelToken);
+                    return updated?.id;
+                }
+
+                var err = await updateResponse.Content.ReadAsStringAsync(cancelToken);
+                _logger.LogWarning(
+                    "WooCommerce variation PUT failed ({Status}) product {ProductId} variation {WooVariationId}: {Error}",
+                    (int)updateResponse.StatusCode, productId, wooVariationIdToUse.Value, err);
+            }
+
+            var createUrl = $"{baseUrl}/products/{wooProductId}/variations";
+            var createJson = JsonSerializer.Serialize(wooVariation, WooVariationJsonOptions);
+            using var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
+            var createResponse = await httpClient.PostAsync(createUrl, createContent, cancelToken);
+            if (createResponse.IsSuccessStatusCode)
+            {
+                var created = await JsonSerializer.DeserializeAsync<WooCommerceVariationResponse>(
+                    await createResponse.Content.ReadAsStreamAsync(cancelToken),
+                    cancellationToken: cancelToken);
+                return created?.id;
+            }
+
+            var errorContent = await createResponse.Content.ReadAsStringAsync(cancelToken);
+            _logger.LogWarning("Failed to create variation for product {ProductId}: {Error}", productId, errorContent);
+            return null;
+        }
+
         private static async Task<List<(int id, string signature)>> GetExistingWooCommerceVariationsAsync(
             string baseUrl,
             int wooProductId,
             HttpClient httpClient,
-            CancellationToken cancelToken)
+            CancellationToken cancelToken,
+            int? maxPages = null)
         {
             var result = new List<(int id, string signature)>();
-            for (var page = 1; page <= MaxVariationFetchPages; page++)
+            var pageLimit = maxPages ?? MaxVariationFetchPages;
+            for (var page = 1; page <= pageLimit; page++)
             {
                 var url = $"{baseUrl}/products/{wooProductId}/variations?per_page={VariationsPerPage}&page={page}";
                 var response = await httpClient.GetAsync(url, cancelToken);
@@ -2293,6 +3230,35 @@ namespace George.Services
         /// Finds a product in WooCommerce by SKU. Tries plain SKU first, then prefixed (S{siteId}_{sku}) for backward compatibility with products synced when prefix was used.
         /// Returns its ID if found, so we can update instead of create (avoids product_invalid_sku when product already exists).
         /// </summary>
+        /// <summary>
+        /// Maps linked local products to WooCommerce product IDs for upsell_ids / cross_sell_ids (uses WooCommerceId, then SKU lookup).
+        /// Order matches the local collection; duplicates are skipped.
+        /// </summary>
+        private static async Task<List<int>> ResolveWooCommerceIdsForLinkedProductsAsync(
+            string baseUrl,
+            int siteId,
+            ICollection<Product>? linked,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            var ordered = new List<int>();
+            if (linked == null || linked.Count == 0)
+                return ordered;
+
+            var seen = new HashSet<int>();
+            foreach (var p in linked)
+            {
+                if (p == null) continue;
+                int? wooId = p.WooCommerceId;
+                if (!wooId.HasValue && !string.IsNullOrWhiteSpace(p.Sku))
+                    wooId = await FindProductIdBySkuAsync(baseUrl, siteId, p.Sku, httpClient, cancelToken).ConfigureAwait(false);
+                if (wooId.HasValue && wooId.Value > 0 && seen.Add(wooId.Value))
+                    ordered.Add(wooId.Value);
+            }
+
+            return ordered;
+        }
+
         private static async Task<int?> FindProductIdBySkuAsync(string baseUrl, int siteId, string sku, HttpClient httpClient, CancellationToken cancelToken)
         {
             if (string.IsNullOrWhiteSpace(sku)) return null;
@@ -2367,6 +3333,400 @@ namespace George.Services
             return true;
         }
 
+        private static readonly string[] WooSideloadRecognizedImageExtensions =
+        {
+            ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".ico", ".svg"
+        };
+
+        private static bool FileNameHasRecognizedImageExtension(string? fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName)) return false;
+            var ext = Path.GetExtension(fileName.Trim());
+            return WooSideloadRecognizedImageExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static string SanitizeWooSideloadFileNameStem(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return "";
+            var s = Path.GetFileName(raw.Trim());
+            if (string.IsNullOrEmpty(s)) return "";
+            s = Regex.Replace(s, @"[^\w\-\.\u0590-\u05FF]+", "_", RegexOptions.CultureInvariant).Trim('_', '.');
+            return string.IsNullOrEmpty(s) ? "" : s;
+        }
+
+        private static bool FileNamesEqualIgnoringExtension(string a, string b)
+        {
+            a = Path.GetFileName(a.Trim());
+            b = Path.GetFileName(b.Trim());
+            if (a.Length == 0 || b.Length == 0) return false;
+            return string.Equals(Path.GetFileNameWithoutExtension(a), Path.GetFileNameWithoutExtension(b), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool WooProductImageAttachmentNameMatchesHint(string? attachmentName, string? friendlyNameHint, string sideloadFileName)
+        {
+            if (string.IsNullOrWhiteSpace(attachmentName)) return false;
+            attachmentName = attachmentName.Trim();
+            if (string.Equals(attachmentName, sideloadFileName, StringComparison.OrdinalIgnoreCase)) return true;
+            if (!string.IsNullOrWhiteSpace(friendlyNameHint) && string.Equals(attachmentName, friendlyNameHint.Trim(), StringComparison.OrdinalIgnoreCase)) return true;
+            if (!string.IsNullOrWhiteSpace(friendlyNameHint) && FileNamesEqualIgnoringExtension(attachmentName, friendlyNameHint.Trim())) return true;
+            return FileNamesEqualIgnoringExtension(attachmentName, sideloadFileName);
+        }
+
+        /// <summary>
+        /// Stable Woo JPEG attachment name per George <see cref="ProductImage.MediaId"/> so replacing a product image uploads fresh bytes
+        /// instead of reusing an old attachment matched only by list position (<c>george-woo-{productId}-{index}.jpg</c>).
+        /// </summary>
+        private static string GeorgeWooProductImageCompatFileName(int productId, int? mediaId, int sortOrder) =>
+            mediaId is > 0
+                ? $"george-woo-{productId}-m{mediaId.Value}-p{sortOrder}.jpg"
+                : $"george-woo-{productId}-p{sortOrder}.jpg";
+
+        private static string GeorgeWooProductImageSideloadFileName(int productId, int? mediaId, string resolvedSideloadFileName)
+        {
+            if (mediaId is not > 0) return resolvedSideloadFileName;
+            var ext = Path.GetExtension(resolvedSideloadFileName);
+            if (string.IsNullOrEmpty(ext) || !FileNameHasRecognizedImageExtension(resolvedSideloadFileName))
+                ext = ".jpg";
+            return $"george-{productId}-m{mediaId.Value}{ext}";
+        }
+
+        private static string GeorgeWooVariationImageCompatFileName(int productId, int variantId, string imageUrl)
+        {
+            var fingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                Encoding.UTF8.GetBytes(imageUrl.Trim()))[..12]).ToLowerInvariant();
+            return $"george-woo-var-{productId}-{variantId}-{fingerprint}.jpg";
+        }
+
+        private static (int id, string? src, string? name) FindExistingWooImageByAttachmentName(
+            List<(int id, string? src, string? name)>? existingWooImages,
+            string attachmentName)
+        {
+            if (existingWooImages == null || string.IsNullOrWhiteSpace(attachmentName))
+                return (0, null, null);
+            var match = existingWooImages.FirstOrDefault(ex =>
+                string.Equals((ex.name ?? "").Trim(), attachmentName.Trim(), StringComparison.OrdinalIgnoreCase));
+            return match.id != 0 ? match : (0, null, null);
+        }
+
+        /// <summary>
+        /// WooCommerce/WordPress sideload uses the provided <c>name</c> (or URL basename) for file-type checks. URLs without a file extension often fail validation even when bytes are valid JPEG/PNG.
+        /// </summary>
+        private async Task<string> ResolveWooImageSideloadFileNameAsync(string imageUrl, string? friendlyNameHint, CancellationToken cancelToken)
+        {
+            var baseFromHint = SanitizeWooSideloadFileNameStem(friendlyNameHint);
+            if (string.IsNullOrEmpty(baseFromHint) && Uri.TryCreate(imageUrl, UriKind.Absolute, out var uri))
+            {
+                var seg = uri.Segments.LastOrDefault()?.Trim('/');
+                baseFromHint = SanitizeWooSideloadFileNameStem(seg);
+            }
+
+            if (string.IsNullOrEmpty(baseFromHint))
+                baseFromHint = "product-image";
+
+            if (FileNameHasRecognizedImageExtension(baseFromHint))
+                return baseFromHint;
+
+            var ext = await ProbeImageExtensionFromUrlAsync(imageUrl, cancelToken).ConfigureAwait(false);
+            var stem = Path.GetFileNameWithoutExtension(baseFromHint);
+            if (string.IsNullOrEmpty(stem))
+                stem = "image";
+            return stem + ext;
+        }
+
+        /// <summary>
+        /// CDNs (e.g. Wolt imageproxy) use <c>Vary: Accept</c> and may return AVIF to default clients; prefer classic raster types for WordPress compatibility.
+        /// </summary>
+        private static void AddCdnFriendlyImageAcceptHeader(HttpRequestMessage request)
+        {
+            request.Headers.TryAddWithoutValidation(
+                "Accept",
+                "image/jpeg,image/png,image/webp,image/gif;q=0.9,image/avif;q=0.3,*/*;q=0.1");
+        }
+
+        private async Task<string> ProbeImageExtensionFromUrlAsync(string imageUrl, CancellationToken cancelToken)
+        {
+            using var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.Clear();
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Head, imageUrl);
+                AddCdnFriendlyImageAcceptHeader(req);
+                using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancelToken).ConfigureAwait(false);
+                if (resp.IsSuccessStatusCode && TryMapImageContentTypeToExtension(resp.Content.Headers.ContentType?.MediaType, out var ext))
+                    return ext;
+            }
+            catch
+            {
+                // fall through to default
+            }
+
+            return ".jpg";
+        }
+
+        private static bool TryMapImageContentTypeToExtension(string? mediaType, out string extensionWithDot)
+        {
+            extensionWithDot = ".jpg";
+            if (string.IsNullOrWhiteSpace(mediaType)) return false;
+            var primary = mediaType.Trim().Split(';')[0].Trim().ToLowerInvariant();
+            extensionWithDot = primary switch
+            {
+                "image/jpeg" or "image/jpg" => ".jpg",
+                "image/pjpeg" => ".jpg",
+                "image/png" => ".png",
+                "image/gif" => ".gif",
+                "image/webp" => ".webp",
+                "image/bmp" or "image/x-ms-bmp" => ".bmp",
+                "image/svg+xml" => ".svg",
+                "image/x-icon" or "image/vnd.microsoft.icon" => ".ico",
+                _ => ""
+            };
+            return extensionWithDot.Length > 0;
+        }
+
+        private static string GetWordPressRestBaseUrlFromWooV3BaseUrl(string wcV3BaseUrl)
+        {
+            const string suffix = "/wc/v3";
+            if (wcV3BaseUrl.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                return wcV3BaseUrl[..^suffix.Length];
+            var idx = wcV3BaseUrl.LastIndexOf("/wc/v3", StringComparison.OrdinalIgnoreCase);
+            return idx >= 0 ? wcV3BaseUrl[..idx] : wcV3BaseUrl;
+        }
+
+        private async Task<bool> ImageRequiresJpegMediaUploadForWooAsync(string imageUrl, string? friendlyNameHint, CancellationToken cancelToken)
+        {
+            // Wolt (and similar) vary real bytes by Accept; WordPress sideload may get WebP/AVIF and reject even with a .jpg filename hint.
+            if (ImageUrlUsesWoltStyleNegotiatedCdn(imageUrl))
+                return true;
+            if (PathOrUriHasAvifHeifHeicExtension(imageUrl) || PathOrUriHasAvifHeifHeicExtension(friendlyNameHint))
+                return true;
+            if (PathOrUriHasWebpExtension(imageUrl) || PathOrUriHasWebpExtension(friendlyNameHint))
+                return true;
+            var mime = await ProbeImagePrimaryContentTypeAsync(imageUrl, cancelToken).ConfigureAwait(false);
+            return IsAvifHeifHeicContentType(mime) || IsWebpContentType(mime);
+        }
+
+        private static bool ImageUrlUsesWoltStyleNegotiatedCdn(string imageUrl)
+        {
+            if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var u)) return false;
+            return string.Equals(u.Host, "imageproxy.wolt.com", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Wolt imageproxy returns JPEG when <c>format=jpg</c> is set; WordPress can sideload that URL while WooCommerce API keys cannot create <c>wp/v2/media</c> (401).
+        /// </summary>
+        private static bool TryAppendWoltJpegFormatQuery(string imageUrl, out string jpegSideloadUrl)
+        {
+            jpegSideloadUrl = imageUrl;
+            if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var u) || !ImageUrlUsesWoltStyleNegotiatedCdn(imageUrl))
+                return false;
+            if (imageUrl.Contains("format=", StringComparison.OrdinalIgnoreCase))
+            {
+                jpegSideloadUrl = imageUrl;
+                return true;
+            }
+
+            jpegSideloadUrl = string.IsNullOrEmpty(u.Query) ? imageUrl + "?format=jpg" : imageUrl + "&format=jpg";
+            return true;
+        }
+
+        private static bool PathOrUriHasWebpExtension(string? urlOrFileName)
+        {
+            if (string.IsNullOrWhiteSpace(urlOrFileName)) return false;
+            string ext;
+            try
+            {
+                ext = Uri.TryCreate(urlOrFileName, UriKind.Absolute, out var uri)
+                    ? Path.GetExtension(uri.AbsolutePath)
+                    : Path.GetExtension(urlOrFileName);
+            }
+            catch
+            {
+                ext = Path.GetExtension(urlOrFileName);
+            }
+
+            return ext.Equals(".webp", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsWebpContentType(string? mime)
+        {
+            if (string.IsNullOrWhiteSpace(mime)) return false;
+            var primary = mime.Trim().Split(';')[0].Trim().ToLowerInvariant();
+            return primary == "image/webp";
+        }
+
+        private static bool PathOrUriHasAvifHeifHeicExtension(string? urlOrFileName)
+        {
+            if (string.IsNullOrWhiteSpace(urlOrFileName)) return false;
+            string ext;
+            try
+            {
+                ext = Uri.TryCreate(urlOrFileName, UriKind.Absolute, out var u)
+                    ? Path.GetExtension(u.AbsolutePath)
+                    : Path.GetExtension(urlOrFileName);
+            }
+            catch
+            {
+                ext = Path.GetExtension(urlOrFileName);
+            }
+
+            return ext.Equals(".avif", StringComparison.OrdinalIgnoreCase)
+                || ext.Equals(".heif", StringComparison.OrdinalIgnoreCase)
+                || ext.Equals(".heic", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsAvifHeifHeicContentType(string? mime)
+        {
+            if (string.IsNullOrWhiteSpace(mime)) return false;
+            var primary = mime.Trim().Split(';')[0].Trim().ToLowerInvariant();
+            return primary is "image/avif" or "image/heif" or "image/heic" or "image/heif-sequence" or "image/avif-sequence";
+        }
+
+        private async Task<string?> ProbeImagePrimaryContentTypeAsync(string imageUrl, CancellationToken cancelToken)
+        {
+            using var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.Clear();
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Head, imageUrl);
+                AddCdnFriendlyImageAcceptHeader(req);
+                using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancelToken).ConfigureAwait(false);
+                if (resp.IsSuccessStatusCode)
+                    return resp.Content.Headers.ContentType?.MediaType;
+            }
+            catch
+            {
+                // ignore
+            }
+
+            return null;
+        }
+
+        private async Task<byte[]> DownloadImageAndEncodeAsJpegAsync(string imageUrl, CancellationToken cancelToken)
+        {
+            using var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromMinutes(2);
+            client.DefaultRequestHeaders.Clear();
+            using var req = new HttpRequestMessage(HttpMethod.Get, imageUrl);
+            AddCdnFriendlyImageAcceptHeader(req);
+            using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseContentRead, cancelToken).ConfigureAwait(false);
+            resp.EnsureSuccessStatusCode();
+            await using var input = await resp.Content.ReadAsStreamAsync(cancelToken).ConfigureAwait(false);
+            using var ms = new MemoryStream();
+            await input.CopyToAsync(ms, cancelToken).ConfigureAwait(false);
+            using var image = new MagickImage(ms.ToArray());
+            image.Format = MagickFormat.Jpeg;
+            image.Quality = 90;
+            return image.ToByteArray();
+        }
+
+        private readonly record struct WpMediaUploadResult(int? MediaId, int HttpStatus);
+
+        private async Task<WpMediaUploadResult> TryUploadJpegToWordPressMediaLibraryAsync(
+            HttpClient httpClient,
+            string wpJsonBaseUrl,
+            byte[] jpegBytes,
+            string fileName,
+            CancellationToken cancelToken)
+        {
+            try
+            {
+                var url = $"{wpJsonBaseUrl.TrimEnd('/')}/wp/v2/media";
+                using var multipart = new MultipartFormDataContent();
+                var fileContent = new ByteArrayContent(jpegBytes);
+                fileContent.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
+                multipart.Add(fileContent, "file", fileName);
+                using var resp = await httpClient.PostAsync(url, multipart, cancelToken).ConfigureAwait(false);
+                var body = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+                var status = (int)resp.StatusCode;
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var snippet = body.Length > 2000 ? body[..2000] : body;
+                    _logger.LogWarning("WordPress POST wp/v2/media failed ({Status}) for {FileName}: {Body}", status, fileName, snippet);
+                    return new WpMediaUploadResult(null, status);
+                }
+
+                using var doc = JsonDocument.Parse(body);
+                if (doc.RootElement.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number && idEl.TryGetInt32(out var id))
+                    return new WpMediaUploadResult(id, status);
+
+                return new WpMediaUploadResult(null, status);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "WordPress media upload threw for {FileName}", fileName);
+                return new WpMediaUploadResult(null, 0);
+            }
+        }
+
+        /// <summary>
+        /// Downloads the external image, encodes as JPEG, uploads via <see cref="IFileStorage"/> (same as media library), updates <see cref="Media"/> and linked <see cref="ProductImage"/> URLs.
+        /// </summary>
+        private async Task<string?> TryMirrorProductImageToOurStorageForWooAsync(int mediaId, string sourceUrl, CancellationToken cancelToken)
+        {
+            try
+            {
+                var jpegBytes = await DownloadImageAndEncodeAsJpegAsync(sourceUrl, cancelToken).ConfigureAwait(false);
+                if (jpegBytes.Length == 0) return null;
+
+                var fileName = $"woo-sync-{mediaId}.jpg";
+                using var stream = new MemoryStream(jpegBytes);
+                var formFile = new FormFile(stream, 0, jpegBytes.Length, "file", fileName)
+                {
+                    Headers = new HeaderDictionary(),
+                    ContentType = "image/jpeg"
+                };
+
+                var path = FileHelper.GetTempFolderPath();
+                var uploadResult = await _fileStorage.UploadFileAsync(formFile, path, cancelToken).ConfigureAwait(false);
+                if (!uploadResult.IsSuccessful || string.IsNullOrEmpty(uploadResult.FilePath))
+                {
+                    _logger.LogWarning(
+                        "Woo sync: mirror to our storage failed for media {MediaId}: {Message}",
+                        mediaId,
+                        uploadResult.Exception?.Message ?? "upload failed");
+                    return null;
+                }
+
+                var newUrl = FileHelper.GetFileExternalPath(uploadResult.FilePath);
+                var updated = await _mediaStorage.UpdateMediaUrlAndSizeAsync(mediaId, newUrl, jpegBytes.LongLength, updateUserId: null, cancelToken).ConfigureAwait(false);
+                return updated ? newUrl : null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Woo sync: mirror to our storage threw for media {MediaId}, url={Url}", mediaId, sourceUrl);
+                return null;
+            }
+        }
+
+        private static async Task<int?> TryGetWooVariationCompatImageMediaIdAsync(
+            string baseUrl,
+            int wooProductId,
+            int wooVariationId,
+            string compatImageFileName,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            try
+            {
+                var url = $"{baseUrl}/products/{wooProductId}/variations/{wooVariationId}";
+                using var resp = await httpClient.GetAsync(url, cancelToken).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode) return null;
+                var body = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+                var v = TryDeserialize<WooVariationReadForImage>(body);
+                if (v?.image == null || v.image.id <= 0) return null;
+                if (string.Equals((v.image.name ?? "").Trim(), compatImageFileName, StringComparison.OrdinalIgnoreCase))
+                    return v.image.id;
+            }
+            catch
+            {
+                // ignore
+            }
+
+            return null;
+        }
+
         // Helper classes for WooCommerce API responses
         private class WooCommerceCategoryResponse
         {
@@ -2378,6 +3738,11 @@ namespace George.Services
             public int id { get; set; }
             public string? name { get; set; }
             public string? slug { get; set; }
+        }
+
+        private class WooCommerceAttributeTermListItem
+        {
+            public string? name { get; set; }
         }
 
         /// <summary>POST body for WooCommerce attribute term creation. "name" is required by the API.</summary>
@@ -2409,6 +3774,19 @@ namespace George.Services
             public int id { get; set; }
         }
 
+        /// <summary>GET single variation — image block includes media id and filename for AVIF-compat dedup.</summary>
+        private class WooVariationReadForImage
+        {
+            public WooVariationImageBlock? image { get; set; }
+        }
+
+        private class WooVariationImageBlock
+        {
+            public int id { get; set; }
+            public string? name { get; set; }
+            public string? src { get; set; }
+        }
+
         /// <summary>For GET variations list: each variation has id and attributes (id, option).</summary>
         private class WooCommerceVariationListItem
         {
@@ -2429,6 +3807,32 @@ namespace George.Services
             // collapse multiple spaces (including Hebrew/RTL spacing issues)
             s = Regex.Replace(s, @"\s+", " ");
             return s;
+        }
+
+        /// <summary>
+        /// Values to register on the Woo global attribute: use <see cref="ProductOptionValue"/> when present;
+        /// if empty, derive distinct values from <see cref="ProductVariantOptionValue"/> so variable products
+        /// still sync when variants exist but option-value rows were never persisted (API shows empty <c>values</c>).
+        /// </summary>
+        private static List<string> GetProductOptionValuesForWooSync(ProductOption option, Product product)
+        {
+            var fromOption = option.ProductOptionValue?
+                .Select(pov => pov.Value)
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Select(v => v.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList() ?? new List<string>();
+            if (fromOption.Count > 0)
+                return fromOption;
+
+            var key = NormalizeOptionKey(option.Name);
+            return product.ProductVariant?
+                .Where(v => !v.IsDeleted)
+                .SelectMany(v => v.ProductVariantOptionValue ?? Enumerable.Empty<ProductVariantOptionValue>())
+                .Where(pvo => NormalizeOptionKey(pvo.OptionName) == key && !string.IsNullOrWhiteSpace(pvo.OptionValue))
+                .Select(pvo => pvo.OptionValue.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList() ?? new List<string>();
         }
 
         /// <summary>
@@ -2511,6 +3915,55 @@ namespace George.Services
                 page++;
             }
             return items;
+        }
+
+        /// <summary>
+        /// Woo feed can contain duplicate REST rows for the same product id (bad cache / plugins / double page).
+        /// Import stats and progress must follow unique Woo ids so counts match persisted products.
+        /// </summary>
+        private static List<WooImportProductItem> DedupeWooImportProductsByRestId(List<WooImportProductItem> items)
+        {
+            return items
+                .Where(wp => wp.id > 0)
+                .GroupBy(wp => wp.id)
+                .Select(g => g.First())
+                .ToList();
+        }
+
+        /// <summary>Woo ids that appeared more than once in the merged product feed (for support / UI).</summary>
+        private static List<WooCommerceImportFeedDuplicateRow> BuildWooProductFeedDuplicateRows(List<WooImportProductItem> raw)
+        {
+            return raw
+                .Where(w => w.id > 0)
+                .GroupBy(w => w.id)
+                .Where(g => g.Count() > 1)
+                .Select(g =>
+                {
+                    var first = g.First();
+                    string? hint = null;
+                    if (!string.IsNullOrWhiteSpace(first.name))
+                        hint = first.name.Trim();
+                    else if (!string.IsNullOrWhiteSpace(first.slug))
+                        hint = first.slug.Trim();
+                    return new WooCommerceImportFeedDuplicateRow
+                    {
+                        WooProductId = g.Key,
+                        RowCount = g.Count(),
+                        NameHint = hint
+                    };
+                })
+                .OrderBy(x => x.WooProductId)
+                .ToList();
+        }
+
+        /// <summary>Woo sometimes returns blank <c>name</c>; use slug or id so the row is still imported.</summary>
+        private static string ResolveWooImportProductDisplayName(WooImportProductItem wp)
+        {
+            if (!string.IsNullOrWhiteSpace(wp.name))
+                return wp.name.Trim();
+            if (!string.IsNullOrWhiteSpace(wp.slug))
+                return wp.slug.Trim();
+            return $"Product #{wp.id}";
         }
 
         /// <summary>Stable key for matching local categories to Woo rows by parent + name (same name under different parents must not collide).</summary>
@@ -2669,6 +4122,7 @@ namespace George.Services
         {
             var siteId = site.Id;
             var accountId = site.AccountId;
+            // Match only catalog rows already on THIS site. Same SKU/name/Woo id on another site → not in this set → import creates a new Product and links it here (multi-site catalog).
             var existingProducts = await db.Product
                 .Include(p => p.Site)
                 .Include(p => p.ProductCategory)
@@ -2689,10 +4143,13 @@ namespace George.Services
                 .GroupBy(p => p.Sku!.Trim(), StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
-            var eligibleProducts = wooProducts.Where(wp => wp.id > 0 && !string.IsNullOrWhiteSpace(wp.name)).ToList();
+            var eligibleProducts = wooProducts.Where(wp => wp.id > 0).ToList();
+            // Progress matches what we actually persist: one step per distinct Woo product id (duplicate rows in the feed are merged upstream).
             var productTotal = eligibleProducts.Count;
             importProgress?.Report(new WooCommerceImportProgress { Phase = "products", Total = productTotal, Completed = 0 });
             var completedProducts = 0;
+            /** One Created/Updated stat per local Product.Id (two Woo parents can share SKU → same row; duplicate ids already stripped upstream). */
+            var importProductStatsIds = new HashSet<int>();
 
             for (var offset = 0; offset < eligibleProducts.Count; offset += WooImportProductBatchSize)
             {
@@ -2721,9 +4178,14 @@ namespace George.Services
                     if (byWooId.TryGetValue(wp.id, out var existingByWoo))
                         product = existingByWoo;
                     else if (!string.IsNullOrWhiteSpace(wp.sku) && bySku.TryGetValue(wp.sku.Trim(), out var existingBySku))
-                        product = existingBySku;
+                    {
+                        // Two different Woo ids must not share one local row (duplicate SKUs in Woo are common).
+                        // SKU match only when this row is still unlinked to Woo, or already this Woo id.
+                        if (existingBySku.WooCommerceId == null || existingBySku.WooCommerceId == wp.id)
+                            product = existingBySku;
+                    }
 
-                    var isCreate = product == null;
+                    bool isCreate = product == null;
                     if (isCreate)
                     {
                         product = new Product
@@ -2736,11 +4198,9 @@ namespace George.Services
                         };
                         product.Site.Add(site);
                         db.Product.Add(product);
-                        stats.Products.Created++;
                     }
                     else
                     {
-                        stats.Products.Updated++;
                         if (!product!.Site.Any(s => s.Id == siteId))
                             product.Site.Add(site);
                         product.IsDeleted = false;
@@ -2750,7 +4210,28 @@ namespace George.Services
                     if (product == null)
                         continue;
 
-                    product.Name = wp.name.Trim();
+                    // Rare: two Woo rows resolved to the same tracked local row in one run (e.g. odd DB state). Skipping drops Woo ids from the catalog — always persist one row per Woo id.
+                    if (product.Id != 0 && importProductStatsIds.Contains(product.Id))
+                    {
+                        _logger.LogWarning(
+                            "WooCommerce import: Woo product id {WooId} (SKU {Sku}) resolved to local product {LocalId} already updated in this run — creating a new local product for this Woo id.",
+                            wp.id,
+                            wp.sku ?? "",
+                            product.Id);
+                        product = new Product
+                        {
+                            AccountId = accountId,
+                            GuidId = Guid.NewGuid(),
+                            CreationTime = DateTime.UtcNow,
+                            IsDeleted = false,
+                            IsActive = true
+                        };
+                        product.Site.Add(site);
+                        db.Product.Add(product);
+                        isCreate = true;
+                    }
+
+                    product.Name = ResolveWooImportProductDisplayName(wp);
                     product.ShortDescription = wp.short_description;
                     product.LongDescription = wp.description;
                     product.Sku = string.IsNullOrWhiteSpace(wp.sku) ? null : wp.sku.Trim();
@@ -2761,6 +4242,14 @@ namespace George.Services
                     product.StockQuantity = wp.manage_stock == true ? wp.stock_quantity : null;
 
                     await db.SaveChangesAsync(cancelToken);
+
+                    if (importProductStatsIds.Add(product.Id))
+                    {
+                        if (isCreate)
+                            stats.Products.Created++;
+                        else
+                            stats.Products.Updated++;
+                    }
 
                     db.ProductCategory.RemoveRange(db.ProductCategory.Where(x => x.ProductId == product.Id));
                     var optionIds = product.ProductOption.Select(o => o.Id).ToList();
@@ -2879,7 +4368,7 @@ namespace George.Services
 
                     await db.SaveChangesAsync(cancelToken);
 
-                    await ApplyWooImportProductExtensionsAsync(db, product, wp, accountId, importLookups, brandMap, cancelToken);
+                    await ApplyWooImportProductExtensionsAsync(db, product, wp, accountId, siteId, importLookups, brandMap, cancelToken);
 
                     // Woo variable parent can be "out of stock" in REST while each variation is instock without manage_stock.
                     if (wooVariations.Count > 0)
@@ -3000,6 +4489,7 @@ namespace George.Services
         {
             public int id { get; set; }
             public string? name { get; set; }
+            public string? slug { get; set; }
             public string? description { get; set; }
             public string? short_description { get; set; }
             public string? sku { get; set; }
@@ -3025,11 +4515,16 @@ namespace George.Services
             public List<WooImportImageListItem>? images { get; set; }
             public List<WooImportTagItem>? tags { get; set; }
             /// <summary>
-            /// WooCommerce 9.6+ brands taxonomy on the product. Read shape is an array of objects
-            /// (id/name/slug) — same as categories. WRITES use a flat ID array; see
-            /// WooCommerceService.Brands.cs.
+            /// WooCommerce 9.6+ brands on the product. REST read/write both use an array of objects with <c>id</c>
+            /// (see Products API); import only needs this read shape.
             /// </summary>
             public List<WooImportProductBrandItem>? brands { get; set; }
+
+            /// <summary>WooCommerce REST: linked up-sell product IDs (מוצרים משודרגים).</summary>
+            public List<int>? upsell_ids { get; set; }
+
+            /// <summary>WooCommerce REST: linked cross-sell product IDs (מוצרים משלימים).</summary>
+            public List<int>? cross_sell_ids { get; set; }
         }
 
         /// <summary>One entry inside the product's brands[] array on read.</summary>

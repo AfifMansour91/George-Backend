@@ -13,4 +13,7 @@ public class CustomerProfileRes
     public decimal? AverageOrderTotal { get; set; }
     public decimal? TotalTransactions { get; set; }
     public bool Found { get; set; }
+    public bool HasSavedCard { get; set; }
+    public string? SavedCardLast4 { get; set; }
+    public string? SavedCardBrand { get; set; }
 }

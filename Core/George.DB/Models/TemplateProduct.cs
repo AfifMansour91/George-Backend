@@ -92,6 +92,10 @@ public partial class TemplateProduct
     [StringLength(2000)]
     public string? SeoDescription { get; set; }
 
+    /// <summary>Suggested permalink slug when copying template to a site product (Woo <c>slug</c>).</summary>
+    [StringLength(200)]
+    public string? Slug { get; set; }
+
     [StringLength(100)]
     public string? SourceProductId { get; set; }
 

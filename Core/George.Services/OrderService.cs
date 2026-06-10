@@ -7,9 +7,11 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using AutoMapper;
 using George.Common;
+using George.Common.Payment;
 using George.Data;
 using George.DB;
 using George.Providers;
+using George.Services.Orders;
 using George.Services.Request;
 using George.Services.Response;
 using Microsoft.Extensions.Configuration;
@@ -21,7 +23,7 @@ using QRCoder;
 
 namespace George.Services
 {
-    public class OrderService : ServiceBase
+    public partial class OrderService : ServiceBase
     {
         private readonly OrderStorage _orderStorage;
         private readonly CustomerStorage _customerStorage;
@@ -32,6 +34,8 @@ namespace George.Services
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly PrintJobService _printJobService;
         private readonly PromotionStorage _promotionStorage;
+        private readonly Payments.PaymentService _paymentService;
+        private readonly IOrderRealtimeNotifier _orderRealtimeNotifier;
         private readonly string? _publicAppBaseUrl;
         private static readonly Dictionary<string, string> VoucherSourceLabels = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -41,6 +45,7 @@ namespace George.Services
             ["Phone"] = "טלפוני",
         };
         private const string VoucherQrCaption = "פתיחת הזמנה";
+        private const string VoucherStatusLabel = "סטטוס:";
         private const string VoucherDateLabel = "תאריך אספקה:";
         private const string VoucherTimeLabel = "שעה:";
         private const string VoucherShippingLabel = "משלוח";
@@ -62,6 +67,8 @@ namespace George.Services
             IServiceScopeFactory serviceScopeFactory,
             PrintJobService printJobService,
             PromotionStorage promotionStorage,
+            Payments.PaymentService paymentService,
+            IOrderRealtimeNotifier orderRealtimeNotifier,
             IConfiguration configuration)
             : base(logger, mapper, cache)
         {
@@ -74,6 +81,8 @@ namespace George.Services
             _serviceScopeFactory = serviceScopeFactory;
             _printJobService = printJobService;
             _promotionStorage = promotionStorage;
+            _paymentService = paymentService;
+            _orderRealtimeNotifier = orderRealtimeNotifier;
             _publicAppBaseUrl = ResolvePublicAppBaseUrl(configuration);
         }
 
@@ -100,6 +109,7 @@ namespace George.Services
 
             var res = await _orderStorage.GetOrdersAsync(request.Filter, request, cancelToken);
             response.Data!.Items = res.Items.ConvertAll(o => _mapper.Map<OrderRes>(o));
+            await EnrichOrderResListAsync(response.Data.Items, res.Items, cancelToken).ConfigureAwait(false);
             response.Data.Skip = request.Skip;
             response.Data.Limit = request.Take;
             response.Data.Total = res.Total;
@@ -113,6 +123,7 @@ namespace George.Services
             if (order == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
             response.Data = _mapper.Map<OrderRes>(order);
+            await EnrichOrderResAsync(response.Data, order, cancelToken).ConfigureAwait(false);
             return response;
         }
 
@@ -158,6 +169,7 @@ namespace George.Services
             var order = _mapper.Map<Order>(req);
             RebuildDeliveryAddressFromStreetAndCity(order);
             order.CustomerId = customer.Id; // always set: customer was either found or created above
+            await _paymentService.PrepareOrderPaymentOnCreateAsync(order, cancelToken).ConfigureAwait(false);
             order.CreationTime = DateTime.UtcNow;
             order.CreationUserId = AuthUser.Id;
             order.IsDeleted = false;
@@ -195,14 +207,30 @@ namespace George.Services
             }
 
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken);
+            await RecordOrderStatusChangeAsync(
+                created.Id,
+                previousStatus: null,
+                newStatus: created.Status,
+                occurredAtUtc: created.CreationTime,
+                cancelToken).ConfigureAwait(false);
             var loaded = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken);
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loaded, cancelToken).ConfigureAwait(false);
             await TryApplyInternalOrderCatalogOnCreateAsync(loaded!, cancelToken).ConfigureAwait(false);
             var loadedAfterStock = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false) ?? loaded;
-            await TrySendNewOrderCustomerSmsAsync(loadedAfterStock!, cancelToken).ConfigureAwait(false);
             if (loadedAfterStock != null)
-                await TryEnqueueNewOrderAutoPrintAsync(loadedAfterStock, cancelToken).ConfigureAwait(false);
-            response.Data = _mapper.Map<OrderRes>(loadedAfterStock);
+                await _paymentService.TryPlaceAuthorizationHoldIfNeededAsync(loadedAfterStock, cancelToken).ConfigureAwait(false);
+            var loadedAfterPayment = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false)
+                ?? loadedAfterStock;
+            var savedCardOrder = string.Equals(loadedAfterPayment?.PaymentMethod, "SavedCard", StringComparison.OrdinalIgnoreCase);
+            if (loadedAfterPayment != null && !savedCardOrder)
+                await TrySendNewOrderCustomerSmsAsync(loadedAfterPayment, cancelToken).ConfigureAwait(false);
+            if (loadedAfterPayment != null)
+                await TryEnqueueNewOrderAutoPrintAsync(loadedAfterPayment, cancelToken).ConfigureAwait(false);
+            response.Data = _mapper.Map<OrderRes>(loadedAfterPayment);
+            if (loadedAfterPayment != null)
+                await EnrichOrderResAsync(response.Data, loadedAfterPayment, cancelToken).ConfigureAwait(false);
+            if (response.Data != null)
+                await _orderRealtimeNotifier.NotifyNewOrderAsync(response.Data, cancelToken).ConfigureAwait(false);
             return response;
         }
 
@@ -248,7 +276,7 @@ namespace George.Services
             if (string.IsNullOrWhiteSpace(template))
                 return;
 
-            var body = ReplaceOrderPlaceholders(template, order);
+            var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
             try
             {
                 if (!SmsProvider.IsInitialized)
@@ -284,7 +312,7 @@ namespace George.Services
             if (string.IsNullOrWhiteSpace(template))
                 return;
 
-            var body = ReplaceOrderPlaceholders(template, order);
+            var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
             try
             {
                 if (!SmsProvider.IsInitialized)
@@ -319,53 +347,6 @@ namespace George.Services
             return settings.OrderReadyCustomerMessagePickup ?? settings.OrderReadyCustomerMessageShipping;
         }
 
-        /// <summary>
-        /// Match picking: if any line has picked qty &gt; 0, sum only those lines (+ shipping). Otherwise pre-pick — sum all line totals (new order SMS).
-        /// </summary>
-        private static decimal ResolveOrderTotalForPlaceholders(Order order)
-        {
-            var items = order.OrderItem;
-            if (items == null || items.Count == 0)
-                return order.Total ?? 0m;
-
-            var anyPicked = items.Any(i => i.PickedQuantity.HasValue && i.PickedQuantity.Value > 0m);
-            var shipping = order.ShippingCost ?? 0m;
-            if (anyPicked)
-            {
-                var pickedSum = items.Sum(i =>
-                {
-                    if (!i.PickedQuantity.HasValue || i.PickedQuantity.Value <= 0m)
-                        return 0m;
-                    if (i.TotalPrice.HasValue)
-                        return i.TotalPrice.Value;
-                    return i.PickedQuantity.Value * (i.PricePerUnit ?? 0m);
-                });
-                return pickedSum + shipping;
-            }
-
-            var allLines = items.Sum(i => i.TotalPrice ?? i.Quantity * (i.PricePerUnit ?? 0m));
-            if (allLines + shipping > 0m)
-                return allLines + shipping;
-            return order.Total ?? 0m;
-        }
-
-        private static string ReplaceOrderPlaceholders(string template, Order order)
-        {
-            var orderDate = order.CreationTime;
-            var deliveryDate = order.DeliveryDate;
-            var pickupDate = order.PickupDate;
-            var orderTotalStr = ResolveOrderTotalForPlaceholders(order).ToString("N2", CultureInfo.InvariantCulture);
-            return template
-                .Replace("[customer_name]", order.CustomerName ?? "")
-                .Replace("[order_number]", order.OrderNumber ?? "")
-                .Replace("[order_date]", orderDate.ToString("dd/MM/yyyy"))
-                .Replace("[order_total]", orderTotalStr)
-                .Replace("[delivery_date]", deliveryDate.HasValue ? deliveryDate.Value.ToString("dd/MM/yyyy") : "")
-                .Replace("[delivery_time]", order.DeliveryTime ?? "")
-                .Replace("[pickup_date]", pickupDate.HasValue ? pickupDate.Value.ToString("dd/MM/yyyy") : "")
-                .Replace("[pickup_time]", order.PickupTime ?? "");
-        }
-
         /// <summary>Send reminder SMS to customer for a ready order (שלח תזכורת). Uses OrderReady message template from account notification settings.</summary>
         public async Task<IApiResponse<bool>> SendReminderAsync(int orderId, CancellationToken cancelToken = default)
         {
@@ -384,7 +365,7 @@ namespace George.Services
             var template = ResolveOrderReadyCustomerMessageTemplate(settings, order);
             if (string.IsNullOrWhiteSpace(template))
                 return CreateResponse(response, StatusCode.InvalidRequest, "No reminder message template configured for this order.");
-            var body = ReplaceOrderPlaceholders(template, order);
+            var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
             try
             {
                 if (!SmsProvider.IsInitialized)
@@ -436,7 +417,12 @@ namespace George.Services
                 if (req.DeliveryApartment != null) o.DeliveryApartment = req.DeliveryApartment;
                 if (req.DeliveryFloor != null) o.DeliveryFloor = req.DeliveryFloor;
                 if (req.DeliveryEntranceCode != null) o.DeliveryEntranceCode = req.DeliveryEntranceCode;
-                if (req.PaymentStatus != null) o.PaymentStatus = req.PaymentStatus;
+                if (req.PaymentStatus != null)
+                {
+                    o.PaymentStatus = req.PaymentStatus;
+                    if (string.Equals(req.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase) && o.PaidAt == null)
+                        o.PaidAt = DateTime.UtcNow;
+                }
                 if (req.PaymentMethod != null) o.PaymentMethod = req.PaymentMethod;
                 if (req.BagsCount.HasValue) o.BagsCount = req.BagsCount;
                 if (req.ShippingCost.HasValue) o.ShippingCost = req.ShippingCost.Value;
@@ -448,7 +434,21 @@ namespace George.Services
             }, cancelToken);
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
+            if (req.Status != null)
+            {
+                await RecordOrderStatusChangeAsync(
+                    orderId,
+                    previousStatus,
+                    updated.Status,
+                    DateTime.UtcNow,
+                    cancelToken).ConfigureAwait(false);
+            }
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "order update", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
+            if (req.PaymentMethod != null && beforeUpdate != null &&
+                !string.Equals(beforeUpdate.PaymentMethod, updated.PaymentMethod, StringComparison.OrdinalIgnoreCase))
+            {
+                await _paymentService.ClearCardcomOnCashPaymentAsync(updated, cancelToken).ConfigureAwait(false);
+            }
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             if (loaded != null && loaded.CustomerId is int customerId && customerId > 0)
             {
@@ -474,6 +474,18 @@ namespace George.Services
                 }
             }
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(orderId, previousStatus, loaded, cancelToken).ConfigureAwait(false);
+            if (loaded != null)
+            {
+                var paymentMethod = (loaded.PaymentMethod ?? "").Trim();
+                var settle = (loaded.PaymentSettleStatus ?? "").Trim();
+                var needsSavedCardHold = string.Equals(paymentMethod, "SavedCard", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(settle, PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(settle, PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase)
+                    && string.IsNullOrWhiteSpace(loaded.CardcomLowProfileId);
+                if (needsSavedCardHold)
+                    await _paymentService.TryPlaceAuthorizationHoldIfNeededAsync(loaded, cancelToken).ConfigureAwait(false);
+                loaded = await _orderStorage.GetOrderByIdAsync(loaded.Id, cancelToken).ConfigureAwait(false) ?? loaded;
+            }
             if (loaded != null &&
                 !string.Equals(previousStatus, "Ready", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(loaded.Status, "Ready", StringComparison.OrdinalIgnoreCase))
@@ -481,6 +493,8 @@ namespace George.Services
                 await TrySendOrderReadyCustomerSmsAsync(loaded, cancelToken).ConfigureAwait(false);
             }
             response.Data = _mapper.Map<OrderRes>(loaded);
+            if (loaded != null)
+                await EnrichOrderResAsync(response.Data, loaded, cancelToken).ConfigureAwait(false);
             return response;
         }
 
@@ -499,12 +513,21 @@ namespace George.Services
                         restoredProductIds,
                         "order cancel (catalog restored)",
                         cancelToken).ConfigureAwait(false);
+                await _paymentService.TryVoidAuthorizationOnOrderCancelAsync(beforeCancel, cancelToken)
+                    .ConfigureAwait(false);
             }
             var order = await _orderStorage.CancelOrderAsync(orderId, AuthUser.Id, softDelete, cancelToken);
             if (order == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
+            await RecordOrderStatusChangeAsync(
+                orderId,
+                beforeCancel.Status,
+                "Cancelled",
+                DateTime.UtcNow,
+                cancelToken).ConfigureAwait(false);
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, order, "order cancel", statusOverrideForWcRest: "cancelled", cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(order);
+            await EnrichOrderResAsync(response.Data!, order, cancelToken).ConfigureAwait(false);
             return response;
         }
 
@@ -523,6 +546,23 @@ namespace George.Services
             response.Data.OrderCount = profile.OrderCount;
             response.Data.AverageOrderTotal = profile.AverageOrderTotal;
             response.Data.TotalTransactions = profile.TotalTransactions;
+
+            var cardRes = await _paymentService.GetSavedCardForCustomerAsync(siteId, phone, null, cancelToken)
+                .ConfigureAwait(false);
+            response.Data.HasSavedCard = cardRes.Data?.HasCard == true;
+            if (cardRes.Data?.HasCard == true)
+            {
+                if (!string.IsNullOrWhiteSpace(cardRes.Data.Last4Digits))
+                    response.Data.SavedCardLast4 = cardRes.Data.Last4Digits;
+                if (!string.IsNullOrWhiteSpace(cardRes.Data.CardBrand))
+                    response.Data.SavedCardBrand = cardRes.Data.CardBrand;
+            }
+            else
+            {
+                response.Data.SavedCardLast4 = null;
+                response.Data.SavedCardBrand = null;
+            }
+
             return response;
         }
 
@@ -582,7 +622,7 @@ namespace George.Services
                     .ApplyPickingConsumptionDeltaAsync(
                         oi.ProductId.Value,
                         oi.ProductVariantId,
-                        oi.Quantity,
+                        OrderItemStockConsumption.ResolveOrderedCatalogConsumption(oi),
                         cancelToken)
                     .ConfigureAwait(false);
                 stockPushProductIds.Add(oi.ProductId.Value);
@@ -647,7 +687,7 @@ namespace George.Services
             return response;
         }
 
-        /// <summary>Save picking state (שמור וצא). Body: { "items": [ { "orderItemId", "pickedQuantity", "totalPrice" }, ... ] }.</summary>
+        /// <summary>Save picking state (שמור וצא). Body: { "items": [ { "orderItemId", "pickedQuantity", "totalPrice", "pickingUserConfirmed" }, ... ] }.</summary>
         public async Task<IApiResponse<OrderRes>> UpdatePickingAsync(int orderId, UpdatePickingReq? req, CancellationToken cancelToken = default)
         {
             var response = new ApiResponse<OrderRes>();
@@ -664,19 +704,19 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.InvalidRequest, "Cannot update picking for a cancelled order.");
             var updates = req.Items
                 .Where(i => i.OrderItemId > 0)
-                .Select(i => (i.OrderItemId, i.PickedQuantity, i.TotalPrice))
+                .Select(i => (i.OrderItemId, i.PickedQuantity, i.TotalPrice, i.PickingUserConfirmed))
                 .ToList();
             var updated = await _orderStorage.UpdatePickingAsync(orderId, updates, cancelToken);
             if (updated == null) return CreateResponse(response, StatusCode.ItemNotFound);
 
             var stockPushProductIds = new List<int>();
-            foreach (var (orderItemId, newPicked, _) in updates)
+            foreach (var (orderItemId, newPicked, _, _) in updates)
             {
                 var line = orderCheck.OrderItem?.FirstOrDefault(i => i.Id == orderItemId && !i.IsDeleted);
                 if (line == null || line.ProductId is not > 0) continue;
                 var oldPicked = line.PickedQuantity ?? 0m;
                 var newPickedVal = newPicked ?? 0m;
-                var consumptionDelta = newPickedVal - oldPicked;
+                var consumptionDelta = OrderItemStockConsumption.ResolvePickingDeltaCatalogConsumption(line, oldPicked, newPickedVal);
                 if (consumptionDelta == 0m) continue;
                 await _productStorage
                     .ApplyPickingConsumptionDeltaAsync(
@@ -1405,6 +1445,15 @@ namespace George.Services
                 }, cancelToken).ConfigureAwait(false);
                 if (updated == null)
                     return CreateResponse(response, StatusCode.ItemNotFound);
+                if (!string.Equals(previousWooStatus, updated.Status, StringComparison.OrdinalIgnoreCase))
+                {
+                    await RecordOrderStatusChangeAsync(
+                        existing.Id,
+                        previousWooStatus,
+                        updated.Status,
+                        DateTime.UtcNow,
+                        cancelToken).ConfigureAwait(false);
+                }
                 var updateItems = new List<OrderItem>();
                 if (payload.Items != null)
                 {
@@ -1453,8 +1502,12 @@ namespace George.Services
                     updated.OrderItem?.OrderBy(i => i.SortOrder).ToList());
                 await _orderStorage.ReplaceOrderItemsAsync(existing.Id, updateItems, cancelToken).ConfigureAwait(false);
                 var loaded = await _orderStorage.GetOrderByIdAsync(existing.Id, cancelToken).ConfigureAwait(false);
+                if (loaded != null && payload.HasEmbeddedGatewayPayment())
+                    await TryApplyEmbeddedWooCommerceGatewayPaymentAsync(loaded, payload, cancelToken).ConfigureAwait(false);
+                loaded = await _orderStorage.GetOrderByIdAsync(existing.Id, cancelToken).ConfigureAwait(false);
                 await TryApplyCompletionInventoryWhenOrderCompletedAsync(existing.Id, previousWooStatus, loaded, cancelToken).ConfigureAwait(false);
                 response.Data = _mapper.Map<OrderRes>(loaded!);
+                await EnrichOrderResAsync(response.Data, loaded!, cancelToken).ConfigureAwait(false);
                 return response;
             }
             var createItems = new List<CreateOrderItemReq>();
@@ -1522,6 +1575,7 @@ namespace George.Services
             ApplyWooCommerceShippingAddressToOrder(order, payload.ShippingAddress);
             order.CustomerId = customer.Id;
             order.ManagerNote = null;
+            await _paymentService.PrepareOrderPaymentOnCreateAsync(order, cancelToken).ConfigureAwait(false);
             // Use the date when the order was placed in WooCommerce, not when our API received the webhook
             order.CreationTime = payload.OrderDate.HasValue
                 ? (payload.OrderDate.Value.Kind == DateTimeKind.Utc ? payload.OrderDate.Value : payload.OrderDate.Value.ToUniversalTime())
@@ -1555,13 +1609,25 @@ namespace George.Services
                 items.Add(oi);
             }
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken).ConfigureAwait(false);
+            await RecordOrderStatusChangeAsync(
+                created.Id,
+                previousStatus: null,
+                newStatus: created.Status,
+                occurredAtUtc: created.CreationTime,
+                cancelToken).ConfigureAwait(false);
             var loadedOrder = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false);
+            if (loadedOrder != null)
+                await TryApplyEmbeddedWooCommerceGatewayPaymentAsync(loadedOrder, payload, cancelToken).ConfigureAwait(false);
+            loadedOrder = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false);
             await TryApplyWooIncomingOrderCatalogAndBaselinePickingAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loadedOrder, cancelToken).ConfigureAwait(false);
             await TrySendNewOrderCustomerSmsAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
             if (loadedOrder != null)
                 await TryEnqueueNewOrderAutoPrintAsync(loadedOrder, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(loadedOrder!);
+            await EnrichOrderResAsync(response.Data, loadedOrder!, cancelToken).ConfigureAwait(false);
+            if (response.Data != null)
+                await _orderRealtimeNotifier.NotifyNewOrderAsync(response.Data, cancelToken).ConfigureAwait(false);
             return response;
         }
 
@@ -1683,9 +1749,16 @@ namespace George.Services
                 }
             }
 
-            sb.Append("  <div style=\"display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:8px;font-size:12px;line-height:13px;\">");
-            sb.Append($"<span style=\"font-weight:400;\">{EscapeHtml(created)}</span>");
+            sb.Append("  <div style=\"padding-bottom:8px;margin-bottom:0;\">");
+            sb.Append("<div style=\"display:flex;justify-content:space-between;align-items:flex-end;font-size:12px;line-height:13px;\">");
+            sb.Append($"<span style=\"font-weight:400;white-space:nowrap;word-break:normal;overflow-wrap:normal;\">{EscapeHtml(created)}</span>");
             sb.Append($"<span style=\"font-weight:700;\">{EscapeHtml(sourceTop)}</span>");
+            sb.Append("</div>");
+            var voucherStatus = VoucherOrderStatusLabel(order);
+            if (!string.IsNullOrEmpty(voucherStatus))
+            {
+                sb.Append($"<div style=\"margin-top:4px;text-align:center;font-size:10px;font-weight:400;line-height:13px;\">{VoucherStatusLabel} {EscapeHtml(voucherStatus)}</div>");
+            }
             sb.AppendLine("</div>");
 
             var headerCityBlock = showHeaderCity
@@ -1693,7 +1766,7 @@ namespace George.Services
                 : "";
             var headerCore =
                 $"<div style=\"font-size:28px;font-weight:900;line-height:32px;\">#{EscapeHtml(orderNo)}</div>" +
-                $"<div style=\"font-size:32px;font-weight:900;line-height:36px;letter-spacing:-0.5px;\">{EscapeHtml(headerShort)}</div>" +
+                $"<div style=\"font-size:28px;font-weight:700;line-height:32px;letter-spacing:-0.5px;white-space:nowrap;-webkit-font-smoothing:antialiased;font-synthesis:none;text-rendering:geometricPrecision;\">{EscapeHtml(headerShort)}</div>" +
                 headerCityBlock;
 
             if (showTopQr)
@@ -1719,11 +1792,11 @@ namespace George.Services
                 sb.Append($"<span>{EscapeHtml(dateLabel)}</span><span>{EscapeHtml(timeLabel)}</span></div>");
                 sb.Append("<div style=\"display:flex;justify-content:space-between;align-items:center;gap:8px;\">");
                 sb.Append(deliveryDate.HasValue
-                    ? $"<span style=\"font-size:20px;font-weight:700;line-height:24px;\">{EscapeHtml(FormatVoucherDateWithWeekday(deliveryDate.Value))}</span>"
-                    : "<span style=\"font-size:20px;font-weight:700;\">—</span>");
+                    ? $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\">{EscapeHtml(FormatVoucherDateWithWeekday(deliveryDate.Value))}</span>"
+                    : $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\">—</span>");
                 sb.Append(!string.IsNullOrWhiteSpace(deliveryTime)
-                    ? $"<span style=\"font-size:20px;font-weight:700;line-height:24px;\">{EscapeHtml(deliveryTime!)}</span>"
-                    : "<span style=\"font-size:20px;font-weight:700;\">—</span>");
+                    ? $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\" dir=\"ltr\">{EscapeHtml(deliveryTime!)}</span>"
+                    : $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\">—</span>");
                 sb.AppendLine("</div></div>");
             }
 
@@ -1741,7 +1814,7 @@ namespace George.Services
             sb.AppendLine($"    <span style=\"font-size:20px;font-weight:800;line-height:24px;\">{VoucherItemsTitle} ({itemCount})</span>");
             sb.AppendLine("  </div>");
 
-            var attrOpts = new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true };
+            var attrOpts = new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true, VoucherPerUnitWeightVariableOnly = true };
             foreach (var it in items)
             {
                 var title = EscapeHtml(OrderItemLineDisplay.GetOrderItemProductName(it));
@@ -1752,35 +1825,31 @@ namespace George.Services
                 sb.Append($"<div style=\"font-size:17px;font-weight:700;line-height:19px;\">{title}</div>");
                 foreach (var seg in OrderItemLineDisplay.GetOrderItemAttributeSegments(it, attrOpts))
                 {
-                    sb.Append("<div style=\"padding-right:12px;font-size:11px;font-weight:400;line-height:15px;\">• ");
+                    sb.Append($"<div style=\"padding-right:12px;font-size:{VoucherPrintHtml.ProductMeta}px;font-weight:400;line-height:{VoucherPrintHtml.ProductMetaLineHeight}px;\">• ");
                     sb.Append(EscapeHtml(seg));
                     sb.Append("</div>");
                 }
 
-                var lineAmt = GetVoucherPickedLineAmount(it);
-                var loket = BuildVoucherLoketLine(it, lineAmt);
-                if (!string.IsNullOrEmpty(loket))
+                var legacyHint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(it, newVoucher);
+                if (!string.IsNullOrWhiteSpace(legacyHint))
                 {
-                    sb.Append("<div style=\"padding-right:12px;font-size:11px;font-weight:700;line-height:15px;\">");
-                    sb.Append(EscapeHtml(loket));
+                    sb.Append($"<div style=\"padding-right:12px;font-size:{VoucherPrintHtml.ProductMeta}px;font-weight:400;line-height:{VoucherPrintHtml.ProductMetaLineHeight}px;\">");
+                    sb.Append(EscapeHtml(legacyHint));
                     sb.Append("</div>");
-                }
-                else
-                {
-                    var legacyHint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(it, newVoucher);
-                    if (!string.IsNullOrWhiteSpace(legacyHint))
-                    {
-                        sb.Append("<div style=\"padding-right:12px;font-size:11px;font-weight:400;line-height:15px;\">");
-                        sb.Append(EscapeHtml(legacyHint));
-                        sb.Append("</div>");
-                    }
                 }
 
                 if (!string.IsNullOrWhiteSpace(it.Notes))
                 {
-                    sb.Append("<div style=\"padding-right:12px;font-size:11px;font-weight:700;line-height:15px;\">הערה: ");
+                    sb.Append($"<div style=\"padding-right:12px;font-size:{VoucherPrintHtml.ItemLineNote}px;font-weight:700;line-height:{VoucherPrintHtml.ItemLineNoteLineHeight}px;\">{VoucherPrintHtml.ItemLineNoteLabelHtml()} ");
                     sb.Append(EscapeHtml(it.Notes!));
                     sb.Append("</div>");
+                }
+
+                var lineAmt = GetVoucherPickedLineAmount(it);
+                var pickedRowHtml = BuildVoucherPickedRowTableHtml(it, lineAmt);
+                if (!string.IsNullOrEmpty(pickedRowHtml))
+                {
+                    sb.Append(pickedRowHtml);
                 }
 
                 sb.Append("</div></div>");
@@ -1818,11 +1887,11 @@ namespace George.Services
             "ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת",
         };
 
-        /// <summary>Voucher / print: e.g. <c>שני 11/03/26</c>.</summary>
+        /// <summary>Voucher delivery date: weekday + dd/MM (no year).</summary>
         private static string FormatVoucherDateWithWeekday(DateTime date)
         {
             var dayName = HebrewWeekdayNames[(int)date.DayOfWeek];
-            var shortDate = date.ToString("dd/MM/yy", CultureInfo.InvariantCulture);
+            var shortDate = date.ToString("dd/MM", CultureInfo.InvariantCulture);
             return $"{dayName} {shortDate}";
         }
 
@@ -1830,8 +1899,12 @@ namespace George.Services
         {
             var local = creationTime.ToLocalTime();
             var time = local.ToString("HH:mm", CultureInfo.InvariantCulture);
-            return $"{FormatVoucherDateWithWeekday(local)} {time}";
+            var shortDate = local.ToString("dd/MM", CultureInfo.InvariantCulture);
+            return $"{shortDate} {time}";
         }
+
+        private const string VoucherDeliveryDatetimeValueStyle =
+            "font-size:20px;font-weight:700;line-height:24px;white-space:nowrap;word-break:normal;overflow-wrap:normal;";
 
         private static string CombineOrderLevelNotes(Order order)
         {
@@ -2017,12 +2090,60 @@ namespace George.Services
             return settled ? $"שולם ({m})" : $"תשלום ({m})";
         }
 
-        private static string? BuildVoucherLoketLine(OrderItem it, decimal? lineAmt)
+        private static string? VoucherOrderStatusLabel(Order order)
         {
-            if (!it.PickedQuantity.HasValue || it.PickedQuantity.Value <= 0m) return null;
+            var status = order.Status?.Trim() ?? "";
+            if (string.Equals(status, "New", StringComparison.OrdinalIgnoreCase)) return "חדשה";
+            var items = order.OrderItem ?? new List<OrderItem>();
+            var anyPicked = items.Any(OrderItemLineDisplay.OrderMeaningfulPick);
+            if (anyPicked ||
+                string.Equals(status, "Ready", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase))
+                return null;
+            if (string.Equals(status, "InTreatment", StringComparison.OrdinalIgnoreCase)) return "בטיפול";
+            return string.IsNullOrEmpty(status) ? null : status;
+        }
+
+        private static string VoucherPriceValueHtml(string label, string valStyle)
+        {
+            if (label == "—") return $"<div style=\"{valStyle}\">{EscapeHtml(label)}</div>";
+            var m = System.Text.RegularExpressions.Regex.Match(label, @"^(₪[\d.]+)\s*(\/\s*.+)$");
+            if (!m.Success) return $"<div style=\"{valStyle}white-space:nowrap;\">{EscapeHtml(label)}</div>";
+            var amount = m.Groups[1].Value;
+            var suffix = m.Groups[2].Value.Trim();
+            if (decimal.TryParse(amount.Replace("₪", "", StringComparison.Ordinal), NumberStyles.Number, CultureInfo.InvariantCulture, out var n) && n >= 100m)
+            {
+                return
+                    $"<div style=\"{valStyle}line-height:13px;\">" +
+                    $"<div style=\"white-space:nowrap;\"><bdi dir=\"ltr\">{EscapeHtml(amount)}</bdi></div>" +
+                    $"<div style=\"font-size:10px;font-weight:700;white-space:nowrap;\">{EscapeHtml(suffix)}</div>" +
+                    "</div>";
+            }
+            return $"<div style=\"{valStyle}white-space:nowrap;\"><bdi dir=\"ltr\">{EscapeHtml(amount)}</bdi>{EscapeHtml(suffix)}</div>";
+        }
+
+        private static string? BuildVoucherPickedRowTableHtml(OrderItem it, decimal? lineAmt)
+        {
+            if (!OrderItemLineDisplay.OrderMeaningfulPick(it)) return null;
             var qty = OrderItemLineDisplay.FormatVoucherPickedDisplay(it);
-            if (lineAmt.HasValue) return $"לוקט: {qty} | ₪{lineAmt.Value.ToString("0.00", CultureInfo.InvariantCulture)}";
-            return $"לוקט: {qty}";
+            var priceLabel = OrderItemLineDisplay.FormatOrderLinePricePerKgForPicking(it);
+            var price = string.IsNullOrWhiteSpace(priceLabel) ? "—" : priceLabel;
+            var total = lineAmt.HasValue
+                ? $"₪{lineAmt.Value.ToString("0.00", CultureInfo.InvariantCulture)}"
+                : "—";
+            const string grid =
+                "display:grid;grid-template-columns:1fr 1fr 1fr;direction:rtl;gap:2px 4px;margin-top:4px;padding-right:12px;text-align:center;width:100%;box-sizing:border-box;";
+            const string head =
+                "font-size:10px;font-weight:700;line-height:13px;border-bottom:1px solid #000;padding-bottom:2px;";
+            const string val = "font-size:11px;font-weight:700;line-height:14px;padding-top:2px;";
+            var priceCell = VoucherPriceValueHtml(price, val);
+            return
+                $"<div style=\"{grid}\">" +
+                $"<div style=\"{head}\">מחיר</div><div style=\"{head}\">לוקט</div><div style=\"{head}\">סה\"כ</div>" +
+                priceCell +
+                $"<div style=\"{val}\">{EscapeHtml(qty)}</div>" +
+                $"<div style=\"{val}\"><bdi dir=\"ltr\">{EscapeHtml(total)}</bdi></div>" +
+                "</div>";
         }
 
         private static string EscapeHtmlAttr(string? s)
@@ -2042,6 +2163,7 @@ namespace George.Services
         /// <summary>Match shop-manager <c>getVoucherPickedLineAmount</c>: line total after pick (TotalPrice or picked × PricePerUnit).</summary>
         private static decimal? GetVoucherPickedLineAmount(OrderItem item)
         {
+            if (!OrderItemLineDisplay.OrderMeaningfulPick(item)) return null;
             if (!item.PickedQuantity.HasValue || item.PickedQuantity.Value <= 0m) return null;
             if (item.TotalPrice.HasValue) return item.TotalPrice.Value;
             return item.PickedQuantity.Value * (item.PricePerUnit ?? 0m);
@@ -2051,9 +2173,10 @@ namespace George.Services
         {
             var items = order.OrderItem ?? new List<OrderItem>();
             var shipping = order.ShippingCost ?? 0m;
-            var anyPicked = items.Any(i => i.PickedQuantity.HasValue && i.PickedQuantity.Value > 0m);
+            var newVoucher = string.Equals(order.Status, "New", StringComparison.OrdinalIgnoreCase);
+            var anyPicked = items.Any(OrderItemLineDisplay.OrderMeaningfulPick);
             decimal itemsSum;
-            if (anyPicked)
+            if (!newVoucher && anyPicked)
             {
                 // After picking: compute from actual picked line totals — order.Total is the original pre-picking value and is not updated after picking.
                 itemsSum = items.Sum(i => GetVoucherPickedLineAmount(i) ?? 0m);
@@ -2123,17 +2246,18 @@ namespace George.Services
                 .Replace("'", "&#39;", StringComparison.Ordinal);
         }
 
-        /// <summary>Record payment from WooCommerce (invoice, Cardcom JSON, gateway status). API key auth. Order: <c>orderNumber</c> and/or <c>orderId</c> (WooCommerce id) must match <see cref="Order.ExternalOrderId"/>.</summary>
+        /// <summary>Record payment from WooCommerce gateway webhook. API key auth. Order: <c>orderNumber</c> / <c>orderId</c> / <c>externalOrderId</c> must match <see cref="Order.ExternalOrderId"/>.</summary>
         public async Task<IApiResponse<OrderRes>> RecordPaymentFromWooCommerceAsync(int siteId, WooCommerceOrderPaymentPayload payment, CancellationToken cancelToken = default)
         {
             var response = new ApiResponse<OrderRes>();
+            payment.NormalizeWooCommercePaymentRequest();
             var externalKey = payment.ResolveExternalOrderKey();
             if (string.IsNullOrWhiteSpace(externalKey))
             {
                 _logger.LogWarning(
-                    "WooCommerce OrderPayment rejected: orderNumber and orderId missing. siteId={SiteId}",
+                    "WooCommerce OrderPayment rejected: orderNumber, orderId, and externalOrderId missing. siteId={SiteId}",
                     siteId);
-                return CreateResponse(response, StatusCode.InvalidRequest, "orderNumber or orderId is required.");
+                return CreateResponse(response, StatusCode.InvalidRequest, "orderNumber, orderId, or externalOrderId is required.");
             }
             var order = await _orderStorage.GetOrderBySiteAndExternalIdAsync(siteId, externalKey, cancelToken).ConfigureAwait(false);
             if (order == null)
@@ -2143,22 +2267,28 @@ namespace George.Services
                     siteId, externalKey, payment.Status);
                 return CreateResponse(response, StatusCode.ItemNotFound, "Order not found.");
             }
-            var treatAsPaid = IsSuccessfulWooCommerceGatewayPaymentStatus(payment.Status);
-            var cardcomJson = SerializeCardcomPaymentToken(payment.CardcomPayment);
-            var cardcomChars = cardcomJson?.Length ?? 0;
+            var isFinalCapture = payment.IsFinalGatewayCapture();
             _logger.LogInformation(
-                "WooCommerce OrderPayment processing. siteId={SiteId}, externalOrderKey={ExternalOrderKey}, internalOrderId={InternalOrderId}, gatewayStatus={GatewayStatus}, treatAsPaid={TreatAsPaid}, cardcomJsonChars={CardcomChars}, hasInvoice={HasInvoice}",
-                siteId, externalKey, order.Id, payment.Status, treatAsPaid, cardcomChars, !string.IsNullOrWhiteSpace(payment.InvoiceNumber));
+                "WooCommerce OrderPayment processing. siteId={SiteId}, externalOrderKey={ExternalOrderKey}, internalOrderId={InternalOrderId}, gatewayStatus={GatewayStatus}, isFinalCapture={IsFinalCapture}, gatewayTx={GatewayTx}, invoice={Invoice}, paymentGateway={PaymentGateway}",
+                siteId, externalKey, order.Id, payment.Status, isFinalCapture,
+                payment.Payment?.TransactionId?.Trim(),
+                payment.InvoiceNumber,
+                payment.Payment?.PaymentGateway);
             var updated = await _orderStorage.UpdateOrderAsync(order.Id, o =>
             {
-                if (payment.InvoiceNumber != null) o.InvoiceNumber = payment.InvoiceNumber;
-                if (payment.PaymentReference != null || payment.ClearanceNumber != null)
-                    o.PaymentReference = payment.PaymentReference ?? payment.ClearanceNumber;
-                if (treatAsPaid && payment.PaidAt.HasValue) o.PaidAt = payment.PaidAt;
-                if (treatAsPaid) o.PaymentStatus = "Paid";
-                if (!string.IsNullOrWhiteSpace(payment.Status)) o.ExternalPaymentStatus = payment.Status.Trim();
-                if (!string.IsNullOrWhiteSpace(cardcomJson)) o.CardcomPaymentJson = cardcomJson;
-                o.UpdatedDate = DateTime.UtcNow;
+                o.GatewayPaymentOrderId = WooCommerceOrderPaymentPayload.GatewayTokenToString(payment.OrderId);
+                o.GatewayPaymentExternalOrderId = WooCommerceOrderPaymentPayload.GatewayTokenToString(payment.ExternalOrderId);
+                o.GatewayPaymentSiteId = string.IsNullOrWhiteSpace(payment.SiteId) ? null : payment.SiteId.Trim();
+                _paymentService.ApplyWooCommerceGatewayPaymentFields(
+                    o,
+                    payment.Payment,
+                    payment.Status,
+                    payment.IsFinished,
+                    o.GatewayPaymentOrderId,
+                    o.GatewayPaymentExternalOrderId,
+                    o.GatewayPaymentSiteId);
+                if (!string.IsNullOrWhiteSpace(payment.PaymentReference))
+                    o.PaymentReference = payment.PaymentReference;
             }, cancelToken).ConfigureAwait(false);
             if (updated == null)
             {
@@ -2168,27 +2298,46 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.ItemNotFound);
             }
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken).ConfigureAwait(false);
+            if (loaded != null)
+            {
+                _paymentService.ApplyWooCommerceGatewayPaymentFields(
+                    loaded,
+                    payment.Payment,
+                    payment.Status,
+                    payment.IsFinished,
+                    loaded.GatewayPaymentOrderId,
+                    loaded.GatewayPaymentExternalOrderId,
+                    loaded.GatewayPaymentSiteId);
+                await _paymentService.PersistOrderPaymentStateAsync(loaded, cancelToken).ConfigureAwait(false);
+                await _paymentService.LogWooCommerceGatewayPaymentEventAsync(
+                    loaded.Id,
+                    payment.Payment,
+                    payment.Status,
+                    payment.IsFinished,
+                    cancelToken).ConfigureAwait(false);
+                loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken).ConfigureAwait(false);
+            }
             response.Data = _mapper.Map<OrderRes>(loaded!);
             _logger.LogInformation(
-                "WooCommerce OrderPayment completed. siteId={SiteId}, internalOrderId={InternalOrderId}, externalOrderKey={ExternalOrderKey}, paymentStatus={PaymentStatus}, externalPaymentStatus={ExternalPaymentStatus}",
-                siteId, loaded!.Id, externalKey, loaded.PaymentStatus, loaded.ExternalPaymentStatus);
+                "WooCommerce OrderPayment completed. siteId={SiteId}, internalOrderId={InternalOrderId}, externalOrderKey={ExternalOrderKey}, paymentStatus={PaymentStatus}, paymentSettleStatus={PaymentSettleStatus}, externalPaymentStatus={ExternalPaymentStatus}",
+                siteId, loaded!.Id, externalKey, loaded.PaymentStatus, loaded.PaymentSettleStatus, loaded.ExternalPaymentStatus);
             return response;
         }
 
-        private static string? SerializeCardcomPaymentToken(JToken? cardcom)
+        private async Task TryApplyEmbeddedWooCommerceGatewayPaymentAsync(
+            Order order,
+            WooCommerceOrderPayload payload,
+            CancellationToken cancelToken)
         {
-            if (cardcom == null || cardcom.Type == JTokenType.Null) return null;
-            return cardcom.ToString(Formatting.None);
-        }
-
-        /// <summary>When <paramref name="status"/> is empty, treat as success (legacy webhooks). Otherwise avoid marking paid on clear failure tokens.</summary>
-        private static bool IsSuccessfulWooCommerceGatewayPaymentStatus(string? status)
-        {
-            if (string.IsNullOrWhiteSpace(status)) return true;
-            var s = status.Trim().ToLowerInvariant();
-            if (s is "failed" or "fail" or "error" or "declined" or "rejected" or "cancelled" or "canceled") return false;
-            if (s.Contains("declin", StringComparison.Ordinal) || s.Contains("fail", StringComparison.Ordinal)) return false;
-            return true;
+            if (!payload.HasEmbeddedGatewayPayment())
+                return;
+            var gatewayStatus = payload.GetResolvedGatewayPaymentStatus();
+            await _paymentService.CompleteWooCommerceGatewayPaymentAsync(
+                order,
+                payload.Payment,
+                gatewayStatus,
+                payload.GatewayIsFinished,
+                cancelToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -2280,7 +2429,7 @@ namespace George.Services
                     .ApplyPickingConsumptionDeltaAsync(
                         line.ProductId.Value,
                         line.ProductVariantId,
-                        line.Quantity,
+                        OrderItemStockConsumption.ResolveOrderedCatalogConsumption(line),
                         cancelToken)
                     .ConfigureAwait(false);
                 productIds.Add(line.ProductId.Value);
@@ -2316,7 +2465,7 @@ namespace George.Services
                     .ApplyPickingConsumptionDeltaAsync(
                         line.ProductId.Value,
                         line.ProductVariantId,
-                        line.Quantity,
+                        OrderItemStockConsumption.ResolveOrderedCatalogConsumption(line),
                         cancelToken)
                     .ConfigureAwait(false);
                 productIds.Add(line.ProductId.Value);
@@ -2345,7 +2494,7 @@ namespace George.Services
                 if (line.PickedQuantity.HasValue && line.PickedQuantity.Value > 0m)
                     restoreQty = line.PickedQuantity.Value;
                 else if (!line.PickedQuantity.HasValue && order.CompletionInventoryApplied && line.Quantity > 0m)
-                    restoreQty = line.Quantity;
+                    restoreQty = OrderItemStockConsumption.ResolveOrderedCatalogConsumption(line);
                 else
                     continue;
                 await _productStorage
@@ -2373,7 +2522,7 @@ namespace George.Services
                     .ApplyPickingConsumptionDeltaAsync(
                         line.ProductId.Value,
                         line.ProductVariantId,
-                        line.Quantity,
+                        OrderItemStockConsumption.ResolveOrderedCatalogConsumption(line),
                         cancelToken)
                     .ConfigureAwait(false);
                 productIds.Add(line.ProductId.Value);

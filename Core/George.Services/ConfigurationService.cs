@@ -194,6 +194,10 @@ namespace George.Services
 			dicParameters.TryGetValue(SysConfig.Parameter.AWSKeySecret, out value);
 			data.AWSKeySecret = value.HasValue() ? value!.Trim() : null;
 
+			dicParameters.TryGetValue(SysConfig.Parameter.OrdersRealtimeEnabled, out value);
+			data.OrdersRealtimeEnabled = value.HasValue() &&
+				(value!.Trim().Equals("true", StringComparison.OrdinalIgnoreCase) ||
+				 value.Trim() == "1");
 
 			res = true;
 			return res;

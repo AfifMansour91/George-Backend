@@ -35,6 +35,18 @@ namespace George.Data
             return result;
         }
 
+        private static List<int> DistinctPositiveIdsPreserveOrder(IEnumerable<int> ids)
+        {
+            var seen = new HashSet<int>();
+            var result = new List<int>();
+            foreach (var id in ids)
+            {
+                if (id <= 0 || !seen.Add(id)) continue;
+                result.Add(id);
+            }
+            return result;
+        }
+
         public async Task<DataListResult<Product>> GetProductsAsync(
             ProductFilter? filter,
             PagingExDto paging,
@@ -45,6 +57,8 @@ namespace George.Data
             // Lighter includes for list; ProductOption and ProductVariant only when requested (e.g. My Products page needs them for "with variations" filter)
             var query = _dbContext.Product
                 .Include(p => p.Brand)
+                .Include(p => p.ProductBrand)
+                    .ThenInclude(pb => pb.Brand)
                 .Include(p => p.Supplier)
                 .Include(p => p.Status)
                 .Include(p => p.Visibility)
@@ -99,8 +113,9 @@ namespace George.Data
                 if (filter.Search?.SearchTerm.HasValue() == true)
                 {
                     var term = filter.Search.SearchTerm!.Trim();
-                    query = query.Where(p => p.Name.Contains(term) || 
+                    query = query.Where(p => p.Name.Contains(term) ||
                                            (p.Sku != null && p.Sku.Contains(term)) ||
+                                           p.ProductVariant.Any(v => !v.IsDeleted && v.Sku != null && v.Sku.Contains(term)) ||
                                            (p.ShortDescription != null && p.ShortDescription.Contains(term)));
                 }
 
@@ -121,7 +136,7 @@ namespace George.Data
             return res;
         }
 
-        /// <summary>Get unique related and complementary product IDs for the given product IDs, restricted to products that belong to the site. For kiosk upsell step. Uses EF only (no raw SQL, no concurrent context use).</summary>
+        /// <summary>Unions RelatedProduct (Woo up-sells) and ComplementaryProduct (Woo cross-sell) IDs for the given cart lines, filtered to products on the site. For kiosk POS linked-products step.</summary>
         public async Task<List<int>> GetUpsellProductIdsForSiteAsync(int siteId, List<int> productIds, CancellationToken cancelToken)
         {
             if (siteId <= 0 || productIds == null || productIds.Count == 0)
@@ -179,6 +194,8 @@ namespace George.Data
 
             var query = _dbContext.Product
                 .Include(p => p.Brand)
+                .Include(p => p.ProductBrand)
+                    .ThenInclude(pb => pb.Brand)
                 .Include(p => p.Supplier)
                 .Include(p => p.Status)
                 .Include(p => p.Visibility)
@@ -247,7 +264,7 @@ namespace George.Data
                 .FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
         }
 
-        public async Task<Product> CreateProductAsync(Product product, List<int>? siteIds, List<int>? categoryIds, List<string>? tags, List<int>? relatedProductIds, List<int>? complementaryProductIds, CancellationToken cancelToken)
+        public async Task<Product> CreateProductAsync(Product product, List<int>? siteIds, List<int>? categoryIds, List<int>? brandIds, List<string>? tags, List<int>? relatedProductIds, List<int>? complementaryProductIds, CancellationToken cancelToken)
         {
             // Normalize empty SKU to NULL to avoid unique constraint violations
             if (string.IsNullOrWhiteSpace(product.Sku))
@@ -285,6 +302,41 @@ namespace George.Data
                         CategoryId = category.Id
                     });
                 }
+            }
+
+            // Brands (many-to-many). When brandIds is null, fall back to legacy Product.BrandId from MapLookups.
+            if (brandIds != null)
+            {
+                var ordered = DistinctPositiveIdsPreserveOrder(brandIds);
+                if (ordered.Count > 0)
+                {
+                    var accountId = product.AccountId;
+                    var valid = await _dbContext.Brand
+                        .Where(b => ordered.Contains(b.Id) && !b.IsDeleted && (!accountId.HasValue || b.AccountId == accountId))
+                        .Select(b => b.Id)
+                        .ToListAsync(cancelToken)
+                        .ConfigureAwait(false);
+                    var validSet = valid.ToHashSet();
+                    var hasPrimary = false;
+                    foreach (var bid in ordered)
+                    {
+                        if (!validSet.Contains(bid)) continue;
+                        product.ProductBrand.Add(new ProductBrand
+                        {
+                            BrandId = bid,
+                            IsPrimary = !hasPrimary,
+                        });
+                        hasPrimary = true;
+                    }
+                }
+            }
+            else if (product.BrandId.HasValue)
+            {
+                product.ProductBrand.Add(new ProductBrand
+                {
+                    BrandId = product.BrandId.Value,
+                    IsPrimary = true,
+                });
             }
 
             // Add tags
@@ -343,12 +395,13 @@ namespace George.Data
             return product;
         }
 
-        public async Task<Product?> UpdateProductAsync(Product updated, List<int>? siteIds, List<int>? categoryIds, List<string>? tags, List<int>? relatedProductIds, List<int>? complementaryProductIds, CancellationToken cancelToken)
+        public async Task<Product?> UpdateProductAsync(Product updated, List<int>? siteIds, List<int>? categoryIds, List<int>? brandIds, List<string>? tags, List<int>? relatedProductIds, List<int>? complementaryProductIds, CancellationToken cancelToken)
         {
             var dbProduct = await _dbContext.Product
                 .Include(p => p.Site)
                 .Include(p => p.Tag)
                 .Include(p => p.ProductCategory)
+                .Include(p => p.ProductBrand)
                 .Include(p => p.RelatedProduct)
                 .Include(p => p.ComplementaryProduct)
                 .FirstOrDefaultAsync(p => p.Id == updated.Id, cancelToken);
@@ -384,10 +437,17 @@ namespace George.Data
             dbProduct.WeightConfigId = updated.WeightConfigId;
             dbProduct.SeoTitle = updated.SeoTitle;
             dbProduct.SeoDescription = updated.SeoDescription;
+            dbProduct.Slug = string.IsNullOrWhiteSpace(updated.Slug) ? null : updated.Slug.Trim();
             dbProduct.LowStockThreshold = updated.LowStockThreshold;
             dbProduct.LabelFrozen = updated.LabelFrozen;
             dbProduct.LabelGlutenFree = updated.LabelGlutenFree;
             dbProduct.LabelNotKosher = updated.LabelNotKosher;
+            dbProduct.LabelBestseller = updated.LabelBestseller;
+            dbProduct.LabelLowAvailability = updated.LabelLowAvailability;
+            dbProduct.LabelReadyToCook = updated.LabelReadyToCook;
+            dbProduct.LabelNatural = updated.LabelNatural;
+            dbProduct.LabelSugarFree = updated.LabelSugarFree;
+            dbProduct.LabelLactoseFree = updated.LabelLactoseFree;
             dbProduct.LabelKosherForPassover = updated.LabelKosherForPassover;
             dbProduct.LabelKosherForPassoverEndDate = updated.LabelKosherForPassoverEndDate;
             dbProduct.LabelNew = updated.LabelNew;
@@ -427,6 +487,35 @@ namespace George.Data
                             ProductId = dbProduct.Id,
                             CategoryId = category.Id
                         });
+                    }
+                }
+            }
+
+            // Update brands (many-to-many). Null brandIds = leave unchanged (partial updates).
+            if (brandIds != null)
+            {
+                dbProduct.ProductBrand.Clear();
+                var ordered = DistinctPositiveIdsPreserveOrder(brandIds);
+                if (ordered.Count > 0)
+                {
+                    var accountId = dbProduct.AccountId;
+                    var valid = await _dbContext.Brand
+                        .Where(b => ordered.Contains(b.Id) && !b.IsDeleted && (!accountId.HasValue || b.AccountId == accountId))
+                        .Select(b => b.Id)
+                        .ToListAsync(cancelToken)
+                        .ConfigureAwait(false);
+                    var validSet = valid.ToHashSet();
+                    var hasPrimary = false;
+                    foreach (var bid in ordered)
+                    {
+                        if (!validSet.Contains(bid)) continue;
+                        dbProduct.ProductBrand.Add(new ProductBrand
+                        {
+                            ProductId = dbProduct.Id,
+                            BrandId = bid,
+                            IsPrimary = !hasPrimary,
+                        });
+                        hasPrimary = true;
                     }
                 }
             }
@@ -526,7 +615,20 @@ namespace George.Data
             return true;
         }
 
-        /// <summary>Sets DisplayOrder for the given product IDs (order in list = index). Single query + single save for performance.</summary>
+        /// <summary>Product IDs from the given set, sorted the same way as the product list API (DisplayOrder asc, CreationTime desc).</summary>
+        public async Task<List<int>> GetProductIdsInDisplayOrderAsync(List<int> productIds, CancellationToken cancelToken)
+        {
+            if (productIds == null || !productIds.Any()) return new List<int>();
+            var idSet = productIds.ToHashSet();
+            return await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => idSet.Contains(p.Id))
+                .OrderBy(p => p.DisplayOrder ?? int.MaxValue)
+                .ThenByDescending(p => p.CreationTime)
+                .Select(p => p.Id)
+                .ToListAsync(cancelToken);
+        }
+
         public async Task UpdateProductOrderAsync(List<int> productIds, CancellationToken cancelToken)
         {
             if (productIds == null || !productIds.Any()) return;
@@ -544,6 +646,81 @@ namespace George.Data
                 }
             }
             await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
+        /// <summary>Lightweight product rows for order-debug preview (sorted like the product list API).</summary>
+        public async Task<List<(int Id, string Name, int? DisplayOrder, int? WooCommerceId, string? Sku)>> GetProductOrderPreviewRowsForSiteAsync(
+            int siteId,
+            CancellationToken cancelToken)
+        {
+            if (siteId <= 0) return new List<(int, string, int?, int?, string?)>();
+            var rows = await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => !p.IsDeleted && p.Site.Any(s => s.Id == siteId))
+                .OrderBy(p => p.DisplayOrder ?? int.MaxValue)
+                .ThenByDescending(p => p.CreationTime)
+                .Select(p => new
+                {
+                    p.Id,
+                    p.Name,
+                    p.DisplayOrder,
+                    WooCommerceId = p.WooCommerceId,
+                    p.Sku
+                })
+                .ToListAsync(cancelToken);
+            return rows
+                .Select(r => (r.Id, r.Name, r.DisplayOrder, r.WooCommerceId, r.Sku))
+                .ToList();
+        }
+
+        /// <summary>WooCommerce REST product id → local Product.Id for products on the site that have a WooCommerceId.</summary>
+        public async Task<Dictionary<int, int>> GetWooCommerceIdToProductIdForSiteAsync(int siteId, CancellationToken cancelToken)
+        {
+            if (siteId <= 0) return new Dictionary<int, int>();
+            var rows = await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => !p.IsDeleted && p.WooCommerceId != null && p.WooCommerceId > 0 && p.Site.Any(s => s.Id == siteId))
+                .Select(p => new { p.Id, WooId = p.WooCommerceId!.Value })
+                .ToListAsync(cancelToken);
+            return rows.ToDictionary(r => r.WooId, r => r.Id);
+        }
+
+        /// <summary>Batch-update DisplayOrder by product id. Returns number of rows updated.</summary>
+        public async Task<int> UpdateDisplayOrdersForProductsAsync(Dictionary<int, int> productIdToDisplayOrder, CancellationToken cancelToken)
+        {
+            if (productIdToDisplayOrder == null || productIdToDisplayOrder.Count == 0) return 0;
+            var ids = productIdToDisplayOrder.Keys.ToList();
+            var products = await _dbContext.Product
+                .Where(p => ids.Contains(p.Id))
+                .ToListAsync(cancelToken);
+            var now = DateTime.UtcNow;
+            var updated = 0;
+            foreach (var product in products)
+            {
+                if (productIdToDisplayOrder.TryGetValue(product.Id, out var order) && product.DisplayOrder != order)
+                {
+                    product.DisplayOrder = order;
+                    product.UpdatedDate = now;
+                    updated++;
+                }
+            }
+            if (updated > 0)
+                await _dbContext.SaveChangesAsync(cancelToken);
+            return updated;
+        }
+
+        /// <summary>Returns distinct category IDs assigned to the given products on a site.</summary>
+        public async Task<List<int>> GetCategoryIdsForProductsOnSiteAsync(List<int> productIds, int siteId, CancellationToken cancelToken)
+        {
+            if (productIds == null || !productIds.Any() || siteId <= 0)
+                return new List<int>();
+            var idSet = productIds.Distinct().ToList();
+            return await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => idSet.Contains(p.Id) && !p.IsDeleted && p.Site.Any(s => s.Id == siteId))
+                .SelectMany(p => p.ProductCategory.Select(pc => pc.CategoryId))
+                .Distinct()
+                .ToListAsync(cancelToken);
         }
 
         /// <summary>Returns siteId -> list of product IDs for products that belong to that site. Used to sync order to WooCommerce per site.</summary>
@@ -587,7 +764,11 @@ namespace George.Data
         }
 
         /// <summary>Returns (WooCommerceId, DisplayOrder) for products in orderedProductIds that belong to the site and have a WooCommerceId. DisplayOrder = index in orderedProductIds. Used for menu-order-only sync.</summary>
-        public async Task<List<(int WooCommerceId, int DisplayOrder)>> GetWooCommerceIdAndDisplayOrderForSiteAsync(List<int> orderedProductIds, int siteId, CancellationToken cancelToken)
+        public async Task<List<(int WooCommerceId, int DisplayOrder)>> GetWooCommerceIdAndDisplayOrderForSiteAsync(
+            List<int> orderedProductIds,
+            int siteId,
+            CancellationToken cancelToken,
+            IReadOnlySet<int>? onlyProductIds = null)
         {
             if (orderedProductIds == null || !orderedProductIds.Any()) return new List<(int, int)>();
             var productIdsSet = orderedProductIds.Distinct().ToHashSet();
@@ -600,7 +781,10 @@ namespace George.Data
             var result = new List<(int, int)>();
             for (var i = 0; i < orderedProductIds.Count; i++)
             {
-                if (idToWooId.TryGetValue(orderedProductIds[i], out var wooId))
+                var productId = orderedProductIds[i];
+                if (onlyProductIds != null && !onlyProductIds.Contains(productId))
+                    continue;
+                if (idToWooId.TryGetValue(productId, out var wooId))
                     result.Add((wooId, i));
             }
             return result;
@@ -912,6 +1096,7 @@ namespace George.Data
                 WeightByVariant = req.WeightByVariant,
                 ShowPricePer100g = req.ShowPricePer100g,
                 ShowUnitPrice = req.ShowUnitPrice,
+                SoldByLabel = req.SoldByLabel,
                 IsDeleted = false
             };
 
@@ -1014,8 +1199,29 @@ namespace George.Data
                 product.SetupTypeId = st?.Id;
             }
 
-            // Map brand — free text from UI: find or create Brand for this account (same idea as TemplateProductStorage).
-            if (req.Brand.HasValue())
+            // Map brands: explicit IDs replace legacy single FK via ProductBrand (handled in Create/UpdateProductAsync).
+            if (req.BrandIds != null)
+            {
+                var ordered = DistinctPositiveIdsPreserveOrder(req.BrandIds);
+                if (ordered.Count == 0)
+                {
+                    product.BrandId = null;
+                }
+                else
+                {
+                    var accountId = product.AccountId;
+                    var valid = await _dbContext.Brand
+                        .Where(b => ordered.Contains(b.Id) && !b.IsDeleted && (!accountId.HasValue || b.AccountId == accountId))
+                        .Select(b => b.Id)
+                        .ToListAsync(cancelToken)
+                        .ConfigureAwait(false);
+                    var validSet = valid.ToHashSet();
+                    var first = ordered.FirstOrDefault(id => validSet.Contains(id));
+                    product.BrandId = first > 0 ? first : null;
+                }
+            }
+            // Legacy free-text brand (find/create). Only when BrandIds omitted — avoids wiping BrandId on partial updates.
+            else if (req.Brand.HasValue())
             {
                 var name = req.Brand.Trim();
                 var accountId = product.AccountId;
@@ -1035,10 +1241,6 @@ namespace George.Data
                 }
 
                 product.BrandId = brand.Id;
-            }
-            else
-            {
-                product.BrandId = null;
             }
 
             // Map supplier — find or create Supplier for this account.
@@ -1130,6 +1332,43 @@ namespace George.Data
             var next = cur - consumptionDelta;
             if (next < 0m) next = 0m;
             return next;
+        }
+
+        /// <summary>
+        /// Bulk-clear expired timed storefront labels (חדש / כשר לפסח). Same rules as
+        /// <c>ProductService.ClearExpiredTimedLabels</c>, for background cleanup without opening each product.
+        /// </summary>
+        /// <returns>Row counts updated for passover and new-label columns.</returns>
+        public async Task<(int PassoverRows, int NewLabelRows)> ClearExpiredTimedProductLabelsAsync(CancellationToken cancelToken)
+        {
+            var now = DateTime.UtcNow;
+            var passoverRows = await _dbContext.Product
+                .Where(p =>
+                    !p.IsDeleted
+                    && p.LabelKosherForPassover
+                    && p.LabelKosherForPassoverEndDate != null
+                    && p.LabelKosherForPassoverEndDate <= now)
+                .ExecuteUpdateAsync(
+                    s => s
+                        .SetProperty(p => p.LabelKosherForPassover, false)
+                        .SetProperty(p => p.LabelKosherForPassoverEndDate, (DateTime?)null),
+                    cancelToken)
+                .ConfigureAwait(false);
+
+            var newLabelRows = await _dbContext.Product
+                .Where(p =>
+                    !p.IsDeleted
+                    && p.LabelNew
+                    && p.LabelNewEndDate != null
+                    && p.LabelNewEndDate <= now)
+                .ExecuteUpdateAsync(
+                    s => s
+                        .SetProperty(p => p.LabelNew, false)
+                        .SetProperty(p => p.LabelNewEndDate, (DateTime?)null),
+                    cancelToken)
+                .ConfigureAwait(false);
+
+            return (passoverRows, newLabelRows);
         }
 
     }

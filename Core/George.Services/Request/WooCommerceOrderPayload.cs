@@ -181,6 +181,27 @@ public class WooCommerceOrderPayload
     [JsonPropertyName("shippingInfo")]
     public WooCommerceShippingInfoPayload? ShippingInfo { get; set; }
 
+    /// <summary>Gateway payment block when checkout auth/charge is included with the order webhook.</summary>
+    [JsonPropertyName("payment")]
+    [JsonProperty("payment")]
+    public WooCommerceOrderPaymentGatewayDetails? Payment { get; set; }
+
+    /// <summary>Gateway charge completion flag from plugin (camelCase).</summary>
+    [JsonPropertyName("gatewayIsFinished")]
+    [JsonProperty("gatewayIsFinished")]
+    public string? GatewayIsFinished { get; set; }
+
+    /// <summary>Gateway payment status from plugin (e.g. authorized, captured).</summary>
+    [JsonPropertyName("gatewayPaymentStatus")]
+    [JsonProperty("gatewayPaymentStatus")]
+    public string? GatewayPaymentStatus { get; set; }
+
+    public bool HasEmbeddedGatewayPayment() =>
+        !string.IsNullOrWhiteSpace(Payment?.ResolveTransactionId());
+
+    public string? GetResolvedGatewayPaymentStatus() =>
+        string.IsNullOrWhiteSpace(GatewayPaymentStatus) ? null : GatewayPaymentStatus.Trim();
+
     public string? GetResolvedShippingLabel()
     {
         var a = ShippingLabel?.Trim();
