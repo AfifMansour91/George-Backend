@@ -51,6 +51,8 @@ public static class PromotionWire
         public const string Web = "web";
         public const string Mobile = "mobile";
         public const string Store = "store";
+        /// <summary>Manual / phone orders (<c>Order.Source</c> phone or manual).</summary>
+        public const string Phone = "phone";
     }
 
     public static class DiscountKind

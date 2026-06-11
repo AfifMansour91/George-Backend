@@ -546,7 +546,7 @@ public partial class GeorgeDBContextBase : DbContext
 
         modelBuilder.Entity<PromotionDailyMetric>(entity =>
         {
-            entity.HasIndex(e => new { e.PromotionId, e.MetricDateUtc }, "UX_PromotionDailyMetric_Promotion_Date").IsUnique();
+            entity.HasIndex(e => new { e.PromotionId, e.MetricDateUtc, e.Channel }, "UX_PromotionDailyMetric_Promotion_Date_Channel").IsUnique();
 
             entity.HasOne(d => d.Promotion).WithMany(p => p.PromotionDailyMetric)
                 .OnDelete(DeleteBehavior.Cascade)

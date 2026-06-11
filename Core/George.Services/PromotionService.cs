@@ -13,6 +13,7 @@ public class PromotionService : ServiceBase
 {
     private readonly PromotionStorage _promotionStorage;
     private readonly SiteStorage _siteStorage;
+    private readonly CustomerStorage _customerStorage;
     private readonly PromotionWebhookDispatcher _webhooks;
 
     public PromotionService(
@@ -21,11 +22,13 @@ public class PromotionService : ServiceBase
         CacheManager cache,
         PromotionStorage promotionStorage,
         SiteStorage siteStorage,
+        CustomerStorage customerStorage,
         PromotionWebhookDispatcher webhooks)
         : base(logger, mapper, cache)
     {
         _promotionStorage = promotionStorage;
         _siteStorage = siteStorage;
+        _customerStorage = customerStorage;
         _webhooks = webhooks;
     }
 
@@ -319,8 +322,30 @@ public class PromotionService : ServiceBase
         if (!string.IsNullOrWhiteSpace(req.CouponCode))
             req.CouponCode = NormalizeCouponCode(req.CouponCode);
 
-        response.Data = PromotionEvaluator.Evaluate(candidates, req, defaults, utcNow);
+        var customerId = await ResolveCustomerIdForEvaluateAsync(req, cancelToken).ConfigureAwait(false);
+        IReadOnlyDictionary<int, int>? priorRedemptions = null;
+        if (customerId > 0)
+        {
+            var promoIds = candidates.Select(p => p.Id).ToList();
+            priorRedemptions = await _promotionStorage
+                .GetCustomerPromotionRedemptionCountsAsync(req.SiteId, customerId, promoIds, cancelToken)
+                .ConfigureAwait(false);
+        }
+
+        response.Data = PromotionEvaluator.Evaluate(candidates, req, defaults, utcNow, priorRedemptions);
         return response;
+    }
+
+    private async Task<int> ResolveCustomerIdForEvaluateAsync(EvaluatePromotionsReq req, CancellationToken cancelToken)
+    {
+        if (int.TryParse(req.CustomerId, out var customerId) && customerId > 0)
+            return customerId;
+        if (string.IsNullOrWhiteSpace(req.CustomerPhone))
+            return 0;
+        var customer = await _customerStorage
+            .GetCustomerByPhoneAsync(req.SiteId, req.CustomerPhone.Trim(), cancelToken)
+            .ConfigureAwait(false);
+        return customer?.Id ?? 0;
     }
 
     private static string? NormalizeCouponCode(string? coupon)

@@ -83,14 +83,44 @@ BEGIN
         Id                 INT            IDENTITY(1,1) NOT NULL CONSTRAINT PK_PromotionDailyMetric PRIMARY KEY,
         PromotionId        INT            NOT NULL,
         MetricDateUtc      DATE           NOT NULL,
+        Channel            NVARCHAR(20)   NOT NULL CONSTRAINT DF_PromotionDailyMetric_Channel DEFAULT (N'web'),
         RedemptionsCount   INT            NOT NULL CONSTRAINT DF_PromotionDailyMetric_Redemptions DEFAULT (0),
         RevenueNis         DECIMAL(18,2)  NOT NULL CONSTRAINT DF_PromotionDailyMetric_Revenue DEFAULT (0),
         DiscountNis        DECIMAL(18,2)  NOT NULL CONSTRAINT DF_PromotionDailyMetric_Discount DEFAULT (0),
         CONSTRAINT FK_PromotionDailyMetric_Promotion FOREIGN KEY (PromotionId) REFERENCES dbo.Promotion (Id) ON DELETE CASCADE
     );
 
-    CREATE UNIQUE NONCLUSTERED INDEX UX_PromotionDailyMetric_Promotion_Date
-        ON dbo.PromotionDailyMetric (PromotionId, MetricDateUtc);
+    CREATE UNIQUE NONCLUSTERED INDEX UX_PromotionDailyMetric_Promotion_Date_Channel
+        ON dbo.PromotionDailyMetric (PromotionId, MetricDateUtc, Channel);
+END
+GO
+
+-- Upgrade existing PromotionDailyMetric (pre-channel installs)
+IF COL_LENGTH(N'dbo.PromotionDailyMetric', N'Channel') IS NULL
+BEGIN
+    ALTER TABLE dbo.PromotionDailyMetric ADD
+        Channel NVARCHAR(20) NOT NULL CONSTRAINT DF_PromotionDailyMetric_Channel DEFAULT (N'web');
+END
+GO
+
+IF EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE name = N'UX_PromotionDailyMetric_Promotion_Date'
+      AND object_id = OBJECT_ID(N'dbo.PromotionDailyMetric')
+)
+BEGIN
+    DROP INDEX UX_PromotionDailyMetric_Promotion_Date ON dbo.PromotionDailyMetric;
+END
+GO
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE name = N'UX_PromotionDailyMetric_Promotion_Date_Channel'
+      AND object_id = OBJECT_ID(N'dbo.PromotionDailyMetric')
+)
+BEGIN
+    CREATE UNIQUE NONCLUSTERED INDEX UX_PromotionDailyMetric_Promotion_Date_Channel
+        ON dbo.PromotionDailyMetric (PromotionId, MetricDateUtc, Channel);
 END
 GO
 
@@ -99,6 +129,18 @@ GO
 -- 3. Promotion (SiteId, CouponCode) unique index   [optional but recommended]
 --    Source: SqlScripts/Promotion_CouponUniqueIndex.sql
 -- -----------------------------------------------------------------------------
+-- Filtered-index WHERE must use simple comparisons only (no LTRIM/RTRIM — SQL Server error 10735).
+-- Whitespace normalization is enforced in PromotionService on create/update.
+IF EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE name = N'UX_Promotion_SiteId_CouponCode'
+      AND object_id = OBJECT_ID(N'dbo.Promotion', N'U')
+)
+BEGIN
+    DROP INDEX UX_Promotion_SiteId_CouponCode ON dbo.Promotion;
+END
+GO
+
 IF NOT EXISTS (
     SELECT 1 FROM sys.indexes
     WHERE name = N'UX_Promotion_SiteId_CouponCode'
@@ -107,7 +149,7 @@ IF NOT EXISTS (
 BEGIN
     CREATE UNIQUE NONCLUSTERED INDEX UX_Promotion_SiteId_CouponCode
         ON dbo.Promotion (SiteId, CouponCode)
-        WHERE CouponCode IS NOT NULL AND LTRIM(RTRIM(CouponCode)) <> N'' AND IsDeleted = 0;
+        WHERE CouponCode IS NOT NULL AND CouponCode <> N'' AND IsDeleted = 0;
 END
 GO
 
@@ -191,6 +233,10 @@ GO
 
 
 -- =============================================================================
+-- Optional after deploy (channel + net revenue semantics):
+--   SqlScripts/Promotion_MetricsChannel.sql  (if upgrading an older DB)
+--   SqlScripts/Promotion_MetricsBackfill.sql
+--
 -- Done. Verify with:
 --
 --   SELECT name FROM sys.tables  WHERE name IN (N'Promotion', N'PromotionDailyMetric');

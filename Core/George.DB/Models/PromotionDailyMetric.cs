@@ -16,6 +16,10 @@ public partial class PromotionDailyMetric
     [Precision(0)]
     public DateTime MetricDateUtc { get; set; }
 
+    /// <summary>Order source channel at redemption time (web / store / mobile / phone). KPI filter uses this, not <c>Promotion.ChannelsJson</c>.</summary>
+    [StringLength(20)]
+    public string Channel { get; set; } = "web";
+
     public int RedemptionsCount { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]

@@ -31,7 +31,7 @@ public class PromotionStorage : StorageBase
         var fromDay = filter.PeriodFromUtc?.Date;
         var toDay = filter.PeriodToUtc?.Date;
 
-        var metricAgg = BuildMetricAggregationQuery(fromDay, toDay);
+        var metricAgg = BuildMetricAggregationQuery(fromDay, toDay, filter.Channel);
 
         var basePromotions = ApplyPromotionFilters(_dbContext.Promotion.AsNoTracking(), filter, utcNow);
 
@@ -116,9 +116,10 @@ public class PromotionStorage : StorageBase
         var fromDay = periodFromUtc?.Date;
         var toDay = periodToUtc?.Date;
 
+        // Channel filter applies to order source on metrics rows, not Promotion.ChannelsJson.
         var promoQuery = ApplyKpiPromotionFilters(
             _dbContext.Promotion.AsNoTracking().Where(p => p.SiteId == siteId),
-            channel,
+            channel: null,
             discountKind);
 
         var ids = await promoQuery.Select(p => p.Id).ToListAsync(cancelToken).ConfigureAwait(false);
@@ -126,6 +127,12 @@ public class PromotionStorage : StorageBase
             return new PromotionPeriodTotals();
 
         var mq = _dbContext.PromotionDailyMetric.AsNoTracking().Where(m => ids.Contains(m.PromotionId));
+        if (!string.IsNullOrWhiteSpace(channel)
+            && !channel.Equals(PromotionWire.Channel.All, StringComparison.OrdinalIgnoreCase))
+        {
+            var ch = NormalizeMetricChannel(channel);
+            mq = mq.Where(m => m.Channel == ch);
+        }
         if (fromDay.HasValue)
             mq = mq.Where(m => m.MetricDateUtc >= fromDay.Value);
         if (toDay.HasValue)
@@ -204,6 +211,136 @@ public class PromotionStorage : StorageBase
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Increment per-promotion daily aggregates from order lines stamped at finalize.
+    /// Spec: <c>Sprint4/מבצעים.md</c> — מימושים / הכנסות / הנחות.
+    /// One redemption per order per promotion; revenue and discount summed across matching lines.
+    /// </summary>
+    public Task RecordPromotionMetricsFromOrderAsync(
+        DateTime orderCreationTimeUtc,
+        string? orderChannel,
+        IReadOnlyList<OrderItem> items,
+        CancellationToken cancelToken) =>
+        ApplyPromotionMetricsDeltaAsync(orderCreationTimeUtc, orderChannel, items, redemptionDelta: 1, cancelToken);
+
+    /// <summary>Undo <see cref="RecordPromotionMetricsFromOrderAsync"/> when an order is cancelled.</summary>
+    public Task ReversePromotionMetricsFromOrderAsync(
+        DateTime orderCreationTimeUtc,
+        string? orderChannel,
+        IReadOnlyList<OrderItem> items,
+        CancellationToken cancelToken) =>
+        ApplyPromotionMetricsDeltaAsync(orderCreationTimeUtc, orderChannel, items, redemptionDelta: -1, cancelToken);
+
+    /// <summary>
+    /// RevenueNis = sum of net line totals (TotalPrice − DiscountAmount) on promoted lines.
+    /// DiscountNis = sum of promotion discounts. Yield KPI = RevenueNis / DiscountNis.
+    /// </summary>
+    private async Task ApplyPromotionMetricsDeltaAsync(
+        DateTime orderCreationTimeUtc,
+        string? orderChannel,
+        IReadOnlyList<OrderItem> items,
+        int redemptionDelta,
+        CancellationToken cancelToken)
+    {
+        if (items == null || items.Count == 0)
+            return;
+
+        var channel = NormalizeMetricChannel(orderChannel);
+        var groups = items
+            .Where(i => i.PromotionId is > 0)
+            .GroupBy(i => i.PromotionId!.Value)
+            .Select(g => new
+            {
+                PromotionId = g.Key,
+                RevenueNis = g.Sum(x => (x.TotalPrice ?? 0m) - (x.DiscountAmount ?? 0m)),
+                DiscountNis = g.Sum(x => x.DiscountAmount ?? 0m),
+            })
+            .ToList();
+
+        if (groups.Count == 0)
+            return;
+
+        var metricDate = DateTime.SpecifyKind(orderCreationTimeUtc.Date, DateTimeKind.Utc);
+        var promoIds = groups.Select(g => g.PromotionId).ToList();
+
+        var existing = await _dbContext.PromotionDailyMetric
+            .Where(m => m.MetricDateUtc == metricDate && m.Channel == channel && promoIds.Contains(m.PromotionId))
+            .ToDictionaryAsync(m => m.PromotionId, cancelToken)
+            .ConfigureAwait(false);
+
+        foreach (var g in groups)
+        {
+            if (!existing.TryGetValue(g.PromotionId, out var row))
+            {
+                if (redemptionDelta < 0)
+                    continue;
+                row = new PromotionDailyMetric
+                {
+                    PromotionId = g.PromotionId,
+                    MetricDateUtc = metricDate,
+                    Channel = channel,
+                };
+                _dbContext.PromotionDailyMetric.Add(row);
+                existing[g.PromotionId] = row;
+            }
+
+            row.RedemptionsCount = Math.Max(0, row.RedemptionsCount + redemptionDelta);
+            row.RevenueNis = Math.Max(0m, row.RevenueNis + redemptionDelta * g.RevenueNis);
+            row.DiscountNis = Math.Max(0m, row.DiscountNis + redemptionDelta * g.DiscountNis);
+        }
+
+        await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+    }
+
+    internal static string NormalizeMetricChannel(string? orderChannel)
+    {
+        var c = (orderChannel ?? "").Trim().ToLowerInvariant();
+        return c switch
+        {
+            PromotionWire.Channel.Store => PromotionWire.Channel.Store,
+            PromotionWire.Channel.Mobile => PromotionWire.Channel.Mobile,
+            PromotionWire.Channel.Phone => PromotionWire.Channel.Phone,
+            PromotionWire.Channel.Web => PromotionWire.Channel.Web,
+            "" => PromotionWire.Channel.Web,
+            _ => c.Length <= 20 ? c : PromotionWire.Channel.Web,
+        };
+    }
+
+    /// <summary>
+    /// Counts prior redemptions per promotion for a customer — distinct orders with a stamped
+    /// <see cref="OrderItem.PromotionId"/>. Used to enforce <c>limits.perCustomer</c> at evaluate time.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<int, int>> GetCustomerPromotionRedemptionCountsAsync(
+        int siteId,
+        int customerId,
+        IReadOnlyCollection<int> promotionIds,
+        CancellationToken cancelToken)
+    {
+        if (promotionIds == null || promotionIds.Count == 0)
+            return new Dictionary<int, int>();
+
+        var ids = promotionIds.Distinct().ToList();
+        var rows = await (
+            from oi in _dbContext.OrderItem.AsNoTracking()
+            join o in _dbContext.Order.AsNoTracking() on oi.OrderId equals o.Id
+            where o.SiteId == siteId
+                  && o.CustomerId == customerId
+                  && !o.IsDeleted
+                  && o.Status != "Cancelled"
+                  && oi.PromotionId != null
+                  && ids.Contains(oi.PromotionId.Value)
+            group oi by oi.PromotionId into g
+            select new
+            {
+                PromotionId = g.Key!.Value,
+                OrderCount = g.Select(x => x.OrderId).Distinct().Count(),
+            })
+            .ToListAsync(cancelToken)
+            .ConfigureAwait(false);
+
+        return rows.ToDictionary(r => r.PromotionId, r => r.OrderCount);
+    }
+
     public async Task<Promotion> CreatePromotionAsync(Promotion entity, CancellationToken cancelToken)
     {
         _dbContext.Promotion.Add(entity);
@@ -251,13 +388,19 @@ public class PromotionStorage : StorageBase
         return await q.AnyAsync(cancelToken).ConfigureAwait(false);
     }
 
-    private IQueryable<MetricAgg> BuildMetricAggregationQuery(DateTime? fromDay, DateTime? toDay)
+    private IQueryable<MetricAgg> BuildMetricAggregationQuery(DateTime? fromDay, DateTime? toDay, string? orderChannel)
     {
         var mq = _dbContext.PromotionDailyMetric.AsNoTracking();
         if (fromDay.HasValue)
             mq = mq.Where(m => m.MetricDateUtc >= fromDay.Value);
         if (toDay.HasValue)
             mq = mq.Where(m => m.MetricDateUtc <= toDay.Value);
+        if (!string.IsNullOrWhiteSpace(orderChannel)
+            && !orderChannel.Equals(PromotionWire.Channel.All, StringComparison.OrdinalIgnoreCase))
+        {
+            var ch = NormalizeMetricChannel(orderChannel);
+            mq = mq.Where(m => m.Channel == ch);
+        }
 
         return mq.GroupBy(m => m.PromotionId).Select(g => new MetricAgg
         {
@@ -301,12 +444,7 @@ public class PromotionStorage : StorageBase
             query = query.Where(p => p.ListDiscountKind.ToLower() == dk);
         }
 
-        if (!string.IsNullOrWhiteSpace(filter.Channel)
-            && !filter.Channel.Equals(PromotionWire.Channel.All, StringComparison.OrdinalIgnoreCase))
-        {
-            var token = "\"" + filter.Channel.Trim().ToLowerInvariant() + "\"";
-            query = query.Where(p => (p.ChannelsJson ?? PromotionWire.DefaultChannelsJson)!.Contains(token));
-        }
+        // Channel filter is applied on PromotionDailyMetric.Channel (order source), not Promotion.ChannelsJson.
 
         return query;
     }

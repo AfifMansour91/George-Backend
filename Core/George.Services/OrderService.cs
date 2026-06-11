@@ -199,7 +199,7 @@ namespace George.Services
             // Failures here MUST NOT block the order from being created.
             try
             {
-                await ApplyPromotionsToOrderItemsAsync(req.SiteId, order.Source, items, cancelToken).ConfigureAwait(false);
+                await ApplyPromotionsToOrderItemsAsync(req.SiteId, order.Source, customer.Id, items, productCache, cancelToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -207,6 +207,22 @@ namespace George.Services
             }
 
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken);
+
+            try
+            {
+                await _promotionStorage
+                    .RecordPromotionMetricsFromOrderAsync(
+                        created.CreationTime,
+                        MapOrderSourceToPromotionChannel(order.Source),
+                        items,
+                        cancelToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "RecordPromotionMetricsFromOrderAsync failed orderId={OrderId}", created.Id);
+            }
+
             await RecordOrderStatusChangeAsync(
                 created.Id,
                 previousStatus: null,
@@ -442,6 +458,13 @@ namespace George.Services
                     updated.Status,
                     DateTime.UtcNow,
                     cancelToken).ConfigureAwait(false);
+
+                if (beforeUpdate != null
+                    && !string.Equals(previousStatus, "Cancelled", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(updated.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+                {
+                    await TryReversePromotionMetricsForOrderAsync(beforeUpdate, cancelToken).ConfigureAwait(false);
+                }
             }
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "order update", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             if (req.PaymentMethod != null && beforeUpdate != null &&
@@ -506,6 +529,8 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.ItemNotFound);
             if (!string.Equals(beforeCancel.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
             {
+                await TryReversePromotionMetricsForOrderAsync(beforeCancel, cancelToken).ConfigureAwait(false);
+
                 var restoredProductIds = await TryRestoreCatalogStockOnOrderCancelAsync(beforeCancel, cancelToken).ConfigureAwait(false);
                 if (restoredProductIds.Count > 0)
                     await ScheduleWooCommerceCatalogStockPushForProductsAsync(
@@ -1455,13 +1480,22 @@ namespace George.Services
                         cancelToken).ConfigureAwait(false);
                 }
                 var updateItems = new List<OrderItem>();
+                var wooUpdateProductCache = new Dictionary<int, Product?>();
                 if (payload.Items != null)
                 {
                     for (var i = 0; i < payload.Items.Count; i++)
                     {
                         var it = payload.Items[i];
                         var ourProductId = await ResolveWooCommerceItemProductIdAsync(siteId, site.AccountId, it.ProductId, it.Sku, GetEffectiveVariationId(it), cancelToken).ConfigureAwait(false);
-                        Product? product = ourProductId.HasValue ? await _productStorage.GetProductAsync(ourProductId.Value, cancelToken).ConfigureAwait(false) : null;
+                        Product? product = null;
+                        if (ourProductId.HasValue)
+                        {
+                            if (!wooUpdateProductCache.TryGetValue(ourProductId.Value, out product))
+                            {
+                                product = await _productStorage.GetProductAsync(ourProductId.Value, cancelToken).ConfigureAwait(false);
+                                wooUpdateProductCache[ourProductId.Value] = product;
+                            }
+                        }
                         var matchedVariant = GetVariantFromPayloadItem(it, product);
                         var (qty, unitWeightGrams, variantTitle) = GetWooCommerceItemQuantityAndUnitWeight(it, product);
                         var oi = new OrderItem
@@ -1500,7 +1534,53 @@ namespace George.Services
                 MergePickingStateIntoWooCommerceReplacementItems(
                     updateItems,
                     updated.OrderItem?.OrderBy(i => i.SortOrder).ToList());
+
+                try
+                {
+                    var oldPromoItems = updated.OrderItem?.Where(i => i.PromotionId is > 0).ToList() ?? new List<OrderItem>();
+                    if (oldPromoItems.Count > 0)
+                    {
+                        await _promotionStorage
+                            .ReversePromotionMetricsFromOrderAsync(
+                                updated.CreationTime,
+                                MapOrderSourceToPromotionChannel(updated.Source),
+                                oldPromoItems,
+                                cancelToken)
+                            .ConfigureAwait(false);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "ReversePromotionMetricsFromOrderAsync failed woo update orderId={OrderId}", existing.Id);
+                }
+
+                try
+                {
+                    await ApplyPromotionsToOrderItemsAsync(
+                        siteId, "woocommerce", updateCustomer.Id, updateItems, wooUpdateProductCache, cancelToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "ApplyPromotionsToOrderItemsAsync failed woo update siteId={SiteId}", siteId);
+                }
+
                 await _orderStorage.ReplaceOrderItemsAsync(existing.Id, updateItems, cancelToken).ConfigureAwait(false);
+
+                try
+                {
+                    await _promotionStorage
+                        .RecordPromotionMetricsFromOrderAsync(
+                            updated.CreationTime,
+                            MapOrderSourceToPromotionChannel(updated.Source),
+                            updateItems,
+                            cancelToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "RecordPromotionMetricsFromOrderAsync failed woo update orderId={OrderId}", existing.Id);
+                }
                 var loaded = await _orderStorage.GetOrderByIdAsync(existing.Id, cancelToken).ConfigureAwait(false);
                 if (loaded != null && payload.HasEmbeddedGatewayPayment())
                     await TryApplyEmbeddedWooCommerceGatewayPaymentAsync(loaded, payload, cancelToken).ConfigureAwait(false);
@@ -1608,7 +1688,35 @@ namespace George.Services
                     ApplyWooCommerceQuantityTypeToLineDisplay(oi, payload.Items[i]);
                 items.Add(oi);
             }
+
+            try
+            {
+                await ApplyPromotionsToOrderItemsAsync(
+                    siteId, order.Source, customer.Id, items, wooProductCache, cancelToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ApplyPromotionsToOrderItemsAsync failed woo create siteId={SiteId}", siteId);
+            }
+
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken).ConfigureAwait(false);
+
+            try
+            {
+                await _promotionStorage
+                    .RecordPromotionMetricsFromOrderAsync(
+                        created.CreationTime,
+                        MapOrderSourceToPromotionChannel(order.Source),
+                        items,
+                        cancelToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "RecordPromotionMetricsFromOrderAsync failed woo create orderId={OrderId}", created.Id);
+            }
+
             await RecordOrderStatusChangeAsync(
                 created.Id,
                 previousStatus: null,
@@ -2558,7 +2666,13 @@ namespace George.Services
         /// each line with the PromotionId + DiscountAmount it earned. Spec:
         /// <c>Sprint4/מבצעים.md</c> → "סיכום אחריות".
         /// </summary>
-        private async Task ApplyPromotionsToOrderItemsAsync(int siteId, string? orderSource, List<OrderItem> items, CancellationToken cancelToken)
+        private async Task ApplyPromotionsToOrderItemsAsync(
+            int siteId,
+            string? orderSource,
+            int customerId,
+            List<OrderItem> items,
+            IReadOnlyDictionary<int, Product?>? productCache,
+            CancellationToken cancelToken)
         {
             if (items.Count == 0) return;
 
@@ -2578,23 +2692,47 @@ namespace George.Services
                 ApplyOnDiscountedProducts = site?.PromotionsApplyToDiscountedProducts ?? false,
             };
 
+            var cache = productCache != null
+                ? new Dictionary<int, Product?>(productCache)
+                : new Dictionary<int, Product?>();
+            foreach (var line in items.Where(i => i.ProductId is > 0))
+            {
+                var pid = line.ProductId!.Value;
+                if (!cache.ContainsKey(pid))
+                    cache[pid] = await _productStorage.GetProductAsync(pid, cancelToken).ConfigureAwait(false);
+            }
+
             var evalReq = new EvaluatePromotionsReq
             {
                 SiteId = siteId,
                 Channel = MapOrderSourceToPromotionChannel(orderSource),
-                Cart = items.Select(it => new EvaluateCartLine
+                CustomerId = customerId > 0 ? customerId.ToString() : null,
+                Cart = items.Select(it =>
                 {
-                    ProductId = (it.ProductId ?? 0).ToString(),
-                    Quantity = it.Quantity,
-                    PricePerUnit = it.PricePerUnit,
-                    // CategoryId left null for v1 — Product has no primary CategoryId column;
-                    // category-scoped promos are matched at evaluate-time on the storefront only.
-                    CategoryId = null,
+                    var categoryId = it.ProductId is > 0 && cache.TryGetValue(it.ProductId.Value, out var product)
+                        ? PrimaryCategoryId(product)
+                        : null;
+                    return new EvaluateCartLine
+                    {
+                        ProductId = (it.ProductId ?? 0).ToString(),
+                        Quantity = it.Quantity,
+                        PricePerUnit = it.PricePerUnit,
+                        CategoryId = categoryId?.ToString(),
+                    };
                 }).ToList(),
                 CartTotal = items.Sum(it => it.TotalPrice ?? 0m),
             };
 
-            var result = PromotionEvaluator.Evaluate(candidates, evalReq, defaults, utcNow);
+            IReadOnlyDictionary<int, int>? priorRedemptions = null;
+            if (customerId > 0)
+            {
+                var promoIds = candidates.Select(p => p.Id).ToList();
+                priorRedemptions = await _promotionStorage
+                    .GetCustomerPromotionRedemptionCountsAsync(siteId, customerId, promoIds, cancelToken)
+                    .ConfigureAwait(false);
+            }
+
+            var result = PromotionEvaluator.Evaluate(candidates, evalReq, defaults, utcNow, priorRedemptions);
             foreach (var applied in result.PromotionsApplied)
             {
                 if (applied.EligibleItems != null && applied.EligibleItems.Count > 0)
@@ -2628,6 +2766,34 @@ namespace George.Services
                         match.DiscountAmount = (match.DiscountAmount ?? 0m) + applied.DiscountAmount;
                     }
                 }
+            }
+        }
+
+        private static int? PrimaryCategoryId(Product? product)
+        {
+            if (product?.ProductCategory == null || product.ProductCategory.Count == 0) return null;
+            var primary = product.ProductCategory.FirstOrDefault(x => x.IsPrimary);
+            return primary?.CategoryId ?? product.ProductCategory.First().CategoryId;
+        }
+
+        private async Task TryReversePromotionMetricsForOrderAsync(Order order, CancellationToken cancelToken)
+        {
+            try
+            {
+                var items = order.OrderItem?.Where(i => i.PromotionId is > 0).ToList() ?? new List<OrderItem>();
+                if (items.Count == 0)
+                    return;
+                await _promotionStorage
+                    .ReversePromotionMetricsFromOrderAsync(
+                        order.CreationTime,
+                        MapOrderSourceToPromotionChannel(order.Source),
+                        items,
+                        cancelToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ReversePromotionMetricsFromOrderAsync failed orderId={OrderId}", order.Id);
             }
         }
 

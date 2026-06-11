@@ -213,7 +213,7 @@ namespace George.Common
         /// <summary>UTC end of period for daily-metric aggregates (date component used, inclusive).</summary>
         public DateTime? PeriodToUtc { get; set; }
 
-        /// <summary><see cref="George.Data.Models.PromotionWire.Channel"/> (omit or <c>all</c> = no filter).</summary>
+        /// <summary>Order source channel for KPI/list metrics (<see cref="George.Data.Models.PromotionWire.Channel"/>; omit or <c>all</c> = no filter).</summary>
         [StringLength(20)]
         public string? Channel { get; set; }
 

@@ -44,7 +44,8 @@ public static class PromotionEvaluator
         IReadOnlyList<Promotion> candidates,
         EvaluatePromotionsReq req,
         SiteEvaluationDefaults siteDefaults,
-        DateTime utcNow)
+        DateTime utcNow,
+        IReadOnlyDictionary<int, int>? priorCustomerRedemptionsByPromotionId = null)
     {
         var res = new EvaluatePromotionsRes();
         if (candidates is null || candidates.Count == 0 || req?.Cart is null || req.Cart.Count == 0)
@@ -67,6 +68,9 @@ public static class PromotionEvaluator
             {
                 doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(p.PayloadJson) ? "{}" : p.PayloadJson);
                 if (!ScheduleAllowsByPayload(doc.RootElement, utcNow)) continue;
+
+                var (_, perCustomer) = ReadLimits(doc.RootElement);
+                if (IsCustomerLimitReached(p.Id, perCustomer, priorCustomerRedemptionsByPromotionId)) continue;
 
                 var type = (p.PromotionType ?? "").Trim().ToLowerInvariant();
                 EvalOutcome outcome = type switch
@@ -363,30 +367,65 @@ public static class PromotionEvaluator
         var policy = (ReadString(payload, "overagePolicy") ?? defaults.OveragePolicyDefault).ToLowerInvariant();
         if (policy != "same_price" && policy != "full_price") policy = "full_price";
 
-        decimal baseQty = qty;
-        decimal actualQty = totalQty;
-        decimal overage = Math.Max(0m, actualQty - baseQty);
-        decimal promoPrice = fixedPrice;
-        decimal overagePrice;
-        if (policy == "same_price")
-        {
-            var perUnit = baseQty == 0 ? 0m : fixedPrice / baseQty;
-            overagePrice = Math.Round(perUnit * overage, 2, MidpointRounding.AwayFromZero);
-        }
-        else
-        {
-            decimal perUnit = eligibleLines
-                .Where(l => l.PricePerUnit.HasValue && l.Quantity > 0)
-                .Select(l => l.PricePerUnit!.Value)
-                .DefaultIfEmpty(0m)
-                .Max();
-            overagePrice = Math.Round(perUnit * overage, 2, MidpointRounding.AwayFromZero);
-        }
-        decimal total = promoPrice + overagePrice;
-
         decimal originalEligibleCost = eligibleLines
             .Where(l => l.PricePerUnit.HasValue)
             .Sum(l => l.PricePerUnit!.Value * l.Quantity);
+
+        var (perOrderLimit, _) = ReadLimits(payload);
+        decimal total;
+        decimal baseQty = qty;
+        decimal actualQty = totalQty;
+        decimal overage;
+        decimal promoPrice;
+        decimal overagePrice;
+
+        if (perOrderLimit is > 0)
+        {
+            int bundlesApplied = Math.Min((int)Math.Floor(totalQty / qty), perOrderLimit.Value);
+            if (bundlesApplied < 1) return EvalOutcome.None;
+
+            decimal promoUnits = bundlesApplied * qty;
+            decimal outsideUnits = totalQty - promoUnits;
+            promoPrice = bundlesApplied * fixedPrice;
+            if (policy == "same_price")
+            {
+                var perUnit = qty == 0 ? 0m : fixedPrice / qty;
+                overagePrice = Math.Round(perUnit * outsideUnits, 2, MidpointRounding.AwayFromZero);
+            }
+            else
+            {
+                decimal maxUnitPrice = eligibleLines
+                    .Where(l => l.PricePerUnit.HasValue && l.Quantity > 0)
+                    .Select(l => l.PricePerUnit!.Value)
+                    .DefaultIfEmpty(0m)
+                    .Max();
+                overagePrice = Math.Round(maxUnitPrice * outsideUnits, 2, MidpointRounding.AwayFromZero);
+            }
+            overage = outsideUnits;
+            total = promoPrice + overagePrice;
+            actualQty = promoUnits;
+        }
+        else
+        {
+            overage = Math.Max(0m, actualQty - baseQty);
+            promoPrice = fixedPrice;
+            if (policy == "same_price")
+            {
+                var perUnit = baseQty == 0 ? 0m : fixedPrice / baseQty;
+                overagePrice = Math.Round(perUnit * overage, 2, MidpointRounding.AwayFromZero);
+            }
+            else
+            {
+                decimal perUnit = eligibleLines
+                    .Where(l => l.PricePerUnit.HasValue && l.Quantity > 0)
+                    .Select(l => l.PricePerUnit!.Value)
+                    .DefaultIfEmpty(0m)
+                    .Max();
+                overagePrice = Math.Round(perUnit * overage, 2, MidpointRounding.AwayFromZero);
+            }
+            total = promoPrice + overagePrice;
+        }
+
         decimal discountAmount = Math.Max(0m, originalEligibleCost - total);
         if (discountAmount <= 0m) return EvalOutcome.None;
 
@@ -466,6 +505,18 @@ public static class PromotionEvaluator
         if (minQty is { } mq && currentQty < mq) return EvalOutcome.NearMiss(BuildNearby("quantity", currentQty, mq));
         if (minAmt is { } ma && currentAmt < ma) return EvalOutcome.NearMiss(BuildNearby("amount", currentAmt, ma));
 
+        var (perOrderLimit, _) = ReadLimits(payload);
+        int maxQuantity = ReadInt(reward, "maxQuantity") ?? 1;
+        int naturalApplications = 1;
+        if (minQty is > 0)
+            naturalApplications = (int)Math.Floor(currentQty / minQty.Value);
+        else if (minAmt is > 0)
+            naturalApplications = (int)Math.Floor(currentAmt / minAmt.Value);
+        int applications = perOrderLimit is > 0
+            ? Math.Min(naturalApplications, perOrderLimit.Value)
+            : naturalApplications;
+        if (applications < 1) return EvalOutcome.None;
+
         // Multi-reward → tell storefront to prompt; no discount yet.
         if (rewardIds.Count > 1)
         {
@@ -497,15 +548,18 @@ public static class PromotionEvaluator
             });
         }
 
-        decimal originalRewardLine = rewardLine.PricePerUnit.Value * rewardLine.Quantity;
+        decimal discountableQty = Math.Min(rewardLine.Quantity, maxQuantity * applications);
+        if (discountableQty <= 0m) return EvalOutcome.None;
+
+        decimal originalRewardPortion = rewardLine.PricePerUnit.Value * discountableQty;
         decimal rewardDiscount = discountType switch
         {
-            "free" => originalRewardLine,
+            "free" => originalRewardPortion,
             "percentage" => discountValue is { } v && v > 0 && v <= 100
-                ? Math.Round(originalRewardLine * v / 100m, 2, MidpointRounding.AwayFromZero)
+                ? Math.Round(originalRewardPortion * v / 100m, 2, MidpointRounding.AwayFromZero)
                 : 0m,
             "fixed_price" => discountValue is { } v && v >= 0
-                ? Math.Max(0m, originalRewardLine - (v * rewardLine.Quantity))
+                ? Math.Max(0m, originalRewardPortion - (v * discountableQty))
                 : 0m,
             _ => 0m,
         };
@@ -524,6 +578,28 @@ public static class PromotionEvaluator
     }
 
     // ─── JSON helpers ────────────────────────────────────────────────────────────
+
+    private static (int? PerOrder, int? PerCustomer) ReadLimits(JsonElement payload)
+    {
+        int? perOrder = null;
+        int? perCustomer = null;
+        if (payload.TryGetProperty("limits", out var lim) && lim.ValueKind == JsonValueKind.Object)
+        {
+            perOrder = ReadInt(lim, "perOrder");
+            perCustomer = ReadInt(lim, "perCustomer");
+        }
+        perCustomer ??= ReadInt(payload, "limitPerCustomer");
+        return (perOrder, perCustomer);
+    }
+
+    private static bool IsCustomerLimitReached(
+        int promotionId,
+        int? perCustomer,
+        IReadOnlyDictionary<int, int>? priorCustomerRedemptions)
+    {
+        if (perCustomer is not > 0 || priorCustomerRedemptions is null) return false;
+        return priorCustomerRedemptions.TryGetValue(promotionId, out var count) && count >= perCustomer.Value;
+    }
 
     private static bool TryGetIntId(string? raw, out int value)
     {
