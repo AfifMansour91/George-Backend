@@ -42,9 +42,10 @@ public class PromotionStorage : StorageBase
             select new PromotionListRow
             {
                 Promotion = p,
-                PeriodRedemptions = g == null ? 0 : g.Redemptions,
-                PeriodRevenueNis = g == null ? 0m : g.RevenueNis,
-                PeriodDiscountNis = g == null ? 0m : g.DiscountNis,
+                // Left-join null metrics (e.g. drafts) must coalesce in SQL — non-nullable reads throw.
+                PeriodRedemptions = (int?)g.Redemptions ?? 0,
+                PeriodRevenueNis = (decimal?)g.RevenueNis ?? 0m,
+                PeriodDiscountNis = (decimal?)g.DiscountNis ?? 0m,
             };
 
         joined = ApplyPromotionSort(joined, filter);
@@ -421,6 +422,8 @@ public class PromotionStorage : StorageBase
 
     private static IQueryable<Promotion> ApplyPromotionFilters(IQueryable<Promotion> query, PromotionFilter filter, DateTime utcNowDate)
     {
+        query = query.Where(p => p.SiteId == filter.SiteId);
+
         if (!string.IsNullOrWhiteSpace(filter.PromotionType))
         {
             var t = filter.PromotionType.Trim();
