@@ -92,6 +92,17 @@ public class PromotionController : GeorgeControllerBase, IAuthUserProvider
         return await SafeCallWithErrorCatchingAsync(() => _promotionService.EvaluatePromotionsAsync(req, cancelToken));
     }
 
+    /// <summary>Products/categories that should show a catalog "במבצע" badge (ShowBadge promotions).</summary>
+    [HttpGet("catalog-badges")]
+    [ProducesResponseType(typeof(IApiResponse<PromotionCatalogBadgesRes>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> GetCatalogBadgesAsync(
+        [FromQuery] int siteId,
+        [FromQuery] string? channel,
+        CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() => _promotionService.GetCatalogBadgesAsync(siteId, channel, cancelToken));
+    }
+
     [ApiExplorerSettings(IgnoreApi = true)]
     public void SetAuthUser()
     {

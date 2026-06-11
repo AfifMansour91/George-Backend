@@ -2709,15 +2709,21 @@ namespace George.Services
                 CustomerId = customerId > 0 ? customerId.ToString() : null,
                 Cart = items.Select(it =>
                 {
-                    var categoryId = it.ProductId is > 0 && cache.TryGetValue(it.ProductId.Value, out var product)
-                        ? PrimaryCategoryId(product)
-                        : null;
+                    Product? product = null;
+                    if (it.ProductId is > 0)
+                        cache.TryGetValue(it.ProductId.Value, out product);
+                    var categoryIds = product?.ProductCategory?
+                        .Select(pc => pc.CategoryId.ToString())
+                        .Distinct()
+                        .ToList();
+                    var categoryId = PrimaryCategoryId(product);
                     return new EvaluateCartLine
                     {
                         ProductId = (it.ProductId ?? 0).ToString(),
                         Quantity = it.Quantity,
                         PricePerUnit = it.PricePerUnit,
                         CategoryId = categoryId?.ToString(),
+                        CategoryIds = categoryIds is { Count: > 0 } ? categoryIds : null,
                     };
                 }).ToList(),
                 CartTotal = items.Sum(it => it.TotalPrice ?? 0m),

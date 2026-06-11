@@ -336,6 +336,34 @@ public class PromotionService : ServiceBase
         return response;
     }
 
+    public async Task<IApiResponse<PromotionCatalogBadgesRes>> GetCatalogBadgesAsync(
+        int siteId,
+        string? channel,
+        CancellationToken cancelToken)
+    {
+        var response = new ApiResponse<PromotionCatalogBadgesRes>
+        {
+            Data = new PromotionCatalogBadgesRes(),
+        };
+        if (siteId <= 0)
+            return CreateResponse(response, StatusCode.InvalidId);
+
+        var site = await _siteStorage.GetSiteAsync(siteId, cancelToken).ConfigureAwait(false);
+        if (site == null)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+
+        var utcNow = DateTime.UtcNow;
+        var candidates = await _promotionStorage
+            .GetActivePromotionsForEvaluationAsync(siteId, utcNow, cancelToken)
+            .ConfigureAwait(false);
+
+        var scope = PromotionCatalogBadgeResolver.Resolve(candidates, channel, utcNow);
+        response.Data!.ProductIds = scope.ProductIds.OrderBy(x => x).ToList();
+        response.Data.CategoryIds = scope.CategoryIds.OrderBy(x => x).ToList();
+        response.Data.AllProducts = scope.AllProducts;
+        return response;
+    }
+
     private async Task<int> ResolveCustomerIdForEvaluateAsync(EvaluatePromotionsReq req, CancellationToken cancelToken)
     {
         if (int.TryParse(req.CustomerId, out var customerId) && customerId > 0)

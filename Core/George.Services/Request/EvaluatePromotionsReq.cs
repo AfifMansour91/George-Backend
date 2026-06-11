@@ -43,6 +43,9 @@ public class EvaluateCartLine
 
     public string? CategoryId { get; set; }
 
+    /// <summary>All category ids for the product (parent + sub) — used when <see cref="CategoryId"/> is absent.</summary>
+    public List<string>? CategoryIds { get; set; }
+
     /// <summary>"unit" | "kg" | "package" — falls back to product's catalog unit.</summary>
     public string? Unit { get; set; }
 

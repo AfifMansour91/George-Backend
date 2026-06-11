@@ -196,7 +196,7 @@ public static class PromotionEvaluator
                 {
                     "all" => true,
                     "products" => TryGetIntId(line.ProductId, out var pp) && productIds.Contains(pp),
-                    "categories" => TryGetIntId(line.CategoryId, out var cc) && categoryIds.Contains(cc),
+                    "categories" => LineMatchesAnyCategory(line, categoryIds),
                     _ => true,
                 };
             if (!ok) continue;
@@ -333,7 +333,7 @@ public static class PromotionEvaluator
             if (cid is null) return EvalOutcome.None;
             foreach (var line in req.Cart)
             {
-                if (!TryGetIntId(line.CategoryId, out var lc) || lc != cid) continue;
+                if (!LineMatchesCategory(line, cid.Value)) continue;
                 if (TryGetIntId(line.ProductId, out var pid2) && excludedIds.Contains(pid2)) continue;
                 eligibleLines.Add(line);
             }
@@ -471,7 +471,7 @@ public static class PromotionEvaluator
             {
                 "all" => true,
                 "specific_products" => TryGetIntId(line.ProductId, out var pp) && productIds.Contains(pp),
-                "specific_categories" => TryGetIntId(line.CategoryId, out var cc) && categoryIds.Contains(cc),
+                "specific_categories" => LineMatchesAnyCategory(line, categoryIds),
                 _ => true,
             };
             if (ok) buy.Add(line);
@@ -575,6 +575,24 @@ public static class PromotionEvaluator
             DiscountValue = discountValue,
             DiscountAmount = rewardDiscount,
         });
+    }
+
+    private static bool LineMatchesCategory(EvaluateCartLine line, int categoryId)
+    {
+        if (TryGetIntId(line.CategoryId, out var c) && c == categoryId) return true;
+        if (line.CategoryIds == null) return false;
+        foreach (var id in line.CategoryIds)
+            if (TryGetIntId(id, out var cc) && cc == categoryId) return true;
+        return false;
+    }
+
+    private static bool LineMatchesAnyCategory(EvaluateCartLine line, HashSet<int> categoryIds)
+    {
+        if (TryGetIntId(line.CategoryId, out var c) && categoryIds.Contains(c)) return true;
+        if (line.CategoryIds == null) return false;
+        foreach (var id in line.CategoryIds)
+            if (TryGetIntId(id, out var cc) && categoryIds.Contains(cc)) return true;
+        return false;
     }
 
     // ─── JSON helpers ────────────────────────────────────────────────────────────
