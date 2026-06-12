@@ -357,8 +357,17 @@ public class PromotionService : ServiceBase
             .GetActivePromotionsForEvaluationAsync(siteId, utcNow, cancelToken)
             .ConfigureAwait(false);
 
+        var rules = PromotionCatalogBadgeResolver.ResolveRules(candidates, channel, utcNow);
+        response.Data!.Rules = rules.Select(r => new PromotionCatalogBadgeRuleRes
+        {
+            AllProducts = r.AllProducts,
+            ProductIds = r.ProductIds.OrderBy(x => x).ToList(),
+            CategoryIds = r.CategoryIds.OrderBy(x => x).ToList(),
+            ExcludedProductIds = r.ExcludedProductIds.OrderBy(x => x).ToList(),
+        }).ToList();
+
         var scope = PromotionCatalogBadgeResolver.Resolve(candidates, channel, utcNow);
-        response.Data!.ProductIds = scope.ProductIds.OrderBy(x => x).ToList();
+        response.Data.ProductIds = scope.ProductIds.OrderBy(x => x).ToList();
         response.Data.CategoryIds = scope.CategoryIds.OrderBy(x => x).ToList();
         response.Data.AllProducts = scope.AllProducts;
         return response;

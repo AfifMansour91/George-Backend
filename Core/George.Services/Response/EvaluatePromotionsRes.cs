@@ -42,6 +42,12 @@ public class AppliedPromotion
 
     /// <summary>For % / ₪ discount: per-line breakdown so the storefront can show before/after per item.</summary>
     public List<EligibleItem>? EligibleItems { get; set; }
+
+    /// <summary>When true, savings/near-miss messaging belongs in the cart header banner (whole-cart discount).</summary>
+    public bool WholeCart { get; set; }
+
+    /// <summary>Buy-side product ids (string) — storefront renders per-line hints under these cart rows.</summary>
+    public List<string>? TriggerProductIds { get; set; }
 }
 
 public class RewardOption
@@ -90,6 +96,12 @@ public class NearbyPromotion
     /// <summary>"free" | "percentage" | "fixed_price" — same enum as AppliedPromotion.</summary>
     public string? RewardDiscountType { get; set; }
     public decimal? RewardDiscountValue { get; set; }
+
+    /// <summary>When true, encouragement message belongs in the cart header banner.</summary>
+    public bool WholeCart { get; set; }
+
+    /// <summary>Buy-side product ids — storefront renders per-line hints under these cart rows.</summary>
+    public List<string>? TriggerProductIds { get; set; }
 }
 
 public class MissingThreshold

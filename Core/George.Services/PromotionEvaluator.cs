@@ -122,12 +122,17 @@ public static class PromotionEvaluator
         {
             using var doc = JsonDocument.Parse(p.ChannelsJson);
             if (doc.RootElement.ValueKind != JsonValueKind.Array) return true;
+            var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var el in doc.RootElement.EnumerateArray())
             {
                 if (el.ValueKind != JsonValueKind.String) continue;
                 var v = (el.GetString() ?? "").Trim().ToLowerInvariant();
                 if (v == "all" || v == channel) return true;
+                if (!string.IsNullOrEmpty(v)) found.Add(v);
             }
+            // Legacy: editor "all channels" used to save web+mobile+store without phone.
+            if (channel == "phone" && found.Contains("web") && found.Contains("mobile") && found.Contains("store"))
+                return true;
             return false;
         }
         catch (JsonException)
@@ -165,6 +170,9 @@ public static class PromotionEvaluator
 
     private static string? NormalizeCoupon(string? c) =>
         string.IsNullOrWhiteSpace(c) ? null : c.Trim().ToLowerInvariant();
+
+    private static List<string> ProductIdsFromLines(IEnumerable<EvaluateCartLine> lines) =>
+        lines.Select(l => l.ProductId).Distinct(StringComparer.Ordinal).ToList();
 
     // ─── DISCOUNT (% / ₪) ────────────────────────────────────────────────────────
 
@@ -229,6 +237,8 @@ public static class PromotionEvaluator
                     PromotionName = p.Name,
                     Missing = new MissingThreshold { Kind = "quantity", Current = currentQty, Required = mq },
                     PotentialSaving = EstimateDiscountSaving(eligible, kind, value!.Value),
+                    WholeCart = false,
+                    TriggerProductIds = eligible.Select(e => e.ProductId).Distinct().ToList(),
                 });
             }
             if (minAmt is { } ma && cartTotal < ma)
@@ -240,6 +250,7 @@ public static class PromotionEvaluator
                     PromotionName = p.Name,
                     Missing = new MissingThreshold { Kind = "amount", Current = cartTotal, Required = ma },
                     PotentialSaving = EstimateDiscountSaving(eligible, kind, value!.Value),
+                    WholeCart = true,
                 });
             }
         }
@@ -271,6 +282,10 @@ public static class PromotionEvaluator
             DiscountValue = value,
             DiscountAmount = totalDiscount,
             EligibleItems = eligible,
+            WholeCart = wholeCart,
+            TriggerProductIds = wholeCart
+                ? null
+                : eligible.Where(e => e.DiscountAmount > 0).Select(e => e.ProductId).Distinct().ToList(),
         });
     }
 
@@ -361,6 +376,7 @@ public static class PromotionEvaluator
                 PromotionName = p.Name,
                 Missing = new MissingThreshold { Kind = "quantity", Current = totalQty, Required = qty },
                 PotentialSaving = potential,
+                TriggerProductIds = ProductIdsFromLines(eligibleLines),
             });
         }
 
@@ -447,6 +463,7 @@ public static class PromotionEvaluator
                 Total = total,
                 DisplayPricePerUnit = baseQty == 0 ? 0m : Math.Round(promoPrice / baseQty, 2, MidpointRounding.AwayFromZero),
             },
+            TriggerProductIds = ProductIdsFromLines(eligibleLines),
         });
     }
 
@@ -500,6 +517,7 @@ public static class PromotionEvaluator
             RewardProductId = rewardIds.Count == 1 ? rewardIds[0] : null,
             RewardDiscountType = discountType,
             RewardDiscountValue = discountValue,
+            TriggerProductIds = ProductIdsFromLines(buy),
         };
 
         if (minQty is { } mq && currentQty < mq) return EvalOutcome.NearMiss(BuildNearby("quantity", currentQty, mq));
@@ -529,6 +547,7 @@ public static class PromotionEvaluator
                 DiscountValue = discountValue,
                 DiscountAmount = 0m,
                 RewardOptions = rewardIds.Select(id => new RewardOption { ProductId = id, ProductName = string.Empty }).ToList(),
+                TriggerProductIds = ProductIdsFromLines(buy),
             });
         }
 
@@ -545,6 +564,7 @@ public static class PromotionEvaluator
                 DiscountValue = discountValue,
                 DiscountAmount = 0m,
                 RewardProductId = rewardId,
+                TriggerProductIds = ProductIdsFromLines(buy),
             });
         }
 
@@ -574,6 +594,7 @@ public static class PromotionEvaluator
             DiscountType = discountType,
             DiscountValue = discountValue,
             DiscountAmount = rewardDiscount,
+            TriggerProductIds = ProductIdsFromLines(buy),
         });
     }
 

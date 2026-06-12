@@ -9,11 +9,38 @@ namespace George.Services;
 /// </summary>
 public static class PromotionCatalogBadgeResolver
 {
+    public sealed class BadgeRule
+    {
+        public bool AllProducts { get; set; }
+        public HashSet<int> ProductIds { get; } = new();
+        public HashSet<int> CategoryIds { get; } = new();
+        public HashSet<int> ExcludedProductIds { get; } = new();
+    }
+
+    /// <summary>Legacy merged scope — kept for backward compatibility only.</summary>
     public sealed class BadgeScope
     {
         public HashSet<int> ProductIds { get; } = new();
         public HashSet<int> CategoryIds { get; } = new();
         public bool AllProducts { get; set; }
+    }
+
+    public static List<BadgeRule> ResolveRules(
+        IEnumerable<Promotion> promotions,
+        string? channel,
+        DateTime utcNow)
+    {
+        var rules = new List<BadgeRule>();
+        var ch = (channel ?? string.Empty).Trim().ToLowerInvariant();
+        foreach (var p in promotions)
+        {
+            if (!IsEligible(p, utcNow)) continue;
+            if (!ChannelAllows(p, ch)) continue;
+            var rule = ExtractRule(p);
+            if (rule != null && RuleHasScope(rule))
+                rules.Add(rule);
+        }
+        return rules;
     }
 
     public static BadgeScope Resolve(
@@ -22,15 +49,17 @@ public static class PromotionCatalogBadgeResolver
         DateTime utcNow)
     {
         var scope = new BadgeScope();
-        var ch = (channel ?? string.Empty).Trim().ToLowerInvariant();
-        foreach (var p in promotions)
+        foreach (var rule in ResolveRules(promotions, channel, utcNow))
         {
-            if (!IsEligible(p, utcNow)) continue;
-            if (!ChannelAllows(p, ch)) continue;
-            ExtractScope(p, scope);
+            if (rule.AllProducts) scope.AllProducts = true;
+            foreach (var id in rule.ProductIds) scope.ProductIds.Add(id);
+            foreach (var id in rule.CategoryIds) scope.CategoryIds.Add(id);
         }
         return scope;
     }
+
+    private static bool RuleHasScope(BadgeRule rule) =>
+        rule.AllProducts || rule.ProductIds.Count > 0 || rule.CategoryIds.Count > 0;
 
     private static bool IsEligible(Promotion p, DateTime utcNow)
     {
@@ -48,12 +77,16 @@ public static class PromotionCatalogBadgeResolver
         {
             using var doc = JsonDocument.Parse(p.ChannelsJson);
             if (doc.RootElement.ValueKind != JsonValueKind.Array) return true;
+            var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var el in doc.RootElement.EnumerateArray())
             {
                 if (el.ValueKind != JsonValueKind.String) continue;
                 var v = (el.GetString() ?? "").Trim().ToLowerInvariant();
                 if (v == "all" || v == channel) return true;
+                if (!string.IsNullOrEmpty(v)) found.Add(v);
             }
+            if (channel == "phone" && found.Contains("web") && found.Contains("mobile") && found.Contains("store"))
+                return true;
             return false;
         }
         catch (JsonException)
@@ -62,79 +95,93 @@ public static class PromotionCatalogBadgeResolver
         }
     }
 
-    private static void ExtractScope(Promotion p, BadgeScope scope)
+    private static BadgeRule? ExtractRule(Promotion p)
     {
-        if (string.IsNullOrWhiteSpace(p.PayloadJson)) return;
+        if (string.IsNullOrWhiteSpace(p.PayloadJson)) return null;
         try
         {
             using var doc = JsonDocument.Parse(p.PayloadJson);
             var root = doc.RootElement;
+            var rule = new BadgeRule();
             var type = (p.PromotionType ?? "").Trim().ToLowerInvariant();
             switch (type)
             {
                 case "discount":
-                    ExtractDiscountScope(root, scope);
+                    ExtractDiscountScope(root, rule);
                     break;
                 case "buy_x_pay_y":
-                    ExtractBxpyScope(root, scope);
+                    ExtractBxpyScope(root, rule);
                     break;
                 case "buy_x_get_y":
-                    ExtractBxgyScope(root, scope);
+                    ExtractBxgyScope(root, rule);
                     break;
+                default:
+                    return null;
             }
+            return rule;
         }
         catch (JsonException)
         {
-            // ignore malformed payload
+            return null;
         }
     }
 
-    private static void ExtractDiscountScope(JsonElement payload, BadgeScope scope)
+    private static void ExtractDiscountScope(JsonElement payload, BadgeRule rule)
     {
+        AddExcluded(rule, payload);
         var applyScope = ReadString(payload, "applyScope") ?? "all";
         if (applyScope == "whole_cart" || ReadBool(payload, "appliesToWholeCart") == true || applyScope == "all")
         {
-            scope.AllProducts = true;
+            rule.AllProducts = true;
             return;
         }
         if (applyScope == "products")
-            AddIntSet(scope.ProductIds, payload, "productIds");
+            AddIntSet(rule.ProductIds, payload, "productIds");
         else if (applyScope == "categories")
-            AddIntSet(scope.CategoryIds, payload, "categoryIds");
+            AddIntSet(rule.CategoryIds, payload, "categoryIds");
     }
 
-    private static void ExtractBxpyScope(JsonElement payload, BadgeScope scope)
+    private static void ExtractBxpyScope(JsonElement payload, BadgeRule rule)
     {
         if (!payload.TryGetProperty("condition", out var cond) || cond.ValueKind != JsonValueKind.Object) return;
+        AddExcluded(rule, cond);
         var productScope = (ReadString(cond, "scope") ?? "product").ToLowerInvariant();
         if (productScope == "product")
         {
             var pid = ReadInt(cond, "productId");
-            if (pid is > 0) scope.ProductIds.Add(pid.Value);
+            if (pid is > 0) rule.ProductIds.Add(pid.Value);
         }
         else if (productScope == "category")
         {
             var cid = ReadInt(cond, "categoryId");
-            if (cid is > 0) scope.CategoryIds.Add(cid.Value);
+            if (cid is > 0) rule.CategoryIds.Add(cid.Value);
         }
     }
 
-    private static void ExtractBxgyScope(JsonElement payload, BadgeScope scope)
+    private static void ExtractBxgyScope(JsonElement payload, BadgeRule rule)
     {
         if (!payload.TryGetProperty("condition", out var cond) || cond.ValueKind != JsonValueKind.Object) return;
+        AddExcluded(rule, cond);
         var productScope = (ReadString(cond, "productScope") ?? "all").ToLowerInvariant();
         if (productScope == "all")
         {
-            scope.AllProducts = true;
-            return;
+            rule.AllProducts = true;
         }
-        if (productScope == "specific_products")
-            AddIntSet(scope.ProductIds, cond, "productIds");
+        else if (productScope == "specific_products")
+        {
+            AddIntSet(rule.ProductIds, cond, "productIds");
+        }
         else if (productScope == "specific_categories")
-            AddIntSet(scope.CategoryIds, cond, "categoryIds");
+        {
+            AddIntSet(rule.CategoryIds, cond, "categoryIds");
+        }
+
         if (payload.TryGetProperty("reward", out var reward) && reward.ValueKind == JsonValueKind.Object)
-            AddIntSet(scope.ProductIds, reward, "productIds");
+            AddIntSet(rule.ProductIds, reward, "productIds");
     }
+
+    private static void AddExcluded(BadgeRule rule, JsonElement parent) =>
+        AddIntSet(rule.ExcludedProductIds, parent, "excludedProductIds");
 
     private static void AddIntSet(HashSet<int> target, JsonElement parent, string prop)
     {
