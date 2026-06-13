@@ -327,11 +327,11 @@ public class PromotionEvaluatorLimitsTests
     }
 
     [Fact]
-    public void BuyXGetY_minAmount_uses_display_cart_total()
+    public void BuyXGetY_minAmount_uses_qualifying_buy_subtotal()
     {
         var promo = Promo(9, "buy_x_get_y", """
             {
-              "condition": { "productScope": "all", "minQuantity": 1, "minAmount": 100 },
+              "condition": { "productScope": "specific_products", "productIds": [1], "minQuantity": 1, "minAmount": 100 },
               "reward": { "productIds": [99], "discountType": "free" }
             }
             """);
@@ -339,13 +339,12 @@ public class PromotionEvaluatorLimitsTests
         var reqBelow = new EvaluatePromotionsReq
         {
             SiteId = 1,
-            CouponCode = null,
             Cart =
             [
                 new EvaluateCartLine { ProductId = "1", Quantity = 2, PricePerUnit = 20m },
                 new EvaluateCartLine { ProductId = "99", Quantity = 1, PricePerUnit = 5m },
             ],
-            CartTotal = 80m,
+            CartTotal = 200m,
         };
 
         var below = PromotionEvaluator.Evaluate([promo], reqBelow, Defaults, DateTime.UtcNow);
@@ -358,15 +357,117 @@ public class PromotionEvaluatorLimitsTests
             SiteId = 1,
             Cart =
             [
-                new EvaluateCartLine { ProductId = "1", Quantity = 2, PricePerUnit = 20m },
+                new EvaluateCartLine { ProductId = "1", Quantity = 6, PricePerUnit = 20m },
                 new EvaluateCartLine { ProductId = "99", Quantity = 1, PricePerUnit = 5m },
             ],
-            CartTotal = 120m,
+            CartTotal = 125m,
         };
 
         var above = PromotionEvaluator.Evaluate([promo], reqAbove, Defaults, DateTime.UtcNow);
         Assert.Single(above.PromotionsApplied);
         Assert.Equal(5m, above.PromotionsApplied[0].DiscountAmount);
+    }
+
+    [Fact]
+    public void Discount_fixed_amount_is_single_basket_discount_not_per_line()
+    {
+        var promo = Promo(20, "discount", """
+            { "value": 30, "applyScope": "all" }
+            """, "amount");
+
+        var req = new EvaluatePromotionsReq
+        {
+            SiteId = 1,
+            Cart =
+            [
+                new EvaluateCartLine { ProductId = "1", Quantity = 2, PricePerUnit = 50m },
+                new EvaluateCartLine { ProductId = "2", Quantity = 1, PricePerUnit = 40m },
+            ],
+            CartTotal = 140m,
+        };
+
+        var result = PromotionEvaluator.Evaluate([promo], req, Defaults, DateTime.UtcNow);
+
+        Assert.Single(result.PromotionsApplied);
+        Assert.Equal(30m, result.TotalDiscount);
+        Assert.Equal(30m, result.PromotionsApplied[0].DiscountAmount);
+    }
+
+    [Fact]
+    public void Discount_limitPerItems_applies_to_cheapest_units_first()
+    {
+        var promo = Promo(21, "discount", """
+            { "value": 100, "applyScope": "products", "productIds": [1, 2], "limitPerItems": 2 }
+            """, "percent");
+
+        var req = new EvaluatePromotionsReq
+        {
+            SiteId = 1,
+            Cart =
+            [
+                new EvaluateCartLine { ProductId = "1", Quantity = 1, PricePerUnit = 100m },
+                new EvaluateCartLine { ProductId = "2", Quantity = 1, PricePerUnit = 10m },
+            ],
+            CartTotal = 110m,
+        };
+
+        var result = PromotionEvaluator.Evaluate([promo], req, Defaults, DateTime.UtcNow);
+
+        Assert.Single(result.PromotionsApplied);
+        // 100% on cheapest (10) + most expensive (100) = 110
+        Assert.Equal(110m, result.TotalDiscount);
+    }
+
+    [Fact]
+    public void BuyXPayY_decimal_quantity_bundle()
+    {
+        var promo = Promo(22, "buy_x_pay_y", """
+            {
+              "condition": { "scope": "product", "productId": 10, "quantity": 1.5 },
+              "pricing": { "fixedPrice": 45 }
+            }
+            """);
+
+        var req = new EvaluatePromotionsReq
+        {
+            SiteId = 1,
+            Cart =
+            [
+                new EvaluateCartLine { ProductId = "10", Quantity = 1.5m, PricePerUnit = 40m },
+            ],
+            CartTotal = 60m,
+        };
+
+        var result = PromotionEvaluator.Evaluate([promo], req, Defaults, DateTime.UtcNow);
+
+        Assert.Single(result.PromotionsApplied);
+        Assert.Equal(15m, result.PromotionsApplied[0].DiscountAmount);
+    }
+
+    [Fact]
+    public void Lower_priority_promotion_runs_first()
+    {
+        var low = Promo(30, "discount", """{ "value": 10, "applyScope": "products", "productIds": [1] }""", "percent");
+        low.Priority = 5;
+        var high = Promo(31, "discount", """{ "value": 10, "applyScope": "products", "productIds": [2] }""", "percent");
+        high.Priority = 20;
+
+        var req = new EvaluatePromotionsReq
+        {
+            SiteId = 1,
+            Cart =
+            [
+                new EvaluateCartLine { ProductId = "1", Quantity = 1, PricePerUnit = 100m },
+                new EvaluateCartLine { ProductId = "2", Quantity = 1, PricePerUnit = 100m },
+            ],
+            CartTotal = 200m,
+        };
+
+        var result = PromotionEvaluator.Evaluate([high, low], req, Defaults, DateTime.UtcNow);
+
+        Assert.Equal(2, result.PromotionsApplied.Count);
+        Assert.Equal(30, result.PromotionsApplied[0].PromotionId);
+        Assert.Equal(31, result.PromotionsApplied[1].PromotionId);
     }
 
     [Fact]

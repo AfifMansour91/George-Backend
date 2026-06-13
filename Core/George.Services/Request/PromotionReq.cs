@@ -40,6 +40,9 @@ public class CreatePromotionReq
 
     [StringLength(500)]
     public string? AppliesToSummary { get; set; }
+
+    /// <summary>Lower runs first when several promotions apply. Default 10.</summary>
+    public int Priority { get; set; } = 10;
 }
 
 public class UpdatePromotionReq
@@ -55,6 +58,8 @@ public class UpdatePromotionReq
     public bool? ShowBadge { get; set; }
 
     public bool? IsDraft { get; set; }
+
+    public int? Priority { get; set; }
 
     public DateTime? ScheduleStartDateUtc { get; set; }
 

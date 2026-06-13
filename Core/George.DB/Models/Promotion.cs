@@ -68,6 +68,9 @@ public partial class Promotion
     [StringLength(500)]
     public string? AppliesToSummary { get; set; }
 
+    /// <summary>Lower runs first when several promotions apply. Default 10.</summary>
+    public int Priority { get; set; } = 10;
+
     [ForeignKey("SiteId")]
     [InverseProperty("Promotion")]
     public virtual Site Site { get; set; } = null!;

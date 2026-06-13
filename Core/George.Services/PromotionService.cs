@@ -233,6 +233,7 @@ public class PromotionService : ServiceBase
             if (req.ChannelsJson != null) db.ChannelsJson = string.IsNullOrWhiteSpace(req.ChannelsJson) ? PromotionWire.DefaultChannelsJson : req.ChannelsJson;
             if (req.CouponCode != null) db.CouponCode = string.IsNullOrWhiteSpace(req.CouponCode) ? null : req.CouponCode.Trim();
             if (req.AppliesToSummary != null) db.AppliesToSummary = string.IsNullOrWhiteSpace(req.AppliesToSummary) ? null : req.AppliesToSummary.Trim();
+            if (req.Priority.HasValue) db.Priority = Math.Max(0, req.Priority.Value);
             db.UpdateUserId = AuthUser.Id;
         }, cancelToken).ConfigureAwait(false);
 

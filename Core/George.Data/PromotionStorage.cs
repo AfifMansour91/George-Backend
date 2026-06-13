@@ -217,6 +217,8 @@ public class PromotionStorage : StorageBase
                 && p.IsActive
                 && (p.ScheduleStartDateUtc == null || p.ScheduleStartDateUtc.Value.Date <= today)
                 && (p.ScheduleEndDateUtc == null || p.ScheduleEndDateUtc.Value.Date >= today))
+            .OrderBy(p => p.Priority)
+            .ThenBy(p => p.Id)
             .ToListAsync(cancelToken)
             .ConfigureAwait(false);
     }

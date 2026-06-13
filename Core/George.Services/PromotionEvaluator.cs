@@ -57,7 +57,7 @@ public static class PromotionEvaluator
         if (!siteDefaults.ApplyOnPhoneOrders && channel == "phone")
             return res;
 
-        foreach (var p in candidates)
+        foreach (var p in candidates.OrderBy(x => x.Priority).ThenBy(x => x.Id))
         {
             if (!IsBaselineEligible(p, utcNow)) continue;
             if (!ChannelAllows(p, channel)) continue;
@@ -229,13 +229,16 @@ public static class PromotionEvaluator
         }
         if (eligible.Count == 0) return EvalOutcome.None;
 
+        decimal qualifyingSubtotal = eligible.Sum(e => e.OriginalPrice);
+        if (qualifyingSubtotal <= 0m) return EvalOutcome.None;
+
         // Threshold check + near-miss capture.
         if (ReadBool(payload, "applyPurchaseCondition") == true)
         {
             var minQty = ReadInt(payload, "minPurchaseQuantity");
             var minAmt = ReadDecimal(payload, "minPurchaseAmount");
             decimal currentQty = eligible.Sum(e => e.Quantity);
-            decimal cartTotal = ResolveDisplaySubtotal(req);
+            decimal amountThresholdBase = wholeCart ? ResolveDisplaySubtotal(req) : qualifyingSubtotal;
             if (minQty is { } mq && currentQty < mq)
             {
                 return EvalOutcome.NearMiss(new NearbyPromotion
@@ -244,42 +247,42 @@ public static class PromotionEvaluator
                     PromotionType = "discount",
                     PromotionName = p.Name,
                     Missing = new MissingThreshold { Kind = "quantity", Current = currentQty, Required = mq },
-                    PotentialSaving = EstimateDiscountSaving(eligible, kind, value!.Value),
+                    PotentialSaving = EstimateDiscountSaving(eligible, kind, value!.Value, wholeCart),
                     WholeCart = false,
                     TriggerProductIds = eligible.Select(e => e.ProductId).Distinct().ToList(),
                 });
             }
-            if (minAmt is { } ma && cartTotal < ma)
+            if (minAmt is { } ma && amountThresholdBase < ma)
             {
                 return EvalOutcome.NearMiss(new NearbyPromotion
                 {
                     PromotionId = p.Id,
                     PromotionType = "discount",
                     PromotionName = p.Name,
-                    Missing = new MissingThreshold { Kind = "amount", Current = cartTotal, Required = ma },
-                    PotentialSaving = EstimateDiscountSaving(eligible, kind, value!.Value),
-                    WholeCart = true,
+                    Missing = new MissingThreshold { Kind = "amount", Current = amountThresholdBase, Required = ma },
+                    PotentialSaving = EstimateDiscountSaving(eligible, kind, value!.Value, wholeCart),
+                    WholeCart = wholeCart,
                 });
             }
         }
 
         var perItems = ReadInt(payload, "limitPerItems");
-        var targets = ApplyPerItemsLimit(eligible, perItems);
-
-        decimal totalDiscount = 0m;
-        for (int i = 0; i < eligible.Count; i++)
+        if (kind == "amount")
         {
-            if (!targets.Contains(i)) continue;
-            var item = eligible[i];
-            decimal lineDiscount = kind == "percent"
-                ? Math.Round(item.OriginalPrice * value!.Value / 100m, 2, MidpointRounding.AwayFromZero)
-                : Math.Min(value!.Value * item.Quantity, item.OriginalPrice);
-            if (lineDiscount > item.OriginalPrice) lineDiscount = item.OriginalPrice;
-            item.DiscountAmount = lineDiscount;
-            item.FinalPrice = item.OriginalPrice - lineDiscount;
-            totalDiscount += lineDiscount;
+            decimal totalDiscount = Math.Min(value!.Value, qualifyingSubtotal);
+            DistributeProportionalDiscount(eligible, totalDiscount, qualifyingSubtotal);
         }
-        if (totalDiscount <= 0m) return EvalOutcome.None;
+        else if (perItems is > 0)
+        {
+            ApplyPercentDiscountWithPerItemsLimit(eligible, value!.Value, perItems.Value);
+        }
+        else
+        {
+            ApplyPercentDiscountAllUnits(eligible, value!.Value);
+        }
+
+        decimal totalDiscountApplied = eligible.Sum(e => e.DiscountAmount);
+        if (totalDiscountApplied <= 0m) return EvalOutcome.None;
 
         return EvalOutcome.From(new AppliedPromotion
         {
@@ -288,7 +291,7 @@ public static class PromotionEvaluator
             PromotionName = p.Name,
             DiscountType = kind == "percent" ? "percentage" : "amount",
             DiscountValue = value,
-            DiscountAmount = totalDiscount,
+            DiscountAmount = totalDiscountApplied,
             EligibleItems = eligible,
             WholeCart = wholeCart,
             TriggerProductIds = wholeCart
@@ -297,35 +300,112 @@ public static class PromotionEvaluator
         });
     }
 
-    private static decimal EstimateDiscountSaving(List<EligibleItem> eligible, string kind, decimal value)
+    private static decimal EstimateDiscountSaving(List<EligibleItem> eligible, string kind, decimal value, bool wholeCart)
     {
+        decimal qualifyingSubtotal = eligible.Sum(e => e.OriginalPrice);
+        if (qualifyingSubtotal <= 0m) return 0m;
+        if (kind == "amount")
+            return Math.Min(value, qualifyingSubtotal);
         decimal sum = 0m;
         foreach (var i in eligible)
-            sum += kind == "percent"
-                ? Math.Round(i.OriginalPrice * value / 100m, 2, MidpointRounding.AwayFromZero)
-                : Math.Min(value * i.Quantity, i.OriginalPrice);
+            sum += Math.Round(i.OriginalPrice * value / 100m, 2, MidpointRounding.AwayFromZero);
         return sum;
     }
 
-    private static HashSet<int> ApplyPerItemsLimit(List<EligibleItem> lines, int? perItems)
+    private sealed class DiscountUnit
     {
-        var all = Enumerable.Range(0, lines.Count).ToHashSet();
-        if (perItems is null || perItems <= 0 || perItems >= lines.Count) return all;
+        public int LineIndex { get; init; }
+        public decimal UnitPrice { get; init; }
+        public decimal Weight { get; init; } = 1m;
+    }
 
-        var sortedAsc = Enumerable.Range(0, lines.Count)
-            .OrderBy(i => lines[i].Quantity == 0 ? 0m : lines[i].OriginalPrice / lines[i].Quantity)
-            .ThenBy(i => i)
+    private static List<DiscountUnit> BuildDiscountUnits(IReadOnlyList<EligibleItem> lines)
+    {
+        var units = new List<DiscountUnit>();
+        for (int i = 0; i < lines.Count; i++)
+        {
+            var line = lines[i];
+            if (line.Quantity <= 0m || line.OriginalPrice <= 0m) continue;
+            var unitPrice = line.OriginalPrice / line.Quantity;
+            var whole = (int)Math.Floor(line.Quantity);
+            for (int u = 0; u < whole; u++)
+                units.Add(new DiscountUnit { LineIndex = i, UnitPrice = unitPrice, Weight = 1m });
+            var frac = line.Quantity - whole;
+            if (frac > 0.001m)
+                units.Add(new DiscountUnit { LineIndex = i, UnitPrice = unitPrice, Weight = frac });
+        }
+        return units;
+    }
+
+    /// <summary>Israeli consumer-law allocation: cheapest units first, plus one most-expensive when X ≥ 2.</summary>
+    private static List<DiscountUnit> SelectPerItemsUnits(IReadOnlyList<DiscountUnit> units, int perItems)
+    {
+        if (units.Count == 0) return [];
+        if (perItems <= 0 || units.Count <= perItems) return units.ToList();
+
+        var sorted = units
+            .Select((u, idx) => (Unit: u, SortIdx: idx))
+            .OrderBy(x => x.Unit.UnitPrice)
+            .ThenBy(x => x.SortIdx)
             .ToList();
 
-        var result = new HashSet<int>();
+        var selectedIndices = new HashSet<int>();
         if (perItems == 1)
+            selectedIndices.Add(0);
+        else
         {
-            result.Add(sortedAsc[0]);
-            return result;
+            for (int i = 0; i < perItems - 1 && i < sorted.Count; i++)
+                selectedIndices.Add(i);
+            selectedIndices.Add(sorted.Count - 1);
         }
-        for (int i = 0; i < perItems.Value - 1 && i < sortedAsc.Count - 1; i++) result.Add(sortedAsc[i]);
-        result.Add(sortedAsc[^1]);
-        return result;
+
+        return selectedIndices.OrderBy(i => i).Select(i => sorted[i].Unit).ToList();
+    }
+
+    private static void DistributeProportionalDiscount(List<EligibleItem> eligible, decimal totalDiscount, decimal qualifyingTotal)
+    {
+        decimal allocated = 0m;
+        for (int i = 0; i < eligible.Count; i++)
+        {
+            var item = eligible[i];
+            decimal lineDiscount = i == eligible.Count - 1
+                ? totalDiscount - allocated
+                : Math.Round(totalDiscount * item.OriginalPrice / qualifyingTotal, 2, MidpointRounding.AwayFromZero);
+            allocated += lineDiscount;
+            lineDiscount = Math.Min(Math.Max(0m, lineDiscount), item.OriginalPrice);
+            item.DiscountAmount = lineDiscount;
+            item.FinalPrice = item.OriginalPrice - lineDiscount;
+        }
+    }
+
+    private static void ApplyPercentDiscountAllUnits(List<EligibleItem> eligible, decimal percent)
+    {
+        foreach (var item in eligible)
+        {
+            var lineDiscount = Math.Round(item.OriginalPrice * percent / 100m, 2, MidpointRounding.AwayFromZero);
+            lineDiscount = Math.Min(lineDiscount, item.OriginalPrice);
+            item.DiscountAmount = lineDiscount;
+            item.FinalPrice = item.OriginalPrice - lineDiscount;
+        }
+    }
+
+    private static void ApplyPercentDiscountWithPerItemsLimit(List<EligibleItem> eligible, decimal percent, int perItems)
+    {
+        var units = BuildDiscountUnits(eligible);
+        var selected = SelectPerItemsUnits(units, perItems);
+        var discountByLine = new decimal[eligible.Count];
+        foreach (var u in selected)
+        {
+            discountByLine[u.LineIndex] += Math.Round(
+                u.UnitPrice * u.Weight * percent / 100m, 2, MidpointRounding.AwayFromZero);
+        }
+
+        for (int i = 0; i < eligible.Count; i++)
+        {
+            var lineDiscount = Math.Min(discountByLine[i], eligible[i].OriginalPrice);
+            eligible[i].DiscountAmount = lineDiscount;
+            eligible[i].FinalPrice = eligible[i].OriginalPrice - lineDiscount;
+        }
     }
 
     // ─── BUY X PAY Y ─────────────────────────────────────────────────────────────
@@ -568,7 +648,7 @@ public static class PromotionEvaluator
         };
 
         if (buyQty < minQty) return EvalOutcome.NearMiss(BuildNearby("quantity", buyQty, minQty));
-        if (minAmt is > 0 && displaySubtotal < minAmt) return EvalOutcome.NearMiss(BuildNearby("amount", displaySubtotal, minAmt.Value));
+        if (minAmt is > 0 && buyAmt < minAmt) return EvalOutcome.NearMiss(BuildNearby("amount", buyAmt, minAmt.Value));
 
         var (perOrderLimit, _) = ReadLimits(payload);
 

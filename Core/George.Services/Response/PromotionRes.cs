@@ -21,6 +21,8 @@ public class PromotionRes
     public string? CouponCode { get; set; }
     public string? AppliesToSummary { get; set; }
 
+    public int Priority { get; set; } = 10;
+
     public int PeriodRedemptions { get; set; }
     public decimal PeriodRevenueNis { get; set; }
     public decimal PeriodDiscountNis { get; set; }

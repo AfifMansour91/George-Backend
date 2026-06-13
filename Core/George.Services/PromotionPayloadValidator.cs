@@ -117,8 +117,8 @@ public static class PromotionPayloadValidator
         }
 
         if (!cond.TryGetProperty("quantity", out var qEl) || qEl.ValueKind != JsonValueKind.Number
-            || !qEl.TryGetInt32(out var qty) || qty < 1)
-            return Fail("buy_x_pay_y: condition.quantity must be an integer >= 1.", out errorMessage);
+            || !qEl.TryGetDecimal(out var qty) || qty <= 0m)
+            return Fail("buy_x_pay_y: condition.quantity must be a number > 0.", out errorMessage);
 
         if (!root.TryGetProperty("pricing", out var pricing) || pricing.ValueKind != JsonValueKind.Object)
             return Fail("buy_x_pay_y must include a \"pricing\" object.", out errorMessage);

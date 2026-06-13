@@ -31,6 +31,9 @@ public class PromotionWebhookDispatcher
     /// <summary>Auth header for WordPress Promotion Engine inbound API.</summary>
     public const string PromengSecretHeader = "X-Promeng-Secret";
 
+    private const int MaxAttempts = 3;
+    private static readonly TimeSpan[] RetryDelays = { TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3) };
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<PromotionWebhookDispatcher> _logger;
     private readonly ProductStorage _productStorage;
@@ -89,11 +92,11 @@ public class PromotionWebhookDispatcher
                 using var msg = new HttpRequestMessage(HttpMethod.Delete, deleteUrl);
                 if (!string.IsNullOrWhiteSpace(secret))
                     msg.Headers.TryAddWithoutValidation(PromengSecretHeader, secret!.Trim());
-                using var resp = await client.SendAsync(msg).ConfigureAwait(false);
-                if (!resp.IsSuccessStatusCode)
+                var promengOk = await SendWithRetriesAsync(client, msg, $"Promeng DELETE for {promotion.Id} → {deleteUrl}").ConfigureAwait(false);
+                if (!promengOk)
                 {
-                    _logger.LogWarning("Promeng DELETE for {PromotionId} → {Url} returned {Status}",
-                        promotion.Id, deleteUrl, (int)resp.StatusCode);
+                    _logger.LogWarning("Promeng DELETE for {PromotionId} → {Url} failed after {Attempts} attempts",
+                        promotion.Id, deleteUrl, MaxAttempts);
                 }
                 return;
             }
@@ -110,11 +113,11 @@ public class PromotionWebhookDispatcher
             postMsg.Headers.TryAddWithoutValidation("X-StoreOS-Event", EventDeleted);
             if (!string.IsNullOrWhiteSpace(secret))
                 postMsg.Headers.TryAddWithoutValidation(SignatureHeader, ComputeHmacSha256Hex(body, secret!));
-            using var postResp = await client.SendAsync(postMsg).ConfigureAwait(false);
-            if (!postResp.IsSuccessStatusCode)
+            var ok = await SendWithRetriesAsync(client, postMsg, $"Promotion delete webhook for {promotion.Id} → {url}").ConfigureAwait(false);
+            if (!ok)
             {
-                _logger.LogWarning("Promotion delete webhook for {PromotionId} → {Url} returned {Status}",
-                    promotion.Id, url, (int)postResp.StatusCode);
+                _logger.LogWarning("Promotion delete webhook for {PromotionId} → {Url} failed after {Attempts} attempts",
+                    promotion.Id, url, MaxAttempts);
             }
         }
         catch (Exception e)
@@ -157,11 +160,11 @@ public class PromotionWebhookDispatcher
             if (!string.IsNullOrWhiteSpace(secret))
                 msg.Headers.TryAddWithoutValidation(SignatureHeader, ComputeHmacSha256Hex(body, secret!));
 
-            using var resp = await client.SendAsync(msg).ConfigureAwait(false);
-            if (!resp.IsSuccessStatusCode)
+            var ok = await SendWithRetriesAsync(client, msg, $"Promotion webhook {eventName} for {promotion.Id} → {url}").ConfigureAwait(false);
+            if (!ok)
             {
-                _logger.LogWarning("Promotion webhook {Event} for {PromotionId} → {Url} returned {Status}",
-                    eventName, promotion.Id, url, (int)resp.StatusCode);
+                _logger.LogWarning("Promotion webhook {Event} for {PromotionId} → {Url} failed after {Attempts} attempts",
+                    eventName, promotion.Id, url, MaxAttempts);
             }
         }
         catch (Exception e)
@@ -193,12 +196,56 @@ public class PromotionWebhookDispatcher
         if (!string.IsNullOrWhiteSpace(secret))
             msg.Headers.TryAddWithoutValidation(PromengSecretHeader, secret!.Trim());
 
-        using var resp = await client.SendAsync(msg).ConfigureAwait(false);
-        if (!resp.IsSuccessStatusCode)
+        var ok = await SendWithRetriesAsync(client, msg, $"Promeng webhook {eventName} for {promotion.Id} → {url}").ConfigureAwait(false);
+        if (!ok)
         {
-            _logger.LogWarning("Promeng webhook {Event} for {PromotionId} → {Url} returned {Status}",
-                eventName, promotion.Id, url, (int)resp.StatusCode);
+            _logger.LogWarning("Promeng webhook {Event} for {PromotionId} → {Url} failed after {Attempts} attempts",
+                eventName, promotion.Id, url, MaxAttempts);
         }
+    }
+
+    private async Task<bool> SendWithRetriesAsync(HttpClient client, HttpRequestMessage request, string logContext)
+    {
+        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
+        {
+            try
+            {
+                using var attemptRequest = await CloneRequestAsync(request).ConfigureAwait(false);
+                using var resp = await client.SendAsync(attemptRequest).ConfigureAwait(false);
+                if (resp.IsSuccessStatusCode) return true;
+                _logger.LogWarning("{Context} returned {Status} (attempt {Attempt}/{Max})",
+                    logContext, (int)resp.StatusCode, attempt, MaxAttempts);
+            }
+            catch (Exception ex) when (attempt < MaxAttempts)
+            {
+                _logger.LogWarning(ex, "{Context} threw (attempt {Attempt}/{Max})", logContext, attempt, MaxAttempts);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "{Context} threw on final attempt", logContext);
+                return false;
+            }
+
+            if (attempt < MaxAttempts)
+                await Task.Delay(RetryDelays[attempt - 1]).ConfigureAwait(false);
+        }
+        return false;
+    }
+
+    private static async Task<HttpRequestMessage> CloneRequestAsync(HttpRequestMessage request)
+    {
+        var clone = new HttpRequestMessage(request.Method, request.RequestUri);
+        foreach (var h in request.Headers)
+            clone.Headers.TryAddWithoutValidation(h.Key, h.Value);
+        if (request.Content is not null)
+        {
+            var bytes = await request.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+            var content = new ByteArrayContent(bytes);
+            foreach (var h in request.Content.Headers)
+                content.Headers.TryAddWithoutValidation(h.Key, h.Value);
+            clone.Content = content;
+        }
+        return clone;
     }
 
     internal static bool IsPromengUrl(string url) =>
@@ -233,6 +280,7 @@ public class PromotionWebhookDispatcher
         channels_json = p.ChannelsJson,
         coupon_code = p.CouponCode,
         applies_to_summary = p.AppliesToSummary,
+        priority = p.Priority,
         payload_json = p.PayloadJson,
         creation_time = p.CreationTime,
         updated_date = p.UpdatedDate,

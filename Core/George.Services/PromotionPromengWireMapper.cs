@@ -61,7 +61,7 @@ public static class PromotionPromengWireMapper
             show_label = p.ShowBadge,
             requires_coupon = !string.IsNullOrWhiteSpace(p.CouponCode),
             coupon_code = string.IsNullOrWhiteSpace(p.CouponCode) ? null : p.CouponCode.Trim(),
-            priority = 10,
+            priority = p.Priority > 0 ? p.Priority : 10,
             starts_at = FormatPromengDateTime(p.ScheduleStartDateUtc),
             ends_at = FormatPromengDateTime(p.ScheduleEndDateUtc),
             weekdays = MapWeekdays(root),
