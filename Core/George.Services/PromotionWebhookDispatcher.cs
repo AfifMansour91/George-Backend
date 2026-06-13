@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using George.Data;
 using George.DB;
 using Microsoft.Extensions.Logging;
 
@@ -22,17 +23,29 @@ public class PromotionWebhookDispatcher
     public const string EventCreated = "promotion.created";
     public const string EventUpdated = "promotion.updated";
     public const string EventEnded = "promotion.ended";
+    public const string EventDeleted = "promotion.deleted";
 
     /// <summary>Header carrying the hex-encoded HMAC-SHA256 signature when a secret is configured.</summary>
     public const string SignatureHeader = "X-StoreOS-Signature";
 
+    /// <summary>Auth header for WordPress Promotion Engine inbound API.</summary>
+    public const string PromengSecretHeader = "X-Promeng-Secret";
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<PromotionWebhookDispatcher> _logger;
+    private readonly ProductStorage _productStorage;
+    private readonly CategoryStorage _categoryStorage;
 
-    public PromotionWebhookDispatcher(IHttpClientFactory httpClientFactory, ILogger<PromotionWebhookDispatcher> logger)
+    public PromotionWebhookDispatcher(
+        IHttpClientFactory httpClientFactory,
+        ILogger<PromotionWebhookDispatcher> logger,
+        ProductStorage productStorage,
+        CategoryStorage categoryStorage)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _productStorage = productStorage;
+        _categoryStorage = categoryStorage;
     }
 
     /// <summary>Convenience wrapper. <paramref name="site"/> may be null — call is then a no-op.</summary>
@@ -47,26 +60,95 @@ public class PromotionWebhookDispatcher
         if (string.IsNullOrWhiteSpace(url) || promotion is null || string.IsNullOrWhiteSpace(eventName))
             return Task.CompletedTask;
 
-        // Snake-case wire body matches the spec example bodies (`event`, `promotion_id`, `promotion`).
-        var body = JsonSerializer.Serialize(new
-        {
-            @event = eventName,
-            promotion_id = promotion.Id,
-            promotion = ToWireDto(promotion),
-        });
-
-        // Fire-and-forget: don't await. Use a fresh CancellationToken since the request token
-        // belongs to the API call that's about to return.
-        _ = Task.Run(() => SendAsync(eventName, promotion.Id, url!.Trim(), secret, body), CancellationToken.None);
+        _ = Task.Run(() => SendAsync(eventName, promotion, url!.Trim(), secret), CancellationToken.None);
         return Task.CompletedTask;
     }
 
-    private async Task SendAsync(string eventName, int promotionId, string url, string? secret, string body)
+    /// <summary>Notify downstream (StoreOS JSON or Promeng DELETE) before a promotion row is removed.</summary>
+    public Task FireDeleteAsync(Promotion promotion, Site? site, CancellationToken cancelToken = default)
+    {
+        if (site is null || string.IsNullOrWhiteSpace(site.PromotionWebhookUrl))
+            return Task.CompletedTask;
+
+        var url = site.PromotionWebhookUrl.Trim();
+        var secret = site.PromotionWebhookSecret;
+        _ = Task.Run(() => SendDeleteAsync(promotion, url, secret), CancellationToken.None);
+        return Task.CompletedTask;
+    }
+
+    private async Task SendDeleteAsync(Promotion promotion, string url, string? secret)
     {
         try
         {
             var client = _httpClientFactory.CreateClient();
             client.Timeout = TimeSpan.FromSeconds(10);
+
+            if (IsPromengUrl(url))
+            {
+                var deleteUrl = BuildPromengDeleteUrl(url, promotion.Id);
+                using var msg = new HttpRequestMessage(HttpMethod.Delete, deleteUrl);
+                if (!string.IsNullOrWhiteSpace(secret))
+                    msg.Headers.TryAddWithoutValidation(PromengSecretHeader, secret!.Trim());
+                using var resp = await client.SendAsync(msg).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Promeng DELETE for {PromotionId} → {Url} returned {Status}",
+                        promotion.Id, deleteUrl, (int)resp.StatusCode);
+                }
+                return;
+            }
+
+            var body = JsonSerializer.Serialize(new
+            {
+                @event = EventDeleted,
+                promotion_id = promotion.Id,
+                promotion = ToWireDto(promotion),
+            });
+            using var content = new StringContent(body, Encoding.UTF8, "application/json");
+            content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+            using var postMsg = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+            postMsg.Headers.TryAddWithoutValidation("X-StoreOS-Event", EventDeleted);
+            if (!string.IsNullOrWhiteSpace(secret))
+                postMsg.Headers.TryAddWithoutValidation(SignatureHeader, ComputeHmacSha256Hex(body, secret!));
+            using var postResp = await client.SendAsync(postMsg).ConfigureAwait(false);
+            if (!postResp.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Promotion delete webhook for {PromotionId} → {Url} returned {Status}",
+                    promotion.Id, url, (int)postResp.StatusCode);
+            }
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Promotion delete webhook for {PromotionId} → {Url} failed", promotion.Id, url);
+        }
+    }
+
+    internal static string BuildPromengDeleteUrl(string upsertUrl, int promotionId)
+    {
+        var baseUrl = upsertUrl.TrimEnd('/');
+        return $"{baseUrl}/{PromotionPromengWireMapper.ExternalId(new Promotion { Id = promotionId })}";
+    }
+
+    private async Task SendAsync(string eventName, Promotion promotion, string url, string? secret)
+    {
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(10);
+
+            if (IsPromengUrl(url))
+            {
+                await SendPromengAsync(client, eventName, promotion, url, secret).ConfigureAwait(false);
+                return;
+            }
+
+            var body = JsonSerializer.Serialize(new
+            {
+                @event = eventName,
+                promotion_id = promotion.Id,
+                promotion = ToWireDto(promotion),
+            });
+
             using var content = new StringContent(body, Encoding.UTF8, "application/json");
             content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
 
@@ -79,14 +161,48 @@ public class PromotionWebhookDispatcher
             if (!resp.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Promotion webhook {Event} for {PromotionId} → {Url} returned {Status}",
-                    eventName, promotionId, url, (int)resp.StatusCode);
+                    eventName, promotion.Id, url, (int)resp.StatusCode);
             }
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "Promotion webhook {Event} for {PromotionId} → {Url} failed", eventName, promotionId, url);
+            _logger.LogError(e, "Promotion webhook {Event} for {PromotionId} → {Url} failed", eventName, promotion.Id, url);
         }
     }
+
+    private async Task SendPromengAsync(HttpClient client, string eventName, Promotion promotion, string url, string? secret)
+    {
+        var productIds = new HashSet<int>();
+        var categoryIds = new HashSet<int>();
+        PromotionPromengWireMapper.CollectGeorgeIdsFromPayload(promotion, productIds, categoryIds);
+
+        var productMap = await _productStorage
+            .GetWooCommerceIdMapForProductIdsAsync(productIds.ToList(), CancellationToken.None)
+            .ConfigureAwait(false);
+        var categoryMap = await _categoryStorage
+            .GetWooCommerceIdMapForCategoryIdsAsync(categoryIds.ToList(), CancellationToken.None)
+            .ConfigureAwait(false);
+
+        var upsert = PromotionPromengWireMapper.ToUpsertBody(promotion, eventName, productMap, categoryMap);
+        var body = JsonSerializer.Serialize(new { promotions = new[] { upsert } });
+
+        using var content = new StringContent(body, Encoding.UTF8, "application/json");
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+
+        using var msg = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+        if (!string.IsNullOrWhiteSpace(secret))
+            msg.Headers.TryAddWithoutValidation(PromengSecretHeader, secret!.Trim());
+
+        using var resp = await client.SendAsync(msg).ConfigureAwait(false);
+        if (!resp.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("Promeng webhook {Event} for {PromotionId} → {Url} returned {Status}",
+                eventName, promotion.Id, url, (int)resp.StatusCode);
+        }
+    }
+
+    internal static bool IsPromengUrl(string url) =>
+        url.Contains("promeng/v1", StringComparison.OrdinalIgnoreCase);
 
     private static string ComputeHmacSha256Hex(string body, string secret)
     {

@@ -33,11 +33,11 @@ public static class PromotionEvaluator
     /// Either an applied promotion (threshold met) or a near-miss promotion (scope matches,
     /// threshold not yet met). Both can be null when the promotion doesn't apply at all.
     /// </summary>
-    private readonly record struct EvalOutcome(AppliedPromotion? Applied, NearbyPromotion? Nearby)
+    private readonly record struct EvalOutcome(AppliedPromotion? Applied, NearbyPromotion? Nearby, NearbyPromotion? SecondaryNearby = null)
     {
-        public static EvalOutcome None => new(null, null);
-        public static EvalOutcome From(AppliedPromotion a) => new(a, null);
-        public static EvalOutcome NearMiss(NearbyPromotion n) => new(null, n);
+        public static EvalOutcome None => new(null, null, null);
+        public static EvalOutcome From(AppliedPromotion a, NearbyPromotion? secondaryNearby = null) => new(a, null, secondaryNearby);
+        public static EvalOutcome NearMiss(NearbyPromotion n) => new(null, n, null);
     }
 
     public static EvaluatePromotionsRes Evaluate(
@@ -90,6 +90,11 @@ public static class PromotionEvaluator
                 {
                     res.PromotionsNearby.Add(outcome.Nearby);
                 }
+
+                if (outcome.SecondaryNearby is not null)
+                {
+                    res.PromotionsNearby.Add(outcome.SecondaryNearby);
+                }
             }
             catch (JsonException)
             {
@@ -101,6 +106,8 @@ public static class PromotionEvaluator
             }
         }
 
+        ApplyCouponPromotionCap(candidates, res);
+        ApplyMaxPerLineStacking(res);
         return res;
     }
 
@@ -197,6 +204,7 @@ public static class PromotionEvaluator
         {
             if (line.PricePerUnit is null || line.Quantity <= 0) continue;
             if (TryGetIntId(line.ProductId, out var pid) && excludedIds.Contains(pid)) continue;
+            if (!defaults.ApplyOnDiscountedProducts && IsLineCatalogDiscounted(line)) continue;
 
             bool ok = wholeCart
                 ? true
@@ -227,7 +235,7 @@ public static class PromotionEvaluator
             var minQty = ReadInt(payload, "minPurchaseQuantity");
             var minAmt = ReadDecimal(payload, "minPurchaseAmount");
             decimal currentQty = eligible.Sum(e => e.Quantity);
-            decimal cartTotal = req.CartTotal ?? eligible.Sum(e => e.OriginalPrice);
+            decimal cartTotal = ResolveDisplaySubtotal(req);
             if (minQty is { } mq && currentQty < mq)
             {
                 return EvalOutcome.NearMiss(new NearbyPromotion
@@ -329,9 +337,9 @@ public static class PromotionEvaluator
         if (!payload.TryGetProperty("pricing", out var pricing) || pricing.ValueKind != JsonValueKind.Object) return EvalOutcome.None;
 
         var scope = (ReadString(cond, "scope") ?? "product").ToLowerInvariant();
-        var qty = ReadInt(cond, "quantity") ?? 0;
+        var buyQty = ReadQuantity(cond, "quantity");
         var fixedPrice = ReadDecimal(pricing, "fixedPrice") ?? 0m;
-        if (qty <= 0 || fixedPrice <= 0m) return EvalOutcome.None;
+        if (buyQty <= 0m || fixedPrice <= 0m) return EvalOutcome.None;
 
         var excludedIds = ReadIntSet(cond, "excludedProductIds");
         var eligibleLines = new List<EvaluateCartLine>();
@@ -340,7 +348,11 @@ public static class PromotionEvaluator
             var pid = ReadInt(cond, "productId");
             if (pid is null) return EvalOutcome.None;
             foreach (var line in req.Cart)
+            {
+                if (IsPromotionGiftLine(line)) continue;
+                if (!defaults.ApplyOnDiscountedProducts && IsLineCatalogDiscounted(line)) continue;
                 if (TryGetIntId(line.ProductId, out var lid) && lid == pid) eligibleLines.Add(line);
+            }
         }
         else if (scope == "category")
         {
@@ -348,6 +360,8 @@ public static class PromotionEvaluator
             if (cid is null) return EvalOutcome.None;
             foreach (var line in req.Cart)
             {
+                if (IsPromotionGiftLine(line)) continue;
+                if (!defaults.ApplyOnDiscountedProducts && IsLineCatalogDiscounted(line)) continue;
                 if (!LineMatchesCategory(line, cid.Value)) continue;
                 if (TryGetIntId(line.ProductId, out var pid2) && excludedIds.Contains(pid2)) continue;
                 eligibleLines.Add(line);
@@ -356,25 +370,20 @@ public static class PromotionEvaluator
         if (eligibleLines.Count == 0) return EvalOutcome.None;
 
         decimal totalQty = eligibleLines.Sum(l => l.Quantity);
-        if (totalQty < qty)
+        if (totalQty < buyQty)
         {
-            // Near-miss: tell the storefront how much more to add and the saving they'd unlock.
-            decimal listSum = eligibleLines
-                .Where(l => l.PricePerUnit.HasValue)
-                .Sum(l => l.PricePerUnit!.Value * l.Quantity);
-            decimal? potential = null;
             decimal perUnit = eligibleLines
                 .Where(l => l.PricePerUnit.HasValue && l.Quantity > 0)
                 .Select(l => l.PricePerUnit!.Value)
                 .DefaultIfEmpty(0m)
                 .Max();
-            if (perUnit > 0m) potential = Math.Max(0m, perUnit * qty - fixedPrice);
+            decimal? potential = perUnit > 0m ? Math.Max(0m, perUnit * buyQty - fixedPrice) : null;
             return EvalOutcome.NearMiss(new NearbyPromotion
             {
                 PromotionId = p.Id,
                 PromotionType = "buy_x_pay_y",
                 PromotionName = p.Name,
-                Missing = new MissingThreshold { Kind = "quantity", Current = totalQty, Required = qty },
+                Missing = new MissingThreshold { Kind = "quantity", Current = totalQty, Required = buyQty },
                 PotentialSaving = potential,
                 TriggerProductIds = ProductIdsFromLines(eligibleLines),
             });
@@ -383,67 +392,110 @@ public static class PromotionEvaluator
         var policy = (ReadString(payload, "overagePolicy") ?? defaults.OveragePolicyDefault).ToLowerInvariant();
         if (policy != "same_price" && policy != "full_price") policy = "full_price";
 
+        var (perOrderLimit, _) = ReadLimits(payload);
+        int bundlesApplied = (int)Math.Floor(totalQty / buyQty);
+        if (perOrderLimit is > 0) bundlesApplied = Math.Min(bundlesApplied, perOrderLimit.Value);
+        if (bundlesApplied < 1) return EvalOutcome.None;
+
+        decimal bundledQty = bundlesApplied * buyQty;
+        decimal overageQty = totalQty - bundledQty;
+
+        var pricedLines = eligibleLines
+            .Where(l => l.PricePerUnit.HasValue && l.Quantity > 0)
+            .Select(l => (Line: l, Price: l.PricePerUnit!.Value))
+            .OrderByDescending(x => x.Price)
+            .ToList();
+
+        decimal needed = bundledQty;
+        var consumedValueByProduct = new Dictionary<string, decimal>(StringComparer.Ordinal);
+        decimal bundledNormalValue = 0m;
+        var remainingByProduct = new Dictionary<string, decimal>(StringComparer.Ordinal);
+        foreach (var pl in pricedLines)
+            remainingByProduct[pl.Line.ProductId] = pl.Line.Quantity;
+
+        foreach (var pl in pricedLines)
+        {
+            if (needed <= 0m) break;
+            if (!remainingByProduct.TryGetValue(pl.Line.ProductId, out var avail) || avail <= 0m) continue;
+            var take = Math.Min(avail, needed);
+            var value = take * pl.Price;
+            bundledNormalValue += value;
+            consumedValueByProduct[pl.Line.ProductId] =
+                consumedValueByProduct.GetValueOrDefault(pl.Line.ProductId) + value;
+            remainingByProduct[pl.Line.ProductId] = avail - take;
+            needed -= take;
+        }
+
+        decimal promoCost = bundlesApplied * fixedPrice;
+        decimal overageCost = 0m;
+        if (overageQty > 0m)
+        {
+            var overagePool = pricedLines
+                .Select(pl => (pl.Line, pl.Price, Remaining: remainingByProduct.GetValueOrDefault(pl.Line.ProductId)))
+                .Where(x => x.Remaining > 0m)
+                .OrderBy(x => x.Price)
+                .ToList();
+            decimal overLeft = overageQty;
+            foreach (var entry in overagePool)
+            {
+                if (overLeft <= 0m) break;
+                var take = Math.Min(entry.Remaining, overLeft);
+                if (policy == "same_price")
+                    overageCost += take * (buyQty == 0m ? 0m : fixedPrice / buyQty);
+                else
+                    overageCost += take * entry.Price;
+                overLeft -= take;
+            }
+        }
+
         decimal originalEligibleCost = eligibleLines
             .Where(l => l.PricePerUnit.HasValue)
             .Sum(l => l.PricePerUnit!.Value * l.Quantity);
-
-        var (perOrderLimit, _) = ReadLimits(payload);
-        decimal total;
-        decimal baseQty = qty;
-        decimal actualQty = totalQty;
-        decimal overage;
-        decimal promoPrice;
-        decimal overagePrice;
-
-        if (perOrderLimit is > 0)
-        {
-            int bundlesApplied = Math.Min((int)Math.Floor(totalQty / qty), perOrderLimit.Value);
-            if (bundlesApplied < 1) return EvalOutcome.None;
-
-            decimal promoUnits = bundlesApplied * qty;
-            decimal outsideUnits = totalQty - promoUnits;
-            promoPrice = bundlesApplied * fixedPrice;
-            if (policy == "same_price")
-            {
-                var perUnit = qty == 0 ? 0m : fixedPrice / qty;
-                overagePrice = Math.Round(perUnit * outsideUnits, 2, MidpointRounding.AwayFromZero);
-            }
-            else
-            {
-                decimal maxUnitPrice = eligibleLines
-                    .Where(l => l.PricePerUnit.HasValue && l.Quantity > 0)
-                    .Select(l => l.PricePerUnit!.Value)
-                    .DefaultIfEmpty(0m)
-                    .Max();
-                overagePrice = Math.Round(maxUnitPrice * outsideUnits, 2, MidpointRounding.AwayFromZero);
-            }
-            overage = outsideUnits;
-            total = promoPrice + overagePrice;
-            actualQty = promoUnits;
-        }
-        else
-        {
-            overage = Math.Max(0m, actualQty - baseQty);
-            promoPrice = fixedPrice;
-            if (policy == "same_price")
-            {
-                var perUnit = baseQty == 0 ? 0m : fixedPrice / baseQty;
-                overagePrice = Math.Round(perUnit * overage, 2, MidpointRounding.AwayFromZero);
-            }
-            else
-            {
-                decimal perUnit = eligibleLines
-                    .Where(l => l.PricePerUnit.HasValue && l.Quantity > 0)
-                    .Select(l => l.PricePerUnit!.Value)
-                    .DefaultIfEmpty(0m)
-                    .Max();
-                overagePrice = Math.Round(perUnit * overage, 2, MidpointRounding.AwayFromZero);
-            }
-            total = promoPrice + overagePrice;
-        }
-
-        decimal discountAmount = Math.Max(0m, originalEligibleCost - total);
+        decimal totalCost = promoCost + overageCost;
+        decimal discountAmount = Math.Max(0m, originalEligibleCost - totalCost);
         if (discountAmount <= 0m) return EvalOutcome.None;
+
+        var eligibleItems = new List<EligibleItem>();
+        if (bundledNormalValue > 0m)
+        {
+            foreach (var pl in pricedLines)
+            {
+                if (!consumedValueByProduct.TryGetValue(pl.Line.ProductId, out var consumedVal) || consumedVal <= 0m)
+                    continue;
+                var lineQty = pl.Line.Quantity;
+                var lineOriginal = pl.Price * lineQty;
+                var lineDiscount = discountAmount * (consumedVal / bundledNormalValue);
+                eligibleItems.Add(new EligibleItem
+                {
+                    ProductId = pl.Line.ProductId,
+                    Quantity = lineQty,
+                    OriginalPrice = lineOriginal,
+                    DiscountAmount = lineDiscount,
+                    FinalPrice = lineOriginal - lineDiscount,
+                });
+            }
+        }
+
+        decimal roundedDiscount = Math.Round(discountAmount, 2, MidpointRounding.AwayFromZero);
+        foreach (var ei in eligibleItems)
+        {
+            ei.DiscountAmount = Math.Round(ei.DiscountAmount, 2, MidpointRounding.AwayFromZero);
+            ei.FinalPrice = Math.Round(ei.OriginalPrice - ei.DiscountAmount, 2, MidpointRounding.AwayFromZero);
+        }
+
+        NearbyPromotion? nextSet = null;
+        decimal remainder = totalQty - bundledQty;
+        if (remainder > 0.001m && !(perOrderLimit is > 0 && bundlesApplied >= perOrderLimit.Value))
+        {
+            nextSet = new NearbyPromotion
+            {
+                PromotionId = p.Id,
+                PromotionType = "buy_x_pay_y",
+                PromotionName = p.Name,
+                Missing = new MissingThreshold { Kind = "next_set", Current = remainder, Required = buyQty },
+                TriggerProductIds = ProductIdsFromLines(eligibleLines),
+            };
+        }
 
         return EvalOutcome.From(new AppliedPromotion
         {
@@ -451,20 +503,21 @@ public static class PromotionEvaluator
             PromotionType = "buy_x_pay_y",
             PromotionName = p.Name,
             DiscountType = "fixed_price",
-            DiscountAmount = discountAmount,
+            DiscountAmount = roundedDiscount,
+            EligibleItems = eligibleItems.Count > 0 ? eligibleItems : null,
             PriceBreakdown = new BxpyPriceBreakdown
             {
-                BaseQuantity = baseQty,
-                ActualQuantity = actualQty,
-                OverageQuantity = overage,
+                BaseQuantity = buyQty,
+                ActualQuantity = bundledQty,
+                OverageQuantity = overageQty,
                 OveragePolicy = policy,
-                PromotionPrice = promoPrice,
-                OveragePrice = overagePrice,
-                Total = total,
-                DisplayPricePerUnit = baseQty == 0 ? 0m : Math.Round(promoPrice / baseQty, 2, MidpointRounding.AwayFromZero),
+                PromotionPrice = promoCost,
+                OveragePrice = Math.Round(overageCost, 2, MidpointRounding.AwayFromZero),
+                Total = Math.Round(totalCost, 2, MidpointRounding.AwayFromZero),
+                DisplayPricePerUnit = buyQty == 0m ? 0m : Math.Round(promoCost / bundledQty, 2, MidpointRounding.AwayFromZero),
             },
             TriggerProductIds = ProductIdsFromLines(eligibleLines),
-        });
+        }, nextSet);
     }
 
     // ─── BUY X GET Y ─────────────────────────────────────────────────────────────
@@ -475,14 +528,69 @@ public static class PromotionEvaluator
         if (!payload.TryGetProperty("condition", out var cond) || cond.ValueKind != JsonValueKind.Object) return EvalOutcome.None;
         if (!payload.TryGetProperty("reward", out var reward) || reward.ValueKind != JsonValueKind.Object) return EvalOutcome.None;
 
+        var benefitAppliesTo = (ReadString(reward, "benefitAppliesTo") ?? "products").ToLowerInvariant();
+        if (benefitAppliesTo is "product") benefitAppliesTo = "products";
+        if (benefitAppliesTo is "category") benefitAppliesTo = "categories";
+
+        var rewardIds = ReadIntSet(reward, "productIds").ToList();
+        if (benefitAppliesTo == "products" && rewardIds.Count == 0) return EvalOutcome.None;
+
+        var discountType = (ReadString(reward, "discountType") ?? "free").ToLowerInvariant();
+        var discountValue = ReadDecimal(reward, "discountValue");
+        var benefitQuantity = Math.Max(1, ReadInt(reward, "benefitQuantity") ?? ReadInt(reward, "maxQuantity") ?? 1);
+        var applyToCheapest = ReadBool(reward, "applyToCheapest") == true;
+        var autoAdd = ReadBool(reward, "autoAdd") != false; // default true like WP admin form
+
         var productScope = (ReadString(cond, "productScope") ?? "all").ToLowerInvariant();
-        var productIds = ReadIntSet(cond, "productIds");
-        var categoryIds = ReadIntSet(cond, "categoryIds");
+        var buyProductIds = ReadIntSet(cond, "productIds");
+        var buyCategoryIds = ReadIntSet(cond, "categoryIds");
         var excludedIds = ReadIntSet(cond, "excludedProductIds");
 
-        var buy = new List<EvaluateCartLine>();
-        foreach (var line in req.Cart)
+        var buyLines = CollectBxgyBuyLines(req.Cart, productScope, buyProductIds, buyCategoryIds, excludedIds, defaults);
+        if (buyLines.Count == 0) return EvalOutcome.None;
+
+        var minQty = ReadInt(cond, "minQuantity") ?? 1;
+        var minAmt = ReadDecimal(cond, "minAmount");
+        decimal buyQty = buyLines.Sum(l => l.Quantity);
+        decimal buyAmt = buyLines.Where(l => l.PricePerUnit.HasValue).Sum(l => l.PricePerUnit!.Value * l.Quantity);
+        decimal displaySubtotal = ResolveDisplaySubtotal(req);
+
+        NearbyPromotion BuildNearby(string kind, decimal current, decimal required) => new NearbyPromotion
         {
+            PromotionId = p.Id,
+            PromotionType = "buy_x_get_y",
+            PromotionName = p.Name,
+            Missing = new MissingThreshold { Kind = kind, Current = current, Required = required },
+            RewardProductId = benefitAppliesTo == "products" && rewardIds.Count == 1 ? rewardIds[0] : null,
+            RewardDiscountType = discountType,
+            RewardDiscountValue = discountValue,
+            TriggerProductIds = ProductIdsFromLines(buyLines),
+        };
+
+        if (buyQty < minQty) return EvalOutcome.NearMiss(BuildNearby("quantity", buyQty, minQty));
+        if (minAmt is > 0 && displaySubtotal < minAmt) return EvalOutcome.NearMiss(BuildNearby("amount", displaySubtotal, minAmt.Value));
+
+        var (perOrderLimit, _) = ReadLimits(payload);
+
+        if (benefitAppliesTo != "products")
+            return EvaluateBxgySharedPool(p, payload, req, buyLines, minQty, minAmt, benefitAppliesTo, reward, benefitQuantity, applyToCheapest, perOrderLimit, discountType, discountValue);
+
+        return EvaluateBxgyDistinctProducts(p, req, buyLines, minQty, buyAmt, minAmt, displaySubtotal, rewardIds, discountType, discountValue, benefitQuantity, applyToCheapest, autoAdd, perOrderLimit);
+    }
+
+    private static List<EvaluateCartLine> CollectBxgyBuyLines(
+        IReadOnlyList<EvaluateCartLine> cart,
+        string productScope,
+        HashSet<int> productIds,
+        HashSet<int> categoryIds,
+        HashSet<int> excludedIds,
+        SiteEvaluationDefaults defaults)
+    {
+        var buy = new List<EvaluateCartLine>();
+        foreach (var line in cart)
+        {
+            if (IsPromotionGiftLine(line)) continue;
+            if (!defaults.ApplyOnDiscountedProducts && IsLineCatalogDiscounted(line)) continue;
             if (TryGetIntId(line.ProductId, out var lid) && excludedIds.Contains(lid)) continue;
             bool ok = productScope switch
             {
@@ -493,51 +601,36 @@ public static class PromotionEvaluator
             };
             if (ok) buy.Add(line);
         }
-        if (buy.Count == 0) return EvalOutcome.None;
+        return buy;
+    }
 
-        var rewardIds = ReadIntSet(reward, "productIds").ToList();
-        if (rewardIds.Count == 0) return EvalOutcome.None;
-        var discountType = (ReadString(reward, "discountType") ?? "free").ToLowerInvariant();
-        var discountValue = ReadDecimal(reward, "discountValue");
+    private static EvalOutcome EvaluateBxgyDistinctProducts(
+        Promotion p,
+        EvaluatePromotionsReq req,
+        List<EvaluateCartLine> buyLines,
+        int minQty,
+        decimal buyAmt,
+        decimal? minAmt,
+        decimal cartSubtotal,
+        List<int> rewardIds,
+        string discountType,
+        decimal? discountValue,
+        int benefitQuantity,
+        bool applyToCheapest,
+        bool autoAdd,
+        int? perOrderLimit)
+    {
+        decimal buyQty = buyLines.Sum(l => l.Quantity);
+        int fulfillments = (int)Math.Floor(buyQty / minQty);
+        if (fulfillments < 1) return EvalOutcome.None;
 
-        // Threshold check + near-miss capture.
-        var minQty = ReadInt(cond, "minQuantity");
-        var minAmt = ReadDecimal(cond, "minAmount");
-        decimal currentQty = buy.Sum(l => l.Quantity);
-        decimal currentAmt = buy.Where(l => l.PricePerUnit.HasValue).Sum(l => l.PricePerUnit!.Value * l.Quantity);
+        int benefitUnits = fulfillments * benefitQuantity;
+        if (perOrderLimit is > 0) benefitUnits = Math.Min(benefitUnits, perOrderLimit.Value);
+        if (benefitUnits < 1) return EvalOutcome.None;
 
-        // Single-reward near-miss carries the gift product info so the storefront can render
-        // "הוסף עוד X כדי לקבל [שם המוצר] חינם" (spec).
-        NearbyPromotion BuildNearby(string kind, decimal current, decimal required) => new NearbyPromotion
-        {
-            PromotionId = p.Id,
-            PromotionType = "buy_x_get_y",
-            PromotionName = p.Name,
-            Missing = new MissingThreshold { Kind = kind, Current = current, Required = required },
-            RewardProductId = rewardIds.Count == 1 ? rewardIds[0] : null,
-            RewardDiscountType = discountType,
-            RewardDiscountValue = discountValue,
-            TriggerProductIds = ProductIdsFromLines(buy),
-        };
-
-        if (minQty is { } mq && currentQty < mq) return EvalOutcome.NearMiss(BuildNearby("quantity", currentQty, mq));
-        if (minAmt is { } ma && currentAmt < ma) return EvalOutcome.NearMiss(BuildNearby("amount", currentAmt, ma));
-
-        var (perOrderLimit, _) = ReadLimits(payload);
-        int maxQuantity = ReadInt(reward, "maxQuantity") ?? 1;
-        int naturalApplications = 1;
-        if (minQty is > 0)
-            naturalApplications = (int)Math.Floor(currentQty / minQty.Value);
-        else if (minAmt is > 0)
-            naturalApplications = (int)Math.Floor(currentAmt / minAmt.Value);
-        int applications = perOrderLimit is > 0
-            ? Math.Min(naturalApplications, perOrderLimit.Value)
-            : naturalApplications;
-        if (applications < 1) return EvalOutcome.None;
-
-        // Multi-reward → tell storefront to prompt; no discount yet.
         if (rewardIds.Count > 1)
         {
+            var nextSetMulti = BuildBxgyBuySideNextSetNudge(p, buyLines, buyQty, minQty, benefitQuantity, perOrderLimit, null, discountType, discountValue);
             return EvalOutcome.From(new AppliedPromotion
             {
                 PromotionId = p.Id,
@@ -547,14 +640,16 @@ public static class PromotionEvaluator
                 DiscountValue = discountValue,
                 DiscountAmount = 0m,
                 RewardOptions = rewardIds.Select(id => new RewardOption { ProductId = id, ProductName = string.Empty }).ToList(),
-                TriggerProductIds = ProductIdsFromLines(buy),
-            });
+                TriggerProductIds = ProductIdsFromLines(buyLines),
+                AutoAddQuantity = benefitUnits,
+            }, nextSetMulti);
         }
 
         var rewardId = rewardIds[0];
         var rewardLine = req.Cart.FirstOrDefault(l => TryGetIntId(l.ProductId, out var rid) && rid == rewardId);
         if (rewardLine is null || rewardLine.PricePerUnit is null)
         {
+            var nextSetUnlock = BuildBxgyBuySideNextSetNudge(p, buyLines, buyQty, minQty, benefitQuantity, perOrderLimit, rewardId, discountType, discountValue);
             return EvalOutcome.From(new AppliedPromotion
             {
                 PromotionId = p.Id,
@@ -564,27 +659,22 @@ public static class PromotionEvaluator
                 DiscountValue = discountValue,
                 DiscountAmount = 0m,
                 RewardProductId = rewardId,
-                TriggerProductIds = ProductIdsFromLines(buy),
-            });
+                TriggerProductIds = ProductIdsFromLines(buyLines),
+                AutoAddEligible = autoAdd && discountType == "free",
+                AutoAddQuantity = benefitUnits,
+            }, nextSetUnlock);
         }
 
-        decimal discountableQty = Math.Min(rewardLine.Quantity, maxQuantity * applications);
+        decimal discountableQty = Math.Min(rewardLine.Quantity, benefitUnits);
         if (discountableQty <= 0m) return EvalOutcome.None;
 
-        decimal originalRewardPortion = rewardLine.PricePerUnit.Value * discountableQty;
-        decimal rewardDiscount = discountType switch
-        {
-            "free" => originalRewardPortion,
-            "percentage" => discountValue is { } v && v > 0 && v <= 100
-                ? Math.Round(originalRewardPortion * v / 100m, 2, MidpointRounding.AwayFromZero)
-                : 0m,
-            "fixed_price" => discountValue is { } v && v >= 0
-                ? Math.Max(0m, originalRewardPortion - (v * discountableQty))
-                : 0m,
-            _ => 0m,
-        };
+        decimal perUnitBenefit = ComputeBxgyPerUnitBenefit(rewardLine.PricePerUnit.Value, discountType, discountValue);
+        if (perUnitBenefit <= 0m) return EvalOutcome.None;
+
+        decimal rewardDiscount = Math.Round(perUnitBenefit * discountableQty, 2, MidpointRounding.AwayFromZero);
         if (rewardDiscount <= 0m) return EvalOutcome.None;
 
+        var nextSetApplied = BuildBxgyBuySideNextSetNudge(p, buyLines, buyQty, minQty, benefitQuantity, perOrderLimit, rewardId, discountType, discountValue);
         return EvalOutcome.From(new AppliedPromotion
         {
             PromotionId = p.Id,
@@ -594,8 +684,406 @@ public static class PromotionEvaluator
             DiscountType = discountType,
             DiscountValue = discountValue,
             DiscountAmount = rewardDiscount,
-            TriggerProductIds = ProductIdsFromLines(buy),
-        });
+            EligibleItems =
+            [
+                new EligibleItem
+                {
+                    ProductId = rewardLine.ProductId,
+                    Quantity = discountableQty,
+                    OriginalPrice = rewardLine.PricePerUnit.Value * discountableQty,
+                    DiscountAmount = rewardDiscount,
+                    FinalPrice = rewardLine.PricePerUnit.Value * discountableQty - rewardDiscount,
+                },
+            ],
+            TriggerProductIds = ProductIdsFromLines(buyLines),
+        }, nextSetApplied);
+    }
+
+    private static EvalOutcome EvaluateBxgySharedPool(
+        Promotion p,
+        JsonElement payload,
+        EvaluatePromotionsReq req,
+        List<EvaluateCartLine> buyLines,
+        int minQty,
+        decimal? minAmt,
+        string benefitAppliesTo,
+        JsonElement reward,
+        int benefitQuantity,
+        bool applyToCheapest,
+        int? perOrderLimit,
+        string discountType,
+        decimal? discountValue)
+    {
+        if (!payload.TryGetProperty("condition", out var cond)) return EvalOutcome.None;
+
+        var productScope = (ReadString(cond, "productScope") ?? "all").ToLowerInvariant();
+        var buyProductIds = ReadIntSet(cond, "productIds");
+        var buyCategoryIds = ReadIntSet(cond, "categoryIds");
+        var buyExcluded = ReadIntSet(cond, "excludedProductIds");
+        var benefitCategoryIds = ReadIntSet(reward, "categoryIds");
+        var benefitExcluded = ReadIntSet(reward, "benefitExcludedProductIds");
+
+        var blines = new List<(EvaluateCartLine Line, decimal PerUnitBenefit)>();
+        foreach (var line in req.Cart)
+        {
+            if (!BxgyBenefitLineMatches(line, benefitAppliesTo, productScope, buyProductIds, buyCategoryIds, buyExcluded, ReadIntSet(reward, "productIds"), benefitCategoryIds, benefitExcluded))
+                continue;
+            if (line.PricePerUnit is null || line.PricePerUnit <= 0) continue;
+            var perUnit = ComputeBxgyPerUnitBenefit(line.PricePerUnit.Value, discountType, discountValue);
+            if (perUnit <= 0m) continue;
+            blines.Add((line, perUnit));
+        }
+        if (blines.Count == 0) return EvalOutcome.None;
+
+        var units = new List<(string ProductId, decimal Value)>();
+        var perUnitByProduct = new Dictionary<string, decimal>(StringComparer.Ordinal);
+        var qtyByProduct = new Dictionary<string, decimal>(StringComparer.Ordinal);
+        foreach (var (line, perUnit) in blines)
+        {
+            int whole = (int)Math.Floor(line.Quantity);
+            if (whole < 1) continue;
+            perUnitByProduct[line.ProductId] = perUnit;
+            qtyByProduct[line.ProductId] = line.Quantity;
+            for (int i = 0; i < whole; i++)
+                units.Add((line.ProductId, perUnit));
+        }
+        if (units.Count == 0) return EvalOutcome.None;
+
+        int group = minQty + benefitQuantity;
+        int fulfillments = group > 0 ? units.Count / group : 0;
+        if (fulfillments < 1) return EvalOutcome.None;
+
+        int benefitUnits = fulfillments * benefitQuantity;
+        if (perOrderLimit is > 0) benefitUnits = Math.Min(benefitUnits, perOrderLimit.Value);
+        if (benefitUnits < 1) return EvalOutcome.None;
+
+        var chosen = SelectBxgyBenefitUnits(units, benefitUnits, applyToCheapest);
+        if (chosen.Count == 0) return EvalOutcome.None;
+
+        var freed = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var pid in chosen)
+            freed[pid] = freed.TryGetValue(pid, out var c) ? c + 1 : 1;
+
+        var eligibleItems = new List<EligibleItem>();
+        decimal totalDiscount = 0m;
+        foreach (var (pid, count) in freed)
+        {
+            if (!perUnitByProduct.TryGetValue(pid, out var pu) || !qtyByProduct.TryGetValue(pid, out var lineQty) || lineQty <= 0)
+                continue;
+            decimal lineDiscount = Math.Round(pu * count, 2, MidpointRounding.AwayFromZero);
+            totalDiscount += lineDiscount;
+            eligibleItems.Add(new EligibleItem
+            {
+                ProductId = pid,
+                Quantity = count,
+                OriginalPrice = pu * count,
+                DiscountAmount = lineDiscount,
+                FinalPrice = 0m,
+            });
+        }
+        if (totalDiscount <= 0m) return EvalOutcome.None;
+
+        decimal buyQty = buyLines.Sum(l => l.Quantity);
+        var nextSetPool = BuildBxgyBuySideNextSetNudge(p, buyLines, buyQty, minQty, benefitQuantity, perOrderLimit, null, discountType, discountValue);
+        return EvalOutcome.From(new AppliedPromotion
+        {
+            PromotionId = p.Id,
+            PromotionType = "buy_x_get_y",
+            PromotionName = p.Name,
+            DiscountType = discountType,
+            DiscountValue = discountValue,
+            DiscountAmount = totalDiscount,
+            EligibleItems = eligibleItems,
+            TriggerProductIds = ProductIdsFromLines(buyLines),
+        }, nextSetPool);
+    }
+
+    private static NearbyPromotion? BuildBxgyBuySideNextSetNudge(
+        Promotion p,
+        IReadOnlyList<EvaluateCartLine> buyLines,
+        decimal buyQty,
+        int minQty,
+        int benefitQuantity,
+        int? perOrderLimit,
+        int? rewardProductId,
+        string discountType,
+        decimal? discountValue)
+    {
+        if (minQty < 1) return null;
+        int fulfillments = (int)Math.Floor(buyQty / minQty);
+        if (fulfillments < 1) return null;
+        decimal remainder = buyQty - fulfillments * minQty;
+        if (remainder <= 0.001m) return null;
+        if (perOrderLimit is > 0 && fulfillments * benefitQuantity >= perOrderLimit.Value) return null;
+
+        return new NearbyPromotion
+        {
+            PromotionId = p.Id,
+            PromotionType = "buy_x_get_y",
+            PromotionName = p.Name,
+            Missing = new MissingThreshold { Kind = "next_set", Current = remainder, Required = minQty },
+            RewardProductId = rewardProductId,
+            RewardDiscountType = discountType,
+            RewardDiscountValue = discountValue,
+            TriggerProductIds = ProductIdsFromLines(buyLines),
+        };
+    }
+
+    private static bool BxgyBenefitLineMatches(
+        EvaluateCartLine line,
+        string benefitAppliesTo,
+        string buyScope,
+        HashSet<int> buyProductIds,
+        HashSet<int> buyCategoryIds,
+        HashSet<int> buyExcluded,
+        HashSet<int> benefitProductIds,
+        HashSet<int> benefitCategoryIds,
+        HashSet<int> benefitExcluded)
+    {
+        if (IsPromotionGiftLine(line)) return false;
+        if (TryGetIntId(line.ProductId, out var pid) && benefitExcluded.Contains(pid)) return false;
+
+        if (benefitAppliesTo == "products")
+            return TryGetIntId(line.ProductId, out var pp) && benefitProductIds.Contains(pp);
+
+        if (benefitAppliesTo == "categories")
+            return LineMatchesAnyCategory(line, benefitCategoryIds);
+
+        if (benefitAppliesTo == "same")
+        {
+            if (TryGetIntId(line.ProductId, out var spid) && buyExcluded.Contains(spid)) return false;
+            return buyScope switch
+            {
+                "all" => true,
+                "specific_products" => TryGetIntId(line.ProductId, out var pp) && buyProductIds.Contains(pp),
+                "specific_categories" => LineMatchesAnyCategory(line, buyCategoryIds),
+                _ => true,
+            };
+        }
+
+        // all
+        return true;
+    }
+
+    private static decimal ComputeBxgyPerUnitBenefit(decimal price, string discountType, decimal? discountValue) =>
+        discountType switch
+        {
+            "free" => price,
+            "percentage" when discountValue is > 0 and <= 100 => Math.Round(price * discountValue.Value / 100m, 2, MidpointRounding.AwayFromZero),
+            "fixed_price" when discountValue is >= 0 => Math.Max(0m, price - discountValue.Value),
+            _ => 0m,
+        };
+
+    /// <summary>Israeli-law default: spread free units across price tiers; optional cheapest-only mode.</summary>
+    private static List<string> SelectBxgyBenefitUnits(List<(string ProductId, decimal Value)> units, int need, bool cheapest)
+    {
+        if (need < 1 || units.Count == 0) return new List<string>();
+
+        if (cheapest)
+        {
+            return units.OrderBy(u => u.Value).Take(need).Select(u => u.ProductId).ToList();
+        }
+
+        var sorted = units.OrderByDescending(u => u.Value).ToList();
+        if (need >= sorted.Count)
+            return sorted.Select(u => u.ProductId).ToList();
+
+        var picked = new List<string>();
+        for (int g = 0; g < need; g++)
+        {
+            int end = (int)Math.Floor((g + 1) * sorted.Count / (double)need);
+            int freeIdx = end - 1;
+            if (freeIdx >= 0 && freeIdx < sorted.Count)
+                picked.Add(sorted[freeIdx].ProductId);
+        }
+        return picked;
+    }
+
+    private static bool IsLineCatalogDiscounted(EvaluateCartLine line) =>
+        line.IsCatalogDiscounted == true;
+
+    /// <summary>
+    /// Cart subtotal for minimum-spend gates — prefers client <see cref="EvaluatePromotionsReq.CartTotal"/>
+    /// (display/checkout total, tax-inclusive when the storefront sends it) over a recomputed line sum.
+    /// </summary>
+    private static decimal ResolveDisplaySubtotal(EvaluatePromotionsReq req)
+    {
+        if (req.CartTotal is > 0m) return req.CartTotal.Value;
+        return req.Cart
+            .Where(l => !IsPromotionGiftLine(l) && l.PricePerUnit.HasValue)
+            .Sum(l => l.PricePerUnit!.Value * l.Quantity);
+    }
+
+    private static bool IsPromotionGiftLine(EvaluateCartLine line) =>
+        string.Equals(line.Source, "promotion_gift", StringComparison.OrdinalIgnoreCase);
+
+    // ─── Stacking (max discount per product line — matches WP plugin engine) ─────
+
+    /// <summary>
+    /// When multiple coupon-gated promotions match the same cart coupon, keep the best discount only.
+    /// Auto promotions (no coupon) are unaffected and stack via <see cref="ApplyMaxPerLineStacking"/>.
+    /// </summary>
+    private static void ApplyCouponPromotionCap(IReadOnlyList<Promotion> candidates, EvaluatePromotionsRes res)
+    {
+        if (res.PromotionsApplied.Count <= 1) return;
+
+        var couponByPromoId = new Dictionary<int, string?>();
+        foreach (var p in candidates)
+            couponByPromoId[p.Id] = NormalizeCoupon(p.CouponCode);
+
+        var couponGated = new List<(int Index, AppliedPromotion Applied)>();
+        for (int i = 0; i < res.PromotionsApplied.Count; i++)
+        {
+            var a = res.PromotionsApplied[i];
+            if (couponByPromoId.TryGetValue(a.PromotionId, out var code) && !string.IsNullOrEmpty(code))
+                couponGated.Add((i, a));
+        }
+        if (couponGated.Count <= 1) return;
+
+        var keepIndex = couponGated
+            .OrderByDescending(x => x.Applied.DiscountAmount)
+            .ThenBy(x => x.Index)
+            .First().Index;
+
+        var filtered = new List<AppliedPromotion>();
+        decimal total = 0m;
+        for (int i = 0; i < res.PromotionsApplied.Count; i++)
+        {
+            var a = res.PromotionsApplied[i];
+            if (couponByPromoId.TryGetValue(a.PromotionId, out var code)
+                && !string.IsNullOrEmpty(code)
+                && i != keepIndex)
+                continue;
+            filtered.Add(a);
+            total += a.DiscountAmount;
+        }
+        res.PromotionsApplied = filtered;
+        res.TotalDiscount = total;
+    }
+
+    private static void ApplyMaxPerLineStacking(EvaluatePromotionsRes res)
+    {
+        if (res.PromotionsApplied.Count <= 1) return;
+
+        var contributions = new List<Dictionary<string, decimal>>();
+        foreach (var a in res.PromotionsApplied)
+        {
+            if (IsSignalOnlyPromotion(a))
+            {
+                contributions.Add(new Dictionary<string, decimal>(StringComparer.Ordinal));
+                continue;
+            }
+            contributions.Add(ExtractProductDiscounts(a));
+        }
+
+        var bestByProduct = new Dictionary<string, (int PromoIndex, decimal Amount)>(StringComparer.Ordinal);
+        for (int i = 0; i < contributions.Count; i++)
+        {
+            foreach (var (pid, amt) in contributions[i])
+            {
+                if (amt <= 0m) continue;
+                if (!bestByProduct.TryGetValue(pid, out var cur) || amt > cur.Amount)
+                    bestByProduct[pid] = (i, amt);
+            }
+        }
+
+        var kept = new HashSet<int>();
+        for (int i = 0; i < res.PromotionsApplied.Count; i++)
+        {
+            var a = res.PromotionsApplied[i];
+            if (IsSignalOnlyPromotion(a))
+            {
+                kept.Add(i);
+                continue;
+            }
+            var map = contributions[i];
+            bool hasWinning = false;
+            foreach (var pid in map.Keys)
+            {
+                if (bestByProduct.TryGetValue(pid, out var win) && win.PromoIndex == i && win.Amount > 0m)
+                {
+                    hasWinning = true;
+                    break;
+                }
+            }
+            if (a.WholeCart && a.DiscountAmount > 0m) hasWinning = true;
+            if (hasWinning) kept.Add(i);
+        }
+
+        var filtered = new List<AppliedPromotion>();
+        decimal total = 0m;
+        for (int i = 0; i < res.PromotionsApplied.Count; i++)
+        {
+            if (!kept.Contains(i)) continue;
+            var a = res.PromotionsApplied[i];
+            if (!IsSignalOnlyPromotion(a) && a.EligibleItems?.Count > 0)
+            {
+                decimal promoTotal = 0m;
+                foreach (var ei in a.EligibleItems)
+                {
+                    if (bestByProduct.TryGetValue(ei.ProductId, out var win) && win.PromoIndex == i)
+                    {
+                        ei.DiscountAmount = win.Amount;
+                        ei.FinalPrice = ei.OriginalPrice - win.Amount;
+                        promoTotal += win.Amount;
+                    }
+                    else
+                    {
+                        ei.DiscountAmount = 0m;
+                        ei.FinalPrice = ei.OriginalPrice;
+                    }
+                }
+                a.DiscountAmount = a.WholeCart ? a.DiscountAmount : promoTotal;
+            }
+            else if (!IsSignalOnlyPromotion(a) && a.RewardProductId is int rid && a.DiscountAmount > 0m)
+            {
+                var pid = rid.ToString();
+                if (bestByProduct.TryGetValue(pid, out var win) && win.PromoIndex == i)
+                    a.DiscountAmount = win.Amount;
+                else
+                    continue;
+            }
+            else if (!IsSignalOnlyPromotion(a) && a.PromotionType == "buy_x_pay_y")
+            {
+                // BxPY discount is bundle-level — keep if any trigger product won or no overlap.
+                var triggers = a.TriggerProductIds ?? new List<string>();
+                bool ok = triggers.Count == 0 || triggers.Any(t => bestByProduct.ContainsKey(t));
+                if (!ok) continue;
+            }
+
+            filtered.Add(a);
+            total += a.DiscountAmount;
+        }
+
+        res.PromotionsApplied = filtered;
+        res.TotalDiscount = total;
+    }
+
+    private static bool IsSignalOnlyPromotion(AppliedPromotion a) =>
+        a.DiscountAmount <= 0m &&
+        (a.RewardProductId != null || (a.RewardOptions?.Count ?? 0) > 0);
+
+    private static Dictionary<string, decimal> ExtractProductDiscounts(AppliedPromotion a)
+    {
+        var map = new Dictionary<string, decimal>(StringComparer.Ordinal);
+        if (a.EligibleItems?.Count > 0)
+        {
+            foreach (var ei in a.EligibleItems)
+            {
+                if (ei.DiscountAmount <= 0) continue;
+                map[ei.ProductId] = map.TryGetValue(ei.ProductId, out var cur) ? cur + ei.DiscountAmount : ei.DiscountAmount;
+            }
+            return map;
+        }
+        if (a.RewardProductId is int rid && a.DiscountAmount > 0m)
+            map[rid.ToString()] = a.DiscountAmount;
+        else if (a.PromotionType == "buy_x_pay_y" && a.DiscountAmount > 0m && a.TriggerProductIds?.Count > 0)
+        {
+            var share = a.DiscountAmount / a.TriggerProductIds.Count;
+            foreach (var pid in a.TriggerProductIds)
+                map[pid] = share;
+        }
+        return map;
     }
 
     private static bool LineMatchesCategory(EvaluateCartLine line, int categoryId)
@@ -648,6 +1136,12 @@ public static class PromotionEvaluator
 
     private static string? ReadString(JsonElement obj, string name)
         => obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    private static decimal ReadQuantity(JsonElement obj, string name)
+    {
+        if (!obj.TryGetProperty(name, out var v) || v.ValueKind != JsonValueKind.Number) return 0m;
+        return v.TryGetDecimal(out var d) ? d : 0m;
+    }
 
     private static int? ReadInt(JsonElement obj, string name)
         => obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i) ? i : null;

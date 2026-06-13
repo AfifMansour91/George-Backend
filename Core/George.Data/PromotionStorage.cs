@@ -31,9 +31,18 @@ public class PromotionStorage : StorageBase
         var fromDay = filter.PeriodFromUtc?.Date;
         var toDay = filter.PeriodToUtc?.Date;
 
+        IReadOnlyList<int>? searchProductIds = null;
+        IReadOnlyList<int>? searchCategoryIds = null;
+        if (filter.Search?.SearchTerm.HasValue() == true)
+        {
+            var term = filter.Search!.SearchTerm!.Trim();
+            searchProductIds = await ResolveSearchProductIdsAsync(filter.SiteId, term, cancelToken).ConfigureAwait(false);
+            searchCategoryIds = await ResolveSearchCategoryIdsAsync(filter.SiteId, term, cancelToken).ConfigureAwait(false);
+        }
+
         var metricAgg = BuildMetricAggregationQuery(fromDay, toDay, filter.Channel);
 
-        var basePromotions = ApplyPromotionFilters(_dbContext.Promotion.AsNoTracking(), filter, utcNow);
+        var basePromotions = ApplyPromotionFilters(_dbContext.Promotion.AsNoTracking(), filter, utcNow, searchProductIds, searchCategoryIds);
 
         var joined =
             from p in basePromotions
@@ -293,6 +302,64 @@ public class PromotionStorage : StorageBase
         await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Increment daily KPI from WooCommerce / Promeng outbound redemption reports (GIORGIO_API §2.1).
+    /// </summary>
+    public async Task<int> RecordExternalRedemptionsAsync(
+        int siteId,
+        IReadOnlyList<(int PromotionId, decimal DiscountAmount, DateTime RedeemedAtUtc, string Channel)> rows,
+        CancellationToken cancelToken)
+    {
+        if (rows == null || rows.Count == 0) return 0;
+
+        var promoIds = rows.Select(r => r.PromotionId).Distinct().ToList();
+        var validIds = await _dbContext.Promotion.AsNoTracking()
+            .Where(p => p.SiteId == siteId && !p.IsDeleted && promoIds.Contains(p.Id))
+            .Select(p => p.Id)
+            .ToListAsync(cancelToken)
+            .ConfigureAwait(false);
+        var validSet = validIds.ToHashSet();
+
+        var recorded = 0;
+        foreach (var group in rows.Where(r => validSet.Contains(r.PromotionId)).GroupBy(r => new
+        {
+            r.PromotionId,
+            MetricDate = DateTime.SpecifyKind(r.RedeemedAtUtc.Date, DateTimeKind.Utc),
+            Channel = NormalizeMetricChannel(r.Channel),
+        }))
+        {
+            var discountSum = group.Sum(g => Math.Max(0m, g.DiscountAmount));
+            var count = group.Count();
+
+            var row = await _dbContext.PromotionDailyMetric
+                .FirstOrDefaultAsync(
+                    m => m.PromotionId == group.Key.PromotionId
+                         && m.MetricDateUtc == group.Key.MetricDate
+                         && m.Channel == group.Key.Channel,
+                    cancelToken)
+                .ConfigureAwait(false);
+
+            if (row == null)
+            {
+                row = new PromotionDailyMetric
+                {
+                    PromotionId = group.Key.PromotionId,
+                    MetricDateUtc = group.Key.MetricDate,
+                    Channel = group.Key.Channel,
+                };
+                _dbContext.PromotionDailyMetric.Add(row);
+            }
+
+            row.RedemptionsCount = Math.Max(0, row.RedemptionsCount + count);
+            row.DiscountNis = Math.Max(0m, row.DiscountNis + discountSum);
+            recorded += count;
+        }
+
+        if (recorded > 0)
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+        return recorded;
+    }
+
     internal static string NormalizeMetricChannel(string? orderChannel)
     {
         var c = (orderChannel ?? "").Trim().ToLowerInvariant();
@@ -420,7 +487,30 @@ public class PromotionStorage : StorageBase
         public decimal DiscountNis { get; set; }
     }
 
-    private static IQueryable<Promotion> ApplyPromotionFilters(IQueryable<Promotion> query, PromotionFilter filter, DateTime utcNowDate)
+    private async Task<List<int>> ResolveSearchProductIdsAsync(int siteId, string term, CancellationToken cancelToken) =>
+        await _dbContext.Product.AsNoTracking()
+            .Where(p => !p.IsDeleted && p.Name.Contains(term))
+            .Where(p => p.Site.Any(s => s.Id == siteId))
+            .Select(p => p.Id)
+            .Take(100)
+            .ToListAsync(cancelToken)
+            .ConfigureAwait(false);
+
+    private async Task<List<int>> ResolveSearchCategoryIdsAsync(int siteId, string term, CancellationToken cancelToken) =>
+        await _dbContext.Category.AsNoTracking()
+            .Where(c => !c.IsDeleted && c.Name.Contains(term))
+            .Where(c => c.Site.Any(s => s.Id == siteId))
+            .Select(c => c.Id)
+            .Take(100)
+            .ToListAsync(cancelToken)
+            .ConfigureAwait(false);
+
+    private static IQueryable<Promotion> ApplyPromotionFilters(
+        IQueryable<Promotion> query,
+        PromotionFilter filter,
+        DateTime utcNowDate,
+        IReadOnlyList<int>? searchProductIds = null,
+        IReadOnlyList<int>? searchCategoryIds = null)
     {
         query = query.Where(p => p.SiteId == filter.SiteId);
 
@@ -435,9 +525,15 @@ public class PromotionStorage : StorageBase
         if (filter.Search?.SearchTerm.HasValue() == true)
         {
             var term = filter.Search!.SearchTerm!.Trim();
-            query = query.Where(p => p.Name.Contains(term) || p.PayloadJson.Contains(term)
+            var productPatterns = BuildPayloadIdPatterns(searchProductIds, "productId", "productIds");
+            var categoryPatterns = BuildPayloadIdPatterns(searchCategoryIds, "categoryId", "categoryIds");
+            query = query.Where(p =>
+                p.Name.Contains(term)
+                || p.PayloadJson.Contains(term)
                 || (p.CouponCode != null && p.CouponCode.Contains(term))
-                || (p.AppliesToSummary != null && p.AppliesToSummary.Contains(term)));
+                || (p.AppliesToSummary != null && p.AppliesToSummary.Contains(term))
+                || productPatterns.Any(pat => p.PayloadJson.Contains(pat))
+                || categoryPatterns.Any(pat => p.PayloadJson.Contains(pat)));
         }
 
         if (!string.IsNullOrWhiteSpace(filter.DiscountKind)
@@ -507,6 +603,21 @@ public class PromotionStorage : StorageBase
             _ => query.OrderByDescending(x => x.Promotion.UpdatedDate ?? x.Promotion.CreationTime)
                       .ThenByDescending(x => x.Promotion.Id),
         };
+    }
+
+    private static List<string> BuildPayloadIdPatterns(IReadOnlyList<int>? ids, string singularKey, string pluralKey)
+    {
+        if (ids == null || ids.Count == 0) return new List<string>();
+        var patterns = new List<string>(ids.Count * 4);
+        foreach (var id in ids)
+        {
+            var s = id.ToString();
+            patterns.Add($"\"{singularKey}\":{s}");
+            patterns.Add($"\"{singularKey}\": {s}");
+            patterns.Add($"\"{pluralKey}\":[{s}");
+            patterns.Add($"\"{pluralKey}\": [{s}");
+        }
+        return patterns;
     }
 }
 

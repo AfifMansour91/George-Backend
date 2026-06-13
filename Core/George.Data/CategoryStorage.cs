@@ -336,5 +336,19 @@ namespace George.Data
 
             return currentCategory;
         }
+
+        /// <summary>George category id → WooCommerce category id for webhook id mapping.</summary>
+        public async Task<Dictionary<int, int>> GetWooCommerceIdMapForCategoryIdsAsync(
+            IReadOnlyList<int> categoryIds,
+            CancellationToken cancelToken)
+        {
+            if (categoryIds.Count == 0) return new Dictionary<int, int>();
+
+            return await _dbContext.Category
+                .AsNoTracking()
+                .Where(c => categoryIds.Contains(c.Id) && !c.IsDeleted && c.WooCommerceId != null && c.WooCommerceId > 0)
+                .ToDictionaryAsync(c => c.Id, c => c.WooCommerceId!.Value, cancelToken)
+                .ConfigureAwait(false);
+        }
     }
 }

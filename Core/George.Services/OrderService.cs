@@ -2746,33 +2746,40 @@ namespace George.Services
                     foreach (var ei in applied.EligibleItems)
                     {
                         if (ei.DiscountAmount <= 0m) continue;
-                        var match = items.FirstOrDefault(it => (it.ProductId ?? 0).ToString() == ei.ProductId && it.PromotionId == null);
-                        if (match == null) continue;
-                        match.PromotionId = applied.PromotionId;
-                        match.DiscountAmount = (match.DiscountAmount ?? 0m) + ei.DiscountAmount;
+                        StampOrderLinePromotion(items, ei.ProductId, applied.PromotionId, ei.DiscountAmount);
                     }
                 }
-                else if (applied.PromotionType == "buy_x_pay_y")
+                else if (applied.PromotionType == "buy_x_pay_y" && applied.DiscountAmount > 0m)
                 {
-                    // BxPY: stamp the first matching line that hasn't been claimed by another promo.
-                    var match = items.FirstOrDefault(it => it.PromotionId == null && it.ProductId != null);
-                    if (match != null && applied.DiscountAmount > 0m)
-                    {
-                        match.PromotionId = applied.PromotionId;
-                        match.DiscountAmount = (match.DiscountAmount ?? 0m) + applied.DiscountAmount;
-                    }
+                    var triggers = applied.TriggerProductIds?.ToHashSet(StringComparer.Ordinal) ?? new HashSet<string>();
+                    if (triggers.Count == 0) continue;
+                    var match = items.FirstOrDefault(it =>
+                        it.PromotionId == null
+                        && it.ProductId != null
+                        && triggers.Contains(it.ProductId.Value.ToString()));
+                    if (match != null)
+                        StampOrderLinePromotion(items, match.ProductId!.Value.ToString(), applied.PromotionId, applied.DiscountAmount);
                 }
                 else if (applied.PromotionType == "buy_x_get_y" && applied.RewardProductId.HasValue && applied.DiscountAmount > 0m)
                 {
                     var rid = applied.RewardProductId.Value;
-                    var match = items.FirstOrDefault(it => it.ProductId == rid && it.PromotionId == null);
-                    if (match != null)
-                    {
-                        match.PromotionId = applied.PromotionId;
-                        match.DiscountAmount = (match.DiscountAmount ?? 0m) + applied.DiscountAmount;
-                    }
+                    StampOrderLinePromotion(items, rid.ToString(), applied.PromotionId, applied.DiscountAmount);
                 }
             }
+        }
+
+        private static void StampOrderLinePromotion(
+            List<OrderItem> items,
+            string productId,
+            int promotionId,
+            decimal discountAmount)
+        {
+            if (discountAmount <= 0m) return;
+            var match = items.FirstOrDefault(it =>
+                (it.ProductId ?? 0).ToString() == productId && it.PromotionId == null);
+            if (match == null) return;
+            match.PromotionId = promotionId;
+            match.DiscountAmount = (match.DiscountAmount ?? 0m) + discountAmount;
         }
 
         private static int? PrimaryCategoryId(Product? product)

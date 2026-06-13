@@ -1371,6 +1371,58 @@ namespace George.Data
             return (passoverRows, newLabelRows);
         }
 
+        /// <summary>Product ids with an active catalog sale (sale price &lt; list price, within date window).</summary>
+        public async Task<HashSet<int>> GetActiveCatalogSaleProductIdsAsync(
+            IReadOnlyList<int> productIds,
+            DateTime utcNow,
+            CancellationToken cancelToken)
+        {
+            if (productIds.Count == 0) return new HashSet<int>();
+
+            var rows = await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => productIds.Contains(p.Id) && !p.IsDeleted)
+                .Select(p => new { p.Id, p.Price, p.SalePrice, p.SalePriceStartDate, p.SalePriceEndDate })
+                .ToListAsync(cancelToken)
+                .ConfigureAwait(false);
+
+            var result = new HashSet<int>();
+            foreach (var p in rows)
+            {
+                if (IsOnActiveCatalogSale(p.Price, p.SalePrice, p.SalePriceStartDate, p.SalePriceEndDate, utcNow))
+                    result.Add(p.Id);
+            }
+            return result;
+        }
+
+        private static bool IsOnActiveCatalogSale(
+            decimal? listPrice,
+            decimal? salePrice,
+            DateTime? saleStartUtc,
+            DateTime? saleEndUtc,
+            DateTime utcNow)
+        {
+            if (salePrice is not > 0m || listPrice is not > 0m) return false;
+            if (salePrice.Value >= listPrice.Value) return false;
+            if (saleStartUtc is { } start && utcNow < start) return false;
+            if (saleEndUtc is { } end && utcNow > end) return false;
+            return true;
+        }
+
+        /// <summary>George product id → WooCommerce product id for webhook id mapping.</summary>
+        public async Task<Dictionary<int, int>> GetWooCommerceIdMapForProductIdsAsync(
+            IReadOnlyList<int> productIds,
+            CancellationToken cancelToken)
+        {
+            if (productIds.Count == 0) return new Dictionary<int, int>();
+
+            return await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => productIds.Contains(p.Id) && !p.IsDeleted && p.WooCommerceId != null && p.WooCommerceId > 0)
+                .ToDictionaryAsync(p => p.Id, p => p.WooCommerceId!.Value, cancelToken)
+                .ConfigureAwait(false);
+        }
+
     }
 }
 

@@ -14,6 +14,7 @@ public class PromotionService : ServiceBase
     private readonly PromotionStorage _promotionStorage;
     private readonly SiteStorage _siteStorage;
     private readonly CustomerStorage _customerStorage;
+    private readonly ProductStorage _productStorage;
     private readonly PromotionWebhookDispatcher _webhooks;
 
     public PromotionService(
@@ -23,12 +24,14 @@ public class PromotionService : ServiceBase
         PromotionStorage promotionStorage,
         SiteStorage siteStorage,
         CustomerStorage customerStorage,
+        ProductStorage productStorage,
         PromotionWebhookDispatcher webhooks)
         : base(logger, mapper, cache)
     {
         _promotionStorage = promotionStorage;
         _siteStorage = siteStorage;
         _customerStorage = customerStorage;
+        _productStorage = productStorage;
         _webhooks = webhooks;
     }
 
@@ -276,6 +279,14 @@ public class PromotionService : ServiceBase
     public async Task<IApiResponse<object?>> DeletePromotionAsync(int promotionId, CancellationToken cancelToken)
     {
         var response = new ApiResponse<object?>();
+        var existing = await _promotionStorage.GetPromotionAsync(promotionId, cancelToken).ConfigureAwait(false);
+        if (existing == null)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+
+        var site = await _siteStorage.GetSiteAsync(existing.SiteId, cancelToken).ConfigureAwait(false);
+        if (existing is { IsDraft: false })
+            await _webhooks.FireDeleteAsync(existing, site, cancelToken).ConfigureAwait(false);
+
         var ok = await _promotionStorage.DeletePromotionAsync(promotionId, cancelToken).ConfigureAwait(false);
         if (!ok)
             return CreateResponse(response, StatusCode.ItemNotFound);
@@ -322,6 +333,9 @@ public class PromotionService : ServiceBase
         if (!string.IsNullOrWhiteSpace(req.CouponCode))
             req.CouponCode = NormalizeCouponCode(req.CouponCode);
 
+        if (!defaults.ApplyOnDiscountedProducts && req.Cart is { Count: > 0 })
+            await EnrichCatalogDiscountFlagsAsync(req.Cart, utcNow, cancelToken).ConfigureAwait(false);
+
         var customerId = await ResolveCustomerIdForEvaluateAsync(req, cancelToken).ConfigureAwait(false);
         IReadOnlyDictionary<int, int>? priorRedemptions = null;
         if (customerId > 0)
@@ -334,6 +348,51 @@ public class PromotionService : ServiceBase
 
         response.Data = PromotionEvaluator.Evaluate(candidates, req, defaults, utcNow, priorRedemptions);
         return response;
+    }
+
+    /// <summary>WooCommerce Promeng plugin reports store redemptions for unified KPI dashboard.</summary>
+    public async Task<IApiResponse<object>> RecordExternalRedemptionsAsync(
+        int siteId,
+        RecordPromotionRedemptionsReq req,
+        CancellationToken cancelToken)
+    {
+        var response = new ApiResponse<object> { Data = new { recorded = 0 } };
+        if (req?.Redemptions == null || req.Redemptions.Count == 0)
+            return response;
+
+        var rows = new List<(int PromotionId, decimal DiscountAmount, DateTime RedeemedAtUtc, string Channel)>();
+        foreach (var r in req.Redemptions)
+        {
+            if (!PromotionPromengWireMapper.TryParseExternalId(r.PromotionExternalId, out var promoId))
+                continue;
+            rows.Add((
+                promoId,
+                Math.Max(0m, r.DiscountAmount),
+                ParseRedemptionTimestamp(r.RedeemedAt),
+                string.IsNullOrWhiteSpace(r.Channel) ? PromotionWire.Channel.Web : r.Channel.Trim()));
+        }
+
+        if (rows.Count == 0)
+            return response;
+
+        var recorded = await _promotionStorage
+            .RecordExternalRedemptionsAsync(siteId, rows, cancelToken)
+            .ConfigureAwait(false);
+        response.Data = new { recorded };
+        return response;
+    }
+
+    private static DateTime ParseRedemptionTimestamp(string? redeemedAt)
+    {
+        if (string.IsNullOrWhiteSpace(redeemedAt))
+            return DateTime.UtcNow;
+        if (DateTime.TryParse(
+                redeemedAt.Trim(),
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                out var utc))
+            return utc;
+        return DateTime.UtcNow;
     }
 
     public async Task<IApiResponse<PromotionCatalogBadgesRes>> GetCatalogBadgesAsync(
@@ -360,6 +419,8 @@ public class PromotionService : ServiceBase
         var rules = PromotionCatalogBadgeResolver.ResolveRules(candidates, channel, utcNow);
         response.Data!.Rules = rules.Select(r => new PromotionCatalogBadgeRuleRes
         {
+            PromotionId = r.PromotionId,
+            Label = r.Label,
             AllProducts = r.AllProducts,
             ProductIds = r.ProductIds.OrderBy(x => x).ToList(),
             CategoryIds = r.CategoryIds.OrderBy(x => x).ToList(),
@@ -383,6 +444,31 @@ public class PromotionService : ServiceBase
             .GetCustomerByPhoneAsync(req.SiteId, req.CustomerPhone.Trim(), cancelToken)
             .ConfigureAwait(false);
         return customer?.Id ?? 0;
+    }
+
+    private async Task EnrichCatalogDiscountFlagsAsync(
+        List<EvaluateCartLine> cart,
+        DateTime utcNow,
+        CancellationToken cancelToken)
+    {
+        var productIds = new List<int>();
+        foreach (var line in cart)
+        {
+            if (int.TryParse(line.ProductId, out var pid) && pid > 0)
+                productIds.Add(pid);
+        }
+        if (productIds.Count == 0) return;
+
+        var onSale = await _productStorage
+            .GetActiveCatalogSaleProductIdsAsync(productIds.Distinct().ToList(), utcNow, cancelToken)
+            .ConfigureAwait(false);
+        if (onSale.Count == 0) return;
+
+        foreach (var line in cart)
+        {
+            if (int.TryParse(line.ProductId, out var pid) && onSale.Contains(pid))
+                line.IsCatalogDiscounted = true;
+        }
     }
 
     private static string? NormalizeCouponCode(string? coupon)

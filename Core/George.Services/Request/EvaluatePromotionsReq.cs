@@ -51,4 +51,10 @@ public class EvaluateCartLine
 
     /// <summary>"scale" when the quantity comes from a connected weighing scale (kiosk).</summary>
     public string? Source { get; set; }
+
+    /// <summary>
+    /// Set server-side when the product is on an active catalog sale (sale price &lt; list price).
+    /// Used to gate promotions when site setting <c>PromotionsApplyToDiscountedProducts</c> is false.
+    /// </summary>
+    public bool? IsCatalogDiscounted { get; set; }
 }

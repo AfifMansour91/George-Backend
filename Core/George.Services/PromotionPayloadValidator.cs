@@ -165,8 +165,24 @@ public static class PromotionPayloadValidator
         if (!root.TryGetProperty("reward", out var reward) || reward.ValueKind != JsonValueKind.Object)
             return Fail("Payload for buy_x_get_y must include a \"reward\" object.", out errorMessage);
 
-        if (!reward.TryGetProperty("productIds", out var rids) || rids.ValueKind != JsonValueKind.Array || rids.GetArrayLength() == 0)
-            return Fail("buy_x_get_y: reward.productIds must be a non-empty array of product ids the customer can pick from.", out errorMessage);
+        var benefitAppliesTo = reward.TryGetProperty("benefitAppliesTo", out var baEl) && baEl.ValueKind == JsonValueKind.String
+            ? baEl.GetString()?.Trim().ToLowerInvariant()
+            : "products";
+        if (benefitAppliesTo is "product") benefitAppliesTo = "products";
+        if (benefitAppliesTo is "category") benefitAppliesTo = "categories";
+        if (benefitAppliesTo is not ("products" or "categories" or "same" or "all"))
+            return Fail("buy_x_get_y: reward.benefitAppliesTo must be \"products\", \"categories\", \"same\", or \"all\".", out errorMessage);
+
+        if (benefitAppliesTo == "products")
+        {
+            if (!reward.TryGetProperty("productIds", out var rids) || rids.ValueKind != JsonValueKind.Array || rids.GetArrayLength() == 0)
+                return Fail("buy_x_get_y: reward.productIds must be a non-empty array when benefitAppliesTo=\"products\".", out errorMessage);
+        }
+        else if (benefitAppliesTo == "categories")
+        {
+            if (!reward.TryGetProperty("categoryIds", out var bcids) || bcids.ValueKind != JsonValueKind.Array || bcids.GetArrayLength() == 0)
+                return Fail("buy_x_get_y: reward.categoryIds must be a non-empty array when benefitAppliesTo=\"categories\".", out errorMessage);
+        }
 
         if (!reward.TryGetProperty("discountType", out var dt) || dt.ValueKind != JsonValueKind.String)
             return Fail("buy_x_get_y: reward.discountType must be \"free\", \"percentage\", or \"fixed_price\".", out errorMessage);

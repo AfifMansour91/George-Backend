@@ -48,6 +48,14 @@ public class AppliedPromotion
 
     /// <summary>Buy-side product ids (string) — storefront renders per-line hints under these cart rows.</summary>
     public List<string>? TriggerProductIds { get; set; }
+
+    /// <summary>
+    /// When true, storefront may auto-add a free specific-product BxGY gift (WP <c>auto_add</c> guards).
+    /// </summary>
+    public bool AutoAddEligible { get; set; }
+
+    /// <summary>How many gift units to add/sync when <see cref="AutoAddEligible"/> is true.</summary>
+    public int? AutoAddQuantity { get; set; }
 }
 
 public class RewardOption

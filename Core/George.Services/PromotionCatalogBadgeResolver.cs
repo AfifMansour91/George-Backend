@@ -11,6 +11,9 @@ public static class PromotionCatalogBadgeResolver
 {
     public sealed class BadgeRule
     {
+        public int PromotionId { get; set; }
+        /// <summary>Promotion display name — shown on the catalog banner (plugin uses <c>promotion-&gt;name</c>).</summary>
+        public string Label { get; set; } = string.Empty;
         public bool AllProducts { get; set; }
         public HashSet<int> ProductIds { get; } = new();
         public HashSet<int> CategoryIds { get; } = new();
@@ -32,7 +35,7 @@ public static class PromotionCatalogBadgeResolver
     {
         var rules = new List<BadgeRule>();
         var ch = (channel ?? string.Empty).Trim().ToLowerInvariant();
-        foreach (var p in promotions)
+        foreach (var p in promotions.OrderBy(x => x.Id))
         {
             if (!IsEligible(p, utcNow)) continue;
             if (!ChannelAllows(p, ch)) continue;
@@ -102,7 +105,11 @@ public static class PromotionCatalogBadgeResolver
         {
             using var doc = JsonDocument.Parse(p.PayloadJson);
             var root = doc.RootElement;
-            var rule = new BadgeRule();
+            var rule = new BadgeRule
+            {
+                PromotionId = p.Id,
+                Label = string.IsNullOrWhiteSpace(p.Name) ? "במבצע" : p.Name.Trim(),
+            };
             var type = (p.PromotionType ?? "").Trim().ToLowerInvariant();
             switch (type)
             {
@@ -163,21 +170,29 @@ public static class PromotionCatalogBadgeResolver
         if (!payload.TryGetProperty("condition", out var cond) || cond.ValueKind != JsonValueKind.Object) return;
         AddExcluded(rule, cond);
         var productScope = (ReadString(cond, "productScope") ?? "all").ToLowerInvariant();
-        if (productScope == "all")
-        {
-            rule.AllProducts = true;
-        }
-        else if (productScope == "specific_products")
-        {
+        // WP plugin: buy_applies_to=all must NOT badge the whole catalog — only benefit/trigger products.
+        if (productScope == "specific_products")
             AddIntSet(rule.ProductIds, cond, "productIds");
-        }
         else if (productScope == "specific_categories")
-        {
             AddIntSet(rule.CategoryIds, cond, "categoryIds");
-        }
 
         if (payload.TryGetProperty("reward", out var reward) && reward.ValueKind == JsonValueKind.Object)
-            AddIntSet(rule.ProductIds, reward, "productIds");
+        {
+            var benefitApplies = (ReadString(reward, "benefitAppliesTo") ?? "products").ToLowerInvariant();
+            if (benefitApplies == "products")
+                AddIntSet(rule.ProductIds, reward, "productIds");
+            else if (benefitApplies == "same")
+            {
+                if (productScope == "specific_products")
+                    AddIntSet(rule.ProductIds, cond, "productIds");
+                else if (productScope == "specific_categories")
+                    AddIntSet(rule.CategoryIds, cond, "categoryIds");
+            }
+            else if (benefitApplies == "categories")
+                AddIntSet(rule.CategoryIds, reward, "categoryIds");
+            else if (benefitApplies == "all")
+                rule.AllProducts = true;
+        }
     }
 
     private static void AddExcluded(BadgeRule rule, JsonElement parent) =>
