@@ -267,9 +267,9 @@ public class DashboardService : ServiceBase
         DateTime utcNow,
         CancellationToken cancelToken)
     {
-        var currentCharged = new List<Order>();
-        var yesterdayCharged = new List<Order>();
-        var sameWeekdayCharged = new List<Order>();
+        var currentOrders = new List<Order>();
+        var yesterdayOrders = new List<Order>();
+        var sameWeekdayOrders = new List<Order>();
 
         DateTime yesterdayFrom;
         DateTime yesterdayToEx;
@@ -289,20 +289,21 @@ public class DashboardService : ServiceBase
 
         foreach (var sid in siteIds)
         {
-            currentCharged.AddRange(await _revenueReportStorage
-                .GetOrdersInWindowAsync(sid, fromUtc, toUtcExclusive, byChargeDate: true, cancelToken)
+            // Operations dashboard: orders created in the period (Israel day), not only charged.
+            currentOrders.AddRange(await _revenueReportStorage
+                .GetOrdersInWindowAsync(sid, fromUtc, toUtcExclusive, byChargeDate: false, cancelToken)
                 .ConfigureAwait(false));
-            yesterdayCharged.AddRange(await _revenueReportStorage
-                .GetOrdersInWindowAsync(sid, yesterdayFrom, yesterdayToEx, byChargeDate: true, cancelToken)
+            yesterdayOrders.AddRange(await _revenueReportStorage
+                .GetOrdersInWindowAsync(sid, yesterdayFrom, yesterdayToEx, byChargeDate: false, cancelToken)
                 .ConfigureAwait(false));
-            sameWeekdayCharged.AddRange(await _revenueReportStorage
-                .GetOrdersInWindowAsync(sid, sameWeekdayFrom, sameWeekdayToEx, byChargeDate: true, cancelToken)
+            sameWeekdayOrders.AddRange(await _revenueReportStorage
+                .GetOrdersInWindowAsync(sid, sameWeekdayFrom, sameWeekdayToEx, byChargeDate: false, cancelToken)
                 .ConfigureAwait(false));
         }
 
-        var cur = ComputeKpiSnapshot(currentCharged);
-        var yest = ComputeKpiSnapshot(yesterdayCharged);
-        var week = ComputeKpiSnapshot(sameWeekdayCharged);
+        var cur = ComputeKpiSnapshot(currentOrders);
+        var yest = ComputeKpiSnapshot(yesterdayOrders);
+        var week = ComputeKpiSnapshot(sameWeekdayOrders);
 
         return new DashboardKpisDto
         {
@@ -322,21 +323,24 @@ public class DashboardService : ServiceBase
     private sealed record KpiSnapshot(decimal Income, int Orders, decimal AvgOrder, decimal AvgItems);
 
     /// <summary>
-    /// All KPIs from orders charged in the period (charge date).
+    /// Operations KPIs from orders created in the period, excluding cancelled.
     /// </summary>
-    private static KpiSnapshot ComputeKpiSnapshot(List<Order> chargedOrders)
+    private static KpiSnapshot ComputeKpiSnapshot(List<Order> orders)
     {
-        var chargedCount = chargedOrders.Count;
-        var income = DashboardMetricsHelper.Round2(chargedOrders.Sum(o => o.Total ?? 0m));
-        var avgOrder = chargedCount > 0 ? DashboardMetricsHelper.Round2(income / chargedCount) : 0m;
+        var active = orders
+            .Where(o => !string.Equals(o.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var count = active.Count;
+        var income = DashboardMetricsHelper.Round2(active.Sum(o => o.Total ?? 0m));
+        var avgOrder = count > 0 ? DashboardMetricsHelper.Round2(income / count) : 0m;
 
-        var totalItems = chargedOrders.Sum(o =>
+        var totalItems = active.Sum(o =>
             (o.OrderItem ?? Enumerable.Empty<OrderItem>()).Count(i => !i.IsDeleted && (i.ProductId ?? 0) > 0));
-        var avgItems = chargedCount > 0
-            ? DashboardMetricsHelper.Round2((decimal)totalItems / chargedCount)
+        var avgItems = count > 0
+            ? DashboardMetricsHelper.Round2((decimal)totalItems / count)
             : 0m;
 
-        return new KpiSnapshot(income, chargedCount, avgOrder, avgItems);
+        return new KpiSnapshot(income, count, avgOrder, avgItems);
     }
 
     private async Task<DashboardActiveOrdersDto> BuildActiveOrdersAsync(
@@ -480,18 +484,23 @@ public class DashboardService : ServiceBase
     {
         var siteName = site?.SiteName ?? "";
         var amount = order.Total.HasValue ? $"₪{DashboardMetricsHelper.Round2(order.Total.Value):N0}" : null;
+        var customer = order.CustomerName?.Trim();
+        var customerLabel = string.IsNullOrWhiteSpace(customer)
+            ? order.OrderNumber
+            : customer;
+        var createdUtc = SpecifyUtc(order.CreationTime);
         return new LiveActivityEventRes
         {
             Id = $"order-new-{order.Id}-{order.CreationTime.Ticks}",
             Type = "order_new",
-            Title = $"הזמנה חדשה · {order.CustomerName ?? order.OrderNumber}",
+            Title = $"הזמנה חדשה #{order.OrderNumber} · {customerLabel}",
             Subtitle = amount,
             SiteId = order.SiteId,
             SiteName = siteName,
-            OccurredAt = SpecifyUtc(order.CreationTime),
+            OccurredAt = createdUtc,
             EntityType = "order",
             EntityId = order.Id,
-            Severity = (DateTime.UtcNow - SpecifyUtc(order.CreationTime)).TotalMinutes < 1 ? "highlight" : "normal",
+            Severity = (DateTime.UtcNow - createdUtc).TotalMinutes < 15 ? "highlight" : "normal",
         };
     }
 
@@ -510,6 +519,10 @@ public class DashboardService : ServiceBase
             _ => null,
         };
         if (type == null) return null;
+
+        // New orders are surfaced by GetRecentNewOrdersAsync — skip duplicate status row.
+        if (string.Equals(status, "New", StringComparison.OrdinalIgnoreCase))
+            return null;
 
         var customer = order.CustomerName?.Trim();
         var customerPart = string.IsNullOrWhiteSpace(customer) ? "" : $" · {customer}";

@@ -5,10 +5,10 @@ namespace George.Services.Tests;
 public class DashboardMetricsHelperTests
 {
     [Fact]
-    public void PctChange_ReturnsNullWhenBaselineZeroAndCurrentNonZero()
+    public void PctChange_Returns100WhenBaselineZeroAndCurrentNonZero()
     {
         var result = DashboardMetricsHelper.PctChange(100m, 0m);
-        Assert.Null(result);
+        Assert.Equal(100m, result);
     }
 
     [Fact]

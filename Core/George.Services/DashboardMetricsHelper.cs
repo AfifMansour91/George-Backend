@@ -8,7 +8,7 @@ public static class DashboardMetricsHelper
     public static decimal? PctChange(decimal current, decimal baseline)
     {
         if (baseline == 0m)
-            return current == 0m ? 0m : null;
+            return current == 0m ? 0m : 100m;
         return Math.Round((current - baseline) / baseline * 100m, 1, MidpointRounding.AwayFromZero);
     }
 
