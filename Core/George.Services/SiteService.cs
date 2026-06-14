@@ -4,6 +4,7 @@ using George.Data;
 using George.DB;
 using George.Services.Request;
 using George.Services.Response;
+using George.Services.Payments;
 using Microsoft.Extensions.Logging;
 
 namespace George.Services
@@ -11,15 +12,18 @@ namespace George.Services
     public class SiteService : ServiceBase
     {
         private readonly SiteStorage _siteStorage;
+        private readonly PaymentTokenProtector _paymentTokenProtector;
 
         public SiteService(
             ILogger<SiteService> logger,
             IMapper mapper,
             CacheManager cache,
-            SiteStorage siteStorage
+            SiteStorage siteStorage,
+            PaymentTokenProtector paymentTokenProtector
         ) : base(logger, mapper, cache)
         {
             _siteStorage = siteStorage;
+            _paymentTokenProtector = paymentTokenProtector;
         }
 
         public async Task<IApiResponse<ApiListResponse<SiteRes>>> GetSitesAsync(
@@ -55,6 +59,8 @@ namespace George.Services
                 model.IsraelCityPickerEnabled = true;
             if (!model.AskBagsCountAtPickingFinish.HasValue)
                 model.AskBagsCountAtPickingFinish = true;
+
+            CardcomTestTerminalDefaults.ApplyToNewSiteIfUnset(model, _paymentTokenProtector);
 
             // Create the data in the DB.
             model = await _siteStorage.CreateSiteAsync(model, req.BusinessTypeIds, cancelToken).ConfigureAwait(false);
