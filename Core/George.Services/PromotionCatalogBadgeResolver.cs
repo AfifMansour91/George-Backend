@@ -66,7 +66,7 @@ public static class PromotionCatalogBadgeResolver
 
     private static bool IsEligible(Promotion p, DateTime utcNow)
     {
-        if (p.IsDeleted || p.IsDraft || !p.IsActive || !p.ShowBadge) return false;
+        if (p.IsDeleted || !p.IsActive || !p.ShowBadge) return false;
         if (p.ScheduleStartDateUtc is { } start && start.Date > utcNow.Date) return false;
         if (p.ScheduleEndDateUtc is { } end && end.Date < utcNow.Date) return false;
         return true;
@@ -170,7 +170,11 @@ public static class PromotionCatalogBadgeResolver
         if (!payload.TryGetProperty("condition", out var cond) || cond.ValueKind != JsonValueKind.Object) return;
         AddExcluded(rule, cond);
         var productScope = (ReadString(cond, "productScope") ?? "all").ToLowerInvariant();
-        // WP plugin: buy_applies_to=all must NOT badge the whole catalog — only benefit/trigger products.
+        if (productScope == "all")
+        {
+            rule.AllProducts = true;
+            return;
+        }
         if (productScope == "specific_products")
             AddIntSet(rule.ProductIds, cond, "productIds");
         else if (productScope == "specific_categories")

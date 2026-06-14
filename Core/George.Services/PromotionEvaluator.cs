@@ -115,7 +115,7 @@ public static class PromotionEvaluator
 
     private static bool IsBaselineEligible(Promotion p, DateTime utcNow)
     {
-        if (p.IsDeleted || p.IsDraft || !p.IsActive) return false;
+        if (p.IsDeleted || !p.IsActive) return false;
         if (p.ScheduleStartDateUtc is { } start && start.Date > utcNow.Date) return false;
         if (p.ScheduleEndDateUtc is { } end && end.Date < utcNow.Date) return false;
         return true;

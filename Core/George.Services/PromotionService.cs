@@ -136,7 +136,7 @@ public class PromotionService : ServiceBase
 
         var payloadJson = string.IsNullOrWhiteSpace(req.PayloadJson) ? "{}" : req.PayloadJson.Trim();
         var listKind = string.IsNullOrWhiteSpace(req.ListDiscountKind) ? null : req.ListDiscountKind.Trim().ToLowerInvariant();
-        if (!PromotionPayloadValidator.TryValidate(typeNorm, payloadJson, req.IsDraft, listKind, out var payloadError))
+        if (!PromotionPayloadValidator.TryValidate(typeNorm, payloadJson, isDraft: false, listKind, out var payloadError))
             return CreateResponse(response, StatusCode.InvalidRequest, payloadError ?? "Invalid promotion payload.");
 
         var couponNorm = NormalizeCouponCode(req.CouponCode);
@@ -161,6 +161,8 @@ public class PromotionService : ServiceBase
             };
         }
 
+        model.CouponCode = string.IsNullOrWhiteSpace(req.CouponCode) ? null : req.CouponCode.Trim();
+        model.IsDraft = false;
         model.CreationUserId = AuthUser.Id;
         model = await _promotionStorage.CreatePromotionAsync(model, cancelToken).ConfigureAwait(false);
         var reloaded = await _promotionStorage.GetPromotionAsync(model.Id, cancelToken).ConfigureAwait(false);
@@ -168,7 +170,7 @@ public class PromotionService : ServiceBase
 
         // Webhook: only fire for published promotions; drafts are still being authored.
         // See `Sprint4/מבצעים.md` "סנכרון מבצעים לאתר ולקיוסק".
-        if (reloaded is { IsDraft: false })
+        if (reloaded != null)
         {
             var siteForHook = await _siteStorage.GetSiteAsync(reloaded.SiteId, cancelToken).ConfigureAwait(false);
             await _webhooks.FireAsync(PromotionWebhookDispatcher.EventCreated, reloaded, siteForHook, cancelToken).ConfigureAwait(false);
@@ -197,7 +199,7 @@ public class PromotionService : ServiceBase
         var mergedPayload = req.PayloadJson != null
             ? (string.IsNullOrWhiteSpace(req.PayloadJson) ? "{}" : req.PayloadJson.Trim())
             : existing.PayloadJson;
-        var mergedIsDraft = req.IsDraft ?? existing.IsDraft;
+        var mergedIsDraft = false;
         var mergedListKind = !string.IsNullOrWhiteSpace(req.ListDiscountKind)
             ? req.ListDiscountKind.Trim().ToLowerInvariant()
             : existing.ListDiscountKind;
@@ -224,7 +226,7 @@ public class PromotionService : ServiceBase
                 db.Name = req.Name.Trim();
             if (req.IsActive.HasValue) db.IsActive = req.IsActive.Value;
             if (req.ShowBadge.HasValue) db.ShowBadge = req.ShowBadge.Value;
-            if (req.IsDraft.HasValue) db.IsDraft = req.IsDraft.Value;
+            db.IsDraft = false;
             if (req.ScheduleStartDateUtc.HasValue) db.ScheduleStartDateUtc = req.ScheduleStartDateUtc;
             if (req.ScheduleEndDateUtc.HasValue) db.ScheduleEndDateUtc = req.ScheduleEndDateUtc;
             if (req.PayloadJson != null) db.PayloadJson = mergedPayload;
@@ -243,8 +245,8 @@ public class PromotionService : ServiceBase
         var reloaded = await _promotionStorage.GetPromotionAsync(promotionId, cancelToken).ConfigureAwait(false);
         response.Data = _mapper.Map<PromotionRes>(reloaded!);
 
-        // Webhook for full updates: skip drafts (still being authored).
-        if (reloaded is { IsDraft: false })
+        // Webhook for full updates.
+        if (reloaded != null)
         {
             var siteForHook = await _siteStorage.GetSiteAsync(reloaded.SiteId, cancelToken).ConfigureAwait(false);
             await _webhooks.FireAsync(PromotionWebhookDispatcher.EventUpdated, reloaded, siteForHook, cancelToken).ConfigureAwait(false);
@@ -267,9 +269,7 @@ public class PromotionService : ServiceBase
         var reloaded = await _promotionStorage.GetPromotionAsync(promotionId, cancelToken).ConfigureAwait(false);
         response.Data = _mapper.Map<PromotionRes>(reloaded!);
 
-        // Status toggle from the row's ⋮ menu — fire `updated` so storefronts can refresh
-        // their cache. We skip drafts on the safe assumption draft rows can't be toggled active.
-        if (reloaded is { IsDraft: false })
+        if (reloaded != null)
         {
             var siteForHook = await _siteStorage.GetSiteAsync(reloaded.SiteId, cancelToken).ConfigureAwait(false);
             await _webhooks.FireAsync(PromotionWebhookDispatcher.EventUpdated, reloaded, siteForHook, cancelToken).ConfigureAwait(false);
@@ -285,8 +285,7 @@ public class PromotionService : ServiceBase
             return CreateResponse(response, StatusCode.ItemNotFound);
 
         var site = await _siteStorage.GetSiteAsync(existing.SiteId, cancelToken).ConfigureAwait(false);
-        if (existing is { IsDraft: false })
-            await _webhooks.FireDeleteAsync(existing, site, cancelToken).ConfigureAwait(false);
+        await _webhooks.FireDeleteAsync(existing, site, cancelToken).ConfigureAwait(false);
 
         var ok = await _promotionStorage.DeletePromotionAsync(promotionId, cancelToken).ConfigureAwait(false);
         if (!ok)

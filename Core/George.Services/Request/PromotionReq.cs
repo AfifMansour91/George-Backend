@@ -20,7 +20,7 @@ public class CreatePromotionReq
 
     public bool ShowBadge { get; set; }
 
-    public bool IsDraft { get; set; } = true;
+    public bool IsDraft { get; set; } = false;
 
     /// <summary>Optional schedule for list tabs / reporting (full rules in payload).</summary>
     public DateTime? ScheduleStartDateUtc { get; set; }

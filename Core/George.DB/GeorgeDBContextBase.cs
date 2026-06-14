@@ -532,7 +532,7 @@ public partial class GeorgeDBContextBase : DbContext
             entity.Property(e => e.GuidId).HasDefaultValueSql("(newid())");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.ShowBadge).HasDefaultValue(false);
-            entity.Property(e => e.IsDraft).HasDefaultValue(true);
+            entity.Property(e => e.IsDraft).HasDefaultValue(false);
             entity.Property(e => e.PayloadJson).HasDefaultValue("{}");
             entity.Property(e => e.ListDiscountKind).HasDefaultValue("percent");
             entity.Property(e => e.ChannelsJson).HasDefaultValue("[\"web\"]");

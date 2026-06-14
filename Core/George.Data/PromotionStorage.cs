@@ -78,13 +78,12 @@ public class PromotionStorage : StorageBase
         var q = _dbContext.Promotion.AsNoTracking().Where(p => p.SiteId == siteId);
 
         var all = await q.CountAsync(cancelToken).ConfigureAwait(false);
-        var drafts = await q.Where(p => p.IsDraft).CountAsync(cancelToken).ConfigureAwait(false);
-        var active = await q.Where(p => !p.IsDraft && p.IsActive
+        var active = await q.Where(p => p.IsActive
             && (p.ScheduleStartDateUtc == null || p.ScheduleStartDateUtc <= utcNow)
             && (p.ScheduleEndDateUtc == null || p.ScheduleEndDateUtc >= utcNow)).CountAsync(cancelToken).ConfigureAwait(false);
-        var scheduled = await q.Where(p => !p.IsDraft && p.ScheduleStartDateUtc != null && p.ScheduleStartDateUtc > utcNow)
+        var scheduled = await q.Where(p => p.ScheduleStartDateUtc != null && p.ScheduleStartDateUtc > utcNow)
             .CountAsync(cancelToken).ConfigureAwait(false);
-        var ended = await q.Where(p => !p.IsDraft && p.ScheduleEndDateUtc != null && p.ScheduleEndDateUtc < utcNow)
+        var ended = await q.Where(p => p.ScheduleEndDateUtc != null && p.ScheduleEndDateUtc < utcNow)
             .CountAsync(cancelToken).ConfigureAwait(false);
 
         return new PromotionTabCounts
@@ -92,7 +91,7 @@ public class PromotionStorage : StorageBase
             All = all,
             Active = active,
             Scheduled = scheduled,
-            Drafts = drafts,
+            Drafts = 0,
             Ended = ended,
         };
     }
@@ -104,7 +103,7 @@ public class PromotionStorage : StorageBase
         var weekEnd = utcNow.AddDays(7);
         return await _dbContext.Promotion.AsNoTracking()
             .Where(p => p.SiteId == siteId)
-            .Where(p => !p.IsDraft && p.IsActive
+            .Where(p => !p.IsDeleted && p.IsActive
                 && (p.ScheduleStartDateUtc == null || p.ScheduleStartDateUtc <= utcNow)
                 && (p.ScheduleEndDateUtc == null || p.ScheduleEndDateUtc >= utcNow))
             .Where(p => p.ScheduleEndDateUtc != null
@@ -193,7 +192,6 @@ public class PromotionStorage : StorageBase
         return await _dbContext.Promotion
             .AsNoTracking()
             .Where(p => !p.IsDeleted
-                && !p.IsDraft
                 && p.IsActive
                 && p.ScheduleEndDateUtc != null
                 && p.ScheduleEndDateUtc!.Value.Date < today)
@@ -202,7 +200,7 @@ public class PromotionStorage : StorageBase
     }
 
     /// <summary>
-    /// Promotions eligible for cart-time evaluation: not deleted, not draft, IsActive,
+    /// Promotions eligible for cart-time evaluation: not deleted, IsActive,
     /// and inside the optional date window. Used by <c>POST /Promotion/evaluate</c>.
     /// </summary>
     public async Task<List<Promotion>> GetActivePromotionsForEvaluationAsync(
@@ -213,7 +211,6 @@ public class PromotionStorage : StorageBase
             .AsNoTracking()
             .Where(p => p.SiteId == siteId
                 && !p.IsDeleted
-                && !p.IsDraft
                 && p.IsActive
                 && (p.ScheduleStartDateUtc == null || p.ScheduleStartDateUtc.Value.Date <= today)
                 && (p.ScheduleEndDateUtc == null || p.ScheduleEndDateUtc.Value.Date >= today))
@@ -574,12 +571,12 @@ public class PromotionStorage : StorageBase
         var tab = listTab?.Trim().ToLowerInvariant();
         return tab switch
         {
-            PromotionWire.ListTab.Drafts => query.Where(p => p.IsDraft),
-            PromotionWire.ListTab.Active => query.Where(p => !p.IsDraft && p.IsActive
+            PromotionWire.ListTab.Drafts => query.Where(p => false),
+            PromotionWire.ListTab.Active => query.Where(p => p.IsActive
                 && (p.ScheduleStartDateUtc == null || p.ScheduleStartDateUtc <= utcNowDate)
                 && (p.ScheduleEndDateUtc == null || p.ScheduleEndDateUtc >= utcNowDate)),
-            PromotionWire.ListTab.Scheduled => query.Where(p => !p.IsDraft && p.ScheduleStartDateUtc != null && p.ScheduleStartDateUtc > utcNowDate),
-            PromotionWire.ListTab.Ended => query.Where(p => !p.IsDraft && p.ScheduleEndDateUtc != null && p.ScheduleEndDateUtc < utcNowDate),
+            PromotionWire.ListTab.Scheduled => query.Where(p => p.ScheduleStartDateUtc != null && p.ScheduleStartDateUtc > utcNowDate),
+            PromotionWire.ListTab.Ended => query.Where(p => p.ScheduleEndDateUtc != null && p.ScheduleEndDateUtc < utcNowDate),
             _ => query,
         };
     }
