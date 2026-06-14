@@ -550,4 +550,104 @@ public class PromotionEvaluatorLimitsTests
         Assert.False(rules[0].AllProducts);
         Assert.Contains(99, rules[0].ProductIds);
     }
+
+    [Fact]
+    public void CatalogBadge_respects_daysOfWeek_on_allowed_day()
+    {
+        // 2025-01-05 12:00 UTC = Sunday in Israel
+        var sundayUtc = new DateTime(2025, 1, 5, 12, 0, 0, DateTimeKind.Utc);
+        var promo = new Promotion
+        {
+            Id = 9,
+            PromotionType = "discount",
+            ListDiscountKind = "percent",
+            Name = "Sunday only",
+            PayloadJson = """
+                { "value": 10, "applyScope": "products", "productIds": [10], "daysOfWeek": ["Sun"] }
+                """,
+            IsActive = true,
+            IsDraft = false,
+            IsDeleted = false,
+            ShowBadge = true,
+            ChannelsJson = "[\"all\"]",
+        };
+
+        var rules = PromotionCatalogBadgeResolver.ResolveRules([promo], "store", sundayUtc);
+
+        Assert.Single(rules);
+        Assert.Contains(10, rules[0].ProductIds);
+    }
+
+    [Fact]
+    public void CatalogBadge_respects_daysOfWeek_on_wrong_day()
+    {
+        var sundayUtc = new DateTime(2025, 1, 5, 12, 0, 0, DateTimeKind.Utc);
+        var promo = new Promotion
+        {
+            Id = 10,
+            PromotionType = "discount",
+            ListDiscountKind = "percent",
+            Name = "Monday only",
+            PayloadJson = """
+                { "value": 10, "applyScope": "products", "productIds": [10], "daysOfWeek": ["Mon"] }
+                """,
+            IsActive = true,
+            IsDraft = false,
+            IsDeleted = false,
+            ShowBadge = true,
+            ChannelsJson = "[\"all\"]",
+        };
+
+        var rules = PromotionCatalogBadgeResolver.ResolveRules([promo], "store", sundayUtc);
+
+        Assert.Empty(rules);
+    }
+
+    [Fact]
+    public void Evaluate_discount_respects_daysOfWeek_on_wrong_day()
+    {
+        var sundayUtc = new DateTime(2025, 1, 5, 12, 0, 0, DateTimeKind.Utc);
+        var promo = Promo(22, "discount", """
+            { "value": 10, "applyScope": "products", "productIds": [10], "daysOfWeek": ["Mon"] }
+            """, "percent");
+
+        var req = new EvaluatePromotionsReq
+        {
+            SiteId = 1,
+            Cart =
+            [
+                new EvaluateCartLine { ProductId = "10", Quantity = 1, PricePerUnit = 100m },
+            ],
+            CartTotal = 100m,
+        };
+
+        var result = PromotionEvaluator.Evaluate([promo], req, Defaults, sundayUtc);
+
+        Assert.Empty(result.PromotionsApplied);
+        Assert.Equal(0m, result.TotalDiscount);
+    }
+
+    [Fact]
+    public void Evaluate_discount_respects_daysOfWeek_on_allowed_day()
+    {
+        var sundayUtc = new DateTime(2025, 1, 5, 12, 0, 0, DateTimeKind.Utc);
+        var promo = Promo(23, "discount", """
+            { "value": 10, "applyScope": "products", "productIds": [10], "daysOfWeek": ["Sun"] }
+            """, "percent");
+
+        var req = new EvaluatePromotionsReq
+        {
+            SiteId = 1,
+            Cart =
+            [
+                new EvaluateCartLine { ProductId = "10", Quantity = 1, PricePerUnit = 100m },
+            ],
+            CartTotal = 100m,
+        };
+
+        var result = PromotionEvaluator.Evaluate([promo], req, Defaults, sundayUtc);
+
+        Assert.Single(result.PromotionsApplied);
+        Assert.True(result.TotalDiscount > 0m);
+    }
 }

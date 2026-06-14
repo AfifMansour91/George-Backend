@@ -154,26 +154,8 @@ public static class PromotionEvaluator
         return string.Equals(NormalizeCoupon(p.CouponCode), cartCoupon, StringComparison.Ordinal);
     }
 
-    private static bool ScheduleAllowsByPayload(JsonElement payload, DateTime utcNow)
-    {
-        if (!payload.TryGetProperty("daysOfWeek", out var d) || d.ValueKind != JsonValueKind.Array) return true;
-        if (d.GetArrayLength() == 0) return true;
-        var todayKey = utcNow.DayOfWeek switch
-        {
-            DayOfWeek.Sunday => "Sun",
-            DayOfWeek.Monday => "Mon",
-            DayOfWeek.Tuesday => "Tue",
-            DayOfWeek.Wednesday => "Wed",
-            DayOfWeek.Thursday => "Thu",
-            DayOfWeek.Friday => "Fri",
-            DayOfWeek.Saturday => "Sat",
-            _ => string.Empty,
-        };
-        foreach (var el in d.EnumerateArray())
-            if (el.ValueKind == JsonValueKind.String && string.Equals(el.GetString(), todayKey, StringComparison.Ordinal))
-                return true;
-        return false;
-    }
+    private static bool ScheduleAllowsByPayload(JsonElement payload, DateTime utcNow) =>
+        PromotionWeekdaySchedule.PayloadAllowsToday(payload, utcNow);
 
     private static string? NormalizeCoupon(string? c) =>
         string.IsNullOrWhiteSpace(c) ? null : c.Trim().ToLowerInvariant();

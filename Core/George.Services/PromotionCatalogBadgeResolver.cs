@@ -39,6 +39,7 @@ public static class PromotionCatalogBadgeResolver
         {
             if (!IsEligible(p, utcNow)) continue;
             if (!ChannelAllows(p, ch)) continue;
+            if (!PromotionWeekdaySchedule.PayloadAllowsToday(p.PayloadJson, utcNow)) continue;
             var rule = ExtractRule(p);
             if (rule != null && RuleHasScope(rule))
                 rules.Add(rule);
