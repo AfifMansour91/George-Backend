@@ -31,6 +31,7 @@ public partial class OrderService
             .GetStatusHistoryByOrderIdsAsync(new[] { order.Id }, cancelToken)
             .ConfigureAwait(false);
         ApplyStatusTimestampsToRes(res, order, map.GetValueOrDefault(order.Id));
+        await EnrichOrderResPromotionFieldsAsync(res, order, cancelToken).ConfigureAwait(false);
     }
 
     private async Task EnrichOrderResListAsync(
@@ -47,6 +48,7 @@ public partial class OrderService
             if (!orderById.TryGetValue(res.Id, out var order)) continue;
             ApplyStatusTimestampsToRes(res, order, map.GetValueOrDefault(res.Id));
         }
+        await EnrichOrderResListPromotionFieldsAsync(list, orders, cancelToken).ConfigureAwait(false);
     }
 
     private static void ApplyStatusTimestampsToRes(

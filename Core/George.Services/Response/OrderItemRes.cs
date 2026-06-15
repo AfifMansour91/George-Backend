@@ -41,4 +41,6 @@ public class OrderItemRes
     // Sprint 4: promotion linkage
     public int? PromotionId { get; set; }
     public decimal? DiscountAmount { get; set; }
+    /// <summary>Promotion display name when <see cref="PromotionId"/> is set.</summary>
+    public string? PromotionName { get; set; }
 }

@@ -117,5 +117,8 @@ public class OrderRes
     public string? WoltDeliveryId { get; set; }
     public DateTime? WoltDispatchedAt { get; set; }
 
+    /// <summary>Sum of line-level promotion discounts (NIS).</summary>
+    public decimal? PromotionDiscountTotal { get; set; }
+
     public List<OrderItemRes> Items { get; set; } = new();
 }

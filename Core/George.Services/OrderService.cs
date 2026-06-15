@@ -199,7 +199,15 @@ namespace George.Services
             // Failures here MUST NOT block the order from being created.
             try
             {
-                await ApplyPromotionsToOrderItemsAsync(req.SiteId, order.Source, customer.Id, items, productCache, cancelToken).ConfigureAwait(false);
+                await ApplyPromotionsToOrderItemsAsync(
+                    req.SiteId,
+                    order.Source,
+                    customer.Id,
+                    req.CouponCode,
+                    order.CustomerPhone,
+                    items,
+                    productCache,
+                    cancelToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -701,10 +709,15 @@ namespace George.Services
                     "add order items",
                     cancelToken).ConfigureAwait(false);
 
+            await TryReapplyOrderPromotionsAfterPickingAsync(orderId, cancelToken).ConfigureAwait(false);
+
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             if (loaded != null)
                 await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, loaded, "add items", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
-            response.Data = _mapper.Map<OrderRes>(loaded);
+            var forResponse = loaded ?? updated;
+            response.Data = _mapper.Map<OrderRes>(forResponse);
+            if (forResponse != null)
+                await EnrichOrderResAsync(response.Data, forResponse, cancelToken).ConfigureAwait(false);
             return response;
         }
 
@@ -743,7 +756,12 @@ namespace George.Services
             }
 
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "remove item", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
-            response.Data = _mapper.Map<OrderRes>(updated);
+            await TryReapplyOrderPromotionsAfterPickingAsync(orderId, cancelToken).ConfigureAwait(false);
+            var loaded = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
+            var forResponse = loaded ?? updated;
+            response.Data = _mapper.Map<OrderRes>(forResponse);
+            if (forResponse != null)
+                await EnrichOrderResAsync(response.Data, forResponse, cancelToken).ConfigureAwait(false);
             return response;
         }
 
@@ -793,11 +811,16 @@ namespace George.Services
                     stockPushProductIds,
                     "picking update",
                     cancelToken).ConfigureAwait(false);
+
+            await TryReapplyOrderPromotionsAfterPickingAsync(orderId, cancelToken).ConfigureAwait(false);
+
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             var forResponse = loaded ?? updated;
             if (forResponse != null)
                 await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, forResponse, "picking update", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(forResponse);
+            if (forResponse != null)
+                await EnrichOrderResAsync(response.Data, forResponse, cancelToken).ConfigureAwait(false);
             return response;
         }
 
@@ -1616,7 +1639,7 @@ namespace George.Services
                 try
                 {
                     await ApplyPromotionsToOrderItemsAsync(
-                        siteId, "woocommerce", updateCustomer.Id, updateItems, wooUpdateProductCache, cancelToken)
+                        siteId, "woocommerce", updateCustomer.Id, updated.CouponCode, updated.CustomerPhone, updateItems, wooUpdateProductCache, cancelToken)
                         .ConfigureAwait(false);
                 }
                 catch (Exception ex)
@@ -1751,7 +1774,7 @@ namespace George.Services
             try
             {
                 await ApplyPromotionsToOrderItemsAsync(
-                    siteId, order.Source, customer.Id, items, wooProductCache, cancelToken)
+                    siteId, order.Source, customer.Id, order.CouponCode, order.CustomerPhone, items, wooProductCache, cancelToken)
                     .ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -2012,6 +2035,13 @@ namespace George.Services
                     sb.Append("</div>");
                 }
 
+                if (it.DiscountAmount is > 0m)
+                {
+                    sb.Append($"<div style=\"padding-right:12px;font-size:{VoucherPrintHtml.ProductMeta}px;font-weight:700;line-height:{VoucherPrintHtml.ProductMetaLineHeight}px;color:#047857;\">");
+                    sb.Append($"✓ במבצע · חיסכון ₪{it.DiscountAmount.Value.ToString("0.00", CultureInfo.InvariantCulture)}");
+                    sb.Append("</div>");
+                }
+
                 var lineAmt = GetVoucherPickedLineAmount(it);
                 var pickedRowHtml = BuildVoucherPickedRowTableHtml(it, lineAmt);
                 if (!string.IsNullOrEmpty(pickedRowHtml))
@@ -2024,8 +2054,28 @@ namespace George.Services
 
             if (!newVoucher && grandTotal.HasValue)
             {
+                var promoDisc = OrderDiscountTotals.SumLinePromotionDiscount(
+                    items.Select(i => (i.DiscountAmount, i.IsDeleted)));
+                var manualDisc = order.ManualDiscountAmount is > 0m ? order.ManualDiscountAmount.Value : 0m;
+                var ship = order.ShippingCost ?? 0m;
                 sb.AppendLine("  <div style=\"margin-bottom:12px;padding-bottom:12px;border-bottom:1px dashed #000;text-align:center;\">");
-                sb.AppendLine($"    <div style=\"font-size:15px;font-weight:700;line-height:19px;\">{payLine}</div>");
+                if (promoDisc > 0m)
+                {
+                    sb.AppendLine($"    <div style=\"font-size:12px;font-weight:500;line-height:16px;color:#047857;\">הנחת מבצע: −₪{promoDisc.ToString("0.00", CultureInfo.InvariantCulture)}</div>");
+                }
+                if (manualDisc > 0m)
+                {
+                    sb.AppendLine($"    <div style=\"font-size:12px;font-weight:500;line-height:16px;color:#047857;\">הנחה ידנית: −₪{manualDisc.ToString("0.00", CultureInfo.InvariantCulture)}</div>");
+                }
+                if (!string.IsNullOrWhiteSpace(order.CouponCode))
+                {
+                    sb.AppendLine($"    <div style=\"font-size:11px;font-weight:400;line-height:15px;color:#374151;\">קופון: {EscapeHtml(order.CouponCode.Trim())}</div>");
+                }
+                if (ship > 0m)
+                {
+                    sb.AppendLine($"    <div style=\"font-size:12px;font-weight:500;line-height:16px;\">משלוח: ₪{ship.ToString("0.00", CultureInfo.InvariantCulture)}</div>");
+                }
+                sb.AppendLine($"    <div style=\"margin-top:6px;font-size:15px;font-weight:700;line-height:19px;\">{payLine}</div>");
                 sb.AppendLine($"    <div style=\"margin-top:4px;font-size:24px;font-weight:700;line-height:19px;direction:ltr;unicode-bidi:embed;\">₪{grandTotal.Value.ToString("0.00", CultureInfo.InvariantCulture)}</div>");
                 sb.AppendLine($"    <div style=\"margin-top:4px;font-size:11px;font-weight:400;line-height:19px;\">{VoucherVatIncludedLabel}</div>");
                 sb.AppendLine("  </div>");
@@ -2340,23 +2390,25 @@ namespace George.Services
         {
             var items = order.OrderItem ?? new List<OrderItem>();
             var shipping = order.ShippingCost ?? 0m;
+            var promoDisc = OrderDiscountTotals.SumLinePromotionDiscount(
+                items.Where(i => !i.IsDeleted).Select(i => (i.DiscountAmount, i.IsDeleted)));
+            var manualDisc = order.ManualDiscountAmount is > 0m ? order.ManualDiscountAmount.Value : 0m;
             var newVoucher = string.Equals(order.Status, "New", StringComparison.OrdinalIgnoreCase);
             var anyPicked = items.Any(OrderItemLineDisplay.OrderMeaningfulPick);
             decimal itemsSum;
             if (!newVoucher && anyPicked)
             {
-                // After picking: compute from actual picked line totals — order.Total is the original pre-picking value and is not updated after picking.
                 itemsSum = items.Sum(i => GetVoucherPickedLineAmount(i) ?? 0m);
             }
             else
             {
-                // No picking done: prefer order.Total (e.g. from WooCommerce), otherwise compute from item prices.
-                if (order.Total.HasValue) return order.Total.Value;
+                if (order.Total.HasValue && promoDisc <= 0m && manualDisc <= 0m)
+                    return order.Total.Value;
                 itemsSum = items.Sum(i => i.TotalPrice ?? i.Quantity * (i.PricePerUnit ?? 0m));
             }
 
-            if (itemsSum <= 0m && shipping <= 0m) return null;
-            return itemsSum + shipping;
+            if (itemsSum <= 0m && shipping <= 0m && promoDisc <= 0m && manualDisc <= 0m) return null;
+            return OrderDiscountTotals.ComputeGrandTotal(itemsSum, shipping, promoDisc, manualDisc);
         }
 
         private static string GenerateVoucherQrDataUrl(Order order, string? publicBaseUrl)
@@ -2729,9 +2781,12 @@ namespace George.Services
             int siteId,
             string? orderSource,
             int customerId,
+            string? couponCode,
+            string? customerPhone,
             List<OrderItem> items,
             IReadOnlyDictionary<int, Product?>? productCache,
-            CancellationToken cancelToken)
+            CancellationToken cancelToken,
+            Func<OrderItem, OrderPromotionEvalLine?>? resolveEvalLine = null)
         {
             if (items.Count == 0) return;
 
@@ -2761,13 +2816,30 @@ namespace George.Services
                     cache[pid] = await _productStorage.GetProductAsync(pid, cancelToken).ConfigureAwait(false);
             }
 
+            var evalLines = new List<(OrderItem Item, OrderPromotionEvalLine Line)>();
+            foreach (var it in items)
+            {
+                if (it.ProductId is not > 0) continue;
+                OrderPromotionEvalLine? eval = resolveEvalLine != null
+                    ? resolveEvalLine(it)
+                    : DefaultPromotionEvalLine(it);
+                if (eval is not { } line || line.Quantity <= 0m || line.LineTotal <= 0m) continue;
+                evalLines.Add((it, line));
+            }
+
+            if (evalLines.Count == 0) return;
+
             var evalReq = new EvaluatePromotionsReq
             {
                 SiteId = siteId,
                 Channel = MapOrderSourceToPromotionChannel(orderSource),
                 CustomerId = customerId > 0 ? customerId.ToString() : null,
-                Cart = items.Select(it =>
+                CustomerPhone = string.IsNullOrWhiteSpace(customerPhone) ? null : customerPhone.Trim(),
+                CouponCode = string.IsNullOrWhiteSpace(couponCode) ? null : couponCode.Trim(),
+                Cart = evalLines.Select(pair =>
                 {
+                    var it = pair.Item;
+                    var line = pair.Line;
                     Product? product = null;
                     if (it.ProductId is > 0)
                         cache.TryGetValue(it.ProductId.Value, out product);
@@ -2778,14 +2850,14 @@ namespace George.Services
                     var categoryId = PrimaryCategoryId(product);
                     return new EvaluateCartLine
                     {
-                        ProductId = (it.ProductId ?? 0).ToString(),
-                        Quantity = it.Quantity,
-                        PricePerUnit = it.PricePerUnit,
+                        ProductId = it.ProductId!.Value.ToString(),
+                        Quantity = line.Quantity,
+                        PricePerUnit = line.PricePerUnit,
                         CategoryId = categoryId?.ToString(),
                         CategoryIds = categoryIds is { Count: > 0 } ? categoryIds : null,
                     };
                 }).ToList(),
-                CartTotal = items.Sum(it => it.TotalPrice ?? 0m),
+                CartTotal = evalLines.Sum(p => p.Line.LineTotal),
             };
 
             IReadOnlyDictionary<int, int>? priorRedemptions = null;

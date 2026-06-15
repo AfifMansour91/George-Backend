@@ -102,6 +102,22 @@ namespace George.Data
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
         }
 
+        /// <summary>Tracked load for in-place promotion recalc during picking.</summary>
+        public async Task<Order?> GetOrderByIdTrackedAsync(int orderId, CancellationToken cancelToken)
+        {
+            return await _dbContext.Order
+                .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
+                .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
+        }
+
+        /// <summary>Recalculate header SubTotal/Total on a tracked order and save promotion stamps.</summary>
+        public async Task PersistTrackedOrderTotalsAsync(Order trackedOrder, CancellationToken cancelToken)
+        {
+            RecalculateOrderHeaderTotalsFromLines(trackedOrder);
+            trackedOrder.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+        }
+
         /// <summary>Get order by site and external (e.g. WooCommerce) order id.</summary>
         public async Task<Order?> GetOrderBySiteAndExternalIdAsync(int siteId, string externalOrderId, CancellationToken cancelToken)
         {
@@ -378,8 +394,11 @@ namespace George.Data
         {
             var active = order.OrderItem?.Where(i => !i.IsDeleted).ToList() ?? new List<OrderItem>();
             var sum = active.Sum(SumOrderLineMerchandise);
+            var promo = OrderDiscountTotals.SumLinePromotionDiscount(
+                active.Select(i => (i.DiscountAmount, i.IsDeleted)));
+            var manual = order.ManualDiscountAmount is > 0m ? order.ManualDiscountAmount.Value : 0m;
             order.SubTotal = sum;
-            order.Total = sum + (order.ShippingCost ?? 0m);
+            order.Total = OrderDiscountTotals.ComputeGrandTotal(sum, order.ShippingCost ?? 0m, promo, manual);
         }
 
         /// <summary>Set status to Cancelled and optionally set IsDeleted.</summary>
