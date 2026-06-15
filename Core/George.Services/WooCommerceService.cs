@@ -4277,7 +4277,10 @@ namespace George.Services
                     var optionNameToValues = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
                     if (wp.attributes != null)
                     {
-                        foreach (var attr in wp.attributes.Where(a => !string.IsNullOrWhiteSpace(a.name)))
+                        // TEMPORARY: import only variation attributes (variation=true). Woo "product attributes"
+                        // (variation=false, e.g. קלוריות / nutrition) are skipped until we define where to store them.
+                        // Original loop and rationale: docs/WooCommerce-import-non-variation-attributes.md
+                        foreach (var attr in wp.attributes.Where(a => !string.IsNullOrWhiteSpace(a.name) && a.variation))
                         {
                             if (!optionNameToValues.TryGetValue(attr.name!.Trim(), out var values))
                             {
