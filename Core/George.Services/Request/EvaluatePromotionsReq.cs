@@ -27,6 +27,12 @@ public class EvaluatePromotionsReq
 
     /// <summary>Optional customer phone — resolved to <see cref="CustomerId"/> for per-customer limits when ID is unknown (kiosk).</summary>
     public string? CustomerPhone { get; set; }
+
+    /// <summary>
+    /// When true, evaluate for catalog unit-price display: ignores coupon gate and purchase thresholds
+    /// on discount promotions (ShowBadge catalog pricing).
+    /// </summary>
+    public bool CatalogPricePreview { get; set; }
 }
 
 public class EvaluateCartLine

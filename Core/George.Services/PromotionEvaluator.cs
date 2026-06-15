@@ -53,6 +53,7 @@ public static class PromotionEvaluator
 
         var channel = (req.Channel ?? string.Empty).Trim().ToLowerInvariant();
         var coupon = NormalizeCoupon(req.CouponCode);
+        var catalogPricePreview = req.CatalogPricePreview;
 
         if (!siteDefaults.ApplyOnPhoneOrders && channel == "phone")
             return res;
@@ -61,7 +62,7 @@ public static class PromotionEvaluator
         {
             if (!IsBaselineEligible(p, utcNow)) continue;
             if (!ChannelAllows(p, channel)) continue;
-            if (!CouponMatches(p, coupon)) continue;
+            if (!CouponMatches(p, coupon, catalogPricePreview)) continue;
 
             JsonDocument? doc = null;
             try
@@ -75,7 +76,7 @@ public static class PromotionEvaluator
                 var type = (p.PromotionType ?? "").Trim().ToLowerInvariant();
                 EvalOutcome outcome = type switch
                 {
-                    "discount" => EvaluateDiscount(p, doc.RootElement, req, siteDefaults),
+                    "discount" => EvaluateDiscount(p, doc.RootElement, req, siteDefaults, catalogPricePreview),
                     "buy_x_pay_y" => EvaluateBuyXPayY(p, doc.RootElement, req, siteDefaults),
                     "buy_x_get_y" => EvaluateBuyXGetY(p, doc.RootElement, req, siteDefaults),
                     _ => EvalOutcome.None,
@@ -148,10 +149,12 @@ public static class PromotionEvaluator
         }
     }
 
-    private static bool CouponMatches(Promotion p, string? cartCoupon)
+    private static bool CouponMatches(Promotion p, string? cartCoupon, bool catalogPricePreview = false)
     {
         if (string.IsNullOrWhiteSpace(p.CouponCode)) return true;
-        return string.Equals(NormalizeCoupon(p.CouponCode), cartCoupon, StringComparison.Ordinal);
+        if (!string.IsNullOrWhiteSpace(cartCoupon))
+            return string.Equals(NormalizeCoupon(p.CouponCode), cartCoupon, StringComparison.Ordinal);
+        return catalogPricePreview && p.ShowBadge;
     }
 
     private static bool ScheduleAllowsByPayload(JsonElement payload, DateTime utcNow) =>
@@ -166,7 +169,7 @@ public static class PromotionEvaluator
     // ─── DISCOUNT (% / ₪) ────────────────────────────────────────────────────────
 
     private static EvalOutcome EvaluateDiscount(
-        Promotion p, JsonElement payload, EvaluatePromotionsReq req, SiteEvaluationDefaults defaults)
+        Promotion p, JsonElement payload, EvaluatePromotionsReq req, SiteEvaluationDefaults defaults, bool catalogPricePreview = false)
     {
         var kind = (p.ListDiscountKind ?? "percent").Trim().ToLowerInvariant();
         if (kind != "percent" && kind != "amount") return EvalOutcome.None;
@@ -214,8 +217,8 @@ public static class PromotionEvaluator
         decimal qualifyingSubtotal = eligible.Sum(e => e.OriginalPrice);
         if (qualifyingSubtotal <= 0m) return EvalOutcome.None;
 
-        // Threshold check + near-miss capture.
-        if (ReadBool(payload, "applyPurchaseCondition") == true)
+        // Threshold check + near-miss capture (skipped for catalog unit-price preview).
+        if (!catalogPricePreview && ReadBool(payload, "applyPurchaseCondition") == true)
         {
             var minQty = ReadInt(payload, "minPurchaseQuantity");
             var minAmt = ReadDecimal(payload, "minPurchaseAmount");
@@ -244,6 +247,9 @@ public static class PromotionEvaluator
                     Missing = new MissingThreshold { Kind = "amount", Current = amountThresholdBase, Required = ma },
                     PotentialSaving = EstimateDiscountSaving(eligible, kind, value!.Value, wholeCart),
                     WholeCart = wholeCart,
+                    TriggerProductIds = wholeCart
+                        ? null
+                        : eligible.Select(e => e.ProductId).Distinct().ToList(),
                 });
             }
         }
@@ -447,6 +453,8 @@ public static class PromotionEvaluator
                 PromotionName = p.Name,
                 Missing = new MissingThreshold { Kind = "quantity", Current = totalQty, Required = buyQty },
                 PotentialSaving = potential,
+                DealQuantity = buyQty,
+                DealPrice = fixedPrice,
                 TriggerProductIds = ProductIdsFromLines(eligibleLines),
             });
         }

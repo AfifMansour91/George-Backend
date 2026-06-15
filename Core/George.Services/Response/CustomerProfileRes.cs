@@ -16,4 +16,7 @@ public class CustomerProfileRes
     public bool HasSavedCard { get; set; }
     public string? SavedCardLast4 { get; set; }
     public string? SavedCardBrand { get; set; }
+    /// <summary>Stored on Customer: <c>percent</c> | <c>amount</c>.</summary>
+    public string? PermanentDiscountType { get; set; }
+    public decimal? PermanentDiscountValue { get; set; }
 }

@@ -170,6 +170,18 @@ public partial class Order
     [Column(TypeName = "decimal(18, 2)")]
     public decimal? Total { get; set; }
 
+    /// <summary>Phone/manual order: NIS amount deducted by staff (after promotion discounts).</summary>
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? ManualDiscountAmount { get; set; }
+
+    /// <summary>Phone/manual order: <c>percent</c> or <c>amount</c> — how ManualDiscountValue was entered.</summary>
+    [StringLength(20)]
+    public string? ManualDiscountType { get; set; }
+
+    /// <summary>Phone/manual order: entered percent (e.g. 10) or fixed NIS amount before capping.</summary>
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? ManualDiscountValue { get; set; }
+
     /// <summary>Subtotal at order creation (before picking adjusts line weights/prices). Immutable after first save.</summary>
     [Column(TypeName = "decimal(18, 2)")]
     public decimal? OriginalSubTotal { get; set; }

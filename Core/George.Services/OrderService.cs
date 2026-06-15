@@ -208,6 +208,16 @@ namespace George.Services
 
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken);
 
+            if (req.SavePermanentCustomerDiscount.HasValue)
+            {
+                await ApplyPermanentCustomerDiscountToCustomerAsync(
+                    customer.Id,
+                    req.SavePermanentCustomerDiscount.Value,
+                    req.ManualDiscountType,
+                    req.ManualDiscountValue,
+                    cancelToken).ConfigureAwait(false);
+            }
+
             try
             {
                 await _promotionStorage
@@ -444,6 +454,14 @@ namespace George.Services
                 if (req.ShippingCost.HasValue) o.ShippingCost = req.ShippingCost.Value;
                 if (req.SubTotal.HasValue) o.SubTotal = req.SubTotal.Value;
                 if (req.Total.HasValue) o.Total = req.Total.Value;
+                if (req.CouponCode != null)
+                    o.CouponCode = string.IsNullOrWhiteSpace(req.CouponCode) ? null : req.CouponCode.Trim();
+                if (req.ManualDiscountAmount.HasValue)
+                    o.ManualDiscountAmount = req.ManualDiscountAmount.Value <= 0m ? null : req.ManualDiscountAmount.Value;
+                if (req.ManualDiscountType != null)
+                    o.ManualDiscountType = string.IsNullOrWhiteSpace(req.ManualDiscountType) ? null : req.ManualDiscountType.Trim();
+                if (req.ManualDiscountValue.HasValue)
+                    o.ManualDiscountValue = req.ManualDiscountValue.Value <= 0m ? null : req.ManualDiscountValue.Value;
                 if (touchStreetOrCity)
                     RebuildDeliveryAddressFromStreetAndCity(o, clearCombinedLineWhenBothEmpty: true);
                 o.UpdateUserId = AuthUser.Id;
@@ -493,6 +511,16 @@ namespace George.Services
                         deliveryApartment: loaded.DeliveryApartment,
                         deliveryFloor: loaded.DeliveryFloor,
                         deliveryEntranceCode: loaded.DeliveryEntranceCode,
+                        cancelToken).ConfigureAwait(false);
+                }
+
+                if (req.SavePermanentCustomerDiscount.HasValue)
+                {
+                    await ApplyPermanentCustomerDiscountToCustomerAsync(
+                        customerId,
+                        req.SavePermanentCustomerDiscount.Value,
+                        req.ManualDiscountType,
+                        req.ManualDiscountValue,
                         cancelToken).ConfigureAwait(false);
                 }
             }
@@ -586,6 +614,13 @@ namespace George.Services
             {
                 response.Data.SavedCardLast4 = null;
                 response.Data.SavedCardBrand = null;
+            }
+
+            var crmCustomer = await _customerStorage.GetCustomerByPhoneAsync(siteId, phone, cancelToken).ConfigureAwait(false);
+            if (crmCustomer != null)
+            {
+                response.Data.PermanentDiscountType = crmCustomer.PermanentDiscountType;
+                response.Data.PermanentDiscountValue = crmCustomer.PermanentDiscountValue;
             }
 
             return response;
@@ -1021,6 +1056,30 @@ namespace George.Services
                 string.IsNullOrWhiteSpace(o.DeliveryStreet) &&
                 string.IsNullOrWhiteSpace(o.DeliveryCity))
                 o.DeliveryAddress = null;
+        }
+
+        private async Task ApplyPermanentCustomerDiscountToCustomerAsync(
+            int customerId,
+            bool savePermanent,
+            string? manualDiscountType,
+            decimal? manualDiscountValue,
+            CancellationToken cancelToken)
+        {
+            if (customerId <= 0) return;
+            if (!savePermanent)
+            {
+                await _customerStorage
+                    .SetCustomerPermanentDiscountAsync(customerId, null, null, clear: true, cancelToken)
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            if (manualDiscountValue is null or <= 0m) return;
+            var type = (manualDiscountType ?? "percent").Trim().ToLowerInvariant();
+            if (type != "percent" && type != "amount") type = "percent";
+            await _customerStorage
+                .SetCustomerPermanentDiscountAsync(customerId, type, manualDiscountValue.Value, clear: false, cancelToken)
+                .ConfigureAwait(false);
         }
 
         private static string? BuildCustomerDefaultDeliveryLine(CreateOrderReq req) =>

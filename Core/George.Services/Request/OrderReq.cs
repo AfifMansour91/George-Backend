@@ -56,6 +56,16 @@ public class CreateOrderReq
     /// <summary>Optional; WooCommerce ingest sets via <see cref="WooCommerceOrderPayload"/>.</summary>
     public string? CouponCode { get; set; }
 
+    /// <summary>Phone order: NIS manual discount applied after promotions.</summary>
+    public decimal? ManualDiscountAmount { get; set; }
+    /// <summary>Phone order: <c>percent</c> or <c>amount</c>.</summary>
+    public string? ManualDiscountType { get; set; }
+    /// <summary>Phone order: entered percent or fixed amount.</summary>
+    public decimal? ManualDiscountValue { get; set; }
+
+    /// <summary>When set on phone order: persist manual discount on Customer, or clear when false.</summary>
+    public bool? SavePermanentCustomerDiscount { get; set; }
+
     public List<CreateOrderItemReq> Items { get; set; } = new();
 }
 
@@ -132,4 +142,10 @@ public class UpdateOrderReq
     public decimal? SubTotal { get; set; }
     public decimal? ShippingCost { get; set; }
     public decimal? Total { get; set; }
+
+    public string? CouponCode { get; set; }
+    public decimal? ManualDiscountAmount { get; set; }
+    public string? ManualDiscountType { get; set; }
+    public decimal? ManualDiscountValue { get; set; }
+    public bool? SavePermanentCustomerDiscount { get; set; }
 }

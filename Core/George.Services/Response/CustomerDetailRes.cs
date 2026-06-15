@@ -19,6 +19,9 @@ public class CustomerDetailRes : CustomerRes
     /// <summary>Average days between consecutive (non-cancelled) orders for this customer.</summary>
     public int AverageReturnDays { get; set; }
     public List<CustomerActivityItem>? Activity { get; set; }
+    /// <summary>Phone order: default manual discount type (<c>percent</c> | <c>amount</c>).</summary>
+    public string? PermanentDiscountType { get; set; }
+    public decimal? PermanentDiscountValue { get; set; }
 }
 
 /// <summary>CRM: Activity timeline item.</summary>

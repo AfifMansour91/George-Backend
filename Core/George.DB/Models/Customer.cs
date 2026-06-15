@@ -58,6 +58,14 @@ public partial class Customer
 
     public bool MarketingSms { get; set; }
 
+    /// <summary>Phone order: default manual discount type (<c>percent</c> | <c>amount</c>) for this customer at this site.</summary>
+    [StringLength(20)]
+    public string? PermanentDiscountType { get; set; }
+
+    /// <summary>Phone order: default discount percent or fixed NIS amount.</summary>
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? PermanentDiscountValue { get; set; }
+
     public bool IsDeleted { get; set; }
 
     [Precision(0)]

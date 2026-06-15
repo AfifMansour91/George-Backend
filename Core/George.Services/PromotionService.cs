@@ -421,6 +421,10 @@ public class PromotionService : ServiceBase
         {
             PromotionId = r.PromotionId,
             Label = r.Label,
+            PromotionType = string.IsNullOrWhiteSpace(r.PromotionType) ? null : r.PromotionType,
+            DiscountKind = r.DiscountKind,
+            DiscountValue = r.DiscountValue,
+            WholeCart = r.WholeCart,
             AllProducts = r.AllProducts,
             ProductIds = r.ProductIds.OrderBy(x => x).ToList(),
             CategoryIds = r.CategoryIds.OrderBy(x => x).ToList(),

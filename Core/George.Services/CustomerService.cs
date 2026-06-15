@@ -96,7 +96,9 @@ public class CustomerService : ServiceBase
             MarketingSms = c.MarketingSms,
             LastOrderDate = lastOrderAt?.ToString("dd/MM/yyyy"),
             AverageReturnDays = averageReturnDays,
-            Activity = new List<CustomerActivityItem>()
+            Activity = new List<CustomerActivityItem>(),
+            PermanentDiscountType = c.PermanentDiscountType,
+            PermanentDiscountValue = c.PermanentDiscountValue,
         };
     }
 

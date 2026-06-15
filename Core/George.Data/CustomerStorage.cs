@@ -284,6 +284,36 @@ public class CustomerStorage : StorageBase
             .FirstOrDefaultAsync(o => o.Id == lastOrderId && !o.IsDeleted, cancelToken).ConfigureAwait(false);
     }
 
+    /// <summary>Set or clear the phone-order permanent discount stored on the customer record.</summary>
+    public async Task SetCustomerPermanentDiscountAsync(
+        int customerId,
+        string? discountType,
+        decimal? discountValue,
+        bool clear,
+        CancellationToken cancelToken = default)
+    {
+        var c = await _dbContext.Set<Customer>()
+            .FirstOrDefaultAsync(x => x.Id == customerId && !x.IsDeleted, cancelToken)
+            .ConfigureAwait(false);
+        if (c == null) return;
+
+        if (clear)
+        {
+            c.PermanentDiscountType = null;
+            c.PermanentDiscountValue = null;
+        }
+        else
+        {
+            var type = (discountType ?? "percent").Trim().ToLowerInvariant();
+            if (type != "percent" && type != "amount") type = "percent";
+            c.PermanentDiscountType = type;
+            c.PermanentDiscountValue = discountValue;
+        }
+
+        c.UpdatedDate = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+    }
+
     /// <summary>Update customer name. If siteId is provided, only updates when customer belongs to that site. Returns updated customer or null if not found.</summary>
     public async Task<Customer?> UpdateCustomerAsync(int customerId, int? siteId, string name, CancellationToken cancelToken)
     {

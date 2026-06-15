@@ -98,6 +98,12 @@ public class NearbyPromotion
     /// <summary>Estimated discount amount (NIS) if the customer crosses the threshold.</summary>
     public decimal? PotentialSaving { get; set; }
 
+    /// <summary>For BxPY near-miss: bundle quantity (e.g. 3 kg).</summary>
+    public decimal? DealQuantity { get; set; }
+
+    /// <summary>For BxPY near-miss: bundle price (NIS).</summary>
+    public decimal? DealPrice { get; set; }
+
     /// <summary>For BxGY: the gift product the customer would unlock (when single-option).</summary>
     public int? RewardProductId { get; set; }
     public string? RewardProductName { get; set; }

@@ -14,6 +14,11 @@ public static class PromotionCatalogBadgeResolver
         public int PromotionId { get; set; }
         /// <summary>Promotion display name — shown on the catalog banner (plugin uses <c>promotion-&gt;name</c>).</summary>
         public string Label { get; set; } = string.Empty;
+        public string PromotionType { get; set; } = string.Empty;
+        /// <summary>For discount promotions: "percent" | "amount".</summary>
+        public string? DiscountKind { get; set; }
+        public decimal? DiscountValue { get; set; }
+        public bool WholeCart { get; set; }
         public bool AllProducts { get; set; }
         public HashSet<int> ProductIds { get; } = new();
         public HashSet<int> CategoryIds { get; } = new();
@@ -115,13 +120,15 @@ public static class PromotionCatalogBadgeResolver
             switch (type)
             {
                 case "discount":
-                    ExtractDiscountScope(root, rule);
+                    ExtractDiscountScope(root, rule, p);
                     break;
                 case "buy_x_pay_y":
                     ExtractBxpyScope(root, rule);
+                    rule.PromotionType = "buy_x_pay_y";
                     break;
                 case "buy_x_get_y":
                     ExtractBxgyScope(root, rule);
+                    rule.PromotionType = "buy_x_get_y";
                     break;
                 default:
                     return null;
@@ -134,11 +141,20 @@ public static class PromotionCatalogBadgeResolver
         }
     }
 
-    private static void ExtractDiscountScope(JsonElement payload, BadgeRule rule)
+    private static void ExtractDiscountScope(JsonElement payload, BadgeRule rule, Promotion p)
     {
+        rule.PromotionType = "discount";
+        var kind = (p.ListDiscountKind ?? "percent").Trim().ToLowerInvariant();
+        if (kind is "percent" or "amount")
+        {
+            rule.DiscountKind = kind;
+            rule.DiscountValue = ReadDecimal(payload, "value");
+        }
+
         AddExcluded(rule, payload);
         var applyScope = ReadString(payload, "applyScope") ?? "all";
-        if (applyScope == "whole_cart" || ReadBool(payload, "appliesToWholeCart") == true || applyScope == "all")
+        rule.WholeCart = applyScope == "whole_cart" || ReadBool(payload, "appliesToWholeCart") == true;
+        if (rule.WholeCart || applyScope == "all")
         {
             rule.AllProducts = true;
             return;
@@ -221,4 +237,7 @@ public static class PromotionCatalogBadgeResolver
 
     private static int? ReadInt(JsonElement el, string prop) =>
         el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n) ? n : null;
+
+    private static decimal? ReadDecimal(JsonElement el, string prop) =>
+        el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var d) ? d : null;
 }
