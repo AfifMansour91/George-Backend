@@ -2035,15 +2035,9 @@ namespace George.Services
                     sb.Append("</div>");
                 }
 
-                if (it.DiscountAmount is > 0m)
-                {
-                    sb.Append($"<div style=\"padding-right:12px;font-size:{VoucherPrintHtml.ProductMeta}px;font-weight:700;line-height:{VoucherPrintHtml.ProductMetaLineHeight}px;color:#047857;\">");
-                    sb.Append($"✓ במבצע · חיסכון ₪{it.DiscountAmount.Value.ToString("0.00", CultureInfo.InvariantCulture)}");
-                    sb.Append("</div>");
-                }
-
                 var lineAmt = GetVoucherPickedLineAmount(it);
-                var pickedRowHtml = BuildVoucherPickedRowTableHtml(it, lineAmt);
+                var linePricing = VoucherReceiptLayout.GetLinePricing(it, lineAmt);
+                var pickedRowHtml = BuildVoucherPickedRowTableHtml(it, lineAmt, linePricing);
                 if (!string.IsNullOrEmpty(pickedRowHtml))
                 {
                     sb.Append(pickedRowHtml);
@@ -2054,31 +2048,12 @@ namespace George.Services
 
             if (!newVoucher && grandTotal.HasValue)
             {
-                var promoDisc = OrderDiscountTotals.SumLinePromotionDiscount(
-                    items.Select(i => (i.DiscountAmount, i.IsDeleted)));
-                var manualDisc = order.ManualDiscountAmount is > 0m ? order.ManualDiscountAmount.Value : 0m;
-                var ship = order.ShippingCost ?? 0m;
-                sb.AppendLine("  <div style=\"margin-bottom:12px;padding-bottom:12px;border-bottom:1px dashed #000;text-align:center;\">");
-                if (promoDisc > 0m)
-                {
-                    sb.AppendLine($"    <div style=\"font-size:12px;font-weight:500;line-height:16px;color:#047857;\">הנחת מבצע: −₪{promoDisc.ToString("0.00", CultureInfo.InvariantCulture)}</div>");
-                }
-                if (manualDisc > 0m)
-                {
-                    sb.AppendLine($"    <div style=\"font-size:12px;font-weight:500;line-height:16px;color:#047857;\">הנחה ידנית: −₪{manualDisc.ToString("0.00", CultureInfo.InvariantCulture)}</div>");
-                }
-                if (!string.IsNullOrWhiteSpace(order.CouponCode))
-                {
-                    sb.AppendLine($"    <div style=\"font-size:11px;font-weight:400;line-height:15px;color:#374151;\">קופון: {EscapeHtml(order.CouponCode.Trim())}</div>");
-                }
-                if (ship > 0m)
-                {
-                    sb.AppendLine($"    <div style=\"font-size:12px;font-weight:500;line-height:16px;\">משלוח: ₪{ship.ToString("0.00", CultureInfo.InvariantCulture)}</div>");
-                }
-                sb.AppendLine($"    <div style=\"margin-top:6px;font-size:15px;font-weight:700;line-height:19px;\">{payLine}</div>");
-                sb.AppendLine($"    <div style=\"margin-top:4px;font-size:24px;font-weight:700;line-height:19px;direction:ltr;unicode-bidi:embed;\">₪{grandTotal.Value.ToString("0.00", CultureInfo.InvariantCulture)}</div>");
-                sb.AppendLine($"    <div style=\"margin-top:4px;font-size:11px;font-weight:400;line-height:19px;\">{VoucherVatIncludedLabel}</div>");
-                sb.AppendLine("  </div>");
+                var anyPicked = items.Any(OrderItemLineDisplay.OrderMeaningfulPick);
+                var itemsSum = !newVoucher && anyPicked
+                    ? items.Sum(i => GetVoucherPickedLineAmount(i) ?? 0m)
+                    : items.Sum(OrderedLineGrossForVoucher);
+                var summary = VoucherReceiptLayout.BuildSummary(order, itemsSum);
+                sb.AppendLine(VoucherReceiptLayout.SummaryHtml(summary, payLine, VoucherVatIncludedLabel, EscapeHtml));
             }
 
             if (showBottomQr)
@@ -2339,7 +2314,13 @@ namespace George.Services
             return $"<div style=\"{valStyle}white-space:nowrap;\"><bdi dir=\"ltr\">{EscapeHtml(amount)}</bdi>{EscapeHtml(suffix)}</div>";
         }
 
-        private static string? BuildVoucherPickedRowTableHtml(OrderItem it, decimal? lineAmt)
+        private static decimal OrderedLineGrossForVoucher(OrderItem item)
+        {
+            if (item.TotalPrice is > 0m) return item.TotalPrice.Value;
+            return item.Quantity * (item.PricePerUnit ?? 0m);
+        }
+
+        private static string? BuildVoucherPickedRowTableHtml(OrderItem it, decimal? lineAmt, VoucherReceiptLayout.LinePricing? linePricing)
         {
             if (!OrderItemLineDisplay.OrderMeaningfulPick(it)) return null;
             var qty = OrderItemLineDisplay.FormatVoucherPickedDisplay(it);
@@ -2354,12 +2335,13 @@ namespace George.Services
                 "font-size:10px;font-weight:700;line-height:13px;border-bottom:1px solid #000;padding-bottom:2px;";
             const string val = "font-size:11px;font-weight:700;line-height:14px;padding-top:2px;";
             var priceCell = VoucherPriceValueHtml(price, val);
+            var totalCell = VoucherReceiptLayout.PickedTotalCellHtml(linePricing, total, val, EscapeHtml);
             return
                 $"<div style=\"{grid}\">" +
                 $"<div style=\"{head}\">מחיר</div><div style=\"{head}\">לוקט</div><div style=\"{head}\">סה\"כ</div>" +
                 priceCell +
                 $"<div style=\"{val}\">{EscapeHtml(qty)}</div>" +
-                $"<div style=\"{val}\"><bdi dir=\"ltr\">{EscapeHtml(total)}</bdi></div>" +
+                totalCell +
                 "</div>";
         }
 
