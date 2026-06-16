@@ -53,6 +53,9 @@ namespace George.Services.Response
         /// <summary>When true (default), UI asks for bag count when completing picking.</summary>
         public bool? AskBagsCountAtPickingFinish { get; set; }
 
+        /// <summary>When true (default), UI shows picking confirmation dialog after barcode scan.</summary>
+        public bool? ConfirmPickingAfterScan { get; set; }
+
         public string? PaymentGatewayProvider { get; set; }
         public int? CardcomTerminalNumber { get; set; }
         public string? CardcomApiName { get; set; }

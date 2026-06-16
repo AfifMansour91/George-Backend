@@ -59,6 +59,8 @@ namespace George.Services
                 model.IsraelCityPickerEnabled = true;
             if (!model.AskBagsCountAtPickingFinish.HasValue)
                 model.AskBagsCountAtPickingFinish = true;
+            if (!model.ConfirmPickingAfterScan.HasValue)
+                model.ConfirmPickingAfterScan = true;
 
             CardcomTestTerminalDefaults.ApplyToNewSiteIfUnset(model, _paymentTokenProtector);
 

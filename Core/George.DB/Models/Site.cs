@@ -134,6 +134,9 @@ public partial class Site
     /// <summary>When true (default), staff must confirm bag count before completing picking. When false, skip that prompt.</summary>
     public bool? AskBagsCountAtPickingFinish { get; set; }
 
+    /// <summary>When true (default), show picking confirmation dialog after barcode scan. When false, apply scan silently unless weight exceeds tolerance.</summary>
+    public bool? ConfirmPickingAfterScan { get; set; }
+
     /// <summary>Active payment provider: none | cardcom.</summary>
     [StringLength(32)]
     public string PaymentGatewayProvider { get; set; } = "none";
