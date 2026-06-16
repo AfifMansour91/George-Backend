@@ -45,6 +45,10 @@ namespace George.Services.Response
         public string? PrintFutureAtTime { get; set; }
         public bool? VoucherPrinterSilent { get; set; }
         public string? VoucherPrinterName { get; set; }
+        public bool? VoucherPrinterUseAgent { get; set; }
+        public string? LabelPrinterName { get; set; }
+        public bool? LabelPrinterUseAgent { get; set; }
+        public bool? PrintLabelsAfterPicking { get; set; }
 
         /// <summary>When true (default), UI asks for bag count when completing picking.</summary>
         public bool? AskBagsCountAtPickingFinish { get; set; }
