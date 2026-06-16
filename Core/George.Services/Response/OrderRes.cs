@@ -52,6 +52,8 @@ public class OrderRes
     public string? PickupTime { get; set; }
     public string? ManagerNote { get; set; }
     public string? CustomerNote { get; set; }
+    /// <summary>Permanent manager note from CRM Customer.Notes (not stored on Order).</summary>
+    public string? CustomerProfileNote { get; set; }
     public string? DeliveryNote { get; set; }
     public decimal? SubTotal { get; set; }
     public decimal? ShippingCost { get; set; }

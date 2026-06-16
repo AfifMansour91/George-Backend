@@ -439,7 +439,6 @@ namespace George.Data
             result.Found = true;
             result.CustomerName = last.CustomerName;
             result.CustomerPhone = last.CustomerPhone;
-            result.ManagerNote = last.ManagerNote;
             result.LastOrderDate = (last.DeliveryDate ?? last.PickupDate)?.ToString("yyyy-MM-dd");
             result.OrderCount = orders.Count;
             var totals = orders.Where(o => o.Total.HasValue).Select(o => o.Total!.Value).ToList();

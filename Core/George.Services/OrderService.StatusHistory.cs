@@ -31,6 +31,7 @@ public partial class OrderService
             .GetStatusHistoryByOrderIdsAsync(new[] { order.Id }, cancelToken)
             .ConfigureAwait(false);
         ApplyStatusTimestampsToRes(res, order, map.GetValueOrDefault(order.Id));
+        await ApplyCustomerProfileNotesAsync(new[] { res }, new[] { order }, cancelToken).ConfigureAwait(false);
     }
 
     private async Task EnrichOrderResListAsync(
@@ -46,6 +47,33 @@ public partial class OrderService
         {
             if (!orderById.TryGetValue(res.Id, out var order)) continue;
             ApplyStatusTimestampsToRes(res, order, map.GetValueOrDefault(res.Id));
+        }
+        await ApplyCustomerProfileNotesAsync(list, orders, cancelToken).ConfigureAwait(false);
+    }
+
+    private async Task ApplyCustomerProfileNotesAsync(
+        IReadOnlyList<OrderRes> list,
+        IReadOnlyList<Order> orders,
+        CancellationToken cancelToken)
+    {
+        var customerIds = orders
+            .Select(o => o.CustomerId ?? 0)
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+        if (customerIds.Count == 0) return;
+
+        var notesByCustomerId = await _customerStorage
+            .GetNotesByCustomerIdsAsync(customerIds, cancelToken)
+            .ConfigureAwait(false);
+
+        var orderById = orders.ToDictionary(o => o.Id);
+        foreach (var res in list)
+        {
+            if (!orderById.TryGetValue(res.Id, out var order)) continue;
+            if (order.CustomerId is not > 0) continue;
+            if (notesByCustomerId.TryGetValue(order.CustomerId.Value, out var notes))
+                res.CustomerProfileNote = notes;
         }
     }
 

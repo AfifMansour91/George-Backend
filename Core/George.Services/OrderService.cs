@@ -146,6 +146,10 @@ namespace George.Services
                 req.AccountId = site.AccountId;
             }
 
+            var permanentNote = string.IsNullOrWhiteSpace(req.PermanentCustomerNote)
+                ? null
+                : req.PermanentCustomerNote.Trim();
+
             // Ensure customer exists for this site (find by SiteId + phone, or create); then link order to that customer. Pass marketingSms so it is persisted on the customer. Persist full delivery address on Customer (structured + combined line).
             var customer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
                 req.SiteId,
@@ -155,7 +159,7 @@ namespace George.Services
                 email: req.CustomerEmail,
                 city: req.DeliveryCity,
                 defaultAddress: BuildCustomerDefaultDeliveryLine(req),
-                notes: null,
+                notes: permanentNote,
                 marketingSms: req.MarketingSms,
                 deliveryStreet: req.DeliveryStreet,
                 deliveryApartment: req.DeliveryApartment,
@@ -524,7 +528,9 @@ namespace George.Services
             response.Data.Found = profile.Found;
             response.Data.CustomerName = profile.CustomerName;
             response.Data.CustomerPhone = profile.CustomerPhone;
-            response.Data.ManagerNote = profile.ManagerNote;
+            var crmCustomer = await _customerStorage.GetCustomerByPhoneAsync(siteId, phone, cancelToken)
+                .ConfigureAwait(false);
+            response.Data.ManagerNote = crmCustomer?.Notes;
             response.Data.LastOrderDate = profile.LastOrderDate;
             response.Data.OrderCount = profile.OrderCount;
             response.Data.AverageOrderTotal = profile.AverageOrderTotal;
