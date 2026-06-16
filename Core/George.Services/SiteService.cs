@@ -124,9 +124,13 @@ namespace George.Services
             if (req.PrintFutureAtTime != null) model.PrintFutureAtTime = req.PrintFutureAtTime;
             if (req.VoucherPrinterSilent.HasValue) model.VoucherPrinterSilent = req.VoucherPrinterSilent;
             if (req.VoucherPrinterName != null) model.VoucherPrinterName = req.VoucherPrinterName;
-            if (req.VoucherPrinterUseAgent.HasValue) model.VoucherPrinterUseAgent = req.VoucherPrinterUseAgent.Value;
+            model.VoucherPrinterUseAgent = req.VoucherPrinterUseAgent.HasValue
+                ? req.VoucherPrinterUseAgent.Value
+                : existingSite.VoucherPrinterUseAgent;
             if (req.LabelPrinterName != null) model.LabelPrinterName = req.LabelPrinterName;
-            if (req.LabelPrinterUseAgent.HasValue) model.LabelPrinterUseAgent = req.LabelPrinterUseAgent.Value;
+            model.LabelPrinterUseAgent = req.LabelPrinterUseAgent.HasValue
+                ? req.LabelPrinterUseAgent.Value
+                : existingSite.LabelPrinterUseAgent;
             if (req.PrintLabelsAfterPicking.HasValue) model.PrintLabelsAfterPicking = req.PrintLabelsAfterPicking;
             model = await _siteStorage.UpdateSiteAsync(model, req.BusinessTypeIds, cancelToken).ConfigureAwait(false);
             if (model != null)
