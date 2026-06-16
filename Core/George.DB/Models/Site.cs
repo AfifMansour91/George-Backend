@@ -118,6 +118,19 @@ public partial class Site
     [StringLength(100)]
     public string? VoucherPrinterName { get; set; }
 
+    /// <summary>When true (default), send voucher jobs to local PrintAgent instead of browser print.</summary>
+    public bool VoucherPrinterUseAgent { get; set; } = true;
+
+    /// <summary>Label printer: display name / connection label (optional second printer at branch).</summary>
+    [StringLength(100)]
+    public string? LabelPrinterName { get; set; }
+
+    /// <summary>When true (default), send label jobs to local PrintAgent.</summary>
+    public bool LabelPrinterUseAgent { get; set; } = true;
+
+    /// <summary>When true, print bag labels automatically when picking is completed.</summary>
+    public bool? PrintLabelsAfterPicking { get; set; }
+
     /// <summary>When true (default), staff must confirm bag count before completing picking. When false, skip that prompt.</summary>
     public bool? AskBagsCountAtPickingFinish { get; set; }
 
