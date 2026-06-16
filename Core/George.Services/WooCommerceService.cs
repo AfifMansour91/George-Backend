@@ -1777,8 +1777,13 @@ namespace George.Services
                     existingWooId = await FindProductIdBySkuAsync(baseUrl, siteId, product.Sku, httpClient, cancelToken);
 
                 List<(int id, string? src, string? name)>? existingWooImages = null;
+                List<WooCommerceProductAttributeReadItem>? existingWooNonVariationAttributes = null;
                 if (existingWooId.HasValue)
-                    existingWooImages = await GetWooCommerceProductImagesAsync(baseUrl, existingWooId.Value, httpClient, cancelToken);
+                {
+                    var existingWooProduct = await GetWooCommerceExistingProductForSyncAsync(baseUrl, existingWooId.Value, httpClient, cancelToken);
+                    existingWooImages = existingWooProduct?.Images;
+                    existingWooNonVariationAttributes = existingWooProduct?.NonVariationAttributes;
+                }
 
                 // Map images: when updating, use existing WooCommerce image id when URL matches to avoid duplicating in media library.
                 // Use the image name from the system (Media.Name) so WooCommerce gets a friendly filename instead of the long URL.
@@ -2090,7 +2095,11 @@ namespace George.Services
 
                     // Build attributes array using global attribute IDs. Include "name" (taxonomy slug) so WooCommerce
                     // reliably relates attributes to the product; options remain display names for the dropdown.
-                    var attributes = product.ProductOption?
+                    // TEMPORARY: George does not import variation=false attrs (see docs/WooCommerce-import-non-variation-attributes.md).
+                    // On update, re-send existing Woo non-variation attrs so PUT does not wipe nutrition/spec fields.
+                    var preservedNonVariationAttributes = BuildWooSyncPreservedNonVariationAttributes(existingWooNonVariationAttributes);
+                    var preservedAttributeCount = preservedNonVariationAttributes.Count;
+                    var georgeVariationAttributes = product.ProductOption?
                         .Where(po => !po.IsDeleted && attributeMap.ContainsKey(NormalizeOptionKey(po.Name)))
                         .Select((option, index) =>
                         {
@@ -2100,7 +2109,7 @@ namespace George.Services
                             var dict = new Dictionary<string, object>
                             {
                                 ["id"] = attrId,
-                                ["position"] = index,
+                                ["position"] = preservedAttributeCount + index,
                                 ["visible"] = true,
                                 ["variation"] = true,
                                 ["options"] = GetProductOptionValuesForWooSync(option, product)
@@ -2111,6 +2120,8 @@ namespace George.Services
                         })
                         .Cast<object>()
                         .ToList() ?? new List<object>();
+
+                    var attributes = preservedNonVariationAttributes.Concat(georgeVariationAttributes).ToList();
 
                     wooProduct["attributes"] = attributes;
 
@@ -3299,9 +3310,15 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Fetches existing product images from WooCommerce (id, src, name) so we can send id instead of src on update and avoid duplicating images in the media library.
+        /// Fetches existing product images and non-variation attributes from WooCommerce for sync updates.
+        /// Images: send id instead of src on update to avoid duplicating in the media library.
+        /// Non-variation attributes: re-included on PUT because George does not model them locally (TEMPORARY).
         /// </summary>
-        private static async Task<List<(int id, string? src, string? name)>?> GetWooCommerceProductImagesAsync(string baseUrl, int wooProductId, HttpClient httpClient, CancellationToken cancelToken)
+        private static async Task<WooExistingProductForSync?> GetWooCommerceExistingProductForSyncAsync(
+            string baseUrl,
+            int wooProductId,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
         {
             try
             {
@@ -3310,8 +3327,15 @@ namespace George.Services
                 if (!response.IsSuccessStatusCode) return null;
                 var body = await response.Content.ReadAsStringAsync(cancelToken);
                 var product = TryDeserialize<WooCommerceProductGetResponse>(body);
-                if (product?.images == null) return null;
-                return product.images.Select(img => (img.id, img.src, img.name)).ToList();
+                if (product == null) return null;
+                return new WooExistingProductForSync
+                {
+                    Images = product.images?.Select(img => (img.id, img.src, img.name)).ToList() ?? new(),
+                    NonVariationAttributes = product.attributes?
+                        .Where(a => !a.variation && !string.IsNullOrWhiteSpace(a.name))
+                        .OrderBy(a => a.position)
+                        .ToList() ?? new()
+                };
             }
             catch
             {
@@ -3319,6 +3343,32 @@ namespace George.Services
             }
         }
 
+        /// <summary>
+        /// Rebuild Woo REST attribute objects for variation=false rows we do not store in George.
+        /// See docs/WooCommerce-import-non-variation-attributes.md (sync preserve section).
+        /// </summary>
+        private static List<object> BuildWooSyncPreservedNonVariationAttributes(
+            IReadOnlyList<WooCommerceProductAttributeReadItem>? existing)
+        {
+            if (existing == null || existing.Count == 0)
+                return new List<object>();
+
+            return existing
+                .Select(a =>
+                {
+                    var dict = new Dictionary<string, object>
+                    {
+                        ["id"] = a.id,
+                        ["position"] = a.position,
+                        ["visible"] = a.visible,
+                        ["variation"] = false,
+                        ["options"] = a.options ?? new List<string>()
+                    };
+                    dict["name"] = a.name!.Trim();
+                    return (object)dict;
+                })
+                .ToList();
+        }
         private static bool IsPublicImageUrl(string? url)
         {
             if (string.IsNullOrWhiteSpace(url)) return false;
@@ -3760,6 +3810,25 @@ namespace George.Services
         private class WooCommerceProductGetResponse
         {
             public List<WooCommerceImageItem>? images { get; set; }
+            public List<WooCommerceProductAttributeReadItem>? attributes { get; set; }
+        }
+
+        /// <summary>Product attribute row from GET /products/{id} (read during sync).</summary>
+        private class WooCommerceProductAttributeReadItem
+        {
+            public int id { get; set; }
+            public string? name { get; set; }
+            public string? slug { get; set; }
+            public int position { get; set; }
+            public bool visible { get; set; }
+            public bool variation { get; set; }
+            public List<string>? options { get; set; }
+        }
+
+        private sealed class WooExistingProductForSync
+        {
+            public List<(int id, string? src, string? name)> Images { get; init; } = new();
+            public List<WooCommerceProductAttributeReadItem> NonVariationAttributes { get; init; } = new();
         }
 
         private class WooCommerceImageItem

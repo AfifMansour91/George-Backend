@@ -58,6 +58,23 @@ foreach (var attr in wp.attributes.Where(a => !string.IsNullOrWhiteSpace(a.name)
 
 Marked in code with `// TEMPORARY` near the loop in `WooCommerceService.cs` (~line 4280).
 
+## Sync to WooCommerce (preserve on update)
+
+George `ProductOption` only contains variation attributes, but WooCommerce **replaces** the whole `attributes[]` on `PUT /products/{id}`. Without merging, any edit + sync would delete Woo-side `variation=false` rows (nutrition, specs).
+
+**Current fix (TEMPORARY, paired with import skip):**
+
+1. Before updating an existing Woo product, `GET /products/{id}` (same request used for image dedup).
+2. Collect attributes where `variation == false`.
+3. Build the PUT payload as: **preserved non-variation attrs** + **George variation attrs** (`ProductOption`), with variation positions offset after preserved rows.
+
+Helpers in `WooCommerceService.cs`:
+
+- `GetWooCommerceExistingProductForSyncAsync`
+- `BuildWooSyncPreservedNonVariationAttributes`
+
+**Limits:** George cannot edit these fields until we model them locally; sync only **keeps** what Woo already had. New products created only in George (no prior Woo attrs) are unchanged. If the GET fails, sync falls back to George variation attrs only (same as before the preserve fix).
+
 ## How to restore full import later
 
 1. Remove `&& a.variation` from the `Where` clause (restore the original loop above).
@@ -67,4 +84,4 @@ Marked in code with `// TEMPORARY` near the loop in `WooCommerceService.cs` (~li
 
 - Attribute model: `WooImportProductAttributeItem` (`name`, `variation`, `options`) in `WooCommerceService.cs`
 - Variable product detection still uses `wp.attributes?.Any(a => a.variation)` in `ApplyWooImportProductExtensionsAsync` — unchanged
-- Export/sync **to** WooCommerce uses George `ProductOption` only; skipped Woo spec attributes will not be pushed back until we model them explicitly
+- Export/sync **to** WooCommerce: variation attrs from `ProductOption`; non-variation attrs preserved from existing Woo product on update (see above)

@@ -118,6 +118,19 @@ public partial class Site
     [StringLength(100)]
     public string? VoucherPrinterName { get; set; }
 
+    /// <summary>When true (default), send voucher jobs to local PrintAgent instead of browser print.</summary>
+    public bool VoucherPrinterUseAgent { get; set; } = true;
+
+    /// <summary>Label printer: display name / connection label (optional second printer at branch).</summary>
+    [StringLength(100)]
+    public string? LabelPrinterName { get; set; }
+
+    /// <summary>When true (default), send label jobs to local PrintAgent.</summary>
+    public bool LabelPrinterUseAgent { get; set; } = true;
+
+    /// <summary>When true, print bag labels automatically when picking is completed.</summary>
+    public bool? PrintLabelsAfterPicking { get; set; }
+
     /// <summary>
     /// Promotion settings (Sprint 4 — `Sprint4/מבצעים.md` "הגדרות מבצעים").
     /// Default for BxPY over-quantity pricing: "same_price" (pro-rated) | "full_price" (regular). Null = "full_price".

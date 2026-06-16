@@ -543,11 +543,54 @@ public class PaymentService : ServiceBase
         if (finalAmount <= 0)
             return CreateResponse(response, StatusCode.InvalidRequest, "Order total must be positive.");
 
-        var (token, cardExp, approval) = await ResolveChargeTokenAsync(order, cancelToken);
+        _logger.LogInformation(
+            "FinalizePickingPayment start: orderId={OrderId}, siteId={SiteId}, finalAmount={FinalAmount}, authAmount={AuthAmount}, " +
+            "settleStatus={SettleStatus}, paymentStatus={PaymentStatus}, lowProfileId={LowProfileId}, " +
+            "hasCardcomPaymentJson={HasCardcomPaymentJson}, customerPaymentMethodId={CustomerPaymentMethodId}, " +
+            "cardcomApprovalPresent={CardcomApprovalPresent}, encryptionKeyConfigured={EncryptionKeyConfigured}",
+            order.Id,
+            order.SiteId,
+            finalAmount,
+            authAmount,
+            order.PaymentSettleStatus,
+            order.PaymentStatus,
+            order.CardcomLowProfileId,
+            !string.IsNullOrWhiteSpace(order.CardcomPaymentJson),
+            order.CustomerPaymentMethodId,
+            !string.IsNullOrWhiteSpace(order.CardcomApprovalNumber),
+            _tokenProtector.UsesDatabaseEncryptionKey);
+
+        var (token, cardExp, approval) = await ResolveChargeTokenAsync(order, cancelToken, forceRefreshFromCardcom: true);
+        approval = CoalesceNonEmpty(approval, order.CardcomApprovalNumber);
+        _logger.LogInformation(
+            "FinalizePickingPayment resolved token: orderId={OrderId}, tokenShape={TokenShape}, tokenMask={TokenMask}, " +
+            "cardExp={CardExp}, approvalPresent={ApprovalPresent}, approvalMasked={ApprovalMasked}, usable={Usable}",
+            order.Id,
+            CardcomGateway.DescribeTokenShape(token),
+            MaskToken(token),
+            FormatCardExpForLog(cardExp),
+            !string.IsNullOrWhiteSpace(approval),
+            MaskApprovalNumber(approval),
+            IsResolvedChargeTokenUsable((token, cardExp, approval)));
+
         var invoiceDocument = BuildDocumentForOrder(order, creds, sendByEmail: false);
+        var cardOwner = BuildCardOwnerContactFromOrder(order);
+        _logger.LogInformation(
+            "FinalizePickingPayment card owner: orderId={OrderId}, hasName={HasName}, hasPhone={HasPhone}, hasEmail={HasEmail}",
+            order.Id,
+            !string.IsNullOrWhiteSpace(cardOwner?.Name),
+            !string.IsNullOrWhiteSpace(cardOwner?.Phone),
+            !string.IsNullOrWhiteSpace(cardOwner?.Email));
 
         if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(cardExp))
         {
+            _logger.LogWarning(
+                "FinalizePickingPayment no token/exp: orderId={OrderId}, tokenShape={TokenShape}, cardExpPresent={CardExpPresent}, approvalPresent={ApprovalPresent}",
+                order.Id,
+                CardcomGateway.DescribeTokenShape(token),
+                !string.IsNullOrWhiteSpace(cardExp),
+                !string.IsNullOrWhiteSpace(approval));
+
             if (string.IsNullOrWhiteSpace(approval))
                 return CreateResponse(response, StatusCode.InvalidRequest,
                     "No payment token for this order. Customer must complete card authorization when ordering.");
@@ -557,6 +600,7 @@ public class PaymentService : ServiceBase
                 Amount = finalAmount,
                 ApprovalNumber = approval,
                 ExternalUniqTranId = $"capture-{order.Id}-{DateTime.UtcNow:yyyyMMddHHmmss}",
+                CardOwner = cardOwner,
                 Document = invoiceDocument,
             }, cancelToken);
 
@@ -572,40 +616,55 @@ public class PaymentService : ServiceBase
                 return response;
             }
 
-            order.PaymentStatus = "Paid";
-            order.PaymentSettleStatus = PaymentSettleStatus.Captured;
-            order.PaidAt = DateTime.UtcNow;
-            order.PaymentReference = txCapture.TranzactionId;
-            order.GatewayPaymentTransactionId = txCapture.TranzactionId;
-            ApplyInvoiceFromTransaction(order, txCapture);
-            await TryCreateInvoiceAfterCaptureIfMissingAsync(order, creds, invoiceDocument, txCapture.TranzactionId,
-                cancelToken);
-            order.ExternalPaymentStatus = "success";
-            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
-            await TrySendInvoiceSmsAfterCaptureAsync(order, creds, cancelToken);
-
-            response.Data = new FinalizePickingPaymentRes
-            {
-                Outcome = "Captured",
-                FinalAmount = finalAmount,
-                AuthorizedAmount = authAmount,
-                TransactionId = txCapture.TranzactionId,
-                InvoiceNumber = order.InvoiceNumber,
-                DocumentUrl = order.CardcomDocumentUrl,
-            };
-            return response;
+            return await CompleteFinalizeCaptureAsync(order, creds, invoiceDocument, response, finalAmount, authAmount, txCapture, cancelToken);
         }
 
-        await TryReleaseAuthorizationHoldBestEffortAsync(order, creds, token, cardExp, approval, authAmount, cancelToken);
+        if (!CardcomGateway.IsCardcomTokenUuid(token))
+        {
+            _logger.LogError(
+                "FinalizePickingPayment abort: orderId={OrderId} — refusing ChargeToken with invalid token shape={TokenShape}",
+                order.Id,
+                CardcomGateway.DescribeTokenShape(token));
+            return CreateResponse(response, StatusCode.InvalidRequest,
+                "Payment token is invalid for this order. Re-authorize the card or contact support.");
+        }
+
+        // Picking always charges the token (not J5 capture). Release any open J5 hold first so it does not block the sale.
+        var voidApproval = await TryRecoverJ5ApprovalAsync(order, cancelToken);
+        if (!string.IsNullOrWhiteSpace(voidApproval))
+        {
+            order.CardcomApprovalNumber ??= voidApproval;
+            _logger.LogInformation(
+                "FinalizePickingPayment void J5 before token charge: orderId={OrderId}, approvalMasked={ApprovalMasked}, authAmount={AuthAmount}",
+                order.Id,
+                MaskApprovalNumber(voidApproval),
+                authAmount);
+            await TryReleaseAuthorizationHoldBestEffortAsync(
+                order, creds, token, cardExp, voidApproval, authAmount, cancelToken, forceVoid: true);
+        }
+        else if (!string.IsNullOrWhiteSpace(order.CardcomLowProfileId))
+        {
+            _logger.LogWarning(
+                "FinalizePickingPayment: orderId={OrderId} — no J5 approval to void before token charge (lowProfileId present)",
+                order.Id);
+        }
+
+        _logger.LogInformation(
+            "FinalizePickingPayment standalone token charge: orderId={OrderId}, amount={Amount}, tokenShape={TokenShape}, tokenMask={TokenMask}, cardExp={CardExp}",
+            order.Id,
+            finalAmount,
+            CardcomGateway.DescribeTokenShape(token),
+            MaskToken(token),
+            FormatCardExpForLog(cardExp));
 
         var tx = await _cardcom.ChargeTokenAsync(creds, new ChargeTokenRequest
         {
             Amount = finalAmount,
             Token = token,
             CardExpirationMMYY = cardExp,
-            ApprovalNumber = approval,
+            ApprovalNumber = null,
             ExternalUniqTranId = $"charge-{order.Id}-{DateTime.UtcNow:yyyyMMddHHmmss}",
-            CustomerName = order.CustomerName,
+            CardOwner = cardOwner,
             Document = invoiceDocument,
         }, cancelToken);
 
@@ -614,6 +673,11 @@ public class PaymentService : ServiceBase
 
         if (!tx.Success)
         {
+            _logger.LogWarning(
+                "FinalizePickingPayment ChargeToken failed: orderId={OrderId}, responseCode={ResponseCode}, description={Description}",
+                order.Id,
+                tx.ResponseCode,
+                TruncatePaymentStatusMessage(tx.Description));
             order.PaymentSettleStatus = PaymentSettleStatus.Failed;
             order.ExternalPaymentStatus = tx.Description;
             await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
@@ -621,6 +685,19 @@ public class PaymentService : ServiceBase
             return response;
         }
 
+        return await CompleteFinalizeCaptureAsync(order, creds, invoiceDocument, response, finalAmount, authAmount, tx, cancelToken);
+    }
+
+    private async Task<ApiResponse<FinalizePickingPaymentRes>> CompleteFinalizeCaptureAsync(
+        Order order,
+        SitePaymentCredentials creds,
+        CardcomTransactionDocument invoiceDocument,
+        ApiResponse<FinalizePickingPaymentRes> response,
+        decimal finalAmount,
+        decimal authAmount,
+        PaymentTransactionResult tx,
+        CancellationToken cancelToken)
+    {
         order.PaymentStatus = "Paid";
         order.PaymentSettleStatus = PaymentSettleStatus.Captured;
         order.PaidAt = DateTime.UtcNow;
@@ -774,6 +851,14 @@ public class PaymentService : ServiceBase
         };
         return response;
     }
+
+    private static CardcomCardOwnerContact BuildCardOwnerContactFromOrder(Order order) =>
+        new()
+        {
+            Name = string.IsNullOrWhiteSpace(order.CustomerName) ? null : order.CustomerName.Trim(),
+            Phone = string.IsNullOrWhiteSpace(order.CustomerPhone) ? null : order.CustomerPhone.Trim(),
+            Email = string.IsNullOrWhiteSpace(order.CustomerEmail) ? null : order.CustomerEmail.Trim(),
+        };
 
     private static CardcomTransactionDocument BuildDocumentForOrder(
         Order order,
@@ -1384,7 +1469,7 @@ public class PaymentService : ServiceBase
         {
             var ev = events.FirstOrDefault(e =>
                 string.Equals(e.EventType, eventType, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(e.StatusCode, "0", StringComparison.OrdinalIgnoreCase)
+                && IsSuccessfulCardcomEventStatus(e.StatusCode)
                 && !string.IsNullOrWhiteSpace(e.RawResponseJson));
             if (ev?.RawResponseJson == null)
                 continue;
@@ -1404,7 +1489,8 @@ public class PaymentService : ServiceBase
         string? last4 = null,
         string? brand = null,
         string? tokenEx = null,
-        string? cardExp = null) =>
+        string? cardExp = null,
+        string? approval = null) =>
         new()
         {
             Success = source.Success,
@@ -1415,7 +1501,7 @@ public class PaymentService : ServiceBase
             Operation = source.Operation,
             TranzactionId = source.TranzactionId,
             SuspendedDealId = source.SuspendedDealId,
-            ApprovalNumber = source.ApprovalNumber,
+            ApprovalNumber = approval ?? source.ApprovalNumber,
             Token = source.Token,
             TokenExDate = tokenEx ?? source.TokenExDate,
             CardExpirationMMYY = cardExp ?? source.CardExpirationMMYY,
@@ -1438,7 +1524,7 @@ public class PaymentService : ServiceBase
         var events = await _paymentStorage.GetPaymentEventsAsync(order.Id, cancelToken);
         var successEvent = events.FirstOrDefault(e =>
             e.EventType == "ValidateCallback"
-            && string.Equals(e.StatusCode, "0", StringComparison.OrdinalIgnoreCase)
+            && IsSuccessfulCardcomEventStatus(e.StatusCode)
             && !string.IsNullOrWhiteSpace(e.RawResponseJson));
         if (successEvent?.RawResponseJson == null)
             return;
@@ -1521,6 +1607,14 @@ public class PaymentService : ServiceBase
         if (string.IsNullOrWhiteSpace(validated.Token))
             return;
 
+        if (!CardcomGateway.IsCardcomTokenUuid(validated.Token))
+        {
+            _logger.LogWarning(
+                "Skip token persist for order {OrderId}: token is not a Cardcom UUID (length={Length})",
+                order.Id, validated.Token.Length);
+            return;
+        }
+
         var cardExp = validated.CardExpirationMMYY;
         if (string.IsNullOrWhiteSpace(cardExp) && !string.IsNullOrWhiteSpace(validated.RawJson))
             cardExp = _cardcom.ParseLpResult(validated.RawJson).CardExpirationMMYY;
@@ -1531,6 +1625,9 @@ public class PaymentService : ServiceBase
         }
 
         StoreOrderCardcomCredentials(order, validated.Token, cardExp, validated.ApprovalNumber);
+
+        if (!string.IsNullOrWhiteSpace(validated.ApprovalNumber))
+            order.CardcomApprovalNumber = validated.ApprovalNumber.Trim();
 
         var customerId = await EnsureOrderCustomerIdAsync(order, cancelToken);
         if (customerId is not int cid)
@@ -1646,17 +1743,36 @@ public class PaymentService : ServiceBase
     private (string Token, string CardExp, string? Approval)? TryReadOrderCardcomCredentials(Order order)
     {
         if (string.IsNullOrWhiteSpace(order.CardcomPaymentJson))
+        {
+            _logger.LogDebug(
+                "TryReadOrderCardcomCredentials: orderId={OrderId} — no CardcomPaymentJson",
+                order.Id);
             return null;
+        }
 
         try
         {
             var payload = JsonSerializer.Deserialize<OrderCardcomCredentialPayload>(order.CardcomPaymentJson);
             if (payload?.Et == null || string.IsNullOrWhiteSpace(payload.Exp))
+            {
+                _logger.LogWarning(
+                    "TryReadOrderCardcomCredentials: orderId={OrderId} — invalid payload (Et or Exp missing), jsonLen={JsonLen}",
+                    order.Id,
+                    order.CardcomPaymentJson.Length);
                 return null;
+            }
 
             if (!_tokenProtector.TryUnprotect(payload.Et, out var token))
+            {
+                _logger.LogWarning(
+                    "TryReadOrderCardcomCredentials: orderId={OrderId} — Et decrypt failed (encryptionKeyConfigured={EncryptionKeyConfigured}, etPrefix={EtPrefix})",
+                    order.Id,
+                    _tokenProtector.UsesDatabaseEncryptionKey,
+                    payload.Et.Length > 3 ? payload.Et[..3] : payload.Et);
                 return null;
+            }
 
+            var cardExp = payload.Exp;
             var approval = order.CardcomApprovalNumber;
             if (!string.IsNullOrWhiteSpace(payload.Ea)
                 && _tokenProtector.TryUnprotect(payload.Ea, out var decryptedApproval))
@@ -1664,10 +1780,108 @@ public class PaymentService : ServiceBase
                 approval = decryptedApproval;
             }
 
-            return (token, payload.Exp, approval);
+            var shapeBeforeNormalize = CardcomGateway.DescribeTokenShape(token);
+            token = TryNormalizeChargeToken(order.Id, token, ref cardExp, ref approval) ?? token;
+            var shapeAfterNormalize = CardcomGateway.DescribeTokenShape(token);
+
+            if (!CardcomGateway.IsCardcomTokenUuid(token) || string.IsNullOrWhiteSpace(cardExp))
+            {
+                _logger.LogWarning(
+                    "TryReadOrderCardcomCredentials: orderId={OrderId} — token not usable after decrypt (shapeBefore={ShapeBefore}, shapeAfter={ShapeAfter}, cardExpPresent={CardExpPresent})",
+                    order.Id,
+                    shapeBeforeNormalize,
+                    shapeAfterNormalize,
+                    !string.IsNullOrWhiteSpace(cardExp));
+                return null;
+            }
+
+            _logger.LogInformation(
+                "TryReadOrderCardcomCredentials: orderId={OrderId} — ok (shapeBefore={ShapeBefore}, shapeAfter={ShapeAfter}, tokenMask={TokenMask}, cardExp={CardExp}, approvalPresent={ApprovalPresent})",
+                order.Id,
+                shapeBeforeNormalize,
+                shapeAfterNormalize,
+                MaskToken(token),
+                FormatCardExpForLog(cardExp),
+                !string.IsNullOrWhiteSpace(approval));
+            return (token, cardExp, approval);
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex,
+                "TryReadOrderCardcomCredentials: orderId={OrderId} — exception parsing CardcomPaymentJson",
+                order.Id);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Cardcom tokens are UUIDs. If a credential JSON blob was stored as the token, unwrap and decrypt the inner Et field.
+    /// </summary>
+    private string? TryNormalizeChargeToken(int orderId, string? token, ref string? cardExp, ref string? approval)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return null;
+
+        var t = token.Trim();
+        if (CardcomGateway.IsCardcomTokenUuid(t))
+            return t;
+
+        var shape = CardcomGateway.DescribeTokenShape(t);
+        _logger.LogWarning(
+            "TryNormalizeChargeToken: orderId={OrderId} — non-uuid token shape={Shape}",
+            orderId,
+            shape);
+
+        if (!t.StartsWith("{", StringComparison.Ordinal))
+            return null;
+
+        try
+        {
+            var nested = JsonSerializer.Deserialize<OrderCardcomCredentialPayload>(t);
+            if (nested?.Et == null)
+            {
+                _logger.LogWarning(
+                    "TryNormalizeChargeToken: orderId={OrderId} — nested JSON missing Et",
+                    orderId);
+                return null;
+            }
+
+            if (!_tokenProtector.TryUnprotect(nested.Et, out var inner))
+            {
+                _logger.LogWarning(
+                    "TryNormalizeChargeToken: orderId={OrderId} — nested Et decrypt failed",
+                    orderId);
+                return null;
+            }
+
+            if (!CardcomGateway.IsCardcomTokenUuid(inner))
+            {
+                _logger.LogWarning(
+                    "TryNormalizeChargeToken: orderId={OrderId} — nested inner token shape={InnerShape}",
+                    orderId,
+                    CardcomGateway.DescribeTokenShape(inner));
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(nested.Exp))
+                cardExp = nested.Exp;
+            if (!string.IsNullOrWhiteSpace(nested.Ea)
+                && _tokenProtector.TryUnprotect(nested.Ea, out var nestedApproval))
+            {
+                approval = nestedApproval;
+            }
+
+            _logger.LogWarning(
+                "TryNormalizeChargeToken: orderId={OrderId} — unwrapped nested credential JSON, innerMask={InnerMask}",
+                orderId,
+                MaskToken(inner));
+            return inner;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex,
+                "TryNormalizeChargeToken: orderId={OrderId} — nested JSON parse failed",
+                orderId);
             return null;
         }
     }
@@ -1987,23 +2201,90 @@ public class PaymentService : ServiceBase
 
     private async Task<(string? Token, string? CardExp, string? Approval)> ResolveChargeTokenAsync(
         Order order,
-        CancellationToken cancelToken)
+        CancellationToken cancelToken,
+        bool forceRefreshFromCardcom = false)
     {
-        var resolved = await TryResolveStoredChargeTokenAsync(order, cancelToken);
-        if (!string.IsNullOrWhiteSpace(resolved.Token) && !string.IsNullOrWhiteSpace(resolved.CardExp))
-            return resolved;
+        _logger.LogInformation(
+            "ResolveChargeToken start: orderId={OrderId}, settleStatus={SettleStatus}, lowProfileId={LowProfileId}, forceRefresh={ForceRefresh}",
+            order.Id,
+            order.PaymentSettleStatus,
+            order.CardcomLowProfileId,
+            forceRefreshFromCardcom);
 
-        if (order.PaymentSettleStatus == PaymentSettleStatus.Authorized
-            && !string.IsNullOrWhiteSpace(order.CardcomLowProfileId))
+        if (forceRefreshFromCardcom && !string.IsNullOrWhiteSpace(order.CardcomLowProfileId))
         {
+            _logger.LogInformation(
+                "ResolveChargeToken: orderId={OrderId} — force syncing from Cardcom GetLpResult",
+                order.Id);
             await TrySyncTokenFromCardcomAsync(order, cancelToken);
-            resolved = await TryResolveStoredChargeTokenAsync(order, cancelToken);
-            if (!string.IsNullOrWhiteSpace(resolved.Token) && !string.IsNullOrWhiteSpace(resolved.CardExp))
-                return resolved;
         }
 
-        return resolved;
+        var resolved = await TryResolveStoredChargeTokenAsync(order, cancelToken);
+        if (IsResolvedChargeTokenUsable(resolved))
+        {
+            _logger.LogInformation(
+                "ResolveChargeToken: orderId={OrderId} — stored credentials usable (tokenShape={TokenShape}, approvalPresent={ApprovalPresent})",
+                order.Id,
+                CardcomGateway.DescribeTokenShape(resolved.Token),
+                !string.IsNullOrWhiteSpace(resolved.Approval ?? order.CardcomApprovalNumber));
+            return (
+                resolved.Token,
+                resolved.CardExp,
+                CoalesceNonEmpty(resolved.Approval, order.CardcomApprovalNumber));
+        }
+
+        _logger.LogWarning(
+            "ResolveChargeToken: orderId={OrderId} — stored credentials not usable (tokenShape={TokenShape}, cardExpPresent={CardExpPresent})",
+            order.Id,
+            CardcomGateway.DescribeTokenShape(resolved.Token),
+            !string.IsNullOrWhiteSpace(resolved.CardExp));
+
+        if (!forceRefreshFromCardcom
+            && !string.IsNullOrWhiteSpace(order.CardcomLowProfileId)
+            && (order.PaymentSettleStatus == PaymentSettleStatus.Authorized
+                || order.PaymentSettleStatus == PaymentSettleStatus.Failed))
+        {
+            _logger.LogInformation(
+                "ResolveChargeToken: orderId={OrderId} — syncing token from Cardcom GetLpResult",
+                order.Id);
+            await TrySyncTokenFromCardcomAsync(order, cancelToken);
+            resolved = await TryResolveStoredChargeTokenAsync(order, cancelToken);
+            if (IsResolvedChargeTokenUsable(resolved))
+            {
+                _logger.LogInformation(
+                    "ResolveChargeToken: orderId={OrderId} — usable after Cardcom sync (tokenShape={TokenShape})",
+                    order.Id,
+                    CardcomGateway.DescribeTokenShape(resolved.Token));
+                return (
+                    resolved.Token,
+                    resolved.CardExp,
+                    CoalesceNonEmpty(resolved.Approval, order.CardcomApprovalNumber));
+            }
+
+            _logger.LogWarning(
+                "ResolveChargeToken: orderId={OrderId} — still not usable after Cardcom sync (tokenShape={TokenShape})",
+                order.Id,
+                CardcomGateway.DescribeTokenShape(resolved.Token));
+        }
+        else if (!forceRefreshFromCardcom)
+        {
+            _logger.LogWarning(
+                "ResolveChargeToken: orderId={OrderId} — skipped Cardcom sync (lowProfileIdPresent={LowProfilePresent}, settleStatus={SettleStatus})",
+                order.Id,
+                !string.IsNullOrWhiteSpace(order.CardcomLowProfileId),
+                order.PaymentSettleStatus);
+        }
+
+        return (
+            resolved.Token,
+            resolved.CardExp,
+            CoalesceNonEmpty(resolved.Approval, order.CardcomApprovalNumber));
     }
+
+    private static bool IsResolvedChargeTokenUsable((string? Token, string? CardExp, string? Approval) resolved) =>
+        !string.IsNullOrWhiteSpace(resolved.Token)
+        && !string.IsNullOrWhiteSpace(resolved.CardExp)
+        && CardcomGateway.IsCardcomTokenUuid(resolved.Token);
 
     private async Task<(string? Token, string? CardExp, string? Approval)> TryResolveStoredChargeTokenAsync(
         Order order,
@@ -2014,62 +2295,252 @@ public class PaymentService : ServiceBase
         var fromOrder = TryReadOrderCardcomCredentials(order);
         if (fromOrder is { } creds
             && !string.IsNullOrWhiteSpace(creds.Token)
-            && !string.IsNullOrWhiteSpace(creds.CardExp))
+            && !string.IsNullOrWhiteSpace(creds.CardExp)
+            && CardcomGateway.IsCardcomTokenUuid(creds.Token))
+        {
+            _logger.LogInformation(
+                "TryResolveStoredChargeToken: orderId={OrderId} — source=order.CardcomPaymentJson, tokenMask={TokenMask}",
+                order.Id,
+                MaskToken(creds.Token));
             return (creds.Token, creds.CardExp, creds.Approval ?? approval);
+        }
+
+        if (fromOrder != null)
+        {
+            _logger.LogWarning(
+                "TryResolveStoredChargeToken: orderId={OrderId} — order.CardcomPaymentJson rejected (tokenShape={TokenShape})",
+                order.Id,
+                CardcomGateway.DescribeTokenShape(fromOrder.Value.Token));
+        }
 
         if (order.CustomerPaymentMethodId is int pmId)
         {
             var pm = await _paymentStorage.GetPaymentMethodByIdAsync(pmId, cancelToken);
-            if (pm != null
-                && _tokenProtector.TryUnprotect(pm.EncryptedToken, out var token)
-                && !string.IsNullOrWhiteSpace(pm.CardExpirationMMYY))
+            if (pm == null)
+            {
+                _logger.LogWarning(
+                    "TryResolveStoredChargeToken: orderId={OrderId} — CustomerPaymentMethodId={PmId} not found",
+                    order.Id,
+                    pmId);
+            }
+            else if (!_tokenProtector.TryUnprotect(pm.EncryptedToken, out var rawToken))
+            {
+                _logger.LogWarning(
+                    "TryResolveStoredChargeToken: orderId={OrderId} — CustomerPaymentMethodId={PmId} decrypt failed (encryptionKeyConfigured={EncryptionKeyConfigured})",
+                    order.Id,
+                    pmId,
+                    _tokenProtector.UsesDatabaseEncryptionKey);
+            }
+            else if (string.IsNullOrWhiteSpace(pm.CardExpirationMMYY))
+            {
+                _logger.LogWarning(
+                    "TryResolveStoredChargeToken: orderId={OrderId} — CustomerPaymentMethodId={PmId} missing CardExpirationMMYY",
+                    order.Id,
+                    pmId);
+            }
+            else
             {
                 var cardExp = pm.CardExpirationMMYY;
-                if (string.IsNullOrWhiteSpace(approval)
+                var rawShape = CardcomGateway.DescribeTokenShape(rawToken);
+                var token = TryNormalizeChargeToken(order.Id, rawToken, ref cardExp, ref approval);
+                if (token != null
+                    && string.IsNullOrWhiteSpace(approval)
                     && _tokenProtector.TryUnprotect(pm.EncryptedApprovalNumber, out var decryptedApproval))
                 {
                     approval = decryptedApproval;
                 }
 
-                return (token, cardExp, approval);
+                if (token != null && CardcomGateway.IsCardcomTokenUuid(token))
+                {
+                    _logger.LogInformation(
+                        "TryResolveStoredChargeToken: orderId={OrderId} — source=CustomerPaymentMethodId={PmId}, rawShape={RawShape}, tokenMask={TokenMask}",
+                        order.Id,
+                        pmId,
+                        rawShape,
+                        MaskToken(token));
+                    return (token, cardExp, approval);
+                }
+
+                _logger.LogWarning(
+                    "TryResolveStoredChargeToken: orderId={OrderId} — CustomerPaymentMethodId={PmId} rejected (rawShape={RawShape}, normalizedShape={NormalizedShape})",
+                    order.Id,
+                    pmId,
+                    rawShape,
+                    CardcomGateway.DescribeTokenShape(token));
             }
         }
 
         if (order.CustomerId is int cid)
         {
             var pm = await _paymentStorage.GetDefaultPaymentMethodAsync(cid, order.SiteId, cancelToken);
-            if (pm != null
-                && _tokenProtector.TryUnprotect(pm.EncryptedToken, out var token)
-                && !string.IsNullOrWhiteSpace(pm.CardExpirationMMYY))
+            if (pm == null)
+            {
+                _logger.LogDebug(
+                    "TryResolveStoredChargeToken: orderId={OrderId} — no default payment method for customerId={CustomerId}",
+                    order.Id,
+                    cid);
+            }
+            else if (!_tokenProtector.TryUnprotect(pm.EncryptedToken, out var rawToken))
+            {
+                _logger.LogWarning(
+                    "TryResolveStoredChargeToken: orderId={OrderId} — default PM decrypt failed for customerId={CustomerId}",
+                    order.Id,
+                    cid);
+            }
+            else if (string.IsNullOrWhiteSpace(pm.CardExpirationMMYY))
+            {
+                _logger.LogWarning(
+                    "TryResolveStoredChargeToken: orderId={OrderId} — default PM missing CardExpirationMMYY for customerId={CustomerId}",
+                    order.Id,
+                    cid);
+            }
+            else
             {
                 var cardExp = pm.CardExpirationMMYY;
-                if (string.IsNullOrWhiteSpace(approval)
+                var rawShape = CardcomGateway.DescribeTokenShape(rawToken);
+                var token = TryNormalizeChargeToken(order.Id, rawToken, ref cardExp, ref approval);
+                if (token != null
+                    && string.IsNullOrWhiteSpace(approval)
                     && _tokenProtector.TryUnprotect(pm.EncryptedApprovalNumber, out var decryptedApproval))
                 {
                     approval = decryptedApproval;
                 }
 
-                return (token, cardExp, approval);
+                if (token != null && CardcomGateway.IsCardcomTokenUuid(token))
+                {
+                    _logger.LogInformation(
+                        "TryResolveStoredChargeToken: orderId={OrderId} — source=defaultCustomerPM customerId={CustomerId}, rawShape={RawShape}, tokenMask={TokenMask}",
+                        order.Id,
+                        cid,
+                        rawShape,
+                        MaskToken(token));
+                    return (token, cardExp, approval);
+                }
+
+                _logger.LogWarning(
+                    "TryResolveStoredChargeToken: orderId={OrderId} — default PM rejected (rawShape={RawShape})",
+                    order.Id,
+                    rawShape);
             }
         }
 
+        _logger.LogWarning(
+            "TryResolveStoredChargeToken: orderId={OrderId} — no usable token (approvalPresent={ApprovalPresent})",
+            order.Id,
+            !string.IsNullOrWhiteSpace(approval));
         return (null, null, approval);
     }
 
     /// <summary>Re-fetch GetLpResult and persist token (e.g. order authorized before token was stored).</summary>
+    private async Task<string?> TryRecoverJ5ApprovalAsync(Order order, CancellationToken cancelToken)
+    {
+        if (!string.IsNullOrWhiteSpace(order.CardcomApprovalNumber))
+            return order.CardcomApprovalNumber.Trim();
+
+        var fromOrder = TryReadOrderCardcomCredentials(order);
+        if (fromOrder is { } creds && !string.IsNullOrWhiteSpace(creds.Approval))
+            return creds.Approval.Trim();
+
+        var events = await _paymentStorage.GetPaymentEventsAsync(order.Id, cancelToken);
+        foreach (var eventType in new[] { "ValidateCallback", "TokenAuthorizationHold" })
+        {
+            foreach (var ev in events.Where(e =>
+                         string.Equals(e.EventType, eventType, StringComparison.OrdinalIgnoreCase)
+                         && !string.IsNullOrWhiteSpace(e.RawResponseJson)))
+            {
+                if (!IsSuccessfulCardcomEventStatus(ev.StatusCode)
+                    && !IsLikelyJ5AuthorizationEvent(ev.RawResponseJson))
+                    continue;
+
+                var parsed = _cardcom.ParseLpResult(ev.RawResponseJson!);
+                var approval = CoalesceNonEmpty(
+                    parsed.ApprovalNumber,
+                    CardcomGateway.FindApprovalNumberInJson(ev.RawResponseJson));
+                if (!string.IsNullOrWhiteSpace(approval))
+                {
+                    _logger.LogInformation(
+                        "TryRecoverJ5Approval: orderId={OrderId} from event {EventType} status={StatusCode}, approvalMasked={ApprovalMasked}",
+                        order.Id,
+                        eventType,
+                        ev.StatusCode,
+                        MaskApprovalNumber(approval));
+                    return approval.Trim();
+                }
+            }
+        }
+
+        _logger.LogWarning(
+            "TryRecoverJ5Approval: orderId={OrderId} — no approval in {EventCount} payment events",
+            order.Id,
+            events.Count);
+        return null;
+    }
+
+    private static bool IsSuccessfulCardcomEventStatus(string? statusCode)
+    {
+        if (!int.TryParse(statusCode?.Trim(), out var code))
+            return false;
+        return CardcomGateway.IsCardcomTransactionResponseSuccess(code);
+    }
+
+    private static bool IsLikelyJ5AuthorizationEvent(string? rawJson)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+            return false;
+        return rawJson.Contains("CreateTokenOnly", StringComparison.OrdinalIgnoreCase)
+            || rawJson.Contains("\"JParameter\"", StringComparison.OrdinalIgnoreCase)
+            || rawJson.Contains("TokenApprovalNumber", StringComparison.OrdinalIgnoreCase)
+            || rawJson.Contains("ApprovalNumber", StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task TrySyncTokenFromCardcomAsync(Order order, CancellationToken cancelToken)
     {
+        _logger.LogInformation(
+            "TrySyncTokenFromCardcom: orderId={OrderId}, lowProfileId={LowProfileId}",
+            order.Id,
+            order.CardcomLowProfileId);
+
         var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
         if (creds == null || string.IsNullOrWhiteSpace(order.CardcomLowProfileId))
+        {
+            _logger.LogWarning(
+                "TrySyncTokenFromCardcom: orderId={OrderId} — skipped (creds={CredsPresent}, lowProfileId={LowProfilePresent})",
+                order.Id,
+                creds != null,
+                !string.IsNullOrWhiteSpace(order.CardcomLowProfileId));
             return;
+        }
 
         var validated = await _cardcom.ValidateCallbackAsync(creds, new ValidateCallbackRequest
         {
             LowProfileId = order.CardcomLowProfileId,
         }, cancelToken);
 
+        _logger.LogInformation(
+            "TrySyncTokenFromCardcom GetLpResult: orderId={OrderId}, success={Success}, responseCode={ResponseCode}, " +
+            "tokenShape={TokenShape}, cardExp={CardExp}, approvalPresent={ApprovalPresent}, operation={Operation}",
+            order.Id,
+            validated.Success,
+            validated.ResponseCode,
+            CardcomGateway.DescribeTokenShape(validated.Token),
+            FormatCardExpForLog(validated.CardExpirationMMYY),
+            !string.IsNullOrWhiteSpace(validated.ApprovalNumber),
+            validated.Operation);
+
         if (!string.IsNullOrWhiteSpace(validated.ApprovalNumber))
             order.CardcomApprovalNumber ??= validated.ApprovalNumber;
+        else
+        {
+            var recoveredApproval = await TryRecoverJ5ApprovalAsync(order, cancelToken);
+            if (!string.IsNullOrWhiteSpace(recoveredApproval))
+            {
+                order.CardcomApprovalNumber ??= recoveredApproval;
+                validated = CopyCallback(validated, approval: recoveredApproval);
+                _logger.LogInformation(
+                    "TrySyncTokenFromCardcom: orderId={OrderId} — recovered J5 approval from payment events",
+                    order.Id);
+            }
+        }
         if (!string.IsNullOrWhiteSpace(validated.TranzactionId))
         {
             order.GatewayPaymentTransactionId ??= validated.TranzactionId;
@@ -2079,6 +2550,10 @@ public class PaymentService : ServiceBase
         var payload = ResolveCallbackPayload(validated);
         if (!string.IsNullOrWhiteSpace(payload.Token))
         {
+            _logger.LogInformation(
+                "TrySyncTokenFromCardcom: orderId={OrderId} — persisting token from GetLpResult (shape={TokenShape})",
+                order.Id,
+                CardcomGateway.DescribeTokenShape(payload.Token));
             await PersistCardcomTokenAsync(order, payload, payload.RawJson, cancelToken);
             await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
             return;
@@ -2087,12 +2562,21 @@ public class PaymentService : ServiceBase
         var events = await _paymentStorage.GetPaymentEventsAsync(order.Id, cancelToken);
         var lastCallback = events.FirstOrDefault(e =>
             e.EventType == "ValidateCallback"
-            && string.Equals(e.StatusCode, "0", StringComparison.OrdinalIgnoreCase)
+            && IsSuccessfulCardcomEventStatus(e.StatusCode)
             && !string.IsNullOrWhiteSpace(e.RawResponseJson));
         if (lastCallback?.RawResponseJson == null)
+        {
+            _logger.LogWarning(
+                "TrySyncTokenFromCardcom: orderId={OrderId} — no token in GetLpResult and no ValidateCallback event to backfill",
+                order.Id);
             return;
+        }
 
         var reparsed = _cardcom.ParseLpResult(lastCallback.RawResponseJson);
+        _logger.LogInformation(
+            "TrySyncTokenFromCardcom backfill: orderId={OrderId}, tokenShape={TokenShape}",
+            order.Id,
+            CardcomGateway.DescribeTokenShape(reparsed.Token));
         if (!string.IsNullOrWhiteSpace(reparsed.ApprovalNumber))
             order.CardcomApprovalNumber ??= reparsed.ApprovalNumber;
         if (!string.IsNullOrWhiteSpace(reparsed.Token))
@@ -2134,13 +2618,32 @@ public class PaymentService : ServiceBase
         string cardExp,
         string? approval,
         decimal authAmount,
-        CancellationToken cancelToken)
+        CancellationToken cancelToken,
+        bool forceVoid = false)
     {
         if (string.IsNullOrWhiteSpace(approval))
+        {
+            _logger.LogInformation(
+                "VoidBeforeCharge skipped: orderId={OrderId} — no approval number",
+                order.Id);
             return;
+        }
 
-        if (order.PaymentSettleStatus != PaymentSettleStatus.Authorized)
+        if (!forceVoid && order.PaymentSettleStatus != PaymentSettleStatus.Authorized)
+        {
+            _logger.LogInformation(
+                "VoidBeforeCharge skipped: orderId={OrderId} — settleStatus={SettleStatus} (not authorized)",
+                order.Id,
+                order.PaymentSettleStatus);
             return;
+        }
+
+        _logger.LogInformation(
+            "VoidBeforeCharge: orderId={OrderId}, amount={Amount}, tokenShape={TokenShape}, tokenMask={TokenMask}",
+            order.Id,
+            authAmount,
+            CardcomGateway.DescribeTokenShape(token),
+            MaskToken(token));
 
         var voidTx = await _cardcom.VoidAuthorizationAsync(creds, new VoidAuthorizationRequest
         {
@@ -2153,6 +2656,13 @@ public class PaymentService : ServiceBase
 
         await LogEventAsync(order.Id, "VoidBeforeCharge", voidTx.ResponseCode.ToString(), voidTx.Description,
             voidTx.TranzactionId, MaskToken(token), authAmount, voidTx.RawJson, cancelToken);
+
+        _logger.LogInformation(
+            "VoidBeforeCharge result: orderId={OrderId}, success={Success}, responseCode={ResponseCode}, description={Description}",
+            order.Id,
+            voidTx.Success,
+            voidTx.ResponseCode,
+            TruncatePaymentStatusMessage(voidTx.Description));
     }
 
     private decimal ComputeAuthorizationAmount(Order order, SitePaymentCredentials creds)
@@ -2214,6 +2724,21 @@ public class PaymentService : ServiceBase
 
     private static string? MaskToken(string? token) =>
         string.IsNullOrWhiteSpace(token) || token.Length < 4 ? null : $"****{token[^4..]}";
+
+    private static string? MaskCardExpiration(string? cardExpiration) =>
+        string.IsNullOrWhiteSpace(cardExpiration) ? null : "****";
+
+    /// <summary>Log MM/** for expiry debugging without exposing full value.</summary>
+    private static string? FormatCardExpForLog(string? cardExpiration)
+    {
+        if (string.IsNullOrWhiteSpace(cardExpiration))
+            return null;
+        var digits = new string(cardExpiration.Where(char.IsDigit).ToArray());
+        return digits.Length >= 4 ? $"{digits[..2]}/**" : "invalid";
+    }
+
+    private static string? MaskApprovalNumber(string? approval) =>
+        string.IsNullOrWhiteSpace(approval) || approval.Length < 3 ? null : $"***{approval[^3..]}";
 
     private static string? CoalesceNonEmpty(params string?[] values)
     {

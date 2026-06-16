@@ -45,6 +45,10 @@ namespace George.Services.Response
         public string? PrintFutureAtTime { get; set; }
         public bool? VoucherPrinterSilent { get; set; }
         public string? VoucherPrinterName { get; set; }
+        public bool? VoucherPrinterUseAgent { get; set; }
+        public string? LabelPrinterName { get; set; }
+        public bool? LabelPrinterUseAgent { get; set; }
+        public bool? PrintLabelsAfterPicking { get; set; }
 
         // Promotion settings (Sprint 4)
         /// <summary>"same_price" | "full_price" (default). Default for BxPY over-quantity pricing.</summary>

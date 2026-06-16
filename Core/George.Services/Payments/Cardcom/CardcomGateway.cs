@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using George.Common.Payment;
+using George.Services.Payments;
 using Microsoft.Extensions.Logging;
 
 namespace George.Services.Payments.Cardcom;
@@ -191,7 +192,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         CancellationToken cancelToken = default)
         => await DoTransactionAsync(credentials, request.Amount, request.Token, request.CardExpirationMMYY,
             request.ApprovalNumber, isRefund: false, mtiVoid: false, jValidateHold: false, request.ExternalUniqTranId,
-            request.CreateDocument ? request.Document : null, cancelToken)
+            request.CreateDocument ? request.Document : null, request.CardOwner, cancelToken)
             .ConfigureAwait(false);
 
     public async Task<PaymentTransactionResult> PlaceTokenAuthorizationHoldAsync(
@@ -200,7 +201,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         CancellationToken cancelToken = default)
         => await DoTransactionAsync(credentials, request.Amount, request.Token, request.CardExpirationMMYY,
             approvalNumber: null, isRefund: false, mtiVoid: false, jValidateHold: true, request.ExternalUniqTranId,
-            document: null, cancelToken)
+            document: null, cardOwner: null, cancelToken)
             .ConfigureAwait(false);
 
     public async Task<PaymentTransactionResult> ChargeTokenAsync(
@@ -209,7 +210,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         CancellationToken cancelToken = default)
         => await DoTransactionAsync(credentials, request.Amount, request.Token, request.CardExpirationMMYY,
             request.ApprovalNumber, isRefund: false, mtiVoid: false, jValidateHold: false, request.ExternalUniqTranId,
-            request.CreateDocument ? request.Document : null, cancelToken)
+            request.CreateDocument ? request.Document : null, request.CardOwner, cancelToken)
             .ConfigureAwait(false);
 
     public async Task<PaymentTransactionResult> CreateDocumentAsync(
@@ -281,7 +282,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
                     byTxId.ResponseCode, byTxId.Description);
                 var byToken = await DoTransactionAsync(credentials, request.Amount, request.Token,
                     request.CardExpirationMMYY, approvalNumber: null, isRefund: true, mtiVoid: false,
-                    jValidateHold: false, request.ExternalUniqTranId, document: null, cancelToken)
+                    jValidateHold: false, request.ExternalUniqTranId, document: null, cardOwner: null, cancelToken)
                     .ConfigureAwait(false);
                 if (byToken.Success)
                     return byToken;
@@ -306,7 +307,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
 
         return await DoTransactionAsync(credentials, request.Amount, request.Token, request.CardExpirationMMYY,
             approvalNumber: null, isRefund: true, mtiVoid: false, jValidateHold: false, request.ExternalUniqTranId,
-            document: null, cancelToken)
+            document: null, cardOwner: null, cancelToken)
             .ConfigureAwait(false);
     }
 
@@ -385,7 +386,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         CancellationToken cancelToken = default)
         => await DoTransactionAsync(credentials, request.Amount, request.Token, request.CardExpirationMMYY,
             request.ApprovalNumber, isRefund: false, mtiVoid: true, jValidateHold: false, request.ExternalUniqTranId,
-            document: null, cancelToken)
+            document: null, cardOwner: null, cancelToken)
             .ConfigureAwait(false);
 
     /// <summary>
@@ -592,6 +593,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         bool jValidateHold,
         string externalUniqTranId,
         CardcomTransactionDocument? document,
+        CardcomCardOwnerContact? cardOwner,
         CancellationToken cancelToken)
     {
         var terminal = credentials.TerminalNumber ?? 0;
@@ -611,6 +613,8 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
             body["Token"] = token;
             body["CardExpirationMMYY"] = cardExpiration;
         }
+
+        ApplyCardOwnerContact(body, cardOwner);
 
         var advanced = new Dictionary<string, object?>();
         if (!string.IsNullOrWhiteSpace(credentials.ApiPassword))
@@ -638,11 +642,56 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         if (document != null)
             body["Document"] = CardcomDocumentPayload.ToDictionary(document);
 
+        _logger.LogInformation(
+            "Cardcom Transactions/Transaction: externalId={ExternalUniqTranId}, amount={Amount}, terminal={Terminal}, " +
+            "tokenShape={TokenShape}, tokenMask={TokenMask}, cardExp={CardExp}, hasApproval={HasApproval}, " +
+            "isRefund={IsRefund}, mtiVoid={MtiVoid}, jValidateHold={JValidateHold}, hasDocument={HasDocument}, hasCardOwner={HasCardOwner}",
+            externalUniqTranId,
+            amount,
+            terminal,
+            DescribeTokenShape(token),
+            MaskTokenForLog(token),
+            MaskCardExpirationForLog(cardExpiration),
+            !string.IsNullOrWhiteSpace(approvalNumber),
+            isRefund,
+            mtiVoid,
+            jValidateHold,
+            document != null,
+            cardOwner != null);
+
         var json = await PostJsonAsync("Transactions/Transaction", body, cancelToken).ConfigureAwait(false);
         if (json == null)
+        {
+            _logger.LogWarning(
+                "Cardcom Transactions/Transaction empty response: externalId={ExternalUniqTranId}",
+                externalUniqTranId);
             return new PaymentTransactionResult { Success = false, ResponseCode = -1, Description = "Empty response" };
+        }
 
-        return ParseTransactionResult(json);
+        var result = ParseTransactionResult(json);
+        _logger.LogInformation(
+            "Cardcom Transactions/Transaction response: externalId={ExternalUniqTranId}, success={Success}, " +
+            "responseCode={ResponseCode}, description={Description}, txId={TxId}",
+            externalUniqTranId,
+            result.Success,
+            result.ResponseCode,
+            TruncateForLog(result.Description, 300),
+            result.TranzactionId);
+        return result;
+    }
+
+    private static string? MaskTokenForLog(string? token) =>
+        string.IsNullOrWhiteSpace(token) || token.Length < 4 ? null : $"****{token.Trim()[^4..]}";
+
+    private static string? MaskCardExpirationForLog(string? cardExpiration) =>
+        string.IsNullOrWhiteSpace(cardExpiration) ? null : "****";
+
+    private static string? TruncateForLog(string? value, int max)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return value;
+        var t = value.Trim();
+        return t.Length <= max ? t : t[..max] + "...";
     }
 
     /// <summary>
@@ -733,7 +782,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
 
             var responseCode = GetInt32Property(root, "ResponseCode");
             var description = GetStringProperty(root, "Description");
-            var success = responseCode == 0;
+            var success = IsCardcomTransactionResponseSuccess(responseCode);
             var isPending = !success && IsPendingLpResult(responseCode, description);
 
             string? token = null, tokenEx = null, cardMonth = null, cardYear = null, approval = null, last4 = null;
@@ -879,6 +928,19 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
             "USD" => 2,
             _ => 1,
         };
+
+    private static void ApplyCardOwnerContact(Dictionary<string, object?> body, CardcomCardOwnerContact? cardOwner)
+    {
+        if (cardOwner == null)
+            return;
+
+        if (!string.IsNullOrWhiteSpace(cardOwner.Name))
+            body["CardOwnerName"] = cardOwner.Name.Trim();
+        if (!string.IsNullOrWhiteSpace(cardOwner.Phone))
+            body["CardOwnerPhone"] = cardOwner.Phone.Trim();
+        if (!string.IsNullOrWhiteSpace(cardOwner.Email))
+            body["CardOwnerEmail"] = cardOwner.Email.Trim();
+    }
 
     private static string Truncate(string s, int max) =>
         s.Length <= max ? s : s[..max];
@@ -1035,6 +1097,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
     private static bool IsPendingLpResult(int responseCode, string? description)
     {
         if (responseCode == 0) return false;
+        if (responseCode is 700 or 701) return false;
         var d = (description ?? "").Trim();
         if (d.Length == 0) return true;
         if (d.Contains("ממתינ", StringComparison.OrdinalIgnoreCase)) return true;
@@ -1115,15 +1178,16 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         string? cardYear,
         string? tokenExDate)
     {
-        var normalized = NormalizeCardExpirationMMYY(direct);
-        if (!string.IsNullOrWhiteSpace(normalized))
-            return normalized;
-
+        // CardMonth/CardYear from TranzactionInfo are more reliable than TokenInfo.CardExpirationMMYY.
         if (!string.IsNullOrWhiteSpace(cardMonth) && !string.IsNullOrWhiteSpace(cardYear))
         {
             var yy = cardYear.Length >= 2 ? cardYear[^2..] : cardYear;
             return $"{cardMonth.PadLeft(2, '0')}{yy}";
         }
+
+        var normalized = NormalizeCardExpirationMMYY(direct);
+        if (!string.IsNullOrWhiteSpace(normalized))
+            return normalized;
 
         return NormalizeCardExpirationFromTokenExDate(tokenExDate);
     }
@@ -1191,6 +1255,43 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
     {
         var match = CardcomTokenRegex.Match(json);
         return match.Success ? match.Groups[1].Value : null;
+    }
+
+    private static readonly Regex CardcomApprovalRegex = new(
+        @"""(?:ApprovalNumber|TokenApprovalNumber|AuthNum)""\s*:\s*""?([^"",}\s]+)""?",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>Fallback approval extraction from stored Cardcom JSON (e.g. J5 callback logged as 701).</summary>
+    public static string? FindApprovalNumberInJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+        var match = CardcomApprovalRegex.Match(json);
+        if (!match.Success)
+            return null;
+        var value = match.Groups[1].Value.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    /// <summary>Cardcom charge tokens are UUID strings from Low Profile / TokenInfo.</summary>
+    public static bool IsCardcomTokenUuid(string? token) =>
+        !string.IsNullOrWhiteSpace(token) && Guid.TryParse(token.Trim(), out _);
+
+    /// <summary>Safe token classification for logs (never logs the raw token).</summary>
+    public static string DescribeTokenShape(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return "empty";
+        var t = token.Trim();
+        if (IsCardcomTokenUuid(t))
+            return "uuid";
+        if (t.StartsWith("{\"V\"", StringComparison.Ordinal) || t.Contains("\"Et\"", StringComparison.Ordinal))
+            return "credential-json";
+        if (t.StartsWith("{", StringComparison.Ordinal))
+            return "json-other";
+        if (t.StartsWith(PaymentTokenProtector.DatabaseKeyPrefix, StringComparison.Ordinal))
+            return "encrypted-v2-blob";
+        return $"other(len={t.Length})";
     }
 
     private static string? FindCardExpirationInJson(string json)

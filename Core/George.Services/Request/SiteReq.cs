@@ -50,6 +50,18 @@ namespace George.Services.Request
         /// <summary>Voucher printer: display name (e.g. WIFI, iPad).</summary>
         public string? VoucherPrinterName { get; set; }
 
+        /// <summary>When true (default), send voucher to local PrintAgent.</summary>
+        public bool? VoucherPrinterUseAgent { get; set; }
+
+        /// <summary>Label printer: display name (optional second printer).</summary>
+        public string? LabelPrinterName { get; set; }
+
+        /// <summary>When true (default), send labels to local PrintAgent.</summary>
+        public bool? LabelPrinterUseAgent { get; set; }
+
+        /// <summary>When true, print bag labels automatically after picking completes.</summary>
+        public bool? PrintLabelsAfterPicking { get; set; }
+
         // Promotion settings (Sprint 4)
         /// <summary>"same_price" | "full_price" (default). Default for BxPY over-quantity pricing.</summary>
         public string? PromotionOveragePolicyDefault { get; set; }
