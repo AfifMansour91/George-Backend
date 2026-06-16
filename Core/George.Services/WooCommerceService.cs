@@ -3908,24 +3908,8 @@ namespace George.Services
         /// OCWSU weighable plugin expects meta <c>_ocwsu_product_weight_units</c> to match radio values: <c>kg</c> or <c>grams</c>.
         /// Our <see cref="Unit.Name"/> may be <c>g</c>, <c>gram</c>, Hebrew <c>גרם</c>, etc.
         /// </summary>
-        private static string MapOcwsuProductWeightUnits(string? unitName)
-        {
-            if (string.IsNullOrWhiteSpace(unitName))
-                return "";
-
-            var u = unitName.Trim();
-            var lower = u.ToLowerInvariant();
-            if (lower is "kg" or "kilogram" or "kilograms")
-                return "kg";
-            if (string.Equals(u, "ק\"ג", StringComparison.Ordinal))
-                return "kg";
-            if (string.Equals(u, "גרם", StringComparison.Ordinal))
-                return "grams";
-            if (lower is "g" or "gram" or "grams")
-                return "grams";
-
-            return u;
-        }
+        private static string MapOcwsuProductWeightUnits(string? unitName) =>
+            WooCommerceImportUnitMapping.MapGeorgeUnitNameToOcwsuWeightUnits(unitName);
 
         /// <summary>
         /// Resolve product weight for WooCommerce "weight" field (kg string).

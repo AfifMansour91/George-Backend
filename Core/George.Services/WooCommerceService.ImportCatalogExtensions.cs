@@ -180,18 +180,8 @@ public partial class WooCommerceService
         return MatchByNames(rows, "status", "variation");
     }
 
-    private static int? ResolveUnitIdFromOcwsu(List<Unit> units, string? ocwsuUnitsFromMeta)
-    {
-        if (string.IsNullOrWhiteSpace(ocwsuUnitsFromMeta)) return null;
-        var target = ocwsuUnitsFromMeta.Trim().ToLowerInvariant();
-        foreach (var u in units)
-        {
-            var mapped = MapOcwsuProductWeightUnits(u.Name);
-            if (string.Equals(mapped, target, StringComparison.OrdinalIgnoreCase))
-                return u.Id;
-        }
-        return null;
-    }
+    private static int? ResolveUnitIdFromOcwsu(List<Unit> units, string? ocwsuUnitsFromMeta) =>
+        WooCommerceImportUnitMapping.ResolveUnitIdFromOcwsu(units, ocwsuUnitsFromMeta);
 
     private static int? ResolveUnitWeightModeId(List<UnitWeightMode> modes, string? wooType, bool getWeightFromVariation)
     {
@@ -433,7 +423,12 @@ public partial class WooCommerceService
                 product.WeightConfigId = wc.Id;
             }
 
-            wc.UnitId = ResolveUnitIdFromOcwsu(lk.Units, ocwsuUnits) ?? wc.UnitId;
+            if (!string.IsNullOrWhiteSpace(ocwsuUnits))
+            {
+                var resolvedUnitId = ResolveUnitIdFromOcwsu(lk.Units, ocwsuUnits);
+                if (resolvedUnitId.HasValue)
+                    wc.UnitId = resolvedUnitId.Value;
+            }
             wc.StartWeight = string.IsNullOrWhiteSpace(minW) ? wc.StartWeight : minW.Trim();
             wc.Step = string.IsNullOrWhiteSpace(step) ? wc.Step : step.Trim();
             wc.UnitWeight = string.IsNullOrWhiteSpace(unitW) ? wc.UnitWeight : unitW.Trim();
