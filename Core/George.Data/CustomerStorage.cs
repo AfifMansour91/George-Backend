@@ -53,63 +53,124 @@ public class CustomerStorage : StorageBase
         // If the customer was deleted, reactivate instead of inserting a duplicate.
         if (normalized.Length >= 4)
         {
-            var existing = await _dbContext.Set<Customer>()
-                .FirstOrDefaultAsync(c => c.SiteId == siteId && c.NormalizedPhone == normalized, cancelToken)
+            var existing = await FindCustomerBySiteAndPhoneIncludingDeletedAsync(siteId, normalized, cancelToken)
                 .ConfigureAwait(false);
 
             if (existing != null)
             {
-                var updated = false;
-                if (existing.IsDeleted)
-                {
-                    existing.IsDeleted = false;
-                    updated = true;
-                }
-                if (!string.IsNullOrWhiteSpace(name) && existing.Name != name) { existing.Name = name; updated = true; }
-                if (email != null && existing.Email != email) { existing.Email = email; updated = true; }
-                if (city != null && existing.City != city) { existing.City = city; updated = true; }
-                if (defaultAddress != null && existing.DefaultAddress != defaultAddress) { existing.DefaultAddress = defaultAddress; updated = true; }
-                if (deliveryStreet != null && existing.DeliveryStreet != deliveryStreet) { existing.DeliveryStreet = deliveryStreet; updated = true; }
-                if (deliveryApartment != null && existing.DeliveryApartment != deliveryApartment) { existing.DeliveryApartment = deliveryApartment; updated = true; }
-                if (deliveryFloor != null && existing.DeliveryFloor != deliveryFloor) { existing.DeliveryFloor = deliveryFloor; updated = true; }
-                if (deliveryEntranceCode != null && existing.DeliveryEntranceCode != deliveryEntranceCode) { existing.DeliveryEntranceCode = deliveryEntranceCode; updated = true; }
-                if (notes != null && existing.Notes != notes) { existing.Notes = notes; updated = true; }
-                if (marketingSms.HasValue && existing.MarketingSms != marketingSms.Value) { existing.MarketingSms = marketingSms.Value; updated = true; }
-                if (updated)
-                {
-                    existing.UpdatedDate = DateTime.UtcNow;
-                    await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
-                }
+                await ApplyCustomerFieldUpdatesAsync(
+                    existing,
+                    name,
+                    email,
+                    city,
+                    defaultAddress,
+                    notes,
+                    marketingSms,
+                    deliveryStreet,
+                    deliveryApartment,
+                    deliveryFloor,
+                    deliveryEntranceCode,
+                    reactivateIfDeleted: true,
+                    cancelToken).ConfigureAwait(false);
                 return existing;
             }
         }
 
         // No existing customer for this site + phone: create one
+        var newCustomer = new Customer
         {
-            var newCustomer = new Customer
-            {
-                AccountId = accountId,
-                SiteId = siteId,
-                NormalizedPhone = normalized,
-                Name = name ?? "",
-                Email = email,
-                Phone = phone,
-                City = city,
-                DeliveryStreet = deliveryStreet,
-                DeliveryApartment = deliveryApartment,
-                DeliveryFloor = deliveryFloor,
-                DeliveryEntranceCode = deliveryEntranceCode,
-                DefaultAddress = defaultAddress,
-                Notes = notes,
-                MarketingApproval = false,
-                MarketingEmail = false,
-                MarketingSms = marketingSms ?? false,
-                IsDeleted = false,
-                CreationTime = DateTime.UtcNow
-            };
-            _dbContext.Set<Customer>().Add(newCustomer);
+            AccountId = accountId,
+            SiteId = siteId,
+            NormalizedPhone = normalized,
+            Name = name ?? "",
+            Email = email,
+            Phone = phone,
+            City = city,
+            DeliveryStreet = deliveryStreet,
+            DeliveryApartment = deliveryApartment,
+            DeliveryFloor = deliveryFloor,
+            DeliveryEntranceCode = deliveryEntranceCode,
+            DefaultAddress = defaultAddress,
+            Notes = notes,
+            MarketingApproval = false,
+            MarketingEmail = false,
+            MarketingSms = marketingSms ?? false,
+            IsDeleted = false,
+            CreationTime = DateTime.UtcNow
+        };
+        _dbContext.Set<Customer>().Add(newCustomer);
+        try
+        {
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
             return newCustomer;
+        }
+        catch (DbUpdateException) when (normalized.Length >= 4)
+        {
+            _dbContext.Entry(newCustomer).State = EntityState.Detached;
+            var existing = await FindCustomerBySiteAndPhoneIncludingDeletedAsync(siteId, normalized, cancelToken)
+                .ConfigureAwait(false);
+            if (existing == null) throw;
+            await ApplyCustomerFieldUpdatesAsync(
+                existing,
+                name,
+                email,
+                city,
+                defaultAddress,
+                notes,
+                marketingSms,
+                deliveryStreet,
+                deliveryApartment,
+                deliveryFloor,
+                deliveryEntranceCode,
+                reactivateIfDeleted: true,
+                cancelToken).ConfigureAwait(false);
+            return existing;
+        }
+    }
+
+    private Task<Customer?> FindCustomerBySiteAndPhoneIncludingDeletedAsync(
+        int siteId,
+        string normalized,
+        CancellationToken cancelToken) =>
+        _dbContext.Set<Customer>()
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(c => c.SiteId == siteId && c.NormalizedPhone == normalized, cancelToken);
+
+    private async Task ApplyCustomerFieldUpdatesAsync(
+        Customer existing,
+        string name,
+        string? email,
+        string? city,
+        string? defaultAddress,
+        string? notes,
+        bool? marketingSms,
+        string? deliveryStreet,
+        string? deliveryApartment,
+        string? deliveryFloor,
+        string? deliveryEntranceCode,
+        bool reactivateIfDeleted,
+        CancellationToken cancelToken)
+    {
+        var updated = false;
+        if (reactivateIfDeleted && existing.IsDeleted)
+        {
+            existing.IsDeleted = false;
+            updated = true;
+        }
+        if (!string.IsNullOrWhiteSpace(name) && existing.Name != name) { existing.Name = name; updated = true; }
+        if (email != null && existing.Email != email) { existing.Email = email; updated = true; }
+        if (city != null && existing.City != city) { existing.City = city; updated = true; }
+        if (defaultAddress != null && existing.DefaultAddress != defaultAddress) { existing.DefaultAddress = defaultAddress; updated = true; }
+        if (deliveryStreet != null && existing.DeliveryStreet != deliveryStreet) { existing.DeliveryStreet = deliveryStreet; updated = true; }
+        if (deliveryApartment != null && existing.DeliveryApartment != deliveryApartment) { existing.DeliveryApartment = deliveryApartment; updated = true; }
+        if (deliveryFloor != null && existing.DeliveryFloor != deliveryFloor) { existing.DeliveryFloor = deliveryFloor; updated = true; }
+        if (deliveryEntranceCode != null && existing.DeliveryEntranceCode != deliveryEntranceCode) { existing.DeliveryEntranceCode = deliveryEntranceCode; updated = true; }
+        if (notes != null && existing.Notes != notes) { existing.Notes = notes; updated = true; }
+        if (marketingSms.HasValue && existing.MarketingSms != marketingSms.Value) { existing.MarketingSms = marketingSms.Value; updated = true; }
+        if (updated)
+        {
+            existing.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
         }
     }
 
