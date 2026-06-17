@@ -31,6 +31,7 @@ public partial class OrderService
             .GetStatusHistoryByOrderIdsAsync(new[] { order.Id }, cancelToken)
             .ConfigureAwait(false);
         ApplyStatusTimestampsToRes(res, order, map.GetValueOrDefault(order.Id));
+        ApplyPickupBranchDisplayName(res, order);
         await ApplyCustomerProfileNotesAsync(new[] { res }, new[] { order }, cancelToken).ConfigureAwait(false);
     }
 
@@ -47,8 +48,21 @@ public partial class OrderService
         {
             if (!orderById.TryGetValue(res.Id, out var order)) continue;
             ApplyStatusTimestampsToRes(res, order, map.GetValueOrDefault(res.Id));
+            ApplyPickupBranchDisplayName(res, order);
         }
         await ApplyCustomerProfileNotesAsync(list, orders, cancelToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Self-pickup: expose branch name from Site when Woo/manual order has no shippingStoreName.</summary>
+    private static void ApplyPickupBranchDisplayName(OrderRes res, Order order)
+    {
+        if (!string.Equals(order.DeliveryType, "Pickup", StringComparison.OrdinalIgnoreCase))
+            return;
+        if (!string.IsNullOrWhiteSpace(res.ShippingStoreName))
+            return;
+        var siteName = order.Site?.SiteName?.Trim();
+        if (!string.IsNullOrWhiteSpace(siteName))
+            res.ShippingStoreName = siteName;
     }
 
     private async Task ApplyCustomerProfileNotesAsync(

@@ -169,6 +169,7 @@ namespace George.Services
 
             var order = _mapper.Map<Order>(req);
             RebuildDeliveryAddressFromStreetAndCity(order);
+            await ApplyPickupSiteNameOnCreateAsync(order, req.SiteId, cancelToken).ConfigureAwait(false);
             order.CustomerId = customer.Id; // always set: customer was either found or created above
             await _paymentService.PrepareOrderPaymentOnCreateAsync(order, cancelToken).ConfigureAwait(false);
             order.CreationTime = DateTime.UtcNow;
@@ -1000,6 +1001,19 @@ namespace George.Services
             o.DeliveryFloor = NullIfWhiteSpace(a.Floor);
             o.DeliveryEntranceCode = NullIfWhiteSpace(a.ResolvedEntranceCode);
             o.DeliveryAddress = JoinMainDeliveryLine(a.Street, a.City, a.Zip);
+        }
+
+        /// <summary>Phone/Kiosk/manual pickup: persist branch name from Site when not supplied by client.</summary>
+        private async Task ApplyPickupSiteNameOnCreateAsync(Order order, int siteId, CancellationToken cancelToken)
+        {
+            if (!string.Equals(order.DeliveryType, "Pickup", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (!string.IsNullOrWhiteSpace(order.ShippingStoreName))
+                return;
+            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken).ConfigureAwait(false);
+            var siteName = site?.SiteName?.Trim();
+            if (!string.IsNullOrWhiteSpace(siteName))
+                order.ShippingStoreName = siteName;
         }
 
         /// <summary>Pickup branch name from plugin <c>shippingstorename</c> when delivery type is pickup.</summary>
