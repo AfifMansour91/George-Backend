@@ -2596,10 +2596,20 @@ namespace George.Services
                 foreach (var p in productsRes.Items ?? Enumerable.Empty<Product>())
                     productSkuAndWoo[p.Id] = (p.Sku, p.WooCommerceId);
             }
+            var activeLines = (order.OrderItem ?? new List<OrderItem>())
+                .Where(i => !i.IsDeleted)
+                .OrderBy(i => i.SortOrder)
+                .ToList();
+            var afterPicking = OrderItemLineDisplay.OrderHasOcStoreosPickingAdjustments(activeLines);
             var items = new List<Dictionary<string, object?>>();
-            foreach (var line in order.OrderItem?.OrderBy(i => i.SortOrder) ?? Enumerable.Empty<OrderItem>())
+            foreach (var line in activeLines)
             {
-                var qtyBase = line.PickedQuantity is > 0 ? line.PickedQuantity.Value : line.Quantity;
+                if (afterPicking && !OrderItemLineDisplay.IsOcStoreosBillableLine(line))
+                    continue;
+
+                var qtyBase = afterPicking
+                    ? line.PickedQuantity!.Value
+                    : line.PickedQuantity is > 0 ? line.PickedQuantity.Value : line.Quantity;
                 var qty = qtyBase > 0 ? qtyBase : 1;
                 var row = new Dictionary<string, object?>();
                 if (line.ProductId.HasValue && productSkuAndWoo.TryGetValue(line.ProductId.Value, out var skuWoo))
@@ -2625,12 +2635,26 @@ namespace George.Services
                 row["note"] = line.Notes;
                 row["productNote"] = line.Notes;
                 row["unitPrice"] = line.PricePerUnit;
-                row["lineTotal"] = line.TotalPrice;
+                row["lineTotal"] = afterPicking
+                    ? OrderItemLineDisplay.GetOcStoreosBillableLineTotal(line)
+                    : line.TotalPrice;
                 row["saleUnits"] = line.SaleUnits;
                 row["saleTotalWeight"] = line.SaleTotalWeight;
                 if (line.WooCommerceProductId.HasValue)
                     row["productId"] = line.WooCommerceProductId.Value;
                 items.Add(row);
+            }
+            decimal? syncOrderTotal;
+            if (afterPicking)
+            {
+                var itemsSum = activeLines
+                    .Where(OrderItemLineDisplay.IsOcStoreosBillableLine)
+                    .Sum(line => OrderItemLineDisplay.GetOcStoreosBillableLineTotal(line) ?? 0m);
+                syncOrderTotal = itemsSum + (order.ShippingCost ?? 0m);
+            }
+            else
+            {
+                syncOrderTotal = order.Total;
             }
             var deliveryDate = order.DeliveryDate ?? order.PickupDate;
             var deliveryTime = order.DeliveryTime ?? order.PickupTime;
@@ -2673,7 +2697,7 @@ namespace George.Services
                 },
                 ["items"] = items,
                 ["shippingTotal"] = order.ShippingCost ?? 0,
-                ["orderTotal"] = order.Total,
+                ["orderTotal"] = syncOrderTotal,
                 ["customerNotes"] = order.CustomerNote ?? "",
                 ["billing_notes"] = order.BillingNotes,
                 ["internalOrderNotes"] = order.InternalOrderNotes,
