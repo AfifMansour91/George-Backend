@@ -430,8 +430,9 @@ namespace George.Services
                     updated.Status,
                     DateTime.UtcNow,
                     cancelToken).ConfigureAwait(false);
+                if (ShouldSyncWooCommerceOrderAfterStatusChange(previousStatus, updated.Status))
+                    await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "order status", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             }
-            await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "order update", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             if (req.PaymentMethod != null && beforeUpdate != null &&
                 !string.Equals(beforeUpdate.PaymentMethod, updated.PaymentMethod, StringComparison.OrdinalIgnoreCase))
             {
@@ -632,8 +633,6 @@ namespace George.Services
                     cancelToken).ConfigureAwait(false);
 
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
-            if (loaded != null)
-                await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, loaded, "add items", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(loaded);
             return response;
         }
@@ -672,7 +671,6 @@ namespace George.Services
                     cancelToken).ConfigureAwait(false);
             }
 
-            await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "remove item", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(updated);
             return response;
         }
@@ -725,13 +723,22 @@ namespace George.Services
                     cancelToken).ConfigureAwait(false);
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             var forResponse = loaded ?? updated;
-            if (forResponse != null)
-                await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, forResponse, "picking update", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(forResponse);
             return response;
         }
 
-        /// <summary>After order mutations that should mirror to WooCommerce/oc-storeos (full POST for oc-storeos). Uses a new DI scope inside background work to avoid DbContext concurrency.</summary>
+        /// <summary>
+        /// WooCommerce website orders: push to the store only when picking finishes (Ready/Completed) or on cancel — not on InTreatment or intermediate picking saves.
+        /// </summary>
+        private static bool ShouldSyncWooCommerceOrderAfterStatusChange(string? previousStatus, string? newStatus)
+        {
+            if (string.IsNullOrWhiteSpace(newStatus)) return false;
+            if (string.Equals(previousStatus, newStatus, StringComparison.OrdinalIgnoreCase)) return false;
+            return string.Equals(newStatus, "Ready", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(newStatus, "Completed", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Mirror order to WooCommerce/oc-storeos (full POST for oc-storeos). Uses a new DI scope inside background work to avoid DbContext concurrency.</summary>
         private async Task ScheduleWooCommerceStoreSyncIfApplicableAsync(
             int orderId,
             Order order,
