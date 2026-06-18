@@ -137,6 +137,9 @@ public partial class Site
     /// <summary>When true (default), show picking confirmation dialog after barcode scan. When false, apply scan silently unless weight exceeds tolerance.</summary>
     public bool? ConfirmPickingAfterScan { get; set; }
 
+    /// <summary>When true (default), show order deviation % and amount in picking footer and archive.</summary>
+    public bool? ShowPickingDeviation { get; set; }
+
     /// <summary>Active payment provider: none | cardcom.</summary>
     [StringLength(32)]
     public string PaymentGatewayProvider { get; set; } = "none";

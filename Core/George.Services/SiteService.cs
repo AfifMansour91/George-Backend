@@ -61,6 +61,8 @@ namespace George.Services
                 model.AskBagsCountAtPickingFinish = true;
             if (!model.ConfirmPickingAfterScan.HasValue)
                 model.ConfirmPickingAfterScan = true;
+            if (!model.ShowPickingDeviation.HasValue)
+                model.ShowPickingDeviation = true;
 
             CardcomTestTerminalDefaults.ApplyToNewSiteIfUnset(model, _paymentTokenProtector);
 
