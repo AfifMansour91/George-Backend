@@ -2233,7 +2233,7 @@ namespace George.Services
                 {
                     try
                     {
-                        await SyncProductEdAcfStoreLabelsAsync(baseUrl, wooCommerceId.Value, product, cancelToken);
+                        await SyncProductEdAcfStoreLabelsAsync(baseUrl, siteId, wooCommerceId.Value, product, cancelToken);
                     }
                     catch (Exception ex)
                     {
@@ -2278,11 +2278,27 @@ namespace George.Services
         }
 
         /// <summary>
-        /// POSTs boolean ACF-backed flags to <c>{site}/wp-json/ed/v1/...</c> (Omer's endpoints). Uses a separate HTTP client without WooCommerce REST credentials.
+        /// POSTs boolean ACF-backed storefront labels to <c>{site}/wp-json/ed/v1/product-label</c>.
+        /// Uses site <see cref="Site.InternalApiKey"/> as Giorgio API token (<c>X-Api-Key</c>).
         /// Skipped when <c>GET {site}/wp-json/ed/v1/capabilities</c> reports <c>product_labels: false</c> or the endpoint is unavailable.
         /// </summary>
-        private async Task SyncProductEdAcfStoreLabelsAsync(string wcV3BaseUrl, int wooProductId, Product product, CancellationToken cancelToken)
+        private async Task SyncProductEdAcfStoreLabelsAsync(
+            string wcV3BaseUrl,
+            int siteId,
+            int wooProductId,
+            Product product,
+            CancellationToken cancelToken)
         {
+            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken).ConfigureAwait(false);
+            var apiToken = site?.InternalApiKey?.Trim();
+            if (string.IsNullOrEmpty(apiToken))
+            {
+                _logger.LogWarning(
+                    "ED/v1 product-label sync skipped for site {SiteId}: InternalApiKey (Giorgio token) is not configured.",
+                    siteId);
+                return;
+            }
+
             var idx = wcV3BaseUrl.IndexOf("/wp-json", StringComparison.OrdinalIgnoreCase);
             var siteRoot = idx > 0 ? wcV3BaseUrl.Substring(0, idx).TrimEnd('/') : wcV3BaseUrl.TrimEnd('/');
 
@@ -2294,41 +2310,50 @@ namespace George.Services
                 return;
 
             http.Timeout = TimeSpan.FromSeconds(60);
+            http.DefaultRequestHeaders.Add("X-Api-Key", apiToken);
 
-            var now = DateTime.UtcNow;
-            var passoverEffective = product.LabelKosherForPassover &&
-                                    (!product.LabelKosherForPassoverEndDate.HasValue || product.LabelKosherForPassoverEndDate.Value > now);
-            var newEffective = product.LabelNew &&
-                               (!product.LabelNewEndDate.HasValue || product.LabelNewEndDate.Value > now);
-
-            async Task PostBool(string path, string fieldKey, bool value)
+            var url = $"{siteRoot}/wp-json/ed/v1/product-label";
+            var payload = new Dictionary<string, object>
             {
-                var url = $"{siteRoot}/wp-json/ed/v1/{path}";
-                var json = JsonSerializer.Serialize(new Dictionary<string, object>
-                {
-                    ["product_id"] = wooProductId,
-                    [fieldKey] = value
-                });
-                using var content = new StringContent(json, Encoding.UTF8, "application/json");
-                var resp = await http.PostAsync(url, content, cancelToken).ConfigureAwait(false);
-                if (!resp.IsSuccessStatusCode)
-                {
-                    var err = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
-                    _logger.LogWarning("ED/v1 POST {Path} failed for Woo product {WooId}: {Status} {Body}", path, wooProductId, (int)resp.StatusCode, err);
-                }
+                ["product_id"] = wooProductId,
+                ["labels"] = BuildEdV1ProductLabels(product)
+            };
+            var json = JsonSerializer.Serialize(payload);
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var resp = await http.PostAsync(url, content, cancelToken).ConfigureAwait(false);
+            var body = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "ED/v1 POST product-label failed for Woo product {WooId}: {Status} {Body}",
+                    wooProductId, (int)resp.StatusCode, body);
+                return;
             }
 
-            await PostBool("product-frozen", "frozen", product.LabelFrozen).ConfigureAwait(false);
-            await PostBool("product-gluten-free", "gluten_free", product.LabelGlutenFree).ConfigureAwait(false);
-            await PostBool("product-not-kosher", "not_kosher", product.LabelNotKosher).ConfigureAwait(false);
-            await PostBool("product-kosher-for-passover", "kosher_for_passover", passoverEffective).ConfigureAwait(false);
-            await PostBool("product-bestseller", "bestseller", product.LabelBestseller).ConfigureAwait(false);
-            await PostBool("product-low-availability", "low_availability", product.LabelLowAvailability).ConfigureAwait(false);
-            await PostBool("product-readytocook", "readytocook", product.LabelReadyToCook).ConfigureAwait(false);
-            await PostBool("product-natural", "natural", product.LabelNatural).ConfigureAwait(false);
-            await PostBool("product-sugarfree", "sugarfree", product.LabelSugarFree).ConfigureAwait(false);
-            await PostBool("product-lactosefree", "lactosefree", product.LabelLactoseFree).ConfigureAwait(false);
-            await PostBool("product-new", "new", newEffective).ConfigureAwait(false);
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("success", out var successEl) &&
+                    successEl.ValueKind == JsonValueKind.False)
+                {
+                    _logger.LogWarning(
+                        "ED/v1 POST product-label partial failure for Woo product {WooId}: {Body}",
+                        wooProductId, body);
+                }
+                else if (root.TryGetProperty("errors", out var errorsEl) &&
+                         errorsEl.ValueKind == JsonValueKind.Object &&
+                         errorsEl.EnumerateObject().Any())
+                {
+                    _logger.LogWarning(
+                        "ED/v1 POST product-label returned label errors for Woo product {WooId}: {Body}",
+                        wooProductId, body);
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogDebug(ex, "ED/v1 POST product-label response parse skipped for Woo product {WooId}", wooProductId);
+            }
         }
 
         /// <summary>
