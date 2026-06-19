@@ -145,6 +145,10 @@ public partial class AccountNotificationSettings
     [Column("Payment_CustomerMessagePaymentLink")]
     public string? PaymentCustomerMessagePaymentLink { get; set; }
 
+    /// <summary>When true, send invoice link SMS automatically after successful payment capture.</summary>
+    [Column("Payment_SendInvoiceSmsAfterCapture")]
+    public bool PaymentSendInvoiceSmsAfterCapture { get; set; } = true;
+
     [ForeignKey("AccountId")]
     [InverseProperty("AccountNotificationSettings")]
     public virtual Account Account { get; set; } = null!;

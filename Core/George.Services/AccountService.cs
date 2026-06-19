@@ -435,6 +435,7 @@ namespace George.Services
                 PaymentCustomerMessageInvoice = string.IsNullOrWhiteSpace(req.Payments?.CustomerMessageInvoice) ? null : req.Payments.CustomerMessageInvoice,
                 PaymentCustomerMessageRefund = string.IsNullOrWhiteSpace(req.Payments?.CustomerMessageRefund) ? null : req.Payments.CustomerMessageRefund,
                 PaymentCustomerMessagePaymentLink = string.IsNullOrWhiteSpace(req.Payments?.CustomerMessagePaymentLink) ? null : req.Payments.CustomerMessagePaymentLink,
+                PaymentSendInvoiceSmsAfterCapture = req.Payments?.SendInvoiceSmsAfterCapture ?? true,
             };
         }
     }

@@ -213,6 +213,8 @@ namespace George.Services
             if (loadedAfterPayment != null && !savedCardOrder)
                 await TrySendNewOrderCustomerSmsAsync(loadedAfterPayment, cancelToken).ConfigureAwait(false);
             if (loadedAfterPayment != null)
+                await TrySendNewOrderManagerSmsAsync(loadedAfterPayment, cancelToken).ConfigureAwait(false);
+            if (loadedAfterPayment != null)
                 await TryEnqueueNewOrderAutoPrintAsync(loadedAfterPayment, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(loadedAfterPayment);
             if (loadedAfterPayment != null)
@@ -279,6 +281,58 @@ namespace George.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to send new-order customer SMS for order {OrderId}; order creation succeeded.", order.Id);
+            }
+        }
+
+        /// <summary>Send manager SMS on new order when notification settings channel is SMS.</summary>
+        private async Task TrySendNewOrderManagerSmsAsync(Order order, CancellationToken cancelToken)
+        {
+            var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken).ConfigureAwait(false);
+            var settings = account?.AccountNotificationSettings;
+            if (settings == null)
+                return;
+            if (!NotificationSmsHelper.IsSmsChannel(settings.NewOrderManagerMessageChannel))
+                return;
+
+            var phones = NotificationSmsHelper.ParseRecipientPhones(settings.NewOrderManagerPhoneNumbers);
+            if (phones.Count == 0)
+            {
+                _logger.LogWarning("New-order manager SMS skipped for order {OrderId}: no manager phone numbers configured.", order.Id);
+                return;
+            }
+
+            var template = settings.NewOrderManagerMessageTemplate;
+            if (string.IsNullOrWhiteSpace(template))
+            {
+                _logger.LogWarning("New-order manager SMS skipped for order {OrderId}: empty message template.", order.Id);
+                return;
+            }
+
+            var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
+            try
+            {
+                if (!SmsProvider.IsInitialized)
+                {
+                    _logger.LogWarning("SMS provider not initialized; skipping new-order manager SMS for order {OrderId}.", order.Id);
+                    return;
+                }
+
+                var anySent = false;
+                foreach (var phone in phones)
+                {
+                    var sent = await _smsProvider.SendTextAsync(phone, body, cancelToken).ConfigureAwait(false);
+                    if (sent)
+                        anySent = true;
+                    else
+                        _logger.LogWarning("New-order manager SMS returned false for order {OrderId} to {Phone}.", order.Id, phone);
+                }
+
+                if (!anySent)
+                    _logger.LogWarning("New-order manager SMS failed for all recipients on order {OrderId}.", order.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send new-order manager SMS for order {OrderId}; order creation succeeded.", order.Id);
             }
         }
 
@@ -364,7 +418,10 @@ namespace George.Services
                 var sent = await _smsProvider.SendTextAsync(order.CustomerPhone, body, cancelToken).ConfigureAwait(false);
                 response.Data = sent;
                 if (!sent)
+                {
                     _logger.LogWarning("Send reminder SMS returned false for order {OrderId}.", orderId);
+                    return CreateResponse(response, StatusCode.InvalidRequest, "SMS send failed. Check SMS provider configuration and customer phone.");
+                }
                 return response;
             }
             catch (Exception ex)
@@ -1632,6 +1689,8 @@ namespace George.Services
             await TryApplyWooIncomingOrderCatalogAndBaselinePickingAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loadedOrder, cancelToken).ConfigureAwait(false);
             await TrySendNewOrderCustomerSmsAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
+            if (loadedOrder != null)
+                await TrySendNewOrderManagerSmsAsync(loadedOrder, cancelToken).ConfigureAwait(false);
             if (loadedOrder != null)
                 await TryEnqueueNewOrderAutoPrintAsync(loadedOrder, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(loadedOrder!);

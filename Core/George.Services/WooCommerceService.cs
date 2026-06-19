@@ -2944,11 +2944,11 @@ namespace George.Services
             var variantSyncWork = new List<(ProductVariant variant, int? wooVariationIdToUse, Dictionary<string, object> wooPayload)>();
             var wpJsonBaseForMedia = GetWordPressRestBaseUrlFromWooV3BaseUrl(baseUrl);
 
-            // Per-variation stock in Woo whenever George uses stock_management_type "variation" (qty or binary in/out).
-            // When VariationStockByQuantity is false, each variant still uses StockQuantity as 0/1 for in/out — we must not send parent stock_status for every line or Woo never reflects per-variation toggles.
+            // Per-variation stock in Woo only when George tracks numeric quantity per variation.
+            // Binary in/out per variation uses stock_status only (no manage_stock / stock_quantity in Woo).
             var stockManagedPerVariation = string.Equals(product.StockManagementType?.Name, "variation", StringComparison.OrdinalIgnoreCase);
             var variationTrackQuantity = stockManagedPerVariation && product.VariationStockByQuantity == true;
-            var manageVariationStockInWoo = stockManagedPerVariation;
+            var manageVariationStockInWoo = variationTrackQuantity;
             var productStockStatus = "instock";
             if (product.StockStatus?.Name == "out_of_stock" || product.Status?.Name == "outOfStock")
                 productStockStatus = "outofstock";
@@ -2959,7 +2959,7 @@ namespace George.Services
             {
                 try
                 {
-                    var variantStockStatus = manageVariationStockInWoo
+                    var variantStockStatus = stockManagedPerVariation
                         ? ((variant.StockQuantity ?? 0) > 0 ? "instock" : "outofstock")
                         : productStockStatus;
 
@@ -4410,6 +4410,12 @@ namespace George.Services
                             db.ProductOptionValue.Add(new ProductOptionValue { ProductOptionId = po.Id, Value = value });
                     }
 
+                    var variationStockSources = wooVariations
+                        .Select(v => new WooCommerceImportStockMapping.VariationStockSource(v.manage_stock, v.stock_quantity, v.stock_status))
+                        .ToList();
+                    var usesVariationStock = WooCommerceImportStockMapping.UsesVariationStockManagement(variationStockSources);
+                    product.VariationStockByQuantity = WooCommerceImportStockMapping.ResolveVariationStockByQuantity(variationStockSources);
+
                     foreach (var vv in wooVariations)
                     {
                         var variant = new ProductVariant
@@ -4420,7 +4426,7 @@ namespace George.Services
                             Price = ParseNullableDecimal(vv.regular_price),
                             SalePrice = ParseNullableDecimal(vv.sale_price),
                             Weight = ParseNullableDecimal(vv.weight),
-                            StockQuantity = ResolveImportedVariantStockQuantity(vv),
+                            StockQuantity = ResolveImportedVariantStockQuantity(vv, usesVariationStock),
                             ImageUrl = vv.image?.src,
                             IsDeleted = false
                         };
@@ -4446,18 +4452,6 @@ namespace George.Services
                     }
                     stats.Variations.Updated += wooVariations.Count;
 
-                    // George UI: sum/qty column only when VariationStockByQuantity is true (matches Woo per-variation manage_stock / qty).
-                    if (wooVariations.Count > 0)
-                    {
-                        product.VariationStockByQuantity = wooVariations.Any(v =>
-                            v.manage_stock == true
-                            || (v.stock_quantity.HasValue && v.stock_quantity.Value > 0));
-                    }
-                    else
-                    {
-                        product.VariationStockByQuantity = null;
-                    }
-
                     await db.SaveChangesAsync(cancelToken);
 
                     // WooCommerce variable products usually omit parent regular_price; UI and list need a parent price.
@@ -4482,16 +4476,16 @@ namespace George.Services
 
                     await db.SaveChangesAsync(cancelToken);
 
-                    await ApplyWooImportProductExtensionsAsync(db, product, wp, accountId, siteId, importLookups, brandMap, cancelToken);
+                    await ApplyWooImportProductExtensionsAsync(db, product, wp, accountId, siteId, importLookups, brandMap, wooVariations, cancelToken);
 
                     // Woo variable parent can be "out of stock" in REST while each variation is instock without manage_stock.
-                    if (wooVariations.Count > 0)
+                    if (wooVariations.Count > 0 && usesVariationStock)
                     {
                         var outStockId = ResolveStockStatusId(importLookups, "outofstock");
                         var inStockId = ResolveStockStatusId(importLookups, "instock");
                         var anySalable = wooVariations.Any(v =>
                         {
-                            var q = ResolveImportedVariantStockQuantity(v);
+                            var q = ResolveImportedVariantStockQuantity(v, usesVariationStock: true);
                             return q.HasValue && q.Value > 0;
                         });
                         if (anySalable && inStockId.HasValue && outStockId.HasValue && product.StockStatusId == outStockId.Value)

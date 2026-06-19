@@ -1944,6 +1944,10 @@ public class PaymentService : ServiceBase
         if (!creds.SendInvoiceSmsAfterCapture)
             return;
 
+        var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken);
+        if (account?.AccountNotificationSettings?.PaymentSendInvoiceSmsAfterCapture == false)
+            return;
+
         try
         {
             order = await _paymentStorage.GetOrderForPaymentAsync(order.Id, cancelToken) ?? order;

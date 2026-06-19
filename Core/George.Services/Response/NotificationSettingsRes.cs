@@ -15,6 +15,7 @@ public class PaymentNotificationSettingsRes
     public string? CustomerMessageInvoice { get; set; }
     public string? CustomerMessageRefund { get; set; }
     public string? CustomerMessagePaymentLink { get; set; }
+    public bool? SendInvoiceSmsAfterCapture { get; set; }
 }
 
 public class NewOrderSoundTriggerSourcesRes

@@ -406,6 +406,7 @@ namespace George.Services
                     CustomerMessageInvoice = e.PaymentCustomerMessageInvoice,
                     CustomerMessageRefund = e.PaymentCustomerMessageRefund,
                     CustomerMessagePaymentLink = e.PaymentCustomerMessagePaymentLink,
+                    SendInvoiceSmsAfterCapture = e.PaymentSendInvoiceSmsAfterCapture,
                 }
             };
         }
