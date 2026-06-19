@@ -576,6 +576,16 @@ namespace George.Services
                 var brandMap = await UpsertBrandsFromWooAsync(db, siteForImport, siteForImport.AccountId, httpClient, baseUrl, response.Data, cancelToken);
                 importProgress?.Report(new WooCommerceImportProgress { Phase = "brands", Total = 1, Completed = 1 });
 
+                importProgress?.Report(new WooCommerceImportProgress { Phase = "attributes", Total = 1, Completed = 0 });
+                var attributeCatalog = await UpsertAttributesFromWooAsync(
+                    db,
+                    siteForImport,
+                    httpClient,
+                    baseUrl,
+                    response.Data,
+                    cancelToken);
+                importProgress?.Report(new WooCommerceImportProgress { Phase = "attributes", Total = 1, Completed = 1 });
+
                 await UpsertProductsFromWooAsync(
                     db,
                     siteForImport,
@@ -584,6 +594,7 @@ namespace George.Services
                     wooProducts,
                     categoryMap,
                     brandMap,
+                    attributeCatalog,
                     importLookups,
                     response.Data,
                     importProgress,
@@ -592,8 +603,8 @@ namespace George.Services
                 await tx.CommitAsync(cancelToken);
                 var dupRows = feedRowCountWithId - uniqueIdCount;
                 response.Data.Message = dupRows > 0
-                    ? $"Imported from WooCommerce: {wooCategories.Count} categories, {brandMap.Count} brands, {uniqueIdCount} unique Woo products ({feedRowCountWithId} API rows; {dupRows} duplicate id row(s) in the feed were merged into one product each)."
-                    : $"Imported from WooCommerce: {wooCategories.Count} categories, {brandMap.Count} brands, and {uniqueIdCount} unique Woo products processed.";
+                    ? $"Imported from WooCommerce: {wooCategories.Count} categories, {brandMap.Count} brands, {attributeCatalog.DisplayNameByWooId.Count} attributes, {uniqueIdCount} unique Woo products ({feedRowCountWithId} API rows; {dupRows} duplicate id row(s) in the feed were merged into one product each)."
+                    : $"Imported from WooCommerce: {wooCategories.Count} categories, {brandMap.Count} brands, {attributeCatalog.DisplayNameByWooId.Count} attributes, and {uniqueIdCount} unique Woo products processed.";
                 return response;
             }
             catch (Exception ex)
@@ -1068,45 +1079,33 @@ namespace George.Services
         {
             try
             {
-                var slug = SlugifyAttributeName(attributeName);
-                var searchUrl = $"{baseUrl}/products/attributes?slug={Uri.EscapeDataString(slug)}";
+                var normalizedName = NormalizeAttributeName(attributeName);
+                if (string.IsNullOrEmpty(normalizedName))
+                    return (null, null);
 
-                var searchResponse = await httpClient.GetAsync(searchUrl, cancelToken);
-                
-                if (searchResponse.IsSuccessStatusCode)
-                {
-                    var searchBody = await searchResponse.Content.ReadAsStringAsync(cancelToken);
-                    var attributes = TryDeserialize<List<WooCommerceAttributeResponse>>(searchBody);
-                    if (attributes != null && attributes.Count > 0)
-                    {
-                        var matchingAttr = attributes.FirstOrDefault(a => 
-                            string.Equals(a.name, attributeName, StringComparison.OrdinalIgnoreCase));
-                        if (matchingAttr != null)
-                        {
-                            return (matchingAttr.id, matchingAttr.slug ?? slug);
-                        }
-                    }
-                }
+                var expectedSlug = SlugifyAttributeName(normalizedName);
+                var allAttributes = await FetchWooPagedAsync<WooCommerceAttributeResponse>(
+                    httpClient,
+                    $"{baseUrl}/products/attributes",
+                    cancelToken);
+                if (allAttributes.Count == 0)
+                    return (null, null);
 
-                // Also try searching by name (Hebrew names don't slug well; WooCommerce may have different slug)
-                var nameSearchUrl = $"{baseUrl}/products/attributes?per_page=100&page=1";
+                var matchingByName = allAttributes
+                    .Where(a => string.Equals(NormalizeAttributeName(a.name), normalizedName, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(a => a.id)
+                    .FirstOrDefault();
+                if (matchingByName != null)
+                    return (matchingByName.id, matchingByName.slug ?? expectedSlug);
 
-                var nameSearchResponse = await httpClient.GetAsync(nameSearchUrl, cancelToken);
-                
-                if (nameSearchResponse.IsSuccessStatusCode)
-                {
-                    var nameSearchBody = await nameSearchResponse.Content.ReadAsStringAsync(cancelToken);
-                    var allAttributes = TryDeserialize<List<WooCommerceAttributeResponse>>(nameSearchBody);
-                    if (allAttributes != null)
-                    {
-                        var matchingByName = allAttributes.FirstOrDefault(a => 
-                            string.Equals(a.name, attributeName, StringComparison.OrdinalIgnoreCase));
-                        if (matchingByName != null)
-                        {
-                            return (matchingByName.id, matchingByName.slug ?? slug);
-                        }
-                    }
-                }
+                var matchingBySlug = allAttributes
+                    .Where(a =>
+                        string.Equals(NormalizeWooAttributeSlugKey(a.slug), expectedSlug, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(NormalizeWooAttributeSlugKey(a.slug), NormalizeWooAttributeSlugKey(normalizedName), StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(a => a.id)
+                    .FirstOrDefault();
+                if (matchingBySlug != null)
+                    return (matchingBySlug.id, matchingBySlug.slug ?? expectedSlug);
             }
             catch (Exception ex)
             {
@@ -4217,6 +4216,7 @@ namespace George.Services
             List<WooImportProductItem> wooProducts,
             Dictionary<int, int> categoryMap,
             Dictionary<int, int> brandMap,
+            WooImportAttributeCatalog attributeCatalog,
             WooImportCatalogLookups importLookups,
             WooCommerceImportFromWooRes stats,
             IProgress<WooCommerceImportProgress>? importProgress,
@@ -4384,10 +4384,14 @@ namespace George.Services
                         // Original loop and rationale: docs/WooCommerce-import-non-variation-attributes.md
                         foreach (var attr in wp.attributes.Where(a => !string.IsNullOrWhiteSpace(a.name) && a.variation))
                         {
-                            if (!optionNameToValues.TryGetValue(attr.name!.Trim(), out var values))
+                            var displayName = ResolveWooImportAttributeDisplayName(attr, attributeCatalog);
+                            if (string.IsNullOrWhiteSpace(displayName))
+                                continue;
+
+                            if (!optionNameToValues.TryGetValue(displayName, out var values))
                             {
                                 values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                                optionNameToValues[attr.name.Trim()] = values;
+                                optionNameToValues[displayName] = values;
                             }
                             foreach (var value in attr.options ?? new List<string>())
                             {
@@ -4427,10 +4431,15 @@ namespace George.Services
                         {
                             if (string.IsNullOrWhiteSpace(a.name) || string.IsNullOrWhiteSpace(a.option))
                                 continue;
+                            var optionName = attributeCatalog.DisplayNameBySlug.TryGetValue(
+                                NormalizeWooAttributeSlugKey(a.name),
+                                out var resolvedName)
+                                ? resolvedName
+                                : a.name.Trim();
                             db.ProductVariantOptionValue.Add(new ProductVariantOptionValue
                             {
                                 ProductVariantId = variant.Id,
-                                OptionName = a.name.Trim(),
+                                OptionName = optionName,
                                 OptionValue = a.option.Trim()
                             });
                         }
@@ -4538,6 +4547,7 @@ namespace George.Services
 
         private class WooImportProductAttributeItem
         {
+            public int? id { get; set; }
             public string? name { get; set; }
             public bool variation { get; set; }
             public List<string>? options { get; set; }

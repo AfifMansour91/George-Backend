@@ -885,9 +885,10 @@ namespace George.Data
                     foreach (var siteId in siteIds)
                     {
                         // Find or create Attribute (use fully qualified name to avoid ambiguity)
+                        var optionName = opt.Name.Trim();
                         var attribute = await _dbContext.Attribute
                             .Include(a => a.AttributeValue)
-                            .FirstOrDefaultAsync(a => a.Name == opt.Name && a.SiteId == siteId && !a.IsDeleted, cancelToken);
+                            .FirstOrDefaultAsync(a => a.Name == optionName && a.SiteId == siteId && !a.IsDeleted, cancelToken);
 
                         if (attribute == null)
                         {
