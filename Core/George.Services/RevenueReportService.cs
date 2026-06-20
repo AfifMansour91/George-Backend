@@ -203,7 +203,7 @@ namespace George.Services
                 return AssumeUtc(o.CreationTime);
             var charge = ChargeDateUtc(o);
             if (charge != null)
-                return charge;
+                return charge.Value;
             // Pre-charge cancellation: bucket by cancel time, not original order date.
             if (IsCancelled(o) && !WasEverCharged(o) && o.UpdatedDate != null)
                 return AssumeUtc(o.UpdatedDate.Value);
