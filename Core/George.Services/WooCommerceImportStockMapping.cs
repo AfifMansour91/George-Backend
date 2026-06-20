@@ -8,6 +8,21 @@ public static class WooCommerceImportStockMapping
     public readonly record struct VariationStockSource(bool? ManageStock, decimal? StockQuantity, string? StockStatus);
 
     /// <summary>
+    /// Woo often returns <c>manage_stock=true</c> with <c>stock_quantity=1</c> on variations even when
+    /// the merchant only uses per-variation availability (George: variation + <c>VariationStockByQuantity=false</c>).
+    /// Treat qty=1 as Woo's default checkbox artifact; real numeric tracking uses 0, 2+, or differing counts.
+    /// </summary>
+    private static bool IsSpuriousWooManagedQuantity(VariationStockSource variation)
+    {
+        if (variation.ManageStock != true || !variation.StockQuantity.HasValue)
+            return false;
+        return variation.StockQuantity.Value == 1m;
+    }
+
+    private static bool VariationHasRealQuantityTracking(VariationStockSource variation) =>
+        variation.ManageStock == true && !IsSpuriousWooManagedQuantity(variation);
+
+    /// <summary>
     /// True when George should use <c>stock_management_type = variation</c> for this Woo variable product.
     /// </summary>
     public static bool UsesVariationStockManagement(IReadOnlyList<VariationStockSource> variations)
@@ -15,7 +30,7 @@ public static class WooCommerceImportStockMapping
         if (variations.Count == 0)
             return false;
 
-        if (variations.Any(v => v.ManageStock == true))
+        if (variations.Any(VariationHasRealQuantityTracking))
             return true;
 
         var statuses = variations
@@ -31,7 +46,7 @@ public static class WooCommerceImportStockMapping
     /// Matches George <see cref="George.DB.Product.VariationStockByQuantity"/> — only when Woo tracks numeric qty per variation.
     /// </summary>
     public static bool VariationTracksQuantity(IReadOnlyList<VariationStockSource> variations) =>
-        variations.Any(v => v.ManageStock == true);
+        variations.Any(VariationHasRealQuantityTracking);
 
   /// <summary>
     /// George stock management type name: <c>quantity</c> | <c>variation</c> | <c>status</c>.
@@ -59,7 +74,7 @@ public static class WooCommerceImportStockMapping
         if (!usesVariationStock)
             return null;
 
-        if (variation.ManageStock == true && variation.StockQuantity.HasValue)
+        if (variation.ManageStock == true && variation.StockQuantity.HasValue && !IsSpuriousWooManagedQuantity(variation))
             return variation.StockQuantity.Value;
 
         var st = NormalizeStockStatusToken(variation.StockStatus);

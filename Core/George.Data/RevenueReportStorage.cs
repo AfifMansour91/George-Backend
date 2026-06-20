@@ -16,7 +16,8 @@ namespace George.Data
         /// <summary>
         /// Orders in the report window.
         /// By order: <see cref="Order.CreationTime"/> in range (all statuses).
-        /// By charge: <see cref="Order.PaidAt"/> in range, legacy paid rows, or successful charge events.
+        /// By charge: <see cref="Order.PaidAt"/> in range, legacy paid rows, successful charge events,
+        /// or cancelled-before-charge rows by <see cref="Order.UpdatedDate"/> (cancellation time).
         /// </summary>
         public async Task<List<Order>> GetOrdersInWindowAsync(
             int siteId,
@@ -50,7 +51,14 @@ namespace George.Data
                         && o.UpdatedDate != null
                         && o.UpdatedDate >= fromUtc
                         && o.UpdatedDate < toUtcExclusive) ||
-                    chargedOrderIds.Contains(o.Id));
+                    chargedOrderIds.Contains(o.Id) ||
+                    (o.Status == "Cancelled"
+                        && o.PaidAt == null
+                        && o.PaymentStatus != "Paid"
+                        && o.PaymentStatus != "Refunded"
+                        && o.UpdatedDate != null
+                        && o.UpdatedDate >= fromUtc
+                        && o.UpdatedDate < toUtcExclusive));
             }
             else
             {

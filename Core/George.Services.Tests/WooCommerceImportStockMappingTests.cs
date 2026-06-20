@@ -42,6 +42,38 @@ public class WooCommerceImportStockMappingTests
     }
 
     [Fact]
+    public void Spurious_manage_stock_with_qty_one_does_not_enable_variation_quantity_mode()
+    {
+        var variations = new[]
+        {
+            V(true, 1m, "instock"),
+            V(true, 1m, "instock"),
+        };
+
+        Assert.False(WooCommerceImportStockMapping.UsesVariationStockManagement(variations));
+        Assert.Equal("status", WooCommerceImportStockMapping.ResolveStockManagementTypeName(false, true, variations));
+        Assert.False(WooCommerceImportStockMapping.VariationTracksQuantity(variations));
+        Assert.False(WooCommerceImportStockMapping.ResolveVariationStockByQuantity(variations));
+    }
+
+    [Fact]
+    public void Spurious_manage_stock_with_differing_status_uses_variation_binary_not_quantity()
+    {
+        var variations = new[]
+        {
+            V(true, 1m, "instock"),
+            V(true, 1m, "outofstock"),
+        };
+
+        Assert.True(WooCommerceImportStockMapping.UsesVariationStockManagement(variations));
+        Assert.Equal("variation", WooCommerceImportStockMapping.ResolveStockManagementTypeName(false, true, variations));
+        Assert.False(WooCommerceImportStockMapping.VariationTracksQuantity(variations));
+        Assert.False(WooCommerceImportStockMapping.ResolveVariationStockByQuantity(variations));
+        Assert.Equal(1m, WooCommerceImportStockMapping.ResolveVariantStockQuantity(variations[0], usesVariationStock: true));
+        Assert.Equal(0m, WooCommerceImportStockMapping.ResolveVariantStockQuantity(variations[1], usesVariationStock: true));
+    }
+
+    [Fact]
     public void Variation_with_manage_stock_uses_quantity_mode_and_real_qty()
     {
         var variations = new[] { V(true, 12m, "instock") };
