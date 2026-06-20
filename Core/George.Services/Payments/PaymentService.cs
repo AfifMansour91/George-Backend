@@ -1003,8 +1003,21 @@ public class PaymentService : ServiceBase
             return CreateResponse(response, StatusCode.InvalidRequest, message);
         }
 
-        order.PaymentSettleStatus = PaymentSettleStatus.Refunded;
-        order.PaymentStatus = "Refunded";
+        var previousRefunded = order.RefundedAmount ?? 0m;
+        var totalRefunded = previousRefunded + amount;
+        order.RefundedAmount = totalRefunded;
+
+        var isFullRefund = orderTotal <= 0 || totalRefunded >= orderTotal - 0.01m;
+        if (isFullRefund)
+        {
+            order.PaymentSettleStatus = PaymentSettleStatus.Refunded;
+            order.PaymentStatus = "Refunded";
+        }
+        else
+        {
+            order.PaymentSettleStatus = PaymentSettleStatus.PartiallyRefunded;
+            order.PaymentStatus = "Paid";
+        }
 
         if (!string.IsNullOrWhiteSpace(tx.TranzactionId) && !string.IsNullOrWhiteSpace(creds.ApiPassword))
         {

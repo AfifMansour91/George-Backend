@@ -1929,7 +1929,7 @@ namespace George.Services
                 sb.AppendLine("  <div style=\"margin-bottom:12px;padding-bottom:12px;border-bottom:1px dashed #000;text-align:center;\">");
                 sb.AppendLine($"    <div style=\"font-size:15px;font-weight:700;line-height:19px;\">{payLine}</div>");
                 sb.AppendLine($"    <div style=\"margin-top:4px;font-size:24px;font-weight:700;line-height:19px;direction:ltr;unicode-bidi:embed;\">₪{grandTotal.Value.ToString("0.00", CultureInfo.InvariantCulture)}</div>");
-                sb.AppendLine($"    <div style=\"margin-top:4px;font-size:11px;font-weight:400;line-height:19px;\">{VoucherVatIncludedLabel}</div>");
+                sb.AppendLine($"    <div style=\"margin-top:4px;font-size:11px;font-weight:400;line-height:19px;color:#737373;\">{EscapeHtml(VoucherGrandTotalFooterLine(order))}</div>");
                 sb.AppendLine("  </div>");
             }
 
@@ -2259,6 +2259,22 @@ namespace George.Services
 
             if (itemsSum <= 0m && shipping <= 0m) return null;
             return itemsSum + shipping;
+        }
+
+        private static string FormatVoucherShippingAmount(decimal amount)
+        {
+            var rounded = Math.Round(amount, 2, MidpointRounding.AwayFromZero);
+            if (rounded == Math.Truncate(rounded))
+                return ((long)rounded).ToString(CultureInfo.InvariantCulture);
+            return rounded.ToString("0.00", CultureInfo.InvariantCulture);
+        }
+
+        private static string VoucherGrandTotalFooterLine(Order order)
+        {
+            var shipping = order.ShippingCost ?? 0m;
+            if (IsVoucherShipping(order) && shipping > 0m)
+                return $"כולל משלוח {FormatVoucherShippingAmount(shipping)} ₪ | {VoucherVatIncludedLabel}";
+            return VoucherVatIncludedLabel;
         }
 
         private static string GenerateVoucherQrDataUrl(Order order, string? publicBaseUrl)

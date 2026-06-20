@@ -75,6 +75,8 @@ public class OrderRes
     public string? RefundInvoiceNumber { get; set; }
     /// <summary>Cardcom credit note URL after refund.</summary>
     public string? CardcomRefundDocumentUrl { get; set; }
+    /// <summary>Cumulative amount refunded (partial or full).</summary>
+    public decimal? RefundedAmount { get; set; }
     public DateTime? PaidAt { get; set; }
     /// <summary>Last payment webhook <c>orderId</c>.</summary>
     public string? GatewayPaymentOrderId { get; set; }

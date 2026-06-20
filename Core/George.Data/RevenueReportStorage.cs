@@ -107,5 +107,27 @@ namespace George.Data
 
             return products.ToDictionary(p => p.Id);
         }
+
+        /// <summary>Sum of successful refund event amounts per order (for revenue credits KPI).</summary>
+        public async Task<Dictionary<int, decimal>> GetSuccessfulRefundTotalsByOrderIdsAsync(
+            IEnumerable<int> orderIds,
+            CancellationToken cancelToken)
+        {
+            var ids = orderIds.Where(id => id > 0).Distinct().ToList();
+            if (ids.Count == 0)
+                return new Dictionary<int, decimal>();
+
+            var rows = await _dbContext.OrderPaymentEvent
+                .AsNoTracking()
+                .Where(e => ids.Contains(e.OrderId)
+                    && e.EventType == "Refund"
+                    && (e.StatusCode == "0" || e.StatusCode == "000" || e.StatusCode == "Success"))
+                .GroupBy(e => e.OrderId)
+                .Select(g => new { OrderId = g.Key, Total = g.Sum(e => e.Amount ?? 0m) })
+                .ToListAsync(cancelToken)
+                .ConfigureAwait(false);
+
+            return rows.ToDictionary(x => x.OrderId, x => x.Total);
+        }
     }
 }
