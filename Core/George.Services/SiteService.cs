@@ -61,6 +61,8 @@ namespace George.Services
                 model.AskBagsCountAtPickingFinish = true;
             if (!model.ConfirmPickingAfterScan.HasValue)
                 model.ConfirmPickingAfterScan = true;
+            if (string.IsNullOrWhiteSpace(model.ScaleBarcodeEmbedMode))
+                model.ScaleBarcodeEmbedMode = "auto";
             if (!model.ShowPickingDeviation.HasValue)
                 model.ShowPickingDeviation = true;
 

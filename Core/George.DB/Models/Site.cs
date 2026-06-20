@@ -140,6 +140,13 @@ public partial class Site
     /// <summary>When true (default), show order deviation % and amount in picking footer and archive.</summary>
     public bool? ShowPickingDeviation { get; set; }
 
+    /// <summary>
+    /// How the 5-digit payload on 13-digit scale barcodes (prefix 2) is interpreted when scanning during picking:
+    /// auto (detect), weight (÷1000 kg), or price (÷100 currency then ÷ catalog ₪/kg).
+    /// </summary>
+    [StringLength(16)]
+    public string? ScaleBarcodeEmbedMode { get; set; }
+
     /// <summary>Active payment provider: none | cardcom.</summary>
     [StringLength(32)]
     public string PaymentGatewayProvider { get; set; } = "none";

@@ -174,6 +174,7 @@ namespace George.Data
             if (updated.AskBagsCountAtPickingFinish.HasValue) dbSite.AskBagsCountAtPickingFinish = updated.AskBagsCountAtPickingFinish;
             if (updated.ConfirmPickingAfterScan.HasValue) dbSite.ConfirmPickingAfterScan = updated.ConfirmPickingAfterScan;
             if (updated.ShowPickingDeviation.HasValue) dbSite.ShowPickingDeviation = updated.ShowPickingDeviation;
+            if (updated.ScaleBarcodeEmbedMode != null) dbSite.ScaleBarcodeEmbedMode = updated.ScaleBarcodeEmbedMode;
             if (!string.IsNullOrWhiteSpace(updated.PaymentGatewayProvider))
                 dbSite.PaymentGatewayProvider = updated.PaymentGatewayProvider;
             if (updated.CardcomTerminalNumber.HasValue) dbSite.CardcomTerminalNumber = updated.CardcomTerminalNumber;
