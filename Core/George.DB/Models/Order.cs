@@ -215,6 +215,10 @@ public partial class Order
     [StringLength(1000)]
     public string? CardcomRefundDocumentUrl { get; set; }
 
+    /// <summary>Cumulative amount refunded (partial or full).</summary>
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? RefundedAmount { get; set; }
+
     /// <summary>Last payment webhook <c>orderId</c> (WooCommerce / gateway echo).</summary>
     [StringLength(64)]
     public string? GatewayPaymentOrderId { get; set; }

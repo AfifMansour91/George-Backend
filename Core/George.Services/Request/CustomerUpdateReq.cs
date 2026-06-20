@@ -4,4 +4,6 @@ namespace George.Services.Request;
 public class CustomerUpdateReq
 {
     public string Name { get; set; } = "";
+    /// <summary>Permanent manager note for this customer (CRM Customer.Notes).</summary>
+    public string? Notes { get; set; }
 }

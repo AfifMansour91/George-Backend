@@ -175,7 +175,7 @@ public class CustomerService : ServiceBase
         var response = new ApiResponse<CustomerDetailRes>();
         if (req == null || string.IsNullOrWhiteSpace(req.Name))
             return CreateResponse(response, StatusCode.InvalidRequest, "Name is required");
-        var updated = await _customerStorage.UpdateCustomerAsync(id, siteId, req.Name.Trim(), cancelToken).ConfigureAwait(false);
+        var updated = await _customerStorage.UpdateCustomerAsync(id, siteId, req.Name.Trim(), req.Notes, cancelToken).ConfigureAwait(false);
         if (updated == null)
             return CreateResponse(response, StatusCode.ItemNotFound);
         return await GetCustomerAsync(id, siteId, cancelToken).ConfigureAwait(false);

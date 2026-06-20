@@ -149,6 +149,10 @@ namespace George.Services
                 req.AccountId = site.AccountId;
             }
 
+            var permanentNote = string.IsNullOrWhiteSpace(req.PermanentCustomerNote)
+                ? null
+                : req.PermanentCustomerNote.Trim();
+
             // Ensure customer exists for this site (find by SiteId + phone, or create); then link order to that customer. Pass marketingSms so it is persisted on the customer. Persist full delivery address on Customer (structured + combined line).
             var customer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
                 req.SiteId,
@@ -158,7 +162,7 @@ namespace George.Services
                 email: req.CustomerEmail,
                 city: req.DeliveryCity,
                 defaultAddress: BuildCustomerDefaultDeliveryLine(req),
-                notes: null,
+                notes: permanentNote,
                 marketingSms: req.MarketingSms,
                 deliveryStreet: req.DeliveryStreet,
                 deliveryApartment: req.DeliveryApartment,
@@ -168,6 +172,7 @@ namespace George.Services
 
             var order = _mapper.Map<Order>(req);
             RebuildDeliveryAddressFromStreetAndCity(order);
+            await ApplyPickupSiteNameOnCreateAsync(order, req.SiteId, cancelToken).ConfigureAwait(false);
             order.CustomerId = customer.Id; // always set: customer was either found or created above
             await _paymentService.PrepareOrderPaymentOnCreateAsync(order, cancelToken).ConfigureAwait(false);
             order.CreationTime = DateTime.UtcNow;
@@ -259,6 +264,8 @@ namespace George.Services
             if (loadedAfterPayment != null && !savedCardOrder)
                 await TrySendNewOrderCustomerSmsAsync(loadedAfterPayment, cancelToken).ConfigureAwait(false);
             if (loadedAfterPayment != null)
+                await TrySendNewOrderManagerSmsAsync(loadedAfterPayment, cancelToken).ConfigureAwait(false);
+            if (loadedAfterPayment != null)
                 await TryEnqueueNewOrderAutoPrintAsync(loadedAfterPayment, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(loadedAfterPayment);
             if (loadedAfterPayment != null)
@@ -325,6 +332,58 @@ namespace George.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to send new-order customer SMS for order {OrderId}; order creation succeeded.", order.Id);
+            }
+        }
+
+        /// <summary>Send manager SMS on new order when notification settings channel is SMS.</summary>
+        private async Task TrySendNewOrderManagerSmsAsync(Order order, CancellationToken cancelToken)
+        {
+            var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken).ConfigureAwait(false);
+            var settings = account?.AccountNotificationSettings;
+            if (settings == null)
+                return;
+            if (!NotificationSmsHelper.IsSmsChannel(settings.NewOrderManagerMessageChannel))
+                return;
+
+            var phones = NotificationSmsHelper.ParseRecipientPhones(settings.NewOrderManagerPhoneNumbers);
+            if (phones.Count == 0)
+            {
+                _logger.LogWarning("New-order manager SMS skipped for order {OrderId}: no manager phone numbers configured.", order.Id);
+                return;
+            }
+
+            var template = settings.NewOrderManagerMessageTemplate;
+            if (string.IsNullOrWhiteSpace(template))
+            {
+                _logger.LogWarning("New-order manager SMS skipped for order {OrderId}: empty message template.", order.Id);
+                return;
+            }
+
+            var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
+            try
+            {
+                if (!SmsProvider.IsInitialized)
+                {
+                    _logger.LogWarning("SMS provider not initialized; skipping new-order manager SMS for order {OrderId}.", order.Id);
+                    return;
+                }
+
+                var anySent = false;
+                foreach (var phone in phones)
+                {
+                    var sent = await _smsProvider.SendTextAsync(phone, body, cancelToken).ConfigureAwait(false);
+                    if (sent)
+                        anySent = true;
+                    else
+                        _logger.LogWarning("New-order manager SMS returned false for order {OrderId} to {Phone}.", order.Id, phone);
+                }
+
+                if (!anySent)
+                    _logger.LogWarning("New-order manager SMS failed for all recipients on order {OrderId}.", order.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send new-order manager SMS for order {OrderId}; order creation succeeded.", order.Id);
             }
         }
 
@@ -410,7 +469,10 @@ namespace George.Services
                 var sent = await _smsProvider.SendTextAsync(order.CustomerPhone, body, cancelToken).ConfigureAwait(false);
                 response.Data = sent;
                 if (!sent)
+                {
                     _logger.LogWarning("Send reminder SMS returned false for order {OrderId}.", orderId);
+                    return CreateResponse(response, StatusCode.InvalidRequest, "SMS send failed. Check SMS provider configuration and customer phone.");
+                }
                 return response;
             }
             catch (Exception ex)
@@ -491,8 +553,9 @@ namespace George.Services
                 {
                     await TryReversePromotionMetricsForOrderAsync(beforeUpdate, cancelToken).ConfigureAwait(false);
                 }
+                if (ShouldSyncWooCommerceOrderAfterStatusChange(previousStatus, updated.Status))
+                    await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "order status", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             }
-            await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "order update", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             if (req.PaymentMethod != null && beforeUpdate != null &&
                 !string.Equals(beforeUpdate.PaymentMethod, updated.PaymentMethod, StringComparison.OrdinalIgnoreCase))
             {
@@ -602,7 +665,9 @@ namespace George.Services
             response.Data.Found = profile.Found;
             response.Data.CustomerName = profile.CustomerName;
             response.Data.CustomerPhone = profile.CustomerPhone;
-            response.Data.ManagerNote = profile.ManagerNote;
+            var crmCustomer = await _customerStorage.GetCustomerByPhoneAsync(siteId, phone, cancelToken)
+                .ConfigureAwait(false);
+            response.Data.ManagerNote = crmCustomer?.Notes;
             response.Data.LastOrderDate = profile.LastOrderDate;
             response.Data.OrderCount = profile.OrderCount;
             response.Data.AverageOrderTotal = profile.AverageOrderTotal;
@@ -624,7 +689,6 @@ namespace George.Services
                 response.Data.SavedCardBrand = null;
             }
 
-            var crmCustomer = await _customerStorage.GetCustomerByPhoneAsync(siteId, phone, cancelToken).ConfigureAwait(false);
             if (crmCustomer != null)
             {
                 response.Data.PermanentDiscountType = crmCustomer.PermanentDiscountType;
@@ -816,15 +880,24 @@ namespace George.Services
 
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             var forResponse = loaded ?? updated;
-            if (forResponse != null)
-                await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, forResponse, "picking update", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(forResponse);
             if (forResponse != null)
                 await EnrichOrderResAsync(response.Data, forResponse, cancelToken).ConfigureAwait(false);
             return response;
         }
 
-        /// <summary>After order mutations that should mirror to WooCommerce/oc-storeos (full POST for oc-storeos). Uses a new DI scope inside background work to avoid DbContext concurrency.</summary>
+        /// <summary>
+        /// WooCommerce website orders: push to the store only when picking finishes (Ready/Completed) or on cancel — not on InTreatment or intermediate picking saves.
+        /// </summary>
+        private static bool ShouldSyncWooCommerceOrderAfterStatusChange(string? previousStatus, string? newStatus)
+        {
+            if (string.IsNullOrWhiteSpace(newStatus)) return false;
+            if (string.Equals(previousStatus, newStatus, StringComparison.OrdinalIgnoreCase)) return false;
+            return string.Equals(newStatus, "Ready", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(newStatus, "Completed", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Mirror order to WooCommerce/oc-storeos (full POST for oc-storeos). Uses a new DI scope inside background work to avoid DbContext concurrency.</summary>
         private async Task ScheduleWooCommerceStoreSyncIfApplicableAsync(
             int orderId,
             Order order,
@@ -1118,6 +1191,19 @@ namespace George.Services
             o.DeliveryFloor = NullIfWhiteSpace(a.Floor);
             o.DeliveryEntranceCode = NullIfWhiteSpace(a.ResolvedEntranceCode);
             o.DeliveryAddress = JoinMainDeliveryLine(a.Street, a.City, a.Zip);
+        }
+
+        /// <summary>Phone/Kiosk/manual pickup: persist branch name from Site when not supplied by client.</summary>
+        private async Task ApplyPickupSiteNameOnCreateAsync(Order order, int siteId, CancellationToken cancelToken)
+        {
+            if (!string.Equals(order.DeliveryType, "Pickup", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (!string.IsNullOrWhiteSpace(order.ShippingStoreName))
+                return;
+            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken).ConfigureAwait(false);
+            var siteName = site?.SiteName?.Trim();
+            if (!string.IsNullOrWhiteSpace(siteName))
+                order.ShippingStoreName = siteName;
         }
 
         /// <summary>Pickup branch name from plugin <c>shippingstorename</c> when delivery type is pickup.</summary>
@@ -1813,6 +1899,8 @@ namespace George.Services
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loadedOrder, cancelToken).ConfigureAwait(false);
             await TrySendNewOrderCustomerSmsAsync(loadedOrder!, cancelToken).ConfigureAwait(false);
             if (loadedOrder != null)
+                await TrySendNewOrderManagerSmsAsync(loadedOrder, cancelToken).ConfigureAwait(false);
+            if (loadedOrder != null)
                 await TryEnqueueNewOrderAutoPrintAsync(loadedOrder, cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(loadedOrder!);
             await EnrichOrderResAsync(response.Data, loadedOrder!, cancelToken).ConfigureAwait(false);
@@ -2391,6 +2479,22 @@ namespace George.Services
 
             if (itemsSum <= 0m && shipping <= 0m && promoDisc <= 0m && manualDisc <= 0m) return null;
             return OrderDiscountTotals.ComputeGrandTotal(itemsSum, shipping, promoDisc, manualDisc);
+        }
+
+        private static string FormatVoucherShippingAmount(decimal amount)
+        {
+            var rounded = Math.Round(amount, 2, MidpointRounding.AwayFromZero);
+            if (rounded == Math.Truncate(rounded))
+                return ((long)rounded).ToString(CultureInfo.InvariantCulture);
+            return rounded.ToString("0.00", CultureInfo.InvariantCulture);
+        }
+
+        private static string VoucherGrandTotalFooterLine(Order order)
+        {
+            var shipping = order.ShippingCost ?? 0m;
+            if (IsVoucherShipping(order) && shipping > 0m)
+                return $"כולל משלוח {FormatVoucherShippingAmount(shipping)} ₪ | {VoucherVatIncludedLabel}";
+            return VoucherVatIncludedLabel;
         }
 
         private static string GenerateVoucherQrDataUrl(Order order, string? publicBaseUrl)

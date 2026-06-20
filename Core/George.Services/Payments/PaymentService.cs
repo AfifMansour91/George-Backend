@@ -895,7 +895,7 @@ public class PaymentService : ServiceBase
     }
 
     private static bool OrderMissingInvoiceDocument(Order order) =>
-        string.IsNullOrWhiteSpace(order.InvoiceNumber) && string.IsNullOrWhiteSpace(order.CardcomDocumentUrl);
+        string.IsNullOrWhiteSpace(order.CardcomDocumentUrl);
 
     /// <summary>
     /// Do Transaction often captures without a document; link invoice via CreateDocument + DealNumber.
@@ -1003,8 +1003,21 @@ public class PaymentService : ServiceBase
             return CreateResponse(response, StatusCode.InvalidRequest, message);
         }
 
-        order.PaymentSettleStatus = PaymentSettleStatus.Refunded;
-        order.PaymentStatus = "Refunded";
+        var previousRefunded = order.RefundedAmount ?? 0m;
+        var totalRefunded = previousRefunded + amount;
+        order.RefundedAmount = totalRefunded;
+
+        var isFullRefund = orderTotal <= 0 || totalRefunded >= orderTotal - 0.01m;
+        if (isFullRefund)
+        {
+            order.PaymentSettleStatus = PaymentSettleStatus.Refunded;
+            order.PaymentStatus = "Refunded";
+        }
+        else
+        {
+            order.PaymentSettleStatus = PaymentSettleStatus.PartiallyRefunded;
+            order.PaymentStatus = "Paid";
+        }
 
         if (!string.IsNullOrWhiteSpace(tx.TranzactionId) && !string.IsNullOrWhiteSpace(creds.ApiPassword))
         {
@@ -1944,19 +1957,62 @@ public class PaymentService : ServiceBase
         if (!creds.SendInvoiceSmsAfterCapture)
             return;
 
+        var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken);
+        if (account?.AccountNotificationSettings?.PaymentSendInvoiceSmsAfterCapture == false)
+            return;
+
         try
         {
+            order = await _paymentStorage.GetOrderForPaymentAsync(order.Id, cancelToken) ?? order;
+            await TryEnsureInvoiceDocumentUrlAsync(order, creds, cancelToken);
+
             var (sent, masked) = await TrySendInvoiceSmsAsync(order, overridePhone: null, cancelToken);
             if (sent)
             {
                 await LogEventAsync(order.Id, "InvoiceSms", "0", $"auto:{masked}", null, null, order.Total, null,
                     cancelToken);
+                return;
             }
+
+            var reason = DescribeInvoiceSmsSkipReason(order);
+            await LogEventAsync(order.Id, "InvoiceSms", "Skipped", reason, null, null, order.Total, null,
+                cancelToken);
+            _logger.LogInformation(
+                "Invoice SMS after capture skipped for order {OrderId}: {Reason}",
+                order.Id,
+                reason);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Invoice SMS after capture failed for order {OrderId}", order.Id);
         }
+    }
+
+    private async Task TryEnsureInvoiceDocumentUrlAsync(
+        Order order,
+        SitePaymentCredentials creds,
+        CancellationToken cancelToken)
+    {
+        if (!OrderMissingInvoiceDocument(order))
+            return;
+
+        var document = BuildDocumentForOrder(order, creds);
+        var txId = order.GatewayPaymentTransactionId ?? order.PaymentReference;
+        await TryCreateInvoiceAfterCaptureIfMissingAsync(order, creds, document, txId, cancelToken);
+
+        if (!string.IsNullOrWhiteSpace(order.CardcomDocumentUrl))
+            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+    }
+
+    private static string DescribeInvoiceSmsSkipReason(Order order)
+    {
+        if (string.IsNullOrWhiteSpace(order.CardcomDocumentUrl))
+            return "missing invoice document URL";
+        if (string.IsNullOrWhiteSpace(order.CustomerPhone))
+            return "missing customer phone";
+        if (!SmsProvider.IsInitialized)
+            return "SMS provider not configured";
+        return "SMS send failed";
     }
 
     private async Task<(bool Sent, string? MaskedPhone)> TrySendInvoiceSmsAsync(
@@ -1976,6 +2032,12 @@ public class PaymentService : ServiceBase
             return (false, null);
 
         var body = await BuildInvoiceSmsBodyAsync(order, url, cancelToken);
+        if (!string.IsNullOrWhiteSpace(url) &&
+            !body.Contains(url, StringComparison.OrdinalIgnoreCase))
+        {
+            body = $"{body.TrimEnd()}\n{url.Trim()}";
+        }
+
         var sent = await _smsProvider.SendTextAsync(phone, body, cancelToken);
         return sent ? (true, MaskPhone(phone)) : (false, null);
     }

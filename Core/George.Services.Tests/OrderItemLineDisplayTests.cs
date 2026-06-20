@@ -110,6 +110,61 @@ public class OrderItemLineDisplayTests
     }
 
     [Fact]
+    public void OrderHasOcStoreosPickingAdjustments_true_when_one_line_confirmed()
+    {
+        var items = new[]
+        {
+            new OrderItem { PickingUserConfirmed = true, PickedQuantity = 1m, TotalPrice = 5m },
+            new OrderItem { PickingUserConfirmed = false, PickedQuantity = 1m, TotalPrice = 12m },
+        };
+        Assert.True(OrderItemLineDisplay.OrderHasOcStoreosPickingAdjustments(items));
+    }
+
+    [Fact]
+    public void OrderHasOcStoreosPickingAdjustments_true_when_line_explicitly_unpicked()
+    {
+        var items = new[]
+        {
+            new OrderItem { PickingUserConfirmed = false, PickedQuantity = 0m, TotalPrice = null },
+        };
+        Assert.True(OrderItemLineDisplay.OrderHasOcStoreosPickingAdjustments(items));
+    }
+
+    [Fact]
+    public void OrderHasOcStoreosPickingAdjustments_false_for_stock_baseline_only()
+    {
+        var items = new[]
+        {
+            new OrderItem { PickingUserConfirmed = false, PickedQuantity = 2m, TotalPrice = 12m },
+            new OrderItem { PickingUserConfirmed = false, PickedQuantity = 1m, TotalPrice = 5m },
+        };
+        Assert.False(OrderItemLineDisplay.OrderHasOcStoreosPickingAdjustments(items));
+    }
+
+    [Fact]
+    public void IsOcStoreosBillableLine_requires_confirmed_pick_with_qty()
+    {
+        Assert.False(OrderItemLineDisplay.IsOcStoreosBillableLine(new OrderItem
+        {
+            PickingUserConfirmed = false,
+            PickedQuantity = 1m,
+            TotalPrice = 12m,
+        }));
+        Assert.True(OrderItemLineDisplay.IsOcStoreosBillableLine(new OrderItem
+        {
+            PickingUserConfirmed = true,
+            PickedQuantity = 1m,
+            TotalPrice = 5m,
+        }));
+        Assert.False(OrderItemLineDisplay.IsOcStoreosBillableLine(new OrderItem
+        {
+            PickingUserConfirmed = false,
+            PickedQuantity = 0m,
+            TotalPrice = null,
+        }));
+    }
+
+    [Fact]
     public void Attribute_line_includes_size_and_cut_with_dedupe()
     {
         var item = new OrderItem

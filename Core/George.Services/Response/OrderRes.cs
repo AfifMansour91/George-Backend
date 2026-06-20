@@ -52,6 +52,8 @@ public class OrderRes
     public string? PickupTime { get; set; }
     public string? ManagerNote { get; set; }
     public string? CustomerNote { get; set; }
+    /// <summary>Permanent manager note from CRM Customer.Notes (not stored on Order).</summary>
+    public string? CustomerProfileNote { get; set; }
     public string? DeliveryNote { get; set; }
     public decimal? SubTotal { get; set; }
     public decimal? ShippingCost { get; set; }
@@ -77,6 +79,8 @@ public class OrderRes
     public string? RefundInvoiceNumber { get; set; }
     /// <summary>Cardcom credit note URL after refund.</summary>
     public string? CardcomRefundDocumentUrl { get; set; }
+    /// <summary>Cumulative amount refunded (partial or full).</summary>
+    public decimal? RefundedAmount { get; set; }
     public DateTime? PaidAt { get; set; }
     /// <summary>Last payment webhook <c>orderId</c>.</summary>
     public string? GatewayPaymentOrderId { get; set; }

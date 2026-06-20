@@ -60,6 +60,7 @@ namespace George.Services.Response
         public string Message { get; set; } = string.Empty;
         public WooCommerceImportEntityCounts Categories { get; set; } = new();
         public WooCommerceImportEntityCounts Brands { get; set; } = new();
+        public WooCommerceImportEntityCounts Attributes { get; set; } = new();
         public WooCommerceImportEntityCounts Products { get; set; } = new();
         public WooCommerceImportEntityCounts Variations { get; set; } = new();
         public List<string> Errors { get; set; } = new();
