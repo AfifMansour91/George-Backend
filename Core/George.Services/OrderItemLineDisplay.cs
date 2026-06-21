@@ -505,6 +505,27 @@ public static class OrderItemLineDisplay
     /// <summary>Matches TS <c>orderMeaningfulPick</c> — שורת "לוקט" בבון רק אחרי אישור ליקוט.</summary>
     public static bool OrderMeaningfulPick(OrderItem item) => OrderItemIsPickedForUi(item);
 
+    /// <summary>True when ליקוט changed billing: at least one confirmed pick, or a line explicitly zeroed (unpicked).</summary>
+    public static bool OrderHasOcStoreosPickingAdjustments(IEnumerable<OrderItem> items)
+    {
+        var active = items.Where(i => !i.IsDeleted).ToList();
+        if (active.Any(i => i.PickingUserConfirmed))
+            return true;
+        return active.Any(i => i.PickedQuantity is 0m && !i.TotalPrice.HasValue);
+    }
+
+    /// <summary>oc-storeos POST: bill only lines confirmed in picking with qty &gt; 0.</summary>
+    public static bool IsOcStoreosBillableLine(OrderItem item) =>
+        item.PickingUserConfirmed && item.PickedQuantity is > 0m;
+
+    /// <summary>Line total for oc-storeos after picking; null when the line must not be charged.</summary>
+    public static decimal? GetOcStoreosBillableLineTotal(OrderItem item)
+    {
+        if (!IsOcStoreosBillableLine(item)) return null;
+        if (item.TotalPrice.HasValue) return item.TotalPrice.Value;
+        return item.PickedQuantity!.Value * (item.PricePerUnit ?? 0m);
+    }
+
     /// <summary>Matches TS voucher <c>formatPickedQuantity</c> (unitWeightGrams &gt; 0 ⇒ kg).</summary>
     public static string FormatVoucherPickedDisplay(OrderItem item)
     {

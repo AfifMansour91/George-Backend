@@ -255,6 +255,7 @@ namespace George.Data
                 existing.PaymentCustomerMessageInvoice = settings.PaymentCustomerMessageInvoice;
                 existing.PaymentCustomerMessageRefund = settings.PaymentCustomerMessageRefund;
                 existing.PaymentCustomerMessagePaymentLink = settings.PaymentCustomerMessagePaymentLink;
+                existing.PaymentSendInvoiceSmsAfterCapture = settings.PaymentSendInvoiceSmsAfterCapture;
                 existing.UpdatedDate = DateTime.UtcNow;
             }
             else

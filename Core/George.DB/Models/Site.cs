@@ -142,8 +142,34 @@ public partial class Site
     [StringLength(200)]
     public string? PromotionWebhookSecret { get; set; }
 
+    /// <summary>When true (default), send voucher jobs to local PrintAgent instead of browser print.</summary>
+    public bool VoucherPrinterUseAgent { get; set; } = true;
+
+    /// <summary>Label printer: display name / connection label (optional second printer at branch).</summary>
+    [StringLength(100)]
+    public string? LabelPrinterName { get; set; }
+
+    /// <summary>When true (default), send label jobs to local PrintAgent.</summary>
+    public bool LabelPrinterUseAgent { get; set; } = true;
+
+    /// <summary>When true, print bag labels automatically when picking is completed.</summary>
+    public bool? PrintLabelsAfterPicking { get; set; }
+
     /// <summary>When true (default), staff must confirm bag count before completing picking. When false, skip that prompt.</summary>
     public bool? AskBagsCountAtPickingFinish { get; set; }
+
+    /// <summary>When true (default), show picking confirmation dialog after barcode scan. When false, apply scan silently unless weight exceeds tolerance.</summary>
+    public bool? ConfirmPickingAfterScan { get; set; }
+
+    /// <summary>When true (default), show order deviation % and amount in picking footer and archive.</summary>
+    public bool? ShowPickingDeviation { get; set; }
+
+    /// <summary>
+    /// How the 5-digit payload on 13-digit scale barcodes (prefix 2) is interpreted when scanning during picking:
+    /// auto (detect), weight (÷1000 kg), or price (÷100 currency then ÷ catalog ₪/kg).
+    /// </summary>
+    [StringLength(16)]
+    public string? ScaleBarcodeEmbedMode { get; set; }
 
     /// <summary>Active payment provider: none | cardcom.</summary>
     [StringLength(32)]

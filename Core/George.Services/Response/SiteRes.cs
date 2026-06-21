@@ -45,6 +45,10 @@ namespace George.Services.Response
         public string? PrintFutureAtTime { get; set; }
         public bool? VoucherPrinterSilent { get; set; }
         public string? VoucherPrinterName { get; set; }
+        public bool? VoucherPrinterUseAgent { get; set; }
+        public string? LabelPrinterName { get; set; }
+        public bool? LabelPrinterUseAgent { get; set; }
+        public bool? PrintLabelsAfterPicking { get; set; }
 
         // Promotion settings (Sprint 4)
         /// <summary>"same_price" | "full_price" (default). Default for BxPY over-quantity pricing.</summary>
@@ -57,6 +61,15 @@ namespace George.Services.Response
 
         /// <summary>When true (default), UI asks for bag count when completing picking.</summary>
         public bool? AskBagsCountAtPickingFinish { get; set; }
+
+        /// <summary>When true (default), UI shows picking confirmation dialog after barcode scan.</summary>
+        public bool? ConfirmPickingAfterScan { get; set; }
+
+        /// <summary>When true (default), show picking deviation in footer and archive.</summary>
+        public bool? ShowPickingDeviation { get; set; }
+
+        /// <summary>Scale barcode payload: auto | weight | price.</summary>
+        public string? ScaleBarcodeEmbedMode { get; set; }
 
         public string? PaymentGatewayProvider { get; set; }
         public int? CardcomTerminalNumber { get; set; }

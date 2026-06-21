@@ -59,6 +59,12 @@ namespace George.Services
                 model.IsraelCityPickerEnabled = true;
             if (!model.AskBagsCountAtPickingFinish.HasValue)
                 model.AskBagsCountAtPickingFinish = true;
+            if (!model.ConfirmPickingAfterScan.HasValue)
+                model.ConfirmPickingAfterScan = true;
+            if (string.IsNullOrWhiteSpace(model.ScaleBarcodeEmbedMode))
+                model.ScaleBarcodeEmbedMode = "auto";
+            if (!model.ShowPickingDeviation.HasValue)
+                model.ShowPickingDeviation = true;
 
             CardcomTestTerminalDefaults.ApplyToNewSiteIfUnset(model, _paymentTokenProtector);
 
@@ -122,8 +128,16 @@ namespace George.Services
             if (req.PrintFutureImmediate.HasValue) model.PrintFutureImmediate = req.PrintFutureImmediate;
             if (req.PrintFutureAtTimeEnabled.HasValue) model.PrintFutureAtTimeEnabled = req.PrintFutureAtTimeEnabled;
             if (req.PrintFutureAtTime != null) model.PrintFutureAtTime = req.PrintFutureAtTime;
-
-            // Update the data in the DB.
+            if (req.VoucherPrinterSilent.HasValue) model.VoucherPrinterSilent = req.VoucherPrinterSilent;
+            if (req.VoucherPrinterName != null) model.VoucherPrinterName = req.VoucherPrinterName;
+            model.VoucherPrinterUseAgent = req.VoucherPrinterUseAgent.HasValue
+                ? req.VoucherPrinterUseAgent.Value
+                : existingSite.VoucherPrinterUseAgent;
+            if (req.LabelPrinterName != null) model.LabelPrinterName = req.LabelPrinterName;
+            model.LabelPrinterUseAgent = req.LabelPrinterUseAgent.HasValue
+                ? req.LabelPrinterUseAgent.Value
+                : existingSite.LabelPrinterUseAgent;
+            if (req.PrintLabelsAfterPicking.HasValue) model.PrintLabelsAfterPicking = req.PrintLabelsAfterPicking;
             model = await _siteStorage.UpdateSiteAsync(model, req.BusinessTypeIds, cancelToken).ConfigureAwait(false);
             if (model != null)
             {

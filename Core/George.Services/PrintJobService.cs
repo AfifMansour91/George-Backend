@@ -17,6 +17,7 @@ public class PrintJobService : ServiceBase
     private readonly IHtmlRenderService _htmlRenderService;
     private readonly string _payloadType;
     private const string AutoVoucherJobTypePrefix = "VoucherAuto:";
+    private const string AutoLabelJobTypePrefix = "LabelAuto:";
 
     public PrintJobService(ILogger<PrintJobService> logger, IMapper mapper, CacheManager cache, PrintJobStorage printJobStorage,
     IHtmlRenderService htmlRenderService, IConfiguration configuration)
@@ -45,7 +46,9 @@ public class PrintJobService : ServiceBase
             : req.ClientSource.Trim();
 
         // Auto-print jobs are idempotent by (siteId, orderId, jobType) to prevent polling duplicates.
-        if (req.OrderId.HasValue && req.OrderId.Value > 0 && normalizedJobType.StartsWith(AutoVoucherJobTypePrefix, StringComparison.Ordinal))
+        if (req.OrderId.HasValue && req.OrderId.Value > 0 &&
+            (normalizedJobType.StartsWith(AutoVoucherJobTypePrefix, StringComparison.Ordinal) ||
+             normalizedJobType.StartsWith(AutoLabelJobTypePrefix, StringComparison.Ordinal)))
         {
             var existing = await _printJobStorage
                 .FindBySiteOrderAndJobTypeAsync(req.SiteId, req.OrderId.Value, normalizedJobType, cancelToken)
@@ -150,6 +153,8 @@ public class PrintJobService : ServiceBase
     {
         if (normalizedJobType.StartsWith(AutoVoucherJobTypePrefix, StringComparison.Ordinal))
             return normalizedJobType.Substring(AutoVoucherJobTypePrefix.Length);
+        if (normalizedJobType.StartsWith(AutoLabelJobTypePrefix, StringComparison.Ordinal))
+            return normalizedJobType.Substring(AutoLabelJobTypePrefix.Length);
         return "Manual";
     }
 }

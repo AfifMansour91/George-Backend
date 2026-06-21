@@ -38,6 +38,8 @@ public class CreateOrderReq
     public string? PickupTime { get; set; }
     public string? ManagerNote { get; set; }
     public string? CustomerNote { get; set; }
+    /// <summary>When set, persisted on CRM Customer.Notes (permanent manager note for this customer).</summary>
+    public string? PermanentCustomerNote { get; set; }
     public string? DeliveryNote { get; set; }
     public decimal? SubTotal { get; set; }
     public decimal? ShippingCost { get; set; }

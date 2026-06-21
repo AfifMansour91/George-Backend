@@ -168,30 +168,26 @@ public partial class WooCommerceService
         return s is "draft" or "pending";
     }
 
-    private static int? ResolveStockManagementTypeId(WooImportCatalogLookups lk, bool? manageStock, bool isVariable)
+    private static int? ResolveStockManagementTypeId(
+        WooImportCatalogLookups lk,
+        bool? manageStock,
+        bool isVariable,
+        IReadOnlyList<WooImportVariationItem>? variations)
     {
         if (lk.StockManagementTypes.Count == 0)
             return null;
+
+        var variationSources = (variations ?? Array.Empty<WooImportVariationItem>())
+            .Select(v => new WooCommerceImportStockMapping.VariationStockSource(v.manage_stock, v.stock_quantity, v.stock_status))
+            .ToList();
+
+        var typeName = WooCommerceImportStockMapping.ResolveStockManagementTypeName(manageStock, isVariable, variationSources);
         var rows = lk.StockManagementTypes.Select(x => (x.Name, x.Id));
-        if (manageStock == true)
-            return MatchByNames(rows, "quantity");
-        if (isVariable)
-            return MatchByNames(rows, "variation", "status");
-        return MatchByNames(rows, "status", "variation");
+        return MatchByNames(rows, typeName, typeName == "status" ? "variation" : null);
     }
 
-    private static int? ResolveUnitIdFromOcwsu(List<Unit> units, string? ocwsuUnitsFromMeta)
-    {
-        if (string.IsNullOrWhiteSpace(ocwsuUnitsFromMeta)) return null;
-        var target = ocwsuUnitsFromMeta.Trim().ToLowerInvariant();
-        foreach (var u in units)
-        {
-            var mapped = MapOcwsuProductWeightUnits(u.Name);
-            if (string.Equals(mapped, target, StringComparison.OrdinalIgnoreCase))
-                return u.Id;
-        }
-        return null;
-    }
+    private static int? ResolveUnitIdFromOcwsu(List<Unit> units, string? ocwsuUnitsFromMeta) =>
+        WooCommerceImportUnitMapping.ResolveUnitIdFromOcwsu(units, ocwsuUnitsFromMeta);
 
     private static int? ResolveUnitWeightModeId(List<UnitWeightMode> modes, string? wooType, bool getWeightFromVariation)
     {
@@ -237,18 +233,10 @@ public partial class WooCommerceService
     /// George treats variation salability as <c>StockQuantity &gt; 0</c> (binary or summed qty in UI).
     /// WooCommerce often leaves <c>manage_stock</c> false while still returning <c>stock_status</c> per variation.
     /// </summary>
-    private static decimal? ResolveImportedVariantStockQuantity(WooImportVariationItem vv)
-    {
-        if (vv.manage_stock == true && vv.stock_quantity.HasValue)
-            return vv.stock_quantity.Value;
-
-        var st = (vv.stock_status ?? string.Empty).Trim().ToLowerInvariant().Replace("-", "").Replace("_", "");
-        if (st is "instock" or "onbackorder")
-            return 1m;
-        if (st is "outofstock")
-            return 0m;
-        return null;
-    }
+    private static decimal? ResolveImportedVariantStockQuantity(WooImportVariationItem vv, bool usesVariationStock) =>
+        WooCommerceImportStockMapping.ResolveVariantStockQuantity(
+            new WooCommerceImportStockMapping.VariationStockSource(vv.manage_stock, vv.stock_quantity, vv.stock_status),
+            usesVariationStock);
 
     private async Task ApplyWooImportProductExtensionsAsync(
         GeorgeDBContext db,
@@ -258,6 +246,7 @@ public partial class WooCommerceService
         int siteId,
         WooImportCatalogLookups lk,
         IReadOnlyDictionary<int, int> brandMap,
+        IReadOnlyList<WooImportVariationItem> wooVariations,
         CancellationToken cancelToken)
     {
         var meta = wp.meta_data;
@@ -270,7 +259,7 @@ public partial class WooCommerceService
 
         var stockId = ResolveStockStatusId(lk, wp.stock_status);
         if (stockId.HasValue) product.StockStatusId = stockId;
-        var smtId = ResolveStockManagementTypeId(lk, wp.manage_stock, isVariable);
+        var smtId = ResolveStockManagementTypeId(lk, wp.manage_stock, isVariable, wooVariations);
         if (smtId.HasValue) product.StockManagementTypeId = smtId;
 
         var visId = ResolveVisibilityId(lk, wp.catalog_visibility);
@@ -433,7 +422,12 @@ public partial class WooCommerceService
                 product.WeightConfigId = wc.Id;
             }
 
-            wc.UnitId = ResolveUnitIdFromOcwsu(lk.Units, ocwsuUnits) ?? wc.UnitId;
+            if (!string.IsNullOrWhiteSpace(ocwsuUnits))
+            {
+                var resolvedUnitId = ResolveUnitIdFromOcwsu(lk.Units, ocwsuUnits);
+                if (resolvedUnitId.HasValue)
+                    wc.UnitId = resolvedUnitId.Value;
+            }
             wc.StartWeight = string.IsNullOrWhiteSpace(minW) ? wc.StartWeight : minW.Trim();
             wc.Step = string.IsNullOrWhiteSpace(step) ? wc.Step : step.Trim();
             wc.UnitWeight = string.IsNullOrWhiteSpace(unitW) ? wc.UnitWeight : unitW.Trim();

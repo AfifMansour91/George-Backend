@@ -59,8 +59,29 @@ namespace George.Services.Request
         public string? PromotionWebhookUrl { get; set; }
         public string? PromotionWebhookSecret { get; set; }
 
+        /// <summary>When true (default), send voucher to local PrintAgent.</summary>
+        public bool? VoucherPrinterUseAgent { get; set; }
+
+        /// <summary>Label printer: display name (optional second printer).</summary>
+        public string? LabelPrinterName { get; set; }
+
+        /// <summary>When true (default), send labels to local PrintAgent.</summary>
+        public bool? LabelPrinterUseAgent { get; set; }
+
+        /// <summary>When true, print bag labels automatically after picking completes.</summary>
+        public bool? PrintLabelsAfterPicking { get; set; }
+
         /// <summary>When true (default), prompt for bag count when finishing picking.</summary>
         public bool? AskBagsCountAtPickingFinish { get; set; }
+
+        /// <summary>When true (default), show picking confirmation dialog after barcode scan.</summary>
+        public bool? ConfirmPickingAfterScan { get; set; }
+
+        /// <summary>When true (default), show picking deviation in footer and archive.</summary>
+        public bool? ShowPickingDeviation { get; set; }
+
+        /// <summary>Scale barcode payload: auto | weight | price.</summary>
+        public string? ScaleBarcodeEmbedMode { get; set; }
 
         public string? PaymentGatewayProvider { get; set; }
         public int? CardcomTerminalNumber { get; set; }

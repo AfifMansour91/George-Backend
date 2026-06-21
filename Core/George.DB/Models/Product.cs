@@ -116,43 +116,43 @@ public partial class Product
     [Column(TypeName = "decimal(18, 4)")]
     public decimal? LowStockThreshold { get; set; }
 
-    /// <summary>Storefront label: קפוא → Woo ed/v1 product-frozen.</summary>
+    /// <summary>Storefront label: קפוא → Woo ed/v1 product-label (<c>frozen</c>).</summary>
     public bool LabelFrozen { get; set; }
 
-    /// <summary>Storefront label: ללא גלוטן → Woo ed/v1 product-gluten-free.</summary>
+    /// <summary>Storefront label: ללא גלוטן → Woo ed/v1 product-label (<c>gluten_free</c>).</summary>
     public bool LabelGlutenFree { get; set; }
 
-    /// <summary>Storefront label: לא כשר → Woo ed/v1 product-not-kosher.</summary>
+    /// <summary>Storefront label: לא כשר → Woo ed/v1 product-label (<c>not_kosher</c>).</summary>
     public bool LabelNotKosher { get; set; }
 
-    /// <summary>Storefront label: כשר לפסח → Woo ed/v1 product-kosher-for-passover (effective until end date).</summary>
+    /// <summary>Storefront label: כשר לפסח → Woo ed/v1 product-label (<c>kosher_for_passover</c>, effective until end date).</summary>
     public bool LabelKosherForPassover { get; set; }
 
     [Precision(0)]
     public DateTime? LabelKosherForPassoverEndDate { get; set; }
 
-    /// <summary>Storefront label: חדש — synced via Woo <c>meta_data</c> (<c>new</c> / ACF <c>field_69f5c7cfeadce</c>) and ED/v1 <c>product-new</c>.</summary>
+    /// <summary>Storefront label: חדש — synced via Woo <c>meta_data</c> and ED/v1 <c>product-label</c> (<c>new</c>).</summary>
     public bool LabelNew { get; set; }
 
     [Precision(0)]
     public DateTime? LabelNewEndDate { get; set; }
 
-    /// <summary>Storefront label: רב מכר → Woo ed/v1 product-bestseller.</summary>
+    /// <summary>Storefront label: רב מכר → Woo ed/v1 product-label (<c>bestseller</c>).</summary>
     public bool LabelBestseller { get; set; }
 
-    /// <summary>Storefront label: זמינות נמוכה → Woo ed/v1 product-low-availability (<c>low_availability</c>).</summary>
+    /// <summary>Storefront label: זמינות נמוכה → Woo ed/v1 product-label (<c>low_availability</c>).</summary>
     public bool LabelLowAvailability { get; set; }
 
-    /// <summary>Storefront label: מוכן לבישול → Woo ed/v1 product-readytocook.</summary>
+    /// <summary>Storefront label: מוכן לבישול → Woo ed/v1 product-label (<c>readytocook</c>).</summary>
     public bool LabelReadyToCook { get; set; }
 
-    /// <summary>Storefront label: טבעי → Woo ed/v1 product-natural.</summary>
+    /// <summary>Storefront label: טבעי → Woo ed/v1 product-label (<c>natural</c>).</summary>
     public bool LabelNatural { get; set; }
 
-    /// <summary>Storefront label: ללא תוספת סוכר → Woo ed/v1 product-sugarfree.</summary>
+    /// <summary>Storefront label: ללא תוספת סוכר → Woo ed/v1 product-label (<c>sugarfree</c>).</summary>
     public bool LabelSugarFree { get; set; }
 
-    /// <summary>Storefront label: ללא לקטוז → Woo ed/v1 product-lactosefree.</summary>
+    /// <summary>Storefront label: ללא לקטוז → Woo ed/v1 product-label (<c>lactosefree</c>).</summary>
     public bool LabelLactoseFree { get; set; }
 
     [ForeignKey("BrandId")]

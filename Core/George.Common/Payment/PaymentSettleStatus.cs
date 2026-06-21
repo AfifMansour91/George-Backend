@@ -12,6 +12,7 @@ public static class PaymentSettleStatus
     public const string Failed = "Failed";
     public const string Voided = "Voided";
     public const string Refunded = "Refunded";
+    public const string PartiallyRefunded = "PartiallyRefunded";
 }
 
 public static class PaymentGatewayProviderId

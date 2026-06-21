@@ -83,6 +83,14 @@ public sealed class ValidateCallbackResult
     public string? RawJson { get; init; }
 }
 
+/// <summary>Cardcom Transactions/Transaction card-owner fields (must match Low Profile UIDefinition prefill).</summary>
+public sealed class CardcomCardOwnerContact
+{
+    public string? Name { get; init; }
+    public string? Phone { get; init; }
+    public string? Email { get; init; }
+}
+
 public sealed class CaptureAuthorizationRequest
 {
     public required decimal Amount { get; init; }
@@ -91,6 +99,7 @@ public sealed class CaptureAuthorizationRequest
     public string? ApprovalNumber { get; init; }
     public string ExternalUniqTranId { get; init; } = Guid.NewGuid().ToString("N");
     public bool CreateDocument { get; init; } = true;
+    public CardcomCardOwnerContact? CardOwner { get; init; }
     public CardcomTransactionDocument? Document { get; init; }
 }
 
@@ -111,7 +120,7 @@ public sealed class ChargeTokenRequest
     public string? ApprovalNumber { get; init; }
     public string ExternalUniqTranId { get; init; } = Guid.NewGuid().ToString("N");
     public bool CreateDocument { get; init; } = true;
-    public string? CustomerName { get; init; }
+    public CardcomCardOwnerContact? CardOwner { get; init; }
     public CardcomTransactionDocument? Document { get; init; }
 }
 

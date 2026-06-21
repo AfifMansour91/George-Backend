@@ -576,6 +576,16 @@ namespace George.Services
                 var brandMap = await UpsertBrandsFromWooAsync(db, siteForImport, siteForImport.AccountId, httpClient, baseUrl, response.Data, cancelToken);
                 importProgress?.Report(new WooCommerceImportProgress { Phase = "brands", Total = 1, Completed = 1 });
 
+                importProgress?.Report(new WooCommerceImportProgress { Phase = "attributes", Total = 1, Completed = 0 });
+                var attributeCatalog = await UpsertAttributesFromWooAsync(
+                    db,
+                    siteForImport,
+                    httpClient,
+                    baseUrl,
+                    response.Data,
+                    cancelToken);
+                importProgress?.Report(new WooCommerceImportProgress { Phase = "attributes", Total = 1, Completed = 1 });
+
                 await UpsertProductsFromWooAsync(
                     db,
                     siteForImport,
@@ -584,6 +594,7 @@ namespace George.Services
                     wooProducts,
                     categoryMap,
                     brandMap,
+                    attributeCatalog,
                     importLookups,
                     response.Data,
                     importProgress,
@@ -592,8 +603,8 @@ namespace George.Services
                 await tx.CommitAsync(cancelToken);
                 var dupRows = feedRowCountWithId - uniqueIdCount;
                 response.Data.Message = dupRows > 0
-                    ? $"Imported from WooCommerce: {wooCategories.Count} categories, {brandMap.Count} brands, {uniqueIdCount} unique Woo products ({feedRowCountWithId} API rows; {dupRows} duplicate id row(s) in the feed were merged into one product each)."
-                    : $"Imported from WooCommerce: {wooCategories.Count} categories, {brandMap.Count} brands, and {uniqueIdCount} unique Woo products processed.";
+                    ? $"Imported from WooCommerce: {wooCategories.Count} categories, {brandMap.Count} brands, {attributeCatalog.DisplayNameByWooId.Count} attributes, {uniqueIdCount} unique Woo products ({feedRowCountWithId} API rows; {dupRows} duplicate id row(s) in the feed were merged into one product each)."
+                    : $"Imported from WooCommerce: {wooCategories.Count} categories, {brandMap.Count} brands, {attributeCatalog.DisplayNameByWooId.Count} attributes, and {uniqueIdCount} unique Woo products processed.";
                 return response;
             }
             catch (Exception ex)
@@ -1068,45 +1079,33 @@ namespace George.Services
         {
             try
             {
-                var slug = SlugifyAttributeName(attributeName);
-                var searchUrl = $"{baseUrl}/products/attributes?slug={Uri.EscapeDataString(slug)}";
+                var normalizedName = NormalizeAttributeName(attributeName);
+                if (string.IsNullOrEmpty(normalizedName))
+                    return (null, null);
 
-                var searchResponse = await httpClient.GetAsync(searchUrl, cancelToken);
-                
-                if (searchResponse.IsSuccessStatusCode)
-                {
-                    var searchBody = await searchResponse.Content.ReadAsStringAsync(cancelToken);
-                    var attributes = TryDeserialize<List<WooCommerceAttributeResponse>>(searchBody);
-                    if (attributes != null && attributes.Count > 0)
-                    {
-                        var matchingAttr = attributes.FirstOrDefault(a => 
-                            string.Equals(a.name, attributeName, StringComparison.OrdinalIgnoreCase));
-                        if (matchingAttr != null)
-                        {
-                            return (matchingAttr.id, matchingAttr.slug ?? slug);
-                        }
-                    }
-                }
+                var expectedSlug = SlugifyAttributeName(normalizedName);
+                var allAttributes = await FetchWooPagedAsync<WooCommerceAttributeResponse>(
+                    httpClient,
+                    $"{baseUrl}/products/attributes",
+                    cancelToken);
+                if (allAttributes.Count == 0)
+                    return (null, null);
 
-                // Also try searching by name (Hebrew names don't slug well; WooCommerce may have different slug)
-                var nameSearchUrl = $"{baseUrl}/products/attributes?per_page=100&page=1";
+                var matchingByName = allAttributes
+                    .Where(a => string.Equals(NormalizeAttributeName(a.name), normalizedName, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(a => a.id)
+                    .FirstOrDefault();
+                if (matchingByName != null)
+                    return (matchingByName.id, matchingByName.slug ?? expectedSlug);
 
-                var nameSearchResponse = await httpClient.GetAsync(nameSearchUrl, cancelToken);
-                
-                if (nameSearchResponse.IsSuccessStatusCode)
-                {
-                    var nameSearchBody = await nameSearchResponse.Content.ReadAsStringAsync(cancelToken);
-                    var allAttributes = TryDeserialize<List<WooCommerceAttributeResponse>>(nameSearchBody);
-                    if (allAttributes != null)
-                    {
-                        var matchingByName = allAttributes.FirstOrDefault(a => 
-                            string.Equals(a.name, attributeName, StringComparison.OrdinalIgnoreCase));
-                        if (matchingByName != null)
-                        {
-                            return (matchingByName.id, matchingByName.slug ?? slug);
-                        }
-                    }
-                }
+                var matchingBySlug = allAttributes
+                    .Where(a =>
+                        string.Equals(NormalizeWooAttributeSlugKey(a.slug), expectedSlug, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(NormalizeWooAttributeSlugKey(a.slug), NormalizeWooAttributeSlugKey(normalizedName), StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(a => a.id)
+                    .FirstOrDefault();
+                if (matchingBySlug != null)
+                    return (matchingBySlug.id, matchingBySlug.slug ?? expectedSlug);
             }
             catch (Exception ex)
             {
@@ -1777,8 +1776,13 @@ namespace George.Services
                     existingWooId = await FindProductIdBySkuAsync(baseUrl, siteId, product.Sku, httpClient, cancelToken);
 
                 List<(int id, string? src, string? name)>? existingWooImages = null;
+                List<WooCommerceProductAttributeReadItem>? existingWooNonVariationAttributes = null;
                 if (existingWooId.HasValue)
-                    existingWooImages = await GetWooCommerceProductImagesAsync(baseUrl, existingWooId.Value, httpClient, cancelToken);
+                {
+                    var existingWooProduct = await GetWooCommerceExistingProductForSyncAsync(baseUrl, existingWooId.Value, httpClient, cancelToken);
+                    existingWooImages = existingWooProduct?.Images;
+                    existingWooNonVariationAttributes = existingWooProduct?.NonVariationAttributes;
+                }
 
                 // Map images: when updating, use existing WooCommerce image id when URL matches to avoid duplicating in media library.
                 // Use the image name from the system (Media.Name) so WooCommerce gets a friendly filename instead of the long URL.
@@ -2090,7 +2094,11 @@ namespace George.Services
 
                     // Build attributes array using global attribute IDs. Include "name" (taxonomy slug) so WooCommerce
                     // reliably relates attributes to the product; options remain display names for the dropdown.
-                    var attributes = product.ProductOption?
+                    // TEMPORARY: George does not import variation=false attrs (see docs/WooCommerce-import-non-variation-attributes.md).
+                    // On update, re-send existing Woo non-variation attrs so PUT does not wipe nutrition/spec fields.
+                    var preservedNonVariationAttributes = BuildWooSyncPreservedNonVariationAttributes(existingWooNonVariationAttributes);
+                    var preservedAttributeCount = preservedNonVariationAttributes.Count;
+                    var georgeVariationAttributes = product.ProductOption?
                         .Where(po => !po.IsDeleted && attributeMap.ContainsKey(NormalizeOptionKey(po.Name)))
                         .Select((option, index) =>
                         {
@@ -2100,7 +2108,7 @@ namespace George.Services
                             var dict = new Dictionary<string, object>
                             {
                                 ["id"] = attrId,
-                                ["position"] = index,
+                                ["position"] = preservedAttributeCount + index,
                                 ["visible"] = true,
                                 ["variation"] = true,
                                 ["options"] = GetProductOptionValuesForWooSync(option, product)
@@ -2111,6 +2119,8 @@ namespace George.Services
                         })
                         .Cast<object>()
                         .ToList() ?? new List<object>();
+
+                    var attributes = preservedNonVariationAttributes.Concat(georgeVariationAttributes).ToList();
 
                     wooProduct["attributes"] = attributes;
 
@@ -2222,7 +2232,7 @@ namespace George.Services
                 {
                     try
                     {
-                        await SyncProductEdAcfStoreLabelsAsync(baseUrl, wooCommerceId.Value, product, cancelToken);
+                        await SyncProductEdAcfStoreLabelsAsync(baseUrl, siteId, wooCommerceId.Value, product, cancelToken);
                     }
                     catch (Exception ex)
                     {
@@ -2267,11 +2277,27 @@ namespace George.Services
         }
 
         /// <summary>
-        /// POSTs boolean ACF-backed flags to <c>{site}/wp-json/ed/v1/...</c> (Omer's endpoints). Uses a separate HTTP client without WooCommerce REST credentials.
+        /// POSTs boolean ACF-backed storefront labels to <c>{site}/wp-json/ed/v1/product-label</c>.
+        /// Uses site <see cref="Site.InternalApiKey"/> as Giorgio API token (<c>X-Api-Key</c>).
         /// Skipped when <c>GET {site}/wp-json/ed/v1/capabilities</c> reports <c>product_labels: false</c> or the endpoint is unavailable.
         /// </summary>
-        private async Task SyncProductEdAcfStoreLabelsAsync(string wcV3BaseUrl, int wooProductId, Product product, CancellationToken cancelToken)
+        private async Task SyncProductEdAcfStoreLabelsAsync(
+            string wcV3BaseUrl,
+            int siteId,
+            int wooProductId,
+            Product product,
+            CancellationToken cancelToken)
         {
+            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken).ConfigureAwait(false);
+            var apiToken = site?.InternalApiKey?.Trim();
+            if (string.IsNullOrEmpty(apiToken))
+            {
+                _logger.LogWarning(
+                    "ED/v1 product-label sync skipped for site {SiteId}: InternalApiKey (Giorgio token) is not configured.",
+                    siteId);
+                return;
+            }
+
             var idx = wcV3BaseUrl.IndexOf("/wp-json", StringComparison.OrdinalIgnoreCase);
             var siteRoot = idx > 0 ? wcV3BaseUrl.Substring(0, idx).TrimEnd('/') : wcV3BaseUrl.TrimEnd('/');
 
@@ -2283,41 +2309,50 @@ namespace George.Services
                 return;
 
             http.Timeout = TimeSpan.FromSeconds(60);
+            http.DefaultRequestHeaders.Add("X-Api-Key", apiToken);
 
-            var now = DateTime.UtcNow;
-            var passoverEffective = product.LabelKosherForPassover &&
-                                    (!product.LabelKosherForPassoverEndDate.HasValue || product.LabelKosherForPassoverEndDate.Value > now);
-            var newEffective = product.LabelNew &&
-                               (!product.LabelNewEndDate.HasValue || product.LabelNewEndDate.Value > now);
-
-            async Task PostBool(string path, string fieldKey, bool value)
+            var url = $"{siteRoot}/wp-json/ed/v1/product-label";
+            var payload = new Dictionary<string, object>
             {
-                var url = $"{siteRoot}/wp-json/ed/v1/{path}";
-                var json = JsonSerializer.Serialize(new Dictionary<string, object>
-                {
-                    ["product_id"] = wooProductId,
-                    [fieldKey] = value
-                });
-                using var content = new StringContent(json, Encoding.UTF8, "application/json");
-                var resp = await http.PostAsync(url, content, cancelToken).ConfigureAwait(false);
-                if (!resp.IsSuccessStatusCode)
-                {
-                    var err = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
-                    _logger.LogWarning("ED/v1 POST {Path} failed for Woo product {WooId}: {Status} {Body}", path, wooProductId, (int)resp.StatusCode, err);
-                }
+                ["product_id"] = wooProductId,
+                ["labels"] = BuildEdV1ProductLabels(product)
+            };
+            var json = JsonSerializer.Serialize(payload);
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var resp = await http.PostAsync(url, content, cancelToken).ConfigureAwait(false);
+            var body = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "ED/v1 POST product-label failed for Woo product {WooId}: {Status} {Body}",
+                    wooProductId, (int)resp.StatusCode, body);
+                return;
             }
 
-            await PostBool("product-frozen", "frozen", product.LabelFrozen).ConfigureAwait(false);
-            await PostBool("product-gluten-free", "gluten_free", product.LabelGlutenFree).ConfigureAwait(false);
-            await PostBool("product-not-kosher", "not_kosher", product.LabelNotKosher).ConfigureAwait(false);
-            await PostBool("product-kosher-for-passover", "kosher_for_passover", passoverEffective).ConfigureAwait(false);
-            await PostBool("product-bestseller", "bestseller", product.LabelBestseller).ConfigureAwait(false);
-            await PostBool("product-low-availability", "low_availability", product.LabelLowAvailability).ConfigureAwait(false);
-            await PostBool("product-readytocook", "readytocook", product.LabelReadyToCook).ConfigureAwait(false);
-            await PostBool("product-natural", "natural", product.LabelNatural).ConfigureAwait(false);
-            await PostBool("product-sugarfree", "sugarfree", product.LabelSugarFree).ConfigureAwait(false);
-            await PostBool("product-lactosefree", "lactosefree", product.LabelLactoseFree).ConfigureAwait(false);
-            await PostBool("product-new", "new", newEffective).ConfigureAwait(false);
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("success", out var successEl) &&
+                    successEl.ValueKind == JsonValueKind.False)
+                {
+                    _logger.LogWarning(
+                        "ED/v1 POST product-label partial failure for Woo product {WooId}: {Body}",
+                        wooProductId, body);
+                }
+                else if (root.TryGetProperty("errors", out var errorsEl) &&
+                         errorsEl.ValueKind == JsonValueKind.Object &&
+                         errorsEl.EnumerateObject().Any())
+                {
+                    _logger.LogWarning(
+                        "ED/v1 POST product-label returned label errors for Woo product {WooId}: {Body}",
+                        wooProductId, body);
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogDebug(ex, "ED/v1 POST product-label response parse skipped for Woo product {WooId}", wooProductId);
+            }
         }
 
         /// <summary>
@@ -2585,10 +2620,20 @@ namespace George.Services
                 foreach (var p in productsRes.Items ?? Enumerable.Empty<Product>())
                     productSkuAndWoo[p.Id] = (p.Sku, p.WooCommerceId);
             }
+            var activeLines = (order.OrderItem ?? new List<OrderItem>())
+                .Where(i => !i.IsDeleted)
+                .OrderBy(i => i.SortOrder)
+                .ToList();
+            var afterPicking = OrderItemLineDisplay.OrderHasOcStoreosPickingAdjustments(activeLines);
             var items = new List<Dictionary<string, object?>>();
-            foreach (var line in order.OrderItem?.OrderBy(i => i.SortOrder) ?? Enumerable.Empty<OrderItem>())
+            foreach (var line in activeLines)
             {
-                var qtyBase = line.PickedQuantity is > 0 ? line.PickedQuantity.Value : line.Quantity;
+                if (afterPicking && !OrderItemLineDisplay.IsOcStoreosBillableLine(line))
+                    continue;
+
+                var qtyBase = afterPicking
+                    ? line.PickedQuantity!.Value
+                    : line.PickedQuantity is > 0 ? line.PickedQuantity.Value : line.Quantity;
                 var qty = qtyBase > 0 ? qtyBase : 1;
                 var row = new Dictionary<string, object?>();
                 if (line.ProductId.HasValue && productSkuAndWoo.TryGetValue(line.ProductId.Value, out var skuWoo))
@@ -2614,12 +2659,26 @@ namespace George.Services
                 row["note"] = line.Notes;
                 row["productNote"] = line.Notes;
                 row["unitPrice"] = line.PricePerUnit;
-                row["lineTotal"] = line.TotalPrice;
+                row["lineTotal"] = afterPicking
+                    ? OrderItemLineDisplay.GetOcStoreosBillableLineTotal(line)
+                    : line.TotalPrice;
                 row["saleUnits"] = line.SaleUnits;
                 row["saleTotalWeight"] = line.SaleTotalWeight;
                 if (line.WooCommerceProductId.HasValue)
                     row["productId"] = line.WooCommerceProductId.Value;
                 items.Add(row);
+            }
+            decimal? syncOrderTotal;
+            if (afterPicking)
+            {
+                var itemsSum = activeLines
+                    .Where(OrderItemLineDisplay.IsOcStoreosBillableLine)
+                    .Sum(line => OrderItemLineDisplay.GetOcStoreosBillableLineTotal(line) ?? 0m);
+                syncOrderTotal = itemsSum + (order.ShippingCost ?? 0m);
+            }
+            else
+            {
+                syncOrderTotal = order.Total;
             }
             var deliveryDate = order.DeliveryDate ?? order.PickupDate;
             var deliveryTime = order.DeliveryTime ?? order.PickupTime;
@@ -2662,7 +2721,7 @@ namespace George.Services
                 },
                 ["items"] = items,
                 ["shippingTotal"] = order.ShippingCost ?? 0,
-                ["orderTotal"] = order.Total,
+                ["orderTotal"] = syncOrderTotal,
                 ["customerNotes"] = order.CustomerNote ?? "",
                 ["billing_notes"] = order.BillingNotes,
                 ["internalOrderNotes"] = order.InternalOrderNotes,
@@ -2885,11 +2944,11 @@ namespace George.Services
             var variantSyncWork = new List<(ProductVariant variant, int? wooVariationIdToUse, Dictionary<string, object> wooPayload)>();
             var wpJsonBaseForMedia = GetWordPressRestBaseUrlFromWooV3BaseUrl(baseUrl);
 
-            // Per-variation stock in Woo whenever George uses stock_management_type "variation" (qty or binary in/out).
-            // When VariationStockByQuantity is false, each variant still uses StockQuantity as 0/1 for in/out — we must not send parent stock_status for every line or Woo never reflects per-variation toggles.
+            // Per-variation stock in Woo only when George tracks numeric quantity per variation.
+            // Binary in/out per variation uses stock_status only (no manage_stock / stock_quantity in Woo).
             var stockManagedPerVariation = string.Equals(product.StockManagementType?.Name, "variation", StringComparison.OrdinalIgnoreCase);
             var variationTrackQuantity = stockManagedPerVariation && product.VariationStockByQuantity == true;
-            var manageVariationStockInWoo = stockManagedPerVariation;
+            var manageVariationStockInWoo = variationTrackQuantity;
             var productStockStatus = "instock";
             if (product.StockStatus?.Name == "out_of_stock" || product.Status?.Name == "outOfStock")
                 productStockStatus = "outofstock";
@@ -2900,7 +2959,7 @@ namespace George.Services
             {
                 try
                 {
-                    var variantStockStatus = manageVariationStockInWoo
+                    var variantStockStatus = stockManagedPerVariation
                         ? ((variant.StockQuantity ?? 0) > 0 ? "instock" : "outofstock")
                         : productStockStatus;
 
@@ -3299,9 +3358,15 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Fetches existing product images from WooCommerce (id, src, name) so we can send id instead of src on update and avoid duplicating images in the media library.
+        /// Fetches existing product images and non-variation attributes from WooCommerce for sync updates.
+        /// Images: send id instead of src on update to avoid duplicating in the media library.
+        /// Non-variation attributes: re-included on PUT because George does not model them locally (TEMPORARY).
         /// </summary>
-        private static async Task<List<(int id, string? src, string? name)>?> GetWooCommerceProductImagesAsync(string baseUrl, int wooProductId, HttpClient httpClient, CancellationToken cancelToken)
+        private static async Task<WooExistingProductForSync?> GetWooCommerceExistingProductForSyncAsync(
+            string baseUrl,
+            int wooProductId,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
         {
             try
             {
@@ -3310,8 +3375,15 @@ namespace George.Services
                 if (!response.IsSuccessStatusCode) return null;
                 var body = await response.Content.ReadAsStringAsync(cancelToken);
                 var product = TryDeserialize<WooCommerceProductGetResponse>(body);
-                if (product?.images == null) return null;
-                return product.images.Select(img => (img.id, img.src, img.name)).ToList();
+                if (product == null) return null;
+                return new WooExistingProductForSync
+                {
+                    Images = product.images?.Select(img => (img.id, img.src, img.name)).ToList() ?? new(),
+                    NonVariationAttributes = product.attributes?
+                        .Where(a => !a.variation && !string.IsNullOrWhiteSpace(a.name))
+                        .OrderBy(a => a.position)
+                        .ToList() ?? new()
+                };
             }
             catch
             {
@@ -3319,6 +3391,32 @@ namespace George.Services
             }
         }
 
+        /// <summary>
+        /// Rebuild Woo REST attribute objects for variation=false rows we do not store in George.
+        /// See docs/WooCommerce-import-non-variation-attributes.md (sync preserve section).
+        /// </summary>
+        private static List<object> BuildWooSyncPreservedNonVariationAttributes(
+            IReadOnlyList<WooCommerceProductAttributeReadItem>? existing)
+        {
+            if (existing == null || existing.Count == 0)
+                return new List<object>();
+
+            return existing
+                .Select(a =>
+                {
+                    var dict = new Dictionary<string, object>
+                    {
+                        ["id"] = a.id,
+                        ["position"] = a.position,
+                        ["visible"] = a.visible,
+                        ["variation"] = false,
+                        ["options"] = a.options ?? new List<string>()
+                    };
+                    dict["name"] = a.name!.Trim();
+                    return (object)dict;
+                })
+                .ToList();
+        }
         private static bool IsPublicImageUrl(string? url)
         {
             if (string.IsNullOrWhiteSpace(url)) return false;
@@ -3760,6 +3858,25 @@ namespace George.Services
         private class WooCommerceProductGetResponse
         {
             public List<WooCommerceImageItem>? images { get; set; }
+            public List<WooCommerceProductAttributeReadItem>? attributes { get; set; }
+        }
+
+        /// <summary>Product attribute row from GET /products/{id} (read during sync).</summary>
+        private class WooCommerceProductAttributeReadItem
+        {
+            public int id { get; set; }
+            public string? name { get; set; }
+            public string? slug { get; set; }
+            public int position { get; set; }
+            public bool visible { get; set; }
+            public bool variation { get; set; }
+            public List<string>? options { get; set; }
+        }
+
+        private sealed class WooExistingProductForSync
+        {
+            public List<(int id, string? src, string? name)> Images { get; init; } = new();
+            public List<WooCommerceProductAttributeReadItem> NonVariationAttributes { get; init; } = new();
         }
 
         private class WooCommerceImageItem
@@ -3839,24 +3956,8 @@ namespace George.Services
         /// OCWSU weighable plugin expects meta <c>_ocwsu_product_weight_units</c> to match radio values: <c>kg</c> or <c>grams</c>.
         /// Our <see cref="Unit.Name"/> may be <c>g</c>, <c>gram</c>, Hebrew <c>גרם</c>, etc.
         /// </summary>
-        private static string MapOcwsuProductWeightUnits(string? unitName)
-        {
-            if (string.IsNullOrWhiteSpace(unitName))
-                return "";
-
-            var u = unitName.Trim();
-            var lower = u.ToLowerInvariant();
-            if (lower is "kg" or "kilogram" or "kilograms")
-                return "kg";
-            if (string.Equals(u, "ק\"ג", StringComparison.Ordinal))
-                return "kg";
-            if (string.Equals(u, "גרם", StringComparison.Ordinal))
-                return "grams";
-            if (lower is "g" or "gram" or "grams")
-                return "grams";
-
-            return u;
-        }
+        private static string MapOcwsuProductWeightUnits(string? unitName) =>
+            WooCommerceImportUnitMapping.MapGeorgeUnitNameToOcwsuWeightUnits(unitName);
 
         /// <summary>
         /// Resolve product weight for WooCommerce "weight" field (kg string).
@@ -4115,6 +4216,7 @@ namespace George.Services
             List<WooImportProductItem> wooProducts,
             Dictionary<int, int> categoryMap,
             Dictionary<int, int> brandMap,
+            WooImportAttributeCatalog attributeCatalog,
             WooImportCatalogLookups importLookups,
             WooCommerceImportFromWooRes stats,
             IProgress<WooCommerceImportProgress>? importProgress,
@@ -4282,10 +4384,14 @@ namespace George.Services
                         // Original loop and rationale: docs/WooCommerce-import-non-variation-attributes.md
                         foreach (var attr in wp.attributes.Where(a => !string.IsNullOrWhiteSpace(a.name) && a.variation))
                         {
-                            if (!optionNameToValues.TryGetValue(attr.name!.Trim(), out var values))
+                            var displayName = ResolveWooImportAttributeDisplayName(attr, attributeCatalog);
+                            if (string.IsNullOrWhiteSpace(displayName))
+                                continue;
+
+                            if (!optionNameToValues.TryGetValue(displayName, out var values))
                             {
                                 values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                                optionNameToValues[attr.name.Trim()] = values;
+                                optionNameToValues[displayName] = values;
                             }
                             foreach (var value in attr.options ?? new List<string>())
                             {
@@ -4304,6 +4410,12 @@ namespace George.Services
                             db.ProductOptionValue.Add(new ProductOptionValue { ProductOptionId = po.Id, Value = value });
                     }
 
+                    var variationStockSources = wooVariations
+                        .Select(v => new WooCommerceImportStockMapping.VariationStockSource(v.manage_stock, v.stock_quantity, v.stock_status))
+                        .ToList();
+                    var usesVariationStock = WooCommerceImportStockMapping.UsesVariationStockManagement(variationStockSources);
+                    product.VariationStockByQuantity = WooCommerceImportStockMapping.ResolveVariationStockByQuantity(variationStockSources);
+
                     foreach (var vv in wooVariations)
                     {
                         var variant = new ProductVariant
@@ -4314,7 +4426,7 @@ namespace George.Services
                             Price = ParseNullableDecimal(vv.regular_price),
                             SalePrice = ParseNullableDecimal(vv.sale_price),
                             Weight = ParseNullableDecimal(vv.weight),
-                            StockQuantity = ResolveImportedVariantStockQuantity(vv),
+                            StockQuantity = ResolveImportedVariantStockQuantity(vv, usesVariationStock),
                             ImageUrl = vv.image?.src,
                             IsDeleted = false
                         };
@@ -4325,27 +4437,20 @@ namespace George.Services
                         {
                             if (string.IsNullOrWhiteSpace(a.name) || string.IsNullOrWhiteSpace(a.option))
                                 continue;
+                            var optionName = attributeCatalog.DisplayNameBySlug.TryGetValue(
+                                NormalizeWooAttributeSlugKey(a.name),
+                                out var resolvedName)
+                                ? resolvedName
+                                : a.name.Trim();
                             db.ProductVariantOptionValue.Add(new ProductVariantOptionValue
                             {
                                 ProductVariantId = variant.Id,
-                                OptionName = a.name.Trim(),
+                                OptionName = optionName,
                                 OptionValue = a.option.Trim()
                             });
                         }
                     }
                     stats.Variations.Updated += wooVariations.Count;
-
-                    // George UI: sum/qty column only when VariationStockByQuantity is true (matches Woo per-variation manage_stock / qty).
-                    if (wooVariations.Count > 0)
-                    {
-                        product.VariationStockByQuantity = wooVariations.Any(v =>
-                            v.manage_stock == true
-                            || (v.stock_quantity.HasValue && v.stock_quantity.Value > 0));
-                    }
-                    else
-                    {
-                        product.VariationStockByQuantity = null;
-                    }
 
                     await db.SaveChangesAsync(cancelToken);
 
@@ -4371,16 +4476,16 @@ namespace George.Services
 
                     await db.SaveChangesAsync(cancelToken);
 
-                    await ApplyWooImportProductExtensionsAsync(db, product, wp, accountId, siteId, importLookups, brandMap, cancelToken);
+                    await ApplyWooImportProductExtensionsAsync(db, product, wp, accountId, siteId, importLookups, brandMap, wooVariations, cancelToken);
 
                     // Woo variable parent can be "out of stock" in REST while each variation is instock without manage_stock.
-                    if (wooVariations.Count > 0)
+                    if (wooVariations.Count > 0 && usesVariationStock)
                     {
                         var outStockId = ResolveStockStatusId(importLookups, "outofstock");
                         var inStockId = ResolveStockStatusId(importLookups, "instock");
                         var anySalable = wooVariations.Any(v =>
                         {
-                            var q = ResolveImportedVariantStockQuantity(v);
+                            var q = ResolveImportedVariantStockQuantity(v, usesVariationStock: true);
                             return q.HasValue && q.Value > 0;
                         });
                         if (anySalable && inStockId.HasValue && outStockId.HasValue && product.StockStatusId == outStockId.Value)
@@ -4436,6 +4541,7 @@ namespace George.Services
 
         private class WooImportProductAttributeItem
         {
+            public int? id { get; set; }
             public string? name { get; set; }
             public bool variation { get; set; }
             public List<string>? options { get; set; }

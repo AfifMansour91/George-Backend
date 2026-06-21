@@ -167,7 +167,14 @@ namespace George.Data
             if (updated.PrintFutureAtTime != null) dbSite.PrintFutureAtTime = updated.PrintFutureAtTime;
             if (updated.VoucherPrinterSilent.HasValue) dbSite.VoucherPrinterSilent = updated.VoucherPrinterSilent;
             if (updated.VoucherPrinterName != null) dbSite.VoucherPrinterName = updated.VoucherPrinterName;
+            dbSite.VoucherPrinterUseAgent = updated.VoucherPrinterUseAgent;
+            if (updated.LabelPrinterName != null) dbSite.LabelPrinterName = updated.LabelPrinterName;
+            dbSite.LabelPrinterUseAgent = updated.LabelPrinterUseAgent;
+            if (updated.PrintLabelsAfterPicking.HasValue) dbSite.PrintLabelsAfterPicking = updated.PrintLabelsAfterPicking;
             if (updated.AskBagsCountAtPickingFinish.HasValue) dbSite.AskBagsCountAtPickingFinish = updated.AskBagsCountAtPickingFinish;
+            if (updated.ConfirmPickingAfterScan.HasValue) dbSite.ConfirmPickingAfterScan = updated.ConfirmPickingAfterScan;
+            if (updated.ShowPickingDeviation.HasValue) dbSite.ShowPickingDeviation = updated.ShowPickingDeviation;
+            if (updated.ScaleBarcodeEmbedMode != null) dbSite.ScaleBarcodeEmbedMode = updated.ScaleBarcodeEmbedMode;
             if (!string.IsNullOrWhiteSpace(updated.PaymentGatewayProvider))
                 dbSite.PaymentGatewayProvider = updated.PaymentGatewayProvider;
             if (updated.CardcomTerminalNumber.HasValue) dbSite.CardcomTerminalNumber = updated.CardcomTerminalNumber;

@@ -357,9 +357,11 @@ namespace George.Data
             return a.Value == b.Value;
         }
 
-        /// <summary>Merchandise counted toward order subtotal after picking: only lines with picked qty &gt; 0 (0 is "not picked", not null-only).</summary>
+        /// <summary>Merchandise counted toward order subtotal after picking: only lines confirmed in ליקוט with picked qty &gt; 0.</summary>
         private static decimal SumOrderLineMerchandise(OrderItem i)
         {
+            if (!i.PickingUserConfirmed)
+                return 0m;
             if (!i.PickedQuantity.HasValue || i.PickedQuantity.Value <= 0m)
                 return 0m;
             if (i.TotalPrice.HasValue)
@@ -393,6 +395,9 @@ namespace George.Data
         private static void RecalculateOrderHeaderTotalsFromLines(Order order)
         {
             var active = order.OrderItem?.Where(i => !i.IsDeleted).ToList() ?? new List<OrderItem>();
+            if (!active.Any(i => i.PickingUserConfirmed) &&
+                !active.Any(i => i.PickedQuantity is 0m && !i.TotalPrice.HasValue))
+                return;
             var sum = active.Sum(SumOrderLineMerchandise);
             var promo = OrderDiscountTotals.SumLinePromotionDiscount(
                 active.Select(i => (i.DiscountAmount, i.IsDeleted)));
@@ -458,7 +463,6 @@ namespace George.Data
             result.Found = true;
             result.CustomerName = last.CustomerName;
             result.CustomerPhone = last.CustomerPhone;
-            result.ManagerNote = last.ManagerNote;
             result.LastOrderDate = (last.DeliveryDate ?? last.PickupDate)?.ToString("yyyy-MM-dd");
             result.OrderCount = orders.Count;
             var totals = orders.Where(o => o.Total.HasValue).Select(o => o.Total!.Value).ToList();

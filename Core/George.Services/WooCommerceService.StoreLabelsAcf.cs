@@ -28,9 +28,10 @@ public partial class WooCommerceService
         };
 
     /// <summary>
-    /// Appends ACF true/false meta pairs (<c>key</c> + <c>_{key}</c> field reference) so WooCommerce REST updates match wp-admin.
+    /// Boolean storefront labels for <c>POST /wp-json/ed/v1/product-label</c> (<c>labels</c> object).
+    /// Keys must match existing ACF field names on the WooCommerce site.
     /// </summary>
-    private static void AppendWooAcfStoreLabelMeta(ICollection<object> metaData, Product product)
+    public static Dictionary<string, bool> BuildEdV1ProductLabels(Product product)
     {
         var now = DateTime.UtcNow;
         var passoverEffective = product.LabelKosherForPassover &&
@@ -39,22 +40,45 @@ public partial class WooCommerceService
         var newEffective = product.LabelNew &&
                            (!product.LabelNewEndDate.HasValue || product.LabelNewEndDate.Value > now);
 
+        return new Dictionary<string, bool>(StringComparer.Ordinal)
+        {
+            ["frozen"] = product.LabelFrozen,
+            ["gluten_free"] = product.LabelGlutenFree,
+            ["not_kosher"] = product.LabelNotKosher,
+            ["kosher_for_passover"] = passoverEffective,
+            ["bestseller"] = product.LabelBestseller,
+            ["low_availability"] = product.LabelLowAvailability,
+            ["readytocook"] = product.LabelReadyToCook,
+            ["natural"] = product.LabelNatural,
+            ["sugarfree"] = product.LabelSugarFree,
+            ["lactosefree"] = product.LabelLactoseFree,
+            ["new"] = newEffective,
+        };
+    }
+
+    /// <summary>
+    /// Appends ACF true/false meta pairs (<c>key</c> + <c>_{key}</c> field reference) so WooCommerce REST updates match wp-admin.
+    /// </summary>
+    private static void AppendWooAcfStoreLabelMeta(ICollection<object> metaData, Product product)
+    {
+        var labels = BuildEdV1ProductLabels(product);
+
         void AddTrueFalse(string logicalMetaKey, string fieldRef, bool on)
         {
             metaData.Add(new { key = logicalMetaKey, value = on ? "1" : "0" });
             metaData.Add(new { key = "_" + logicalMetaKey, value = fieldRef });
         }
 
-        AddTrueFalse("new", WooAcfStoreLabelFieldRefs["new"], newEffective);
-        AddTrueFalse("kosher_for_passover", WooAcfStoreLabelFieldRefs["kosher_for_passover"], passoverEffective);
-        AddTrueFalse("bestseller", WooAcfStoreLabelFieldRefs["bestseller"], product.LabelBestseller);
-        AddTrueFalse("frozen", WooAcfStoreLabelFieldRefs["frozen"], product.LabelFrozen);
-        AddTrueFalse("readytocook", WooAcfStoreLabelFieldRefs["readytocook"], product.LabelReadyToCook);
-        AddTrueFalse("natural", WooAcfStoreLabelFieldRefs["natural"], product.LabelNatural);
-        AddTrueFalse("sugarfree", WooAcfStoreLabelFieldRefs["sugarfree"], product.LabelSugarFree);
-        AddTrueFalse("gluten_free", WooAcfStoreLabelFieldRefs["gluten_free"], product.LabelGlutenFree);
-        AddTrueFalse("lactosefree", WooAcfStoreLabelFieldRefs["lactosefree"], product.LabelLactoseFree);
-        AddTrueFalse("not_kosher", WooAcfStoreLabelFieldRefs["not_kosher"], product.LabelNotKosher);
+        AddTrueFalse("new", WooAcfStoreLabelFieldRefs["new"], labels["new"]);
+        AddTrueFalse("kosher_for_passover", WooAcfStoreLabelFieldRefs["kosher_for_passover"], labels["kosher_for_passover"]);
+        AddTrueFalse("bestseller", WooAcfStoreLabelFieldRefs["bestseller"], labels["bestseller"]);
+        AddTrueFalse("frozen", WooAcfStoreLabelFieldRefs["frozen"], labels["frozen"]);
+        AddTrueFalse("readytocook", WooAcfStoreLabelFieldRefs["readytocook"], labels["readytocook"]);
+        AddTrueFalse("natural", WooAcfStoreLabelFieldRefs["natural"], labels["natural"]);
+        AddTrueFalse("sugarfree", WooAcfStoreLabelFieldRefs["sugarfree"], labels["sugarfree"]);
+        AddTrueFalse("gluten_free", WooAcfStoreLabelFieldRefs["gluten_free"], labels["gluten_free"]);
+        AddTrueFalse("lactosefree", WooAcfStoreLabelFieldRefs["lactosefree"], labels["lactosefree"]);
+        AddTrueFalse("not_kosher", WooAcfStoreLabelFieldRefs["not_kosher"], labels["not_kosher"]);
 
         // Optional end dates (if the site adds ACF date fields with these keys)
         if (product.LabelKosherForPassoverEndDate.HasValue)
