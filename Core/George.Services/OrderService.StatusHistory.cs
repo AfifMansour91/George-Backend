@@ -32,15 +32,7 @@ public partial class OrderService
             .ConfigureAwait(false);
         ApplyStatusTimestampsToRes(res, order, map.GetValueOrDefault(order.Id));
         ApplyPickupBranchDisplayName(res, order);
-        await EnrichOrderResPromotionFieldsAsync(res, order, cancelToken).ConfigureAwait(false);
-        if (order.CustomerId is int customerId && customerId > 0)
-        {
-            var notesByCustomerId = await _customerStorage
-                .GetNotesByCustomerIdsAsync(new[] { customerId }, cancelToken)
-                .ConfigureAwait(false);
-            if (notesByCustomerId.TryGetValue(customerId, out var notes))
-                res.CustomerProfileNote = notes;
-        }
+        await ApplyCustomerProfileNotesAsync(new[] { res }, new[] { order }, cancelToken).ConfigureAwait(false);
     }
 
     private async Task EnrichOrderResListAsync(

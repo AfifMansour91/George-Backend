@@ -1,4 +1,4 @@
-# WhatsApp Ordering Agent — Architecture Proposal
+﻿# WhatsApp Ordering Agent ΓÇö Architecture Proposal
 
 **Project:** ShopManager / George Backend
 **Feature:** A multi-tenant conversational-ordering platform — per-account agents, subscription billing, multiple channels (WhatsApp + Web)
@@ -7,7 +7,7 @@
 
 ---
 
-## תקציר מנהלים (Hebrew Executive Summary)
+## ╫¬╫º╫ª╫Ö╫¿ ╫₧╫á╫ö╫£╫Ö╫¥ (Hebrew Executive Summary)
 
 הלקוח מעוניין שלכל מנהל חנות יהיה **AGENT (סוכן חכם) בווטסאפ העסקי שלו**, כך שלקוחות הקצה יוכלו לבצע הזמנות ישירות בשיחת ווטסאפ — ובהמשך למכור זאת כמוצר בתשלום, רב-ערוצי ורב-לקוחי.
 
@@ -35,7 +35,7 @@
 
 > **A phone number connected to the Cloud API cannot also be used in the WhatsApp / WhatsApp Business mobile app at the same time.** Migrating a number to the API removes it from the app.
 
-Each store owner chooses: a **dedicated ordering number** (recommended default), or **full migration** (handle manual chats via ShopManager's team inbox, §6.7). The **web channel (§7) has no such constraint.**
+Each store owner chooses: a **dedicated ordering number** (recommended default), or **full migration** (handle manual chats via ShopManager's team inbox, ┬º6.7). The **web channel (┬º7) has no such constraint.**
 
 ## 3. Recommended Connection Model
 
@@ -44,17 +44,17 @@ Each store owner chooses: a **dedicated ordering number** (recommended default),
 | Option | Pros | Cons | Verdict |
 |---|---|---|---|
 | Direct Cloud API | No markup; full control | You build/maintain signup, billing, WABA mgmt | Long-term, high volume |
-| **BSP — 360dialog** | Flat per-number, no per-message markup, reseller-friendly | Less all-in-one than Twilio | **Recommended** |
-| BSP — Twilio | Already a dependency; great SDK | Per-message markup | Good for fast pilot |
+| **BSP ΓÇö 360dialog** | Flat per-number, no per-message markup, reseller-friendly | Less all-in-one than Twilio | **Recommended** |
+| BSP ΓÇö Twilio | Already a dependency; great SDK | Per-message markup | Good for fast pilot |
 | Shared platform number | Simplest | No per-store branding | Rejected |
 
-A BSP acting as a **Tech Provider/reseller** is what lets each external business (§10) onboard its own verified number. The provider sits behind `IWhatsAppGateway`, so moving to direct Cloud API later is a config change.
+A BSP acting as a **Tech Provider/reseller** is what lets each external business (┬º10) onboard its own verified number. The provider sits behind `IWhatsAppGateway`, so moving to direct Cloud API later is a config change.
 
-## 4. Agent Design — Hybrid
+## 4. Agent Design ΓÇö Hybrid
 
-- **LLM layer (NLU):** interprets free text, maps to catalog items via tool/function-calling — never invents prices or orders.
-- **Structured UI:** interactive buttons/lists (WhatsApp) or web components for the exact steps — selection, quantity, confirmation, payment.
-- **Deterministic FSM:** `Greeting → Browsing → Cart → Checkout → Payment → Confirmed`. The LLM proposes; the state machine disposes.
+- **LLM layer (NLU):** interprets free text, maps to catalog items via tool/function-calling ΓÇö never invents prices or orders.
+- **Structured UI:** interactive buttons/lists (WhatsApp) or web components for the exact steps ΓÇö selection, quantity, confirmation, payment.
+- **Deterministic FSM:** `Greeting ΓåÆ Browsing ΓåÆ Cart ΓåÆ Checkout ΓåÆ Payment ΓåÆ Confirmed`. The LLM proposes; the state machine disposes.
 
 Tools (the only way the agent can act): `search_catalog` → `ICatalogSource`; cart ops → Redis; `lookup_customer` → `GetCustomerProfileByPhoneAsync`; `create_order` / `get_order_status` → **`IOrderSink`** (George: `OrderService.CreateOrderAsync` / `GetOrdersAsync`). Writes go through interfaces (§10), not directly to George.
 
@@ -62,51 +62,51 @@ Tools (the only way the agent can act): `search_catalog` → `ICatalogSource`; c
 
 ```
 CHANNELS:  WhatsApp Gateway (Cloud API/BSP)      Web Chat Adapter (SignalR widget)
-        │  normalized InboundMessage (+ channelType, tenantId)
-        ▼
-Entitlement check (subscription active?)  →  Message Queue + Redis (session/cart)
-        │ consume
-        ▼
+        Γöé  normalized InboundMessage (+ channelType, tenantId)
+        Γû╝
+Entitlement check (subscription active?)  ΓåÆ  Message Queue + Redis (session/cart)
+        Γöé consume
+        Γû╝
 AGENT CORE (.NET):  FSM + Claude (tool-calling) + per-tenant AgentConfig   [channel-agnostic]
-        │ tools call interfaces, not concrete services
-        ▼
-IOrderSink / ICatalogSource  →  George.Services impl (ShopManager)  |  External impl (future)
-        ▼
-George: OrderService.CreateOrderAsync → SignalR + PrintJob → PrintAgent   (unchanged)
+        Γöé tools call interfaces, not concrete services
+        Γû╝
+IOrderSink / ICatalogSource  ΓåÆ  George.Services impl (ShopManager)  |  External impl (future)
+        Γû╝
+George: OrderService.CreateOrderAsync ΓåÆ SignalR + PrintJob ΓåÆ PrintAgent   (unchanged)
 ```
 
-**Principles:** reuse over rebuild; decouple ingestion from thinking; channel-agnostic core (§7); backend-agnostic writes (§10).
+**Principles:** reuse over rebuild; decouple ingestion from thinking; channel-agnostic core (┬º7); backend-agnostic writes (┬º10).
 
 ## 6. Components in Detail
 
-**6.1 Channel Adapters** — WhatsApp Gateway (webhook + `X-Hub-Signature-256` verify + `phone_number_id`→tenant) and a Web Chat Adapter (SignalR + embeddable widget). Both normalize inbound to a common shape with `channelType` and `tenantId`.
+**6.1 Channel Adapters** ΓÇö WhatsApp Gateway (webhook + `X-Hub-Signature-256` verify + `phone_number_id`ΓåÆtenant) and a Web Chat Adapter (SignalR + embeddable widget). Both normalize inbound to a common shape with `channelType` and `tenantId`.
 
-**6.2 Message Queue** — Azure Service Bus / RabbitMQ via MassTransit: retries, dead-lettering, de-dup.
+**6.2 Message Queue** ΓÇö Azure Service Bus / RabbitMQ via MassTransit: retries, dead-lettering, de-dup.
 
-**6.3 Agent Core (Conversation Worker)** — loads per-tenant `AgentConfig` + Redis session, runs the FSM, calls Claude, dispatches tools through `IOrderSink`/`ICatalogSource`.
+**6.3 Agent Core (Conversation Worker)** ΓÇö loads per-tenant `AgentConfig` + Redis session, runs the FSM, calls Claude, dispatches tools through `IOrderSink`/`ICatalogSource`.
 
-**6.4 Session & Cart Store** — Redis, key `conv:{tenantId}:{channel}:{userKey}`, TTL per channel window.
+**6.4 Session & Cart Store** ΓÇö Redis, key `conv:{tenantId}:{channel}:{userKey}`, TTL per channel window.
 
-**6.5 Order Creation** — `create_order` → `IOrderSink`; ShopManager impl calls existing `OrderService.CreateOrderAsync` with `Source="WhatsApp"` or `"Website"`.
+**6.5 Order Creation** ΓÇö `create_order` ΓåÆ `IOrderSink`; ShopManager impl calls existing `OrderService.CreateOrderAsync` with `Source="WhatsApp"` or `"Website"`.
 
-**6.6 Outbound Providers** — `IWhatsAppGateway` (SendText/Interactive/Template); web adapter pushes over SignalR.
+**6.6 Outbound Providers** ΓÇö `IWhatsAppGateway` (SendText/Interactive/Template); web adapter pushes over SignalR.
 
-**6.7 Human Handoff (team inbox)** — worker pauses the bot and raises a SignalR event; a team-inbox view in shop-manager lets staff take over (both channels).
+**6.7 Human Handoff (team inbox)** ΓÇö worker pauses the bot and raises a SignalR event; a team-inbox view in shop-manager lets staff take over (both channels).
 
-**6.8 Entitlement & Metering** — gate that checks subscription before the agent runs; counters per account (§9).
+**6.8 Entitlement & Metering** ΓÇö gate that checks subscription before the agent runs; counters per account (┬º9).
 
 ## 7. Multi-Channel: Web + WhatsApp
 
-The agent brain is **channel-agnostic**. WhatsApp is one adapter; the website is another. Worker, FSM, Redis sessions and tools are identical — only the edges differ.
+The agent brain is **channel-agnostic**. WhatsApp is one adapter; the website is another. Worker, FSM, Redis sessions and tools are identical ΓÇö only the edges differ.
 
 | Aspect | WhatsApp | Web chat |
 |---|---|---|
 | Transport | Cloud API webhook + outbound API | SignalR (already in stack) + widget |
 | Order Source | `Source="WhatsApp"` | `Source="Website"` (already recognized) |
-| Messaging rules | 24h window + approved templates | None — free-form anytime |
+| Messaging rules | 24h window + approved templates | None ΓÇö free-form anytime |
 | Structured choices | WhatsApp list/button messages | Native web UI components |
 | Identity | Phone number (E.164) | Web session / JWT (can be logged-in) |
-| Onboarding & cost | Meta verification + per-conversation fee | None — cheapest to run |
+| Onboarding & cost | Meta verification + per-conversation fee | None ΓÇö cheapest to run |
 
 The web channel is the **easiest and cheapest first pilot** (no Meta onboarding, no per-message cost, no number/app conflict). A logged-in web user lets the agent pre-fill saved details and last orders.
 
@@ -117,11 +117,11 @@ Everything tenant-specific is **data, not code.**
 - **`SiteWhatsAppChannel`** (per store): SiteId, WabaId, PhoneNumberId, DisplayPhone, `AccessTokenEncrypted`, Provider, Status, WebhookVerifyToken.
 - **`AgentConfig`** (per tenant): Persona/SystemPromptOverride, DefaultLanguage, Tone, Greeting, BusinessHours, MenuMode, PaymentMethods, DeliveryTypes, EnabledChannels, HandoffKeywords, feature flags.
 
-A new tenant goes live by accepting sensible defaults — **no deployment, no code change.**
+A new tenant goes live by accepting sensible defaults ΓÇö **no deployment, no code change.**
 
 ## 9. Productization & Billing
 
-Selling the agent as a **paid monthly add-on, one agent per Account**, is a commercial layer on top of the existing multi-tenancy — it does not touch agent logic.
+Selling the agent as a **paid monthly add-on, one agent per Account**, is a commercial layer on top of the existing multi-tenancy ΓÇö it does not touch agent logic.
 
 New data:
 
@@ -130,34 +130,34 @@ New data:
 | `AccountSubscription` | AccountId, Plan, Status (active/trial/past_due/cancelled), StartDate, RenewalDate, ExternalBillingId |
 | `ConversationUsage` | AccountId, Period, ChannelType, ConversationCount, LlmTokens, OverageUnits |
 
-- **Entitlement gate** — check subscription is active before processing a message; inactive accounts get a polite fallback.
-- **Usage metering** — meter WhatsApp conversations + LLM calls per account → cost control + tiered/overage pricing.
-- **Billing** — drive monthly charges through the existing Payment integration, or plug in Stripe Billing for subscriptions/invoicing/dunning.
-- **Admin control** — a toggle in shop-manager to enable the agent and pick a plan flips the entitlement record.
+- **Entitlement gate** ΓÇö check subscription is active before processing a message; inactive accounts get a polite fallback.
+- **Usage metering** ΓÇö meter WhatsApp conversations + LLM calls per account ΓåÆ cost control + tiered/overage pricing.
+- **Billing** ΓÇö drive monthly charges through the existing Payment integration, or plug in Stripe Billing for subscriptions/invoicing/dunning.
+- **Admin control** ΓÇö a toggle in shop-manager to enable the agent and pick a plan flips the entitlement record.
 
 ## 10. Designing for External Reuse (the `IOrderSink` boundary)
 
-This single decision determines whether future resale is easy or painful — make it **deliberately, now.** Put the write/read tools behind thin interfaces:
+This single decision determines whether future resale is easy or painful ΓÇö make it **deliberately, now.** Put the write/read tools behind thin interfaces:
 
 `IOrderSink` (CreateOrder, GetOrderStatus) + `ICatalogSource` (SearchCatalog, GetProduct) + `ICustomerSource` (LookupCustomer)
 
 ```
 Channel Adapters (WhatsApp / Web)  +  Billing & Entitlement  +  AgentConfig
-        ▼
-AGENT CORE (FSM + Claude + tools)   ── the reusable product ──
-        │ writes via interfaces only
-        ▼
+        Γû╝
+AGENT CORE (FSM + Claude + tools)   ΓöÇΓöÇ the reusable product ΓöÇΓöÇ
+        Γöé writes via interfaces only
+        Γû╝
 IOrderSink / ICatalogSource / ICustomerSource
-   ▼                                              ▼
+   Γû╝                                              Γû╝
 George impl (ShopManager = 1st customer)      External impl (REST/webhook contract) = future clients
 ```
 
-- **ShopManager accounts** — the implementation wraps existing George services. Zero extra work.
-- **External customers (future)** — write a new implementation, or publish a REST/webhook contract. The entire agent — FSM, Claude, channels, billing — is reused unchanged.
+- **ShopManager accounts** ΓÇö the implementation wraps existing George services. Zero extra work.
+- **External customers (future)** ΓÇö write a new implementation, or publish a REST/webhook contract. The entire agent ΓÇö FSM, Claude, channels, billing ΓÇö is reused unchanged.
 
 This turns "a WhatsApp feature inside ShopManager" into **a standalone, multi-tenant conversational-ordering platform that ShopManager is simply the first customer of.** Cheap now; expensive to retrofit.
 
-**Honest caveats:** each external business needs its own Meta Business verification and WABA (a BSP as Tech Provider/reseller handles this, but it's a real per-client onboarding step). Third-party resale also raises data-isolation and compliance expectations — strict per-tenant scoping, encrypted credentials, and a clear data-processing posture must be first-class.
+**Honest caveats:** each external business needs its own Meta Business verification and WABA (a BSP as Tech Provider/reseller handles this, but it's a real per-client onboarding step). Third-party resale also raises data-isolation and compliance expectations ΓÇö strict per-tenant scoping, encrypted credentials, and a clear data-processing posture must be first-class.
 
 ## 11. Technology Choices
 
@@ -174,17 +174,17 @@ This turns "a WhatsApp feature inside ShopManager" into **a standalone, multi-te
 
 ## 12. Phased Rollout
 
-1. **Phase 0 — Spike (1 wk):** define `IOrderSink`/`ICatalogSource`; echo bot on one channel; tenant routing.
-2. **Phase 1 — Web MVP (3–5 wks):** hybrid agent in a web chat widget for one account; `create_order` via `IOrderSink`. Cheapest path to a working product.
-3. **Phase 2 — WhatsApp channel (3–4 wks):** WhatsApp adapter, BSP Embedded Signup, templates, 24h-window handling.
-4. **Phase 3 — Productization (3–4 wks):** `AccountSubscription` + `ConversationUsage`, entitlement gate, metering, billing, admin toggle. Now sellable monthly.
-5. **Phase 4 — External platform:** publish the `IOrderSink` REST/webhook contract, reseller WABA onboarding, tenant-isolation hardening, analytics.
+1. **Phase 0 ΓÇö Spike (1 wk):** define `IOrderSink`/`ICatalogSource`; echo bot on one channel; tenant routing.
+2. **Phase 1 ΓÇö Web MVP (3ΓÇô5 wks):** hybrid agent in a web chat widget for one account; `create_order` via `IOrderSink`. Cheapest path to a working product.
+3. **Phase 2 ΓÇö WhatsApp channel (3ΓÇô4 wks):** WhatsApp adapter, BSP Embedded Signup, templates, 24h-window handling.
+4. **Phase 3 ΓÇö Productization (3ΓÇô4 wks):** `AccountSubscription` + `ConversationUsage`, entitlement gate, metering, billing, admin toggle. Now sellable monthly.
+5. **Phase 4 ΓÇö External platform:** publish the `IOrderSink` REST/webhook contract, reseller WABA onboarding, tenant-isolation hardening, analytics.
 
 ## 13. Risks & Mitigations
 
 | Risk | Mitigation |
 |---|---|
-| Number/app conflict (§2) | Default to a dedicated number; web channel avoids it entirely |
+| Number/app conflict (┬º2) | Default to a dedicated number; web channel avoids it entirely |
 | LLM hallucinating prices/orders | Tool-only writes + FSM + structured confirmation |
 | Cost runaway | Entitlement gate + per-account metering; buttons over free-text; cache catalog |
 | Billing edge cases | Use a proven billing engine (Stripe) for proration/dunning |
@@ -202,9 +202,9 @@ This turns "a WhatsApp feature inside ShopManager" into **a standalone, multi-te
 | Entitlement gate + metering + billing integration | New |
 | Redis + queue infrastructure | New (infra) |
 | shop-manager: web chat widget, team inbox, agent + plan admin UI | New (frontend) |
-| `OrderService.CreateOrderAsync`, SignalR, PrintAgent core | Unchanged ✅ |
+| `OrderService.CreateOrderAsync`, SignalR, PrintAgent core | Unchanged Γ£à |
 
-The core order domain stays **untouched** — the agent is an additive, reusable layer above it.
+The core order domain stays **untouched** ΓÇö the agent is an additive, reusable layer above it.
 
 ---
 

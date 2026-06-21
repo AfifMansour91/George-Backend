@@ -50,15 +50,6 @@ namespace George.Services.Request
         /// <summary>Voucher printer: display name (e.g. WIFI, iPad).</summary>
         public string? VoucherPrinterName { get; set; }
 
-        // Promotion settings (Sprint 4)
-        /// <summary>"same_price" | "full_price" (default). Default for BxPY over-quantity pricing.</summary>
-        public string? PromotionOveragePolicyDefault { get; set; }
-        public bool? PromotionsApplyToPhoneOrders { get; set; }
-        public bool? PromotionsApplyToDiscountedProducts { get; set; }
-        /// <summary>URL the storefront/kiosk listens on for promotion lifecycle events.</summary>
-        public string? PromotionWebhookUrl { get; set; }
-        public string? PromotionWebhookSecret { get; set; }
-
         /// <summary>When true (default), send voucher to local PrintAgent.</summary>
         public bool? VoucherPrinterUseAgent { get; set; }
 
@@ -70,6 +61,15 @@ namespace George.Services.Request
 
         /// <summary>When true, print bag labels automatically after picking completes.</summary>
         public bool? PrintLabelsAfterPicking { get; set; }
+
+        // Promotion settings (Sprint 4)
+        /// <summary>"same_price" | "full_price" (default). Default for BxPY over-quantity pricing.</summary>
+        public string? PromotionOveragePolicyDefault { get; set; }
+        public bool? PromotionsApplyToPhoneOrders { get; set; }
+        public bool? PromotionsApplyToDiscountedProducts { get; set; }
+        /// <summary>URL the storefront/kiosk listens on for promotion lifecycle events.</summary>
+        public string? PromotionWebhookUrl { get; set; }
+        public string? PromotionWebhookSecret { get; set; }
 
         /// <summary>When true (default), prompt for bag count when finishing picking.</summary>
         public bool? AskBagsCountAtPickingFinish { get; set; }
