@@ -97,6 +97,8 @@ namespace George.Services
                 WizardStep = req.WizardStep,
                 WizardStatusId = MapWizardStatusNameToId(req.WizardStatus),
                 WizardTypeId = MapWizardTypeNameToId(req.WizardType),
+                // MultiSite Phase 2: explicit management mode (independent of wizard).
+                ManagementMode = req.ManagementMode,
                 LogoUrl = req.LogoUrl,
                 Website = req.Website,
                 IsKosherShop = req.IsKosherShop,
@@ -217,6 +219,8 @@ namespace George.Services
                 // Update WizardStatusId if provided, otherwise preserve existing
                 WizardStatusId = wizardStatusId,
                 WizardTypeId = wizardTypeId,
+                // MultiSite Phase 2: persist explicit management mode (independent of wizard); preserve existing when not provided.
+                ManagementMode = string.IsNullOrWhiteSpace(req.ManagementMode) ? existingAccount.ManagementMode : req.ManagementMode,
                 DefaultNewLabelDays = req.DefaultNewLabelDays.HasValue
                     ? Math.Clamp(req.DefaultNewLabelDays.Value, 1, 365)
                     : existingAccount.DefaultNewLabelDays,

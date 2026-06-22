@@ -131,7 +131,10 @@ namespace George.Data
             {
                 dbAcc.WizardTypeId = updated.WizardTypeId;
             }
-            
+
+            // MultiSite Phase 2: persist management mode (explicit, independent of wizard).
+            dbAcc.ManagementMode = updated.ManagementMode;
+
             // Update LogoUrl
             dbAcc.LogoUrl = updated.LogoUrl;
             
