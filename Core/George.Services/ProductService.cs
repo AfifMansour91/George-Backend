@@ -78,7 +78,6 @@ namespace George.Services
         {
             var ids = items.Select(i => i.Id).ToList();
             var overrides = await _overrideStorage.GetOverridesForSiteAsync(ids, siteId, cancelToken);
-            if (overrides.Count == 0) return;
             var byProductId = overrides
                 .GroupBy(o => o.ProductId)
                 .ToDictionary(g => g.Key, g => g.First());
@@ -86,6 +85,14 @@ namespace George.Services
             {
                 if (!byProductId.TryGetValue(item.Id, out var ov)) continue;
                 item.IsExcludedForSite = ov.IsExcluded;
+                if (!string.IsNullOrEmpty(ov.Name)) item.Name = ov.Name;
+                if (ov.ShortDescription != null) item.ShortDescription = ov.ShortDescription;
+                if (ov.LongDescription != null) item.LongDescription = ov.LongDescription;
+                if (ov.Weight.HasValue) item.Weight = ov.Weight;
+                if (!string.IsNullOrEmpty(ov.WeightUnit)) item.WeightUnit = ov.WeightUnit;
+                if (!string.IsNullOrEmpty(ov.Sku)) item.Sku = ov.Sku;
+                if (!string.IsNullOrEmpty(ov.SeoTitle)) item.SeoTitle = ov.SeoTitle;
+                if (ov.SeoDescription != null) item.SeoDescription = ov.SeoDescription;
                 if (ov.Price.HasValue) item.Price = ov.Price;
                 if (ov.SalePrice.HasValue) item.SalePrice = ov.SalePrice;
                 if (ov.SalePriceStartDate.HasValue) item.SalePriceStartDate = ov.SalePriceStartDate;
@@ -95,6 +102,32 @@ namespace George.Services
                 if (ov.LowStockThreshold.HasValue) item.LowStockThreshold = ov.LowStockThreshold;
                 if (!string.IsNullOrEmpty(ov.StockStatus)) item.StockStatus = ov.StockStatus;
                 if (!string.IsNullOrEmpty(ov.StockManagementType)) item.StockManagementType = ov.StockManagementType;
+            }
+
+            // Per-site category assignment: when a product has site categories, they replace the canonical ones.
+            var siteCats = await _overrideStorage.GetSiteCategoriesAsync(ids, siteId, cancelToken);
+            if (siteCats.Count > 0)
+            {
+                foreach (var grp in siteCats.GroupBy(c => c.ProductId))
+                {
+                    var item = items.FirstOrDefault(i => i.Id == grp.Key);
+                    if (item == null) continue;
+                    item.CategoryIds = grp.Where(c => c.ParentCategoryId == null).Select(c => c.CategoryId).ToList();
+                    item.SubcategoryIds = grp.Where(c => c.ParentCategoryId != null).Select(c => c.CategoryId).ToList();
+                }
+            }
+
+            // Per-site images: when a product has site images, they replace the canonical ones.
+            var siteImages = await _overrideStorage.GetSiteImagesAsync(ids, siteId, cancelToken);
+            if (siteImages.Count > 0)
+            {
+                foreach (var grp in siteImages.GroupBy(im => im.ProductId))
+                {
+                    var item = items.FirstOrDefault(i => i.Id == grp.Key);
+                    if (item == null) continue;
+                    item.ImageUrls = grp.OrderBy(im => im.SortOrder).Select(im => im.Url).ToList();
+                    item.ImageNames = new List<string>();
+                }
             }
         }
 
@@ -177,7 +210,7 @@ namespace George.Services
             return response;
         }
 
-        public async Task<IApiResponse<ProductRes>> GetProductAsync(int productId, CancellationToken cancelToken)
+        public async Task<IApiResponse<ProductRes>> GetProductAsync(int productId, CancellationToken cancelToken, int? siteId = null)
         {
             var response = new ApiResponse<ProductRes>();
 
@@ -186,6 +219,14 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.ItemNotFound);
 
             response.Data = MapProductToRes(product);
+
+            // MultiSite Phase 2: when a site is given, overlay that site's per-site override so the edit
+            // form shows the branch's effective values (price, stock, availability, exclusion).
+            if (siteId is int sid && sid > 0)
+            {
+                await ApplyEffectiveSiteValuesAsync(new List<ProductRes> { response.Data }, sid, cancelToken);
+            }
+
             return response;
         }
 
@@ -304,12 +345,34 @@ namespace George.Services
                     stockQuantity: req.StockQuantity,
                     variationStockByQuantity: req.VariationStockByQuantity,
                     lowStockThreshold: req.LowStockThreshold,
-                    cancelToken);
+                    cancelToken,
+                    // Per-site scalar field overrides.
+                    name: string.IsNullOrWhiteSpace(req.Name) ? null : req.Name,
+                    shortDescription: req.ShortDescription,
+                    longDescription: req.LongDescription,
+                    weight: req.Weight,
+                    weightUnit: req.WeightUnit,
+                    sku: req.Sku,
+                    seoTitle: req.SeoTitle,
+                    seoDescription: req.SeoDescription);
+
+                // Per-site category assignment: when categories are provided, store them for this site only.
+                if (req.CategoryIds != null || req.SubcategoryIds != null)
+                {
+                    var siteCatIds = CombineCategoryIds(req.CategoryIds, req.SubcategoryIds);
+                    await _overrideStorage.SetSiteCategoriesAsync(productId, siteId, siteCatIds ?? new List<int>(), cancelToken);
+                }
+
+                // Per-site images: when images are provided, store them for this site only.
+                if (req.ImageUrls != null)
+                {
+                    await _overrideStorage.SetSiteImagesAsync(productId, siteId, req.ImageUrls, cancelToken);
+                }
 
                 // Return the canonical product with the site's effective override applied (for the edited site).
                 var reloaded = await _productStorage.GetProductAsync(productId, cancelToken);
                 response.Data = MapProductToRes(reloaded!);
-                ApplyOverrideToRes(response.Data, await _overrideStorage.GetOverrideAsync(productId, siteId, cancelToken));
+                await ApplyEffectiveSiteValuesAsync(new List<ProductRes> { response.Data }, siteId, cancelToken);
                 // TODO (Woo per-site sync, todo 5): push effective values to this site's WooCommerce store.
                 return CreateResponse(response);
             }

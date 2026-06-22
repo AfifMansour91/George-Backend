@@ -48,6 +48,11 @@ namespace George.DB
 		// MultiSite Phase 2 — per-site override layer (configured in MapNonScaffoldEntities).
 		public virtual DbSet<ProductSiteOverride> ProductSiteOverride { get; set; }
 		public virtual DbSet<ProductSiteVariantStock> ProductSiteVariantStock { get; set; }
+		public virtual DbSet<ProductSiteCategory> ProductSiteCategory { get; set; }
+		public virtual DbSet<ProductSiteImage> ProductSiteImage { get; set; }
+		public virtual DbSet<ProductSiteWooId> ProductSiteWooId { get; set; }
+
+		public virtual DbSet<CategorySiteWooId> CategorySiteWooId { get; set; }
 
 		// DB Views mapping
 
@@ -263,6 +268,62 @@ namespace George.DB
 					.HasForeignKey(d => d.SiteId)
 					.OnDelete(DeleteBehavior.NoAction)
 					.HasConstraintName("FK_ProductSiteVariantStock_Site");
+			});
+
+			modelBuilder.Entity<ProductSiteCategory>(entity =>
+			{
+				entity.ToTable("ProductSiteCategory");
+				entity.HasOne(d => d.Product).WithMany(p => p.ProductSiteCategory)
+					.HasForeignKey(d => d.ProductId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductSiteCategory_Product");
+				entity.HasOne(d => d.Site).WithMany()
+					.HasForeignKey(d => d.SiteId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductSiteCategory_Site");
+				entity.HasOne(d => d.Category).WithMany()
+					.HasForeignKey(d => d.CategoryId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductSiteCategory_Category");
+			});
+
+			modelBuilder.Entity<ProductSiteImage>(entity =>
+			{
+				entity.ToTable("ProductSiteImage");
+				entity.HasOne(d => d.Product).WithMany(p => p.ProductSiteImage)
+					.HasForeignKey(d => d.ProductId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductSiteImage_Product");
+				entity.HasOne(d => d.Site).WithMany()
+					.HasForeignKey(d => d.SiteId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductSiteImage_Site");
+			});
+
+			modelBuilder.Entity<ProductSiteWooId>(entity =>
+			{
+				entity.ToTable("ProductSiteWooId");
+				entity.HasOne(d => d.Product).WithMany(p => p.ProductSiteWooId)
+					.HasForeignKey(d => d.ProductId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductSiteWooId_Product");
+				entity.HasOne(d => d.Site).WithMany()
+					.HasForeignKey(d => d.SiteId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductSiteWooId_Site");
+			});
+
+			modelBuilder.Entity<CategorySiteWooId>(entity =>
+			{
+				entity.ToTable("CategorySiteWooId");
+				entity.HasOne(d => d.Category).WithMany()
+					.HasForeignKey(d => d.CategoryId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_CategorySiteWooId_Category");
+				entity.HasOne(d => d.Site).WithMany()
+					.HasForeignKey(d => d.SiteId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_CategorySiteWooId_Site");
 			});
 		}
 

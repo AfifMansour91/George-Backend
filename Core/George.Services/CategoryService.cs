@@ -12,17 +12,20 @@ namespace George.Services
     {
         private readonly CategoryStorage _categoryStorage;
         private readonly WooCommerceService _wooCommerceService;
+        private readonly UserStorage _userStorage;
 
         public CategoryService(
             ILogger<CategoryService> logger,
             IMapper mapper,
             CacheManager cache,
             CategoryStorage categoryStorage,
-            WooCommerceService wooCommerceService
+            WooCommerceService wooCommerceService,
+            UserStorage userStorage
         ) : base(logger, mapper, cache)
         {
             _categoryStorage = categoryStorage;
             _wooCommerceService = wooCommerceService;
+            _userStorage = userStorage;
         }
 
         public async Task<IApiResponse<ApiListResponse<CategoryRes>>> GetCategoriesAsync(
@@ -33,6 +36,19 @@ namespace George.Services
             {
                 Data = new ApiListResponse<CategoryRes>()
             };
+
+            // Safety net: a non-master (account) user may only ever see their OWN account's categories, regardless
+            // of what the client sends. Without this the list endpoint returned categories from EVERY account when
+            // the client omitted AccountId. Master/super-admin users are unrestricted (can query any/all accounts).
+            if (!AuthUser.IsMaster && AuthUser.Id > 0)
+            {
+                var user = await _userStorage.GetUserAsync(AuthUser.Id, cancelToken);
+                if (user?.AccountId != null)
+                {
+                    request.Filter ??= new CategoryFilter();
+                    request.Filter.AccountId = user.AccountId.Value;
+                }
+            }
 
             var res = await _categoryStorage.GetCategoriesAsync(request.Filter, request, cancelToken);
 

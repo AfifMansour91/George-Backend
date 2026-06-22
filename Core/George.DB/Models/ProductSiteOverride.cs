@@ -36,6 +36,30 @@ public partial class ProductSiteOverride
     /// <summary>True = product excluded from network management at this site (managed locally there).</summary>
     public bool IsExcluded { get; set; }
 
+    // --- Per-site scalar field overrides (Phase 2: full per-site editing of scalar fields) ---
+    [StringLength(300)]
+    public string? Name { get; set; }
+
+    [StringLength(2000)]
+    public string? ShortDescription { get; set; }
+
+    public string? LongDescription { get; set; }
+
+    [Column(TypeName = "decimal(18, 4)")]
+    public decimal? Weight { get; set; }
+
+    [StringLength(5)]
+    public string? WeightUnit { get; set; }
+
+    [StringLength(100)]
+    public string? Sku { get; set; }
+
+    [StringLength(300)]
+    public string? SeoTitle { get; set; }
+
+    [StringLength(2000)]
+    public string? SeoDescription { get; set; }
+
     [Column(TypeName = "decimal(18, 2)")]
     public decimal? Price { get; set; }
 

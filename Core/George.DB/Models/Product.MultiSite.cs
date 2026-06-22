@@ -19,4 +19,13 @@ public partial class Product
 
     [InverseProperty("Product")]
     public virtual ICollection<ProductSiteOverride> ProductSiteOverride { get; set; } = new List<ProductSiteOverride>();
+
+    [InverseProperty("Product")]
+    public virtual ICollection<ProductSiteCategory> ProductSiteCategory { get; set; } = new List<ProductSiteCategory>();
+
+    [InverseProperty("Product")]
+    public virtual ICollection<ProductSiteImage> ProductSiteImage { get; set; } = new List<ProductSiteImage>();
+
+    [InverseProperty("Product")]
+    public virtual ICollection<ProductSiteWooId> ProductSiteWooId { get; set; } = new List<ProductSiteWooId>();
 }

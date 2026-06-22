@@ -10,6 +10,14 @@ namespace George.Services.Request
     public class ProductSiteOverrideReq
     {
         public bool? IsExcluded { get; set; }
+        public string? Name { get; set; }
+        public string? ShortDescription { get; set; }
+        public string? LongDescription { get; set; }
+        public decimal? Weight { get; set; }
+        public string? WeightUnit { get; set; }
+        public string? Sku { get; set; }
+        public string? SeoTitle { get; set; }
+        public string? SeoDescription { get; set; }
         public decimal? Price { get; set; }
         public decimal? SalePrice { get; set; }
         public DateTime? SalePriceStartDate { get; set; }

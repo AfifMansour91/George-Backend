@@ -10,6 +10,14 @@ namespace George.Data
     {
         public int ProductId { get; set; }
         public bool IsExcluded { get; set; }
+        public string? Name { get; set; }
+        public string? ShortDescription { get; set; }
+        public string? LongDescription { get; set; }
+        public decimal? Weight { get; set; }
+        public string? WeightUnit { get; set; }
+        public string? Sku { get; set; }
+        public string? SeoTitle { get; set; }
+        public string? SeoDescription { get; set; }
         public decimal? Price { get; set; }
         public decimal? SalePrice { get; set; }
         public DateTime? SalePriceStartDate { get; set; }
@@ -30,6 +38,27 @@ namespace George.Data
         public ProductSiteOverrideStorage(GeorgeDBContext dbContext, ILogger<ProductSiteOverrideStorage> logger)
             : base(dbContext, logger)
         {
+        }
+
+        /// <summary>
+        /// True when the site's account is network-managed (so per-site overrides may exist). Mirrors the
+        /// frontend resolution: explicit ManagementMode='network', or legacy null + WizardType='all_sites'.
+        /// Used to skip override lookups entirely for non-network (e.g. single-site) accounts.
+        /// </summary>
+        public async Task<bool> IsSiteNetworkManagedAsync(int siteId, CancellationToken cancelToken)
+        {
+            var info = await _dbContext.Site
+                .Where(s => s.Id == siteId)
+                .Select(s => new
+                {
+                    s.Account.ManagementMode,
+                    WizardType = s.Account.WizardType != null ? s.Account.WizardType.Name : null
+                })
+                .FirstOrDefaultAsync(cancelToken);
+            if (info == null) return false;
+            if (info.ManagementMode == "network") return true;
+            if (string.IsNullOrEmpty(info.ManagementMode) && info.WizardType == "all_sites") return true;
+            return false;
         }
 
         public async Task<ProductSiteOverride?> GetOverrideAsync(int productId, int siteId, CancellationToken cancelToken)
@@ -58,6 +87,14 @@ namespace George.Data
                 {
                     ProductId = o.ProductId,
                     IsExcluded = o.IsExcluded,
+                    Name = o.Name,
+                    ShortDescription = o.ShortDescription,
+                    LongDescription = o.LongDescription,
+                    Weight = o.Weight,
+                    WeightUnit = o.WeightUnit,
+                    Sku = o.Sku,
+                    SeoTitle = o.SeoTitle,
+                    SeoDescription = o.SeoDescription,
                     Price = o.Price,
                     SalePrice = o.SalePrice,
                     SalePriceStartDate = o.SalePriceStartDate,
@@ -81,6 +118,118 @@ namespace George.Data
             var map = new Dictionary<int, decimal?>();
             foreach (var r in rows) map[r.ProductVariantId] = r.StockQuantity;
             return map;
+        }
+
+        /// <summary>Per-site category assignment for a product (with parent id so callers can split main/sub).</summary>
+        public sealed class SiteCategoryAssignment
+        {
+            public int ProductId { get; set; }
+            public int CategoryId { get; set; }
+            public int? ParentCategoryId { get; set; }
+        }
+
+        /// <summary>Per-site category assignments for a batch of products at one site (empty = inherit canonical).</summary>
+        public async Task<List<SiteCategoryAssignment>> GetSiteCategoriesAsync(IReadOnlyCollection<int> productIds, int siteId, CancellationToken cancelToken)
+        {
+            if (productIds == null || productIds.Count == 0) return new List<SiteCategoryAssignment>();
+            return await _dbContext.ProductSiteCategory
+                .Where(x => x.SiteId == siteId && productIds.Contains(x.ProductId))
+                .Join(_dbContext.Category, x => x.CategoryId, c => c.Id,
+                    (x, c) => new SiteCategoryAssignment { ProductId = x.ProductId, CategoryId = x.CategoryId, ParentCategoryId = c.ParentCategoryId })
+                .ToListAsync(cancelToken);
+        }
+
+        /// <summary>Replace a product's per-site category assignment for one site.</summary>
+        public async Task SetSiteCategoriesAsync(int productId, int siteId, IReadOnlyCollection<int> categoryIds, CancellationToken cancelToken)
+        {
+            var existing = await _dbContext.ProductSiteCategory
+                .Where(x => x.ProductId == productId && x.SiteId == siteId)
+                .ToListAsync(cancelToken);
+            _dbContext.ProductSiteCategory.RemoveRange(existing);
+            foreach (var cid in categoryIds.Where(c => c > 0).Distinct())
+            {
+                _dbContext.ProductSiteCategory.Add(new ProductSiteCategory { ProductId = productId, SiteId = siteId, CategoryId = cid });
+            }
+            await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
+        /// <summary>Per-site image rows for a batch of products at one site (ordered by SortOrder). Empty = inherit canonical.</summary>
+        public async Task<List<(int ProductId, string Url, int SortOrder)>> GetSiteImagesAsync(IReadOnlyCollection<int> productIds, int siteId, CancellationToken cancelToken)
+        {
+            if (productIds == null || productIds.Count == 0) return new List<(int, string, int)>();
+            var rows = await _dbContext.ProductSiteImage
+                .Where(x => x.SiteId == siteId && productIds.Contains(x.ProductId))
+                .OrderBy(x => x.SortOrder)
+                .Select(x => new { x.ProductId, x.Url, x.SortOrder })
+                .ToListAsync(cancelToken);
+            return rows.Select(r => (r.ProductId, r.Url, r.SortOrder)).ToList();
+        }
+
+        /// <summary>Replace a product's per-site images for one site (urls in display order).</summary>
+        public async Task SetSiteImagesAsync(int productId, int siteId, IReadOnlyList<string> urls, CancellationToken cancelToken)
+        {
+            var existing = await _dbContext.ProductSiteImage
+                .Where(x => x.ProductId == productId && x.SiteId == siteId)
+                .ToListAsync(cancelToken);
+            _dbContext.ProductSiteImage.RemoveRange(existing);
+            for (var i = 0; i < urls.Count; i++)
+            {
+                var url = urls[i]?.Trim();
+                if (string.IsNullOrEmpty(url)) continue;
+                _dbContext.ProductSiteImage.Add(new ProductSiteImage { ProductId = productId, SiteId = siteId, Url = url, SortOrder = i });
+            }
+            await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
+        /// <summary>The WooCommerce product id for this product in this site's store (null if not yet synced there).</summary>
+        public async Task<int?> GetSiteWooProductIdAsync(int productId, int siteId, CancellationToken cancelToken)
+        {
+            return await _dbContext.ProductSiteWooId
+                .Where(x => x.ProductId == productId && x.SiteId == siteId)
+                .Select(x => (int?)x.WooCommerceProductId)
+                .FirstOrDefaultAsync(cancelToken);
+        }
+
+        /// <summary>Upsert the per-site WooCommerce product id for a (product, site).</summary>
+        public async Task SetSiteWooProductIdAsync(int productId, int siteId, int wooProductId, CancellationToken cancelToken)
+        {
+            var row = await _dbContext.ProductSiteWooId
+                .FirstOrDefaultAsync(x => x.ProductId == productId && x.SiteId == siteId, cancelToken);
+            if (row == null)
+            {
+                row = new ProductSiteWooId { ProductId = productId, SiteId = siteId, WooCommerceProductId = wooProductId };
+                _dbContext.ProductSiteWooId.Add(row);
+            }
+            else
+            {
+                row.WooCommerceProductId = wooProductId;
+            }
+            await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
+        /// <summary>localCategoryId -> this site's WooCommerce category id, for categories already synced to this store.</summary>
+        public async Task<Dictionary<int, int>> GetSiteCategoryWooIdMapAsync(int siteId, CancellationToken cancelToken)
+        {
+            return await _dbContext.CategorySiteWooId
+                .Where(x => x.SiteId == siteId)
+                .ToDictionaryAsync(x => x.CategoryId, x => x.WooCommerceCategoryId, cancelToken);
+        }
+
+        /// <summary>Upsert the per-site WooCommerce category id for a (category, site).</summary>
+        public async Task SetSiteCategoryWooIdAsync(int categoryId, int siteId, int wooCategoryId, CancellationToken cancelToken)
+        {
+            var row = await _dbContext.CategorySiteWooId
+                .FirstOrDefaultAsync(x => x.CategoryId == categoryId && x.SiteId == siteId, cancelToken);
+            if (row == null)
+            {
+                row = new CategorySiteWooId { CategoryId = categoryId, SiteId = siteId, WooCommerceCategoryId = wooCategoryId };
+                _dbContext.CategorySiteWooId.Add(row);
+            }
+            else
+            {
+                row.WooCommerceCategoryId = wooCategoryId;
+            }
+            await _dbContext.SaveChangesAsync(cancelToken);
         }
 
         /// <summary>Loads the override row, creating an empty one if absent (not yet saved).</summary>
@@ -133,18 +282,43 @@ namespace George.Data
             decimal? stockQuantity,
             bool? variationStockByQuantity,
             decimal? lowStockThreshold,
-            CancellationToken cancelToken)
+            CancellationToken cancelToken,
+            // Per-site scalar field overrides (null = don't change).
+            string? name = null,
+            string? shortDescription = null,
+            string? longDescription = null,
+            decimal? weight = null,
+            string? weightUnit = null,
+            string? sku = null,
+            string? seoTitle = null,
+            string? seoDescription = null)
         {
             var row = await GetOrCreateAsync(productId, siteId, accountId, cancelToken);
 
             if (isExcluded.HasValue) row.IsExcluded = isExcluded.Value;
+            if (name != null) row.Name = name;
+            if (shortDescription != null) row.ShortDescription = shortDescription;
+            if (longDescription != null) row.LongDescription = longDescription;
+            if (weight.HasValue) row.Weight = weight;
+            if (weightUnit != null) row.WeightUnit = weightUnit;
+            if (sku != null) row.Sku = sku;
+            if (seoTitle != null) row.SeoTitle = seoTitle;
+            if (seoDescription != null) row.SeoDescription = seoDescription;
             if (price.HasValue) row.Price = price;
             if (salePrice.HasValue) row.SalePrice = salePrice;
             if (salePriceStartDate.HasValue) row.SalePriceStartDate = salePriceStartDate;
             if (salePriceEndDate.HasValue) row.SalePriceEndDate = salePriceEndDate;
             if (availability.HasValue) row.Availability = availability;
-            if (stockManagementType.HasValue()) row.StockManagementTypeId = await ResolveStockManagementTypeIdAsync(stockManagementType, cancelToken);
-            if (stockStatus.HasValue()) row.StockStatusId = await ResolveStockStatusIdAsync(stockStatus, cancelToken);
+            if (stockManagementType.HasValue())
+            {
+                var smtId = await ResolveStockManagementTypeIdAsync(stockManagementType, cancelToken);
+                if (smtId.HasValue) row.StockManagementTypeId = smtId; // don't null out on an unresolvable name
+            }
+            if (stockStatus.HasValue())
+            {
+                var ssId = await ResolveStockStatusIdAsync(stockStatus, cancelToken);
+                if (ssId.HasValue) row.StockStatusId = ssId;
+            }
             if (stockQuantity.HasValue) row.StockQuantity = stockQuantity;
             if (variationStockByQuantity.HasValue) row.VariationStockByQuantity = variationStockByQuantity;
             if (lowStockThreshold.HasValue) row.LowStockThreshold = lowStockThreshold.Value <= 0 ? (decimal?)null : lowStockThreshold.Value;
@@ -203,6 +377,14 @@ namespace George.Data
                     if (row.StockQuantity == null) row.StockQuantity = product.StockQuantity;
                     if (row.VariationStockByQuantity == null) row.VariationStockByQuantity = product.VariationStockByQuantity;
                     if (row.LowStockThreshold == null) row.LowStockThreshold = product.LowStockThreshold;
+                    if (row.Name == null) row.Name = product.Name;
+                    if (row.ShortDescription == null) row.ShortDescription = product.ShortDescription;
+                    if (row.LongDescription == null) row.LongDescription = product.LongDescription;
+                    if (row.Weight == null) row.Weight = product.Weight;
+                    if (row.WeightUnit == null) row.WeightUnit = product.WeightUnit;
+                    if (row.Sku == null) row.Sku = product.Sku;
+                    if (row.SeoTitle == null) row.SeoTitle = product.SeoTitle;
+                    if (row.SeoDescription == null) row.SeoDescription = product.SeoDescription;
                 }
             }
             row.UpdatedDate = DateTime.UtcNow;

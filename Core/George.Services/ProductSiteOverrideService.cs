@@ -45,7 +45,10 @@ namespace George.Services
                 productId, siteId, product.AccountId,
                 req.IsExcluded, req.Price, req.SalePrice, req.SalePriceStartDate, req.SalePriceEndDate,
                 req.Availability, req.StockManagementType, req.StockStatus, req.StockQuantity,
-                req.VariationStockByQuantity, req.LowStockThreshold, cancelToken);
+                req.VariationStockByQuantity, req.LowStockThreshold, cancelToken,
+                name: req.Name, shortDescription: req.ShortDescription, longDescription: req.LongDescription,
+                weight: req.Weight, weightUnit: req.WeightUnit, sku: req.Sku,
+                seoTitle: req.SeoTitle, seoDescription: req.SeoDescription);
 
             response.Data = new ProductSiteOverrideRes
             {

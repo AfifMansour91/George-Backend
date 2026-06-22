@@ -55,6 +55,26 @@ namespace George.Services
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ProductSiteOverrideStorage _overrideStorage;
+        // Per-instance cache of "is this site network-managed?" so single-site/non-network syncs skip all
+        // per-site override lookups entirely (zero overhead + absolute separation from the override feature).
+        // ConcurrentDictionary: a batch may sync multiple products in parallel on one service instance.
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<int, bool> _siteNetworkManagedCache = new();
+
+        private async Task<bool> IsSiteNetworkManagedCachedAsync(int siteId, CancellationToken cancelToken)
+        {
+            if (_siteNetworkManagedCache.TryGetValue(siteId, out var cached)) return cached;
+            bool result;
+            try
+            {
+                result = await _overrideStorage.IsSiteNetworkManagedAsync(siteId, cancelToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                result = false; // on any failure, treat as non-network (skip overrides) — never breaks normal sync
+            }
+            _siteNetworkManagedCache[siteId] = result;
+            return result;
+        }
 
         public WooCommerceService(
             ILogger<WooCommerceService> logger,
@@ -740,7 +760,7 @@ namespace George.Services
                 cancelToken.ThrowIfCancellationRequested();
                 try
                 {
-                    var wooCatId = await SyncCategoryAsync(baseUrl, category, null, httpClient, cancelToken);
+                    var wooCatId = await SyncCategoryAsync(baseUrl, category, null, category.WooCommerceId, httpClient, cancelToken);
                     if (wooCatId.HasValue)
                     {
                         categoryMap[category.Id] = wooCatId.Value;
@@ -764,7 +784,7 @@ namespace George.Services
                 try
                 {
                     var parentWooId = categoryMap[category.ParentCategoryId!.Value];
-                    var wooCatId = await SyncCategoryAsync(baseUrl, category, parentWooId, httpClient, cancelToken);
+                    var wooCatId = await SyncCategoryAsync(baseUrl, category, parentWooId, category.WooCommerceId, httpClient, cancelToken);
                     if (wooCatId.HasValue)
                     {
                         categoryMap[category.Id] = wooCatId.Value;
@@ -796,7 +816,11 @@ namespace George.Services
             if (req.ProductIds == null || !req.ProductIds.Any())
                 return await SyncCategoriesAsync(baseUrl, req.SiteId, httpClient, cancelToken);
 
-            var categoryMap = await LoadCategoryMapFromDbAsync(req.SiteId, cancelToken);
+            // MultiSite Phase 2: a category shared across sites has a different Woo id per store. For network
+            // accounts resolve THIS site's id from the per-site map; single-site/non-network accounts keep the
+            // legacy single-field behavior unchanged.
+            bool networkManaged = await IsSiteNetworkManagedCachedAsync(req.SiteId, cancelToken);
+            var categoryMap = await LoadCategoryMapFromDbAsync(req.SiteId, networkManaged, cancelToken);
             var neededCategoryIds = await _productStorage.GetCategoryIdsForProductsOnSiteAsync(req.ProductIds, req.SiteId, cancelToken);
             var missing = neededCategoryIds.Where(id => !categoryMap.ContainsKey(id)).ToList();
 
@@ -806,7 +830,7 @@ namespace George.Services
                     "WooCommerce sync: syncing {MissingCount} uncached categories for site {SiteId} (product-scoped sync)",
                     missing.Count,
                     req.SiteId);
-                await SyncMissingCategoriesAsync(baseUrl, req.SiteId, missing, categoryMap, httpClient, cancelToken);
+                await SyncMissingCategoriesAsync(baseUrl, req.SiteId, missing, categoryMap, networkManaged, httpClient, cancelToken);
             }
             else
             {
@@ -819,16 +843,34 @@ namespace George.Services
             return categoryMap;
         }
 
-        private async Task<Dictionary<int, int>> LoadCategoryMapFromDbAsync(int siteId, CancellationToken cancelToken)
+        private async Task<Dictionary<int, int>> LoadCategoryMapFromDbAsync(int siteId, bool networkManaged, CancellationToken cancelToken)
         {
             var categoriesResult = await _categoryStorage.GetCategoriesAsync(
                 new CategoryFilter { SiteId = siteId },
                 new PagingExDto { Skip = 0, Take = 10000, IncludeTotal = false },
                 cancelToken);
 
-            return categoriesResult.Items
-                .Where(c => !c.IsDeleted && c.IsActive && c.WooCommerceId.HasValue && c.WooCommerceId.Value > 0)
-                .ToDictionary(c => c.Id, c => c.WooCommerceId!.Value);
+            var active = categoriesResult.Items.Where(c => !c.IsDeleted && c.IsActive).ToList();
+
+            if (!networkManaged)
+            {
+                // Single-site / non-network: the single Category.WooCommerceId is unambiguous. Unchanged behavior.
+                return active
+                    .Where(c => c.WooCommerceId.HasValue && c.WooCommerceId.Value > 0)
+                    .ToDictionary(c => c.Id, c => c.WooCommerceId!.Value);
+            }
+
+            // Network: trust ONLY this site's resolved per-site id. Categories without a per-site row are left
+            // out of the map so they are treated as "missing" and re-resolved (find-or-create by name in THIS
+            // store) rather than reusing the shared single field that may point at a different store.
+            var perSite = await _overrideStorage.GetSiteCategoryWooIdMapAsync(siteId, cancelToken).ConfigureAwait(false);
+            var map = new Dictionary<int, int>();
+            foreach (var c in active)
+            {
+                if (perSite.TryGetValue(c.Id, out var wooId) && wooId > 0)
+                    map[c.Id] = wooId;
+            }
+            return map;
         }
 
         private async Task SyncMissingCategoriesAsync(
@@ -836,6 +878,7 @@ namespace George.Services
             int siteId,
             IReadOnlyList<int> missingCategoryIds,
             Dictionary<int, int> categoryMap,
+            bool networkManaged,
             HttpClient httpClient,
             CancellationToken cancelToken)
         {
@@ -849,6 +892,12 @@ namespace George.Services
             var byId = categoriesResult.Items
                 .Where(c => !c.IsDeleted && c.IsActive)
                 .ToDictionary(c => c.Id);
+
+            // For network accounts the per-site woo id is authoritative; the shared Category.WooCommerceId must
+            // NOT be used to decide update-vs-create (it may belong to a different store). Preload this site's map.
+            var perSiteWooIds = networkManaged
+                ? await _overrideStorage.GetSiteCategoryWooIdMapAsync(siteId, cancelToken).ConfigureAwait(false)
+                : new Dictionary<int, int>();
 
             async Task SyncOneAsync(int categoryId)
             {
@@ -867,11 +916,27 @@ namespace George.Services
 
                 try
                 {
-                    var wooCatId = await SyncCategoryAsync(baseUrl, category, parentWooId, httpClient, cancelToken);
+                    // Network: pass THIS site's known woo id (null on first sync → find-or-create by name in the
+                    // correct store), ignoring the shared single field. Non-network: keep legacy behavior.
+                    int? knownWooId = networkManaged
+                        ? (perSiteWooIds.TryGetValue(category.Id, out var ws) && ws > 0 ? ws : (int?)null)
+                        : category.WooCommerceId;
+                    var wooCatId = await SyncCategoryAsync(baseUrl, category, parentWooId, knownWooId, httpClient, cancelToken);
                     if (wooCatId.HasValue)
                     {
                         categoryMap[category.Id] = wooCatId.Value;
-                        await _categoryStorage.UpdateCategoryWooCommerceIdAsync(category.Id, wooCatId.Value, cancelToken);
+                        if (networkManaged)
+                        {
+                            // Persist per-site; keep the legacy field only as a fallback when it is still empty.
+                            await _overrideStorage.SetSiteCategoryWooIdAsync(category.Id, siteId, wooCatId.Value, cancelToken);
+                            perSiteWooIds[category.Id] = wooCatId.Value;
+                            if (!category.WooCommerceId.HasValue)
+                                await _categoryStorage.UpdateCategoryWooCommerceIdAsync(category.Id, wooCatId.Value, cancelToken);
+                        }
+                        else
+                        {
+                            await _categoryStorage.UpdateCategoryWooCommerceIdAsync(category.Id, wooCatId.Value, cancelToken);
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -944,7 +1009,7 @@ namespace George.Services
                 }
 
                 // Sync the category
-                var wooCatId = await SyncCategoryAsync(baseUrl, category, parentWooId, httpClient, cancelToken);
+                var wooCatId = await SyncCategoryAsync(baseUrl, category, parentWooId, category.WooCommerceId, httpClient, cancelToken);
 
                 if (wooCatId.HasValue)
                 {
@@ -1420,6 +1485,7 @@ namespace George.Services
     string baseUrl,
     Category category,
     int? parentWooId,
+    int? knownWooId,
     HttpClient httpClient,
     CancellationToken cancelToken)
         {
@@ -1431,10 +1497,12 @@ namespace George.Services
                 // ?????????: slug = Slugify(category.Name)
             };
 
-            // 1) ?? ?? ??? WooCommerceId - ???? update
-            if (category.WooCommerceId.HasValue)
+            // 1) When we already know THIS store's category id, update it; otherwise create (find-or-create by
+            // name via term_exists below). knownWooId is the per-site id for network accounts, or the legacy
+            // single field for single-site accounts — never another store's id.
+            if (knownWooId.HasValue)
             {
-                var updatedId = await TryUpdateCategoryAsync(baseUrl, category.WooCommerceId.Value, wooCatData, httpClient, cancelToken);
+                var updatedId = await TryUpdateCategoryAsync(baseUrl, knownWooId.Value, wooCatData, httpClient, cancelToken);
                 if (updatedId.HasValue) return updatedId.Value;
             }
 
@@ -1728,18 +1796,23 @@ namespace George.Services
             {
                 await EnsureAssignedBrandsSyncedToWooForSiteAsync(siteId, product, cancelToken).ConfigureAwait(false);
 
-                // MultiSite Phase 2: load this site's per-site override (price/stock/availability) so the
-                // payload pushes the effective values for this branch. Null when the site has no override
-                // (then the canonical values are used, unchanged behavior).
+                // MultiSite Phase 2: only network-managed accounts can have per-site overrides. For single-site /
+                // non-network accounts, skip ALL override lookups so behavior + cost are identical to before.
+                var siteIsNetworkManaged = await IsSiteNetworkManagedCachedAsync(siteId, cancelToken).ConfigureAwait(false);
+
+                // Load this site's per-site override (price/stock/availability). Null when no override (canonical used).
                 SiteOverrideValues? siteOverride = null;
-                try
+                if (siteIsNetworkManaged)
                 {
-                    var ovList = await _overrideStorage.GetOverridesForSiteAsync(new[] { product.Id }, siteId, cancelToken).ConfigureAwait(false);
-                    siteOverride = ovList.Count > 0 ? ovList[0] : null;
-                }
-                catch (Exception ovEx)
-                {
-                    _logger.LogWarning(ovEx, "Failed to load per-site override for product {ProductId} site {SiteId}; using canonical values", product.Id, siteId);
+                    try
+                    {
+                        var ovList = await _overrideStorage.GetOverridesForSiteAsync(new[] { product.Id }, siteId, cancelToken).ConfigureAwait(false);
+                        siteOverride = ovList.Count > 0 ? ovList[0] : null;
+                    }
+                    catch (Exception ovEx)
+                    {
+                        _logger.LogWarning(ovEx, "Failed to load per-site override for product {ProductId} site {SiteId}; using canonical values", product.Id, siteId);
+                    }
                 }
 
                 // Map stock status
@@ -1785,19 +1858,44 @@ namespace George.Services
                 else if (product.ShippingClass?.Name == "fragile")
                     shippingClass = "fragile";
 
-                // Map categories
-                var allCategoryIds = product.ProductCategory?
-                    .Select(pc => pc.CategoryId)
-                    .Where(id => categoryMap.ContainsKey(id))
+                // Map categories. MultiSite Phase 2: per-site category assignment overrides the canonical for this branch.
+                List<int> perSiteCatIds = new List<int>();
+                if (siteIsNetworkManaged)
+                {
+                    try
+                    {
+                        perSiteCatIds = (await _overrideStorage.GetSiteCategoriesAsync(new[] { product.Id }, siteId, cancelToken).ConfigureAwait(false))
+                            .Select(c => c.CategoryId).ToList();
+                    }
+                    catch (Exception catEx)
+                    {
+                        _logger.LogWarning(catEx, "Woo sync: failed to load per-site categories for product {ProductId} site {SiteId}; using canonical", product.Id, siteId);
+                        perSiteCatIds = new List<int>();
+                    }
+                }
+                var canonicalCatIds = product.ProductCategory?.Select(pc => pc.CategoryId).ToList() ?? new List<int>();
+                var catIdsForWoo = perSiteCatIds.Count > 0 ? perSiteCatIds : canonicalCatIds;
+                var mappedCatIds = catIdsForWoo.Where(id => categoryMap.ContainsKey(id)).ToList();
+                // Safety: if the per-site override category ids did not map to any Woo category (e.g. not yet
+                // synced to this store), fall back to canonical rather than sending [] that clears categories live.
+                if (mappedCatIds.Count == 0 && perSiteCatIds.Count > 0)
+                    mappedCatIds = canonicalCatIds.Where(id => categoryMap.ContainsKey(id)).ToList();
+                var allCategoryIds = mappedCatIds
                     .Select(id => new { id = categoryMap[id] })
                     .Cast<object>()
-                    .ToList() ?? new List<object>();
+                    .ToList();
 
                 // Resolve WooCommerce product ID for update (so we can fetch existing images and use id to avoid duplicating).
                 // Use site-scoped SKU so the same SKU in different branches (sites) does not collide when syncing to one WooCommerce store.
-                int? existingWooId = product.WooCommerceId;
+                // MultiSite Phase 2: the same product has a DIFFERENT Woo id per store. Resolve THIS site's id
+                // from the per-site map first; then a live SKU lookup against THIS store; only then the legacy
+                // single field (correct for single-site accounts). Order matters: SKU lookup must precede the
+                // legacy field, else a multi-site product reuses another store's stale id (only one site updated).
+                int? existingWooId = await _overrideStorage.GetSiteWooProductIdAsync(product.Id, siteId, cancelToken).ConfigureAwait(false);
                 if (!existingWooId.HasValue && !string.IsNullOrWhiteSpace(product.Sku))
                     existingWooId = await FindProductIdBySkuAsync(baseUrl, siteId, product.Sku, httpClient, cancelToken);
+                if (!existingWooId.HasValue)
+                    existingWooId = product.WooCommerceId;
 
                 List<(int id, string? src, string? name)>? existingWooImages = null;
                 List<WooCommerceProductAttributeReadItem>? existingWooNonVariationAttributes = null;
@@ -1810,10 +1908,32 @@ namespace George.Services
 
                 // Map images: when updating, use existing WooCommerce image id when URL matches to avoid duplicating in media library.
                 // Use the image name from the system (Media.Name) so WooCommerce gets a friendly filename instead of the long URL.
-                var ourProductImages = product.ProductImage?
+                // MultiSite Phase 2: per-site images override the canonical for this branch (urls only, sideloaded by Woo).
+                List<(int ProductId, string Url, int SortOrder)> perSiteImages = new List<(int, string, int)>();
+                if (siteIsNetworkManaged)
+                {
+                    try
+                    {
+                        perSiteImages = await _overrideStorage.GetSiteImagesAsync(new[] { product.Id }, siteId, cancelToken).ConfigureAwait(false);
+                    }
+                    catch (Exception imgEx)
+                    {
+                        _logger.LogWarning(imgEx, "Woo sync: failed to load per-site images for product {ProductId} site {SiteId}; using canonical", product.Id, siteId);
+                        perSiteImages = new List<(int, string, int)>();
+                    }
+                }
+                var canonicalProductImages = product.ProductImage?
                     .OrderBy(pi => pi.SortOrder)
                     .Where(pi => IsPublicImageUrl(pi.Url))
                     .ToList() ?? new List<ProductImage>();
+                var perSiteImagesMapped = perSiteImages
+                    .OrderBy(im => im.SortOrder)
+                    .Where(im => IsPublicImageUrl(im.Url))
+                    .Select(im => new ProductImage { Url = im.Url, SortOrder = im.SortOrder })
+                    .ToList();
+                // Safety: only use per-site images when they yield at least one usable url; otherwise keep canonical
+                // rather than sending an empty images list that would wipe the gallery on the live store.
+                var ourProductImages = perSiteImagesMapped.Count > 0 ? perSiteImagesMapped : canonicalProductImages;
                 var wpJsonBaseForMedia = GetWordPressRestBaseUrlFromWooV3BaseUrl(baseUrl);
                 var images = new List<object>();
                 for (var i = 0; i < ourProductImages.Count; i++)
@@ -2043,6 +2163,15 @@ namespace George.Services
                     ["meta_data"] = metaData
                 };
 
+                // MultiSite Phase 2: overlay per-site scalar overrides (name/description/sku) for this branch.
+                if (siteOverride != null)
+                {
+                    if (!string.IsNullOrEmpty(siteOverride.Name)) wooProduct["name"] = siteOverride.Name;
+                    if (siteOverride.LongDescription != null) wooProduct["description"] = siteOverride.LongDescription;
+                    if (siteOverride.ShortDescription != null) wooProduct["short_description"] = siteOverride.ShortDescription;
+                    if (!string.IsNullOrEmpty(siteOverride.Sku)) wooProduct["sku"] = siteOverride.Sku;
+                }
+
                 // menu_order is pushed only on Woo product CREATE (see dedicated PUT below). Updates must not
                 // touch sort — George DisplayOrder often diverges from Woo (defaults, stale import) and
                 // pushing on edit reshuffles the live catalog.
@@ -2237,10 +2366,17 @@ namespace George.Services
                     wooCommerceId = created?.id;
                 }
 
-                // Update product with WooCommerce ID
-                if (wooCommerceId.HasValue && product.WooCommerceId != wooCommerceId.Value)
+                // Persist this store's Woo id PER SITE (so each branch keeps its own id and the next sync targets
+                // the right product). Also keep the legacy single field populated for single-site accounts and as
+                // a last-resort fallback, but never overwrite a good legacy id from a different store: only set it
+                // when empty, so multi-site syncs don't clobber another store's id back into the shared column.
+                if (wooCommerceId.HasValue)
                 {
-                    await _productStorage.UpdateProductWooCommerceIdAsync(product.Id, wooCommerceId.Value, cancelToken);
+                    await _overrideStorage.SetSiteWooProductIdAsync(product.Id, siteId, wooCommerceId.Value, cancelToken);
+                    if (!product.WooCommerceId.HasValue)
+                    {
+                        await _productStorage.UpdateProductWooCommerceIdAsync(product.Id, wooCommerceId.Value, cancelToken);
+                    }
                 }
 
                 // Apply menu_order only on create (not on update) via dedicated PUT so Woo persists sort reliably.
@@ -2991,22 +3127,29 @@ namespace George.Services
                 productStockStatus = "onbackorder";
 
             // MultiSite Phase 2: per-site variant stock (variantId → quantity) for this site, when present.
-            Dictionary<int, decimal?> perSiteVariantStock;
-            try
+            // Skipped for non-network accounts (no overrides possible) so single-site sync is unchanged.
+            Dictionary<int, decimal?> perSiteVariantStock = new Dictionary<int, decimal?>();
+            if (await IsSiteNetworkManagedCachedAsync(siteId, cancelToken).ConfigureAwait(false))
             {
-                perSiteVariantStock = await _overrideStorage.GetVariantStockForSiteAsync(product.Id, siteId, cancelToken).ConfigureAwait(false);
-            }
-            catch (Exception vsEx)
-            {
-                _logger.LogWarning(vsEx, "Failed to load per-site variant stock for product {ProductId} site {SiteId}; using canonical", product.Id, siteId);
-                perSiteVariantStock = new Dictionary<int, decimal?>();
+                try
+                {
+                    perSiteVariantStock = await _overrideStorage.GetVariantStockForSiteAsync(product.Id, siteId, cancelToken).ConfigureAwait(false);
+                }
+                catch (Exception vsEx)
+                {
+                    _logger.LogWarning(vsEx, "Failed to load per-site variant stock for product {ProductId} site {SiteId}; using canonical", product.Id, siteId);
+                    perSiteVariantStock = new Dictionary<int, decimal?>();
+                }
             }
 
             foreach (var variant in variants)
             {
                 try
                 {
-                    var variantStockStatus = stockManagedPerVariation
+                    // Only derive in/out from quantity when quantity is actually tracked per variation.
+                    // Binary in/out variations carry no quantity (StockQuantity null) and must use the
+                    // product-level status, else they were wrongly forced "outofstock".
+                    var variantStockStatus = variationTrackQuantity
                         ? ((variant.StockQuantity ?? 0) > 0 ? "instock" : "outofstock")
                         : productStockStatus;
 
@@ -3096,7 +3239,8 @@ namespace George.Services
                     if (manageVariationStockInWoo)
                     {
                         // MultiSite Phase 2: prefer this site's per-variant stock when present (else canonical).
-                        var effVariantStock = (variant.Id > 0 && perSiteVariantStock.TryGetValue(variant.Id, out var siteVarQty))
+                        // A row with a null quantity (status-only upsert) must inherit canonical, not push 0.
+                        var effVariantStock = (variant.Id > 0 && perSiteVariantStock.TryGetValue(variant.Id, out var siteVarQty) && siteVarQty.HasValue)
                             ? siteVarQty
                             : variant.StockQuantity;
                         wooVariation["stock_quantity"] = ToWooVariationStockQuantity(effVariantStock, variationTrackQuantity);

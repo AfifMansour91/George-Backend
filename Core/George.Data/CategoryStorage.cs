@@ -89,11 +89,22 @@ namespace George.Data
         {
             _dbContext.Category.Add(category);
 
-            // Add sites if provided
-            if (siteIds != null && siteIds.Any())
+            // When no site list is provided ("all sites"), link the category to ALL of the account's sites
+            // (mirrors product creation). A category linked to NO site is invisible per-branch in the UI and is
+            // skipped by the per-site WooCommerce category sync, so empty must expand rather than stay unlinked.
+            var effectiveSiteIds = (siteIds != null && siteIds.Any())
+                ? siteIds
+                : (category.AccountId.HasValue
+                    ? await _dbContext.Site
+                        .Where(s => s.AccountId == category.AccountId.Value && !s.IsDeleted)
+                        .Select(s => s.Id)
+                        .ToListAsync(cancelToken)
+                    : null);
+
+            if (effectiveSiteIds != null && effectiveSiteIds.Any())
             {
                 var sites = await _dbContext.Site
-                    .Where(s => siteIds.Contains(s.Id))
+                    .Where(s => effectiveSiteIds.Contains(s.Id))
                     .ToListAsync(cancelToken);
 
                 foreach (var site in sites)
@@ -292,16 +303,31 @@ namespace George.Data
 
             if (!parts.Any()) return null;
 
+            // "All sites" import sends no site list. Link categories to ALL of the account's sites (mirrors
+            // product creation in ProductStorage). Without this the category is linked to NO site, so it neither
+            // shows under any branch in the UI nor gets picked up by the per-site WooCommerce category sync
+            // (which filters categories by Site.Any(s => s.Id == siteId)).
+            var effectiveSiteIds = (siteIds != null && siteIds.Any())
+                ? siteIds
+                : (accountId.HasValue
+                    ? await _dbContext.Site
+                        .Where(s => s.AccountId == accountId.Value && !s.IsDeleted)
+                        .Select(s => s.Id)
+                        .ToListAsync(cancelToken)
+                    : siteIds);
+
             Category? currentCategory = null;
 
             foreach (var part in parts)
             {
                 var parentId = currentCategory?.Id;
-                var existing = await FindCategoryByNameAsync(part, parentId, accountId, siteIds, cancelToken);
+                var existing = await FindCategoryByNameAsync(part, parentId, accountId, effectiveSiteIds, cancelToken);
 
                 if (existing != null)
                 {
-                    currentCategory = existing;
+                    // Existing category may have been created on a subset of sites; ensure it covers the target sites.
+                    await EnsureCategoryHasSitesAsync(existing.Id, effectiveSiteIds, cancelToken);
+                    currentCategory = await GetCategoryAsync(existing.Id, cancelToken);
                 }
                 else
                 {
@@ -309,7 +335,7 @@ namespace George.Data
                     existing = await FindCategoryByNameAsync(part, parentId, accountId, null, cancelToken);
                     if (existing != null)
                     {
-                        await EnsureCategoryHasSitesAsync(existing.Id, siteIds, cancelToken);
+                        await EnsureCategoryHasSitesAsync(existing.Id, effectiveSiteIds, cancelToken);
                         currentCategory = await GetCategoryAsync(existing.Id, cancelToken);
                     }
                     else
@@ -329,7 +355,7 @@ namespace George.Data
                             GuidId = Guid.NewGuid()
                         };
 
-                        currentCategory = await CreateCategoryAsync(newCategory, siteIds, cancelToken);
+                        currentCategory = await CreateCategoryAsync(newCategory, effectiveSiteIds, cancelToken);
                     }
                 }
             }

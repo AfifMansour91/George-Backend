@@ -37,9 +37,9 @@ namespace George.Api.Controllers
 
         [HttpGet("{productId:int}")]
         [ProducesResponseType(typeof(IApiResponse<ProductRes>), (int)HttpStatusCode.OK)]
-        public async Task<IActionResult> GetProductAsync([FromRoute] int productId, CancellationToken cancelToken = default)
+        public async Task<IActionResult> GetProductAsync([FromRoute] int productId, [FromQuery] int? siteId, CancellationToken cancelToken = default)
         {
-            return await SafeCallWithErrorCatchingAsync(() => _productSvc.GetProductAsync(productId, cancelToken));
+            return await SafeCallWithErrorCatchingAsync(() => _productSvc.GetProductAsync(productId, cancelToken, siteId));
         }
 
         [HttpPost]
