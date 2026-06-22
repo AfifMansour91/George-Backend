@@ -82,6 +82,17 @@ namespace George.Services.Response
         public bool? ShowAsMl { get; set; }
         public string? WeightUnit { get; set; } // "kg" | "g" | "ml"
         public List<int> SiteIds { get; set; } = new(); // Empty = all sites
+
+        // --- MultiSite Phase 2 (override model) ---
+        /// <summary>'network' (canonical, shared) or 'local' (managed only on OwnerSiteId).</summary>
+        public string? ManagementMode { get; set; }
+        /// <summary>When local: the owning site id.</summary>
+        public int? OwnerSiteId { get; set; }
+        /// <summary>Effective view only (fetched with a siteId): the site's override is excluded from network management.</summary>
+        public bool? IsExcludedForSite { get; set; }
+        /// <summary>Effective view only: product is local to the scoped site.</summary>
+        public bool? IsLocalToSite { get; set; }
+
         public int? AccountId { get; set; }
         public int? DisplayOrder { get; set; }
         public string? SeoTitle { get; set; }

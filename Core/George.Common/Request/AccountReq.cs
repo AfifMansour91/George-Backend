@@ -235,6 +235,9 @@ namespace George.Common.Request
         /// <summary>Wizard type: "all_sites", "per_site", or "none" (no client-facing wizard).</summary>
         public string? WizardType { get; set; }
 
+        /// <summary>MultiSite Phase 2: ongoing management mode ("separate" | "network"). Null = keep existing.</summary>
+        public string? ManagementMode { get; set; }
+
         public string? LogoUrl { get; set; }
 
         public string? Address { get; set; }
@@ -488,6 +491,12 @@ namespace George.Common.Request
         public int WizardStep { get; set; } = 1;
         /// <summary>all_sites, per_site, or none (no client-facing wizard).</summary>
         public string WizardType { get; set; } = "all_sites";
+
+        /// <summary>
+        /// MultiSite Phase 2: ongoing management mode ("separate" | "network"), INDEPENDENT of the wizard.
+        /// A no-wizard account can still be network-managed. Null = derive from WizardType (legacy).
+        /// </summary>
+        public string? ManagementMode { get; set; }
 
         public bool SendInviteToClient { get; set; } = false;
         public bool IsKosherShop { get; set; } = false;

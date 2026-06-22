@@ -45,6 +45,10 @@ namespace George.DB
 
 		public GeorgeStoredProcedures StoredProcedures { get { return _storedProcedures; } }
 
+		// MultiSite Phase 2 — per-site override layer (configured in MapNonScaffoldEntities).
+		public virtual DbSet<ProductSiteOverride> ProductSiteOverride { get; set; }
+		public virtual DbSet<ProductSiteVariantStock> ProductSiteVariantStock { get; set; }
+
 		// DB Views mapping
 
 
@@ -233,6 +237,33 @@ namespace George.DB
 					.OnDelete(DeleteBehavior.Cascade)
 					.HasConstraintName("FK_UserPreference_User");
 			});
+
+			// MultiSite Phase 2 — per-site product override layer.
+			modelBuilder.Entity<ProductSiteOverride>(entity =>
+			{
+				entity.ToTable("ProductSiteOverride");
+				entity.HasOne(d => d.Product).WithMany(p => p.ProductSiteOverride)
+					.HasForeignKey(d => d.ProductId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductSiteOverride_Product");
+				entity.HasOne(d => d.Site).WithMany()
+					.HasForeignKey(d => d.SiteId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductSiteOverride_Site");
+			});
+
+			modelBuilder.Entity<ProductSiteVariantStock>(entity =>
+			{
+				entity.ToTable("ProductSiteVariantStock");
+				entity.HasOne(d => d.ProductVariant).WithMany(p => p.ProductSiteVariantStock)
+					.HasForeignKey(d => d.ProductVariantId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductSiteVariantStock_ProductVariant");
+				entity.HasOne(d => d.Site).WithMany()
+					.HasForeignKey(d => d.SiteId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductSiteVariantStock_Site");
+			});
 		}
 
 		private void SetQueryFilters(ModelBuilder modelBuilder)
@@ -256,6 +287,8 @@ namespace George.DB
             modelBuilder.Entity<GlobalBrand>().HasQueryFilter(a => a.IsDeleted == false);
             modelBuilder.Entity<Media>().HasQueryFilter(a => a.IsDeleted == false);
             modelBuilder.Entity<Promotion>().HasQueryFilter(a => a.IsDeleted == false);
+            modelBuilder.Entity<ProductSiteOverride>().HasQueryFilter(a => a.IsDeleted == false);
+            modelBuilder.Entity<ProductSiteVariantStock>().HasQueryFilter(a => a.IsDeleted == false);
             //modelBuilder.Entity<Account>().HasQueryFilter(ent => EF.Property<bool>(ent, PROP_IS_DELETED) == false);
 
         }

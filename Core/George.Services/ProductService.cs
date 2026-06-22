@@ -20,6 +20,7 @@ namespace George.Services
         private readonly WooCommerceService _wooCommerceService;
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly OrderStorage _orderStorage;
+        private readonly ProductSiteOverrideStorage _overrideStorage;
 
         public ProductService(
             ILogger<ProductService> logger,
@@ -31,7 +32,8 @@ namespace George.Services
             MediaStorage mediaStorage,
             WooCommerceService wooCommerceService,
             IServiceScopeFactory serviceScopeFactory,
-            OrderStorage orderStorage
+            OrderStorage orderStorage,
+            ProductSiteOverrideStorage overrideStorage
         ) : base(logger, mapper, cache)
         {
             _productStorage = productStorage;
@@ -41,6 +43,7 @@ namespace George.Services
             _wooCommerceService = wooCommerceService;
             _serviceScopeFactory = serviceScopeFactory;
             _orderStorage = orderStorage;
+            _overrideStorage = overrideStorage;
         }
 
         public async Task<IApiResponse<ApiListResponse<ProductRes>>> GetProductsAsync(
@@ -56,11 +59,43 @@ namespace George.Services
 
             response.Data!.Items = res.Items.ConvertAll(p => MapProductToRes(p));
 
+            // MultiSite Phase 2: when listing for a specific site, overlay that site's per-site overrides
+            // (price, stock, availability, exclusion) so the list shows the effective values for the branch.
+            if (request.Filter?.SiteId is int listSiteId && listSiteId > 0 && response.Data.Items.Count > 0)
+            {
+                await ApplyEffectiveSiteValuesAsync(response.Data.Items, listSiteId, cancelToken);
+            }
+
             response.Data.Skip = request.Skip;
             response.Data.Limit = request.Take;
             response.Data.Total = res.Total;
 
             return response;
+        }
+
+        /// <summary>MultiSite Phase 2: overlay per-site override values onto a list of mapped products for one site.</summary>
+        private async Task ApplyEffectiveSiteValuesAsync(List<ProductRes> items, int siteId, CancellationToken cancelToken)
+        {
+            var ids = items.Select(i => i.Id).ToList();
+            var overrides = await _overrideStorage.GetOverridesForSiteAsync(ids, siteId, cancelToken);
+            if (overrides.Count == 0) return;
+            var byProductId = overrides
+                .GroupBy(o => o.ProductId)
+                .ToDictionary(g => g.Key, g => g.First());
+            foreach (var item in items)
+            {
+                if (!byProductId.TryGetValue(item.Id, out var ov)) continue;
+                item.IsExcludedForSite = ov.IsExcluded;
+                if (ov.Price.HasValue) item.Price = ov.Price;
+                if (ov.SalePrice.HasValue) item.SalePrice = ov.SalePrice;
+                if (ov.SalePriceStartDate.HasValue) item.SalePriceStartDate = ov.SalePriceStartDate;
+                if (ov.SalePriceEndDate.HasValue) item.SalePriceEndDate = ov.SalePriceEndDate;
+                if (ov.StockQuantity.HasValue) item.StockQuantity = ov.StockQuantity;
+                if (ov.VariationStockByQuantity.HasValue) item.VariationStockByQuantity = ov.VariationStockByQuantity;
+                if (ov.LowStockThreshold.HasValue) item.LowStockThreshold = ov.LowStockThreshold;
+                if (!string.IsNullOrEmpty(ov.StockStatus)) item.StockStatus = ov.StockStatus;
+                if (!string.IsNullOrEmpty(ov.StockManagementType)) item.StockManagementType = ov.StockManagementType;
+            }
         }
 
         /// <summary>Get products the customer (by phone at site) has ordered in the past. For kiosk "past purchases". Returns same shape as GetProductsAsync.</summary>
@@ -245,6 +280,39 @@ namespace George.Services
             var existingProduct = await _productStorage.GetProductAsync(productId, cancelToken);
             if (existingProduct == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
+
+            // MultiSite Phase 2: when editing a single branch, write a per-site override instead of mutating
+            // the canonical product (so changes do not leak to other sites). 'all_sites' / null = canonical update.
+            if (string.Equals(req.EditScope, "selected_site", StringComparison.OrdinalIgnoreCase) && req.SiteId.HasValue)
+            {
+                var siteId = req.SiteId.Value;
+
+                // A product managed locally on another site cannot be edited from this site.
+                if (existingProduct.ManagementMode == "local" && existingProduct.OwnerSiteId.HasValue && existingProduct.OwnerSiteId.Value != siteId)
+                    return CreateResponse(response, StatusCode.InvalidRequest, "Product is local to another site and cannot be edited here.");
+
+                await _overrideStorage.UpsertOverrideAsync(
+                    productId, siteId, existingProduct.AccountId,
+                    isExcluded: null,
+                    price: req.Price,
+                    salePrice: req.SalePrice,
+                    salePriceStartDate: req.SalePriceStartDate,
+                    salePriceEndDate: req.SalePriceEndDate,
+                    availability: null,
+                    stockManagementType: req.StockManagementType,
+                    stockStatus: req.StockStatus,
+                    stockQuantity: req.StockQuantity,
+                    variationStockByQuantity: req.VariationStockByQuantity,
+                    lowStockThreshold: req.LowStockThreshold,
+                    cancelToken);
+
+                // Return the canonical product with the site's effective override applied (for the edited site).
+                var reloaded = await _productStorage.GetProductAsync(productId, cancelToken);
+                response.Data = MapProductToRes(reloaded!);
+                ApplyOverrideToRes(response.Data, await _overrideStorage.GetOverrideAsync(productId, siteId, cancelToken));
+                // TODO (Woo per-site sync, todo 5): push effective values to this site's WooCommerce store.
+                return CreateResponse(response);
+            }
 
             // Merge request with existing product: if a property is null in req, keep the value from DB (partial update support for table quick-edit)
             var product = MergeReqWithExistingProduct(req, existingProduct);
@@ -926,6 +994,8 @@ namespace George.Services
                 IsKosher = req.IsKosher,
                 IsWeighted = req.IsWeighted,
                 AccountId = req.AccountId,
+                ManagementMode = req.ManagementMode,
+                OwnerSiteId = req.OwnerSiteId,
                 DisplayOrder = req.DisplayOrder,
                 SeoTitle = req.SeoTitle,
                 SeoDescription = req.SeoDescription,
@@ -974,6 +1044,8 @@ namespace George.Services
                 IsKosher = req.IsKosher ?? existing.IsKosher,
                 IsWeighted = req.IsWeighted ?? existing.IsWeighted,
                 AccountId = existing.AccountId ?? req.AccountId,
+                ManagementMode = req.ManagementMode ?? existing.ManagementMode,
+                OwnerSiteId = req.OwnerSiteId ?? existing.OwnerSiteId,
                 SeoTitle = req.SeoTitle ?? existing.SeoTitle,
                 SeoDescription = req.SeoDescription ?? existing.SeoDescription,
                 Slug = req.Slug != null
@@ -1016,6 +1088,23 @@ namespace George.Services
         }
 
 
+        /// <summary>
+        /// MultiSite Phase 2: applies a per-site override onto a ProductRes to produce the effective view
+        /// for a single site. Only fields present on the override are overlaid.
+        /// </summary>
+        private static void ApplyOverrideToRes(ProductRes res, ProductSiteOverride? ov)
+        {
+            if (ov == null) return;
+            res.IsExcludedForSite = ov.IsExcluded;
+            if (ov.Price.HasValue) res.Price = ov.Price;
+            if (ov.SalePrice.HasValue) res.SalePrice = ov.SalePrice;
+            if (ov.SalePriceStartDate.HasValue) res.SalePriceStartDate = ov.SalePriceStartDate;
+            if (ov.SalePriceEndDate.HasValue) res.SalePriceEndDate = ov.SalePriceEndDate;
+            if (ov.StockQuantity.HasValue) res.StockQuantity = ov.StockQuantity;
+            if (ov.VariationStockByQuantity.HasValue) res.VariationStockByQuantity = ov.VariationStockByQuantity;
+            if (ov.LowStockThreshold.HasValue) res.LowStockThreshold = ov.LowStockThreshold;
+        }
+
         /// <summary>Maps Product entity to API response. Price and SalePrice are always from the Product entity (never from Template Product).</summary>
         private ProductRes MapProductToRes(Product product)
         {
@@ -1040,6 +1129,8 @@ namespace George.Services
                 IsKosher = product.IsKosher,
                 IsWeighted = product.IsWeighted,
                 AccountId = product.AccountId,
+                ManagementMode = product.ManagementMode,
+                OwnerSiteId = product.OwnerSiteId,
                 DisplayOrder = product.DisplayOrder,
                 ShowAsMl = product.ShowAsMl ?? (product.WeightUnit == "ml" ? true : null),
                 WeightUnit = product.WeightUnit,

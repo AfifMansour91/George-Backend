@@ -15,10 +15,12 @@ namespace George.Api.Controllers
     public class ProductController : GeorgeControllerBase, IAuthUserProvider
     {
         private readonly ProductService _productSvc;
+        private readonly ProductSiteOverrideService _overrideSvc;
 
-        public ProductController(ProductService productSvc, ILogger<ProductController> logger) : base(logger)
+        public ProductController(ProductService productSvc, ProductSiteOverrideService overrideSvc, ILogger<ProductController> logger) : base(logger)
         {
             _productSvc = productSvc;
+            _overrideSvc = overrideSvc;
         }
 
         [HttpGet]
@@ -59,6 +61,56 @@ namespace George.Api.Controllers
         public async Task<IActionResult> DeleteProductAsync([FromRoute] int productId, [FromQuery] int? siteId, CancellationToken cancelToken = default)
         {
             return await SafeCallWithErrorCatchingAsync(() => _productSvc.DeleteProductAsync(productId, siteId, cancelToken));
+        }
+
+        // ----------------------- MultiSite Phase 2: per-site override layer -----------------------
+
+        /// <summary>Upsert a per-(product, site) override. Only the provided fields are written.</summary>
+        [HttpPut("{productId:int}/site-overrides/{siteId:int}")]
+        [ProducesResponseType(typeof(IApiResponse<ProductSiteOverrideRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> UpsertSiteOverrideAsync([FromRoute] int productId, [FromRoute] int siteId, [FromBody] ProductSiteOverrideReq req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _overrideSvc.UpsertOverrideAsync(productId, siteId, req, cancelToken));
+        }
+
+        /// <summary>Reset override fields (comma-separated <c>fields</c>: price,salePrice,availability,stock) back to inheriting the canonical. No fields = reset all but exclusion.</summary>
+        [HttpDelete("{productId:int}/site-overrides/{siteId:int}")]
+        [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> ResetSiteOverrideAsync([FromRoute] int productId, [FromRoute] int siteId, [FromQuery] string? fields, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _overrideSvc.ResetOverrideAsync(productId, siteId, fields, cancelToken));
+        }
+
+        /// <summary>Exclude a product from network management at a site (it becomes locally managed there).</summary>
+        [HttpPost("{productId:int}/exclude")]
+        [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> ExcludeProductAsync([FromRoute] int productId, [FromBody] ProductSiteScopeReq req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _overrideSvc.ExcludeAsync(productId, req, cancelToken));
+        }
+
+        /// <summary>Re-include a previously excluded product in network management at a site.</summary>
+        [HttpPost("{productId:int}/include")]
+        [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> IncludeProductAsync([FromRoute] int productId, [FromBody] ProductSiteScopeReq req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _overrideSvc.IncludeAsync(productId, req, cancelToken));
+        }
+
+        /// <summary>Update per-site variant stock for a product.</summary>
+        [HttpPut("{productId:int}/variant-stock")]
+        [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> UpdateVariantStockAsync([FromRoute] int productId, [FromBody] ProductSiteVariantStockReq req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _overrideSvc.UpdateVariantStockAsync(productId, req, cancelToken));
+        }
+
+        /// <summary>Local + excluded products for the all-sites badge/popup.</summary>
+        [HttpGet("local")]
+        [ProducesResponseType(typeof(IApiResponse<LocalProductsRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetLocalProductsAsync([FromQuery] int accountId, [FromQuery] int? siteId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _overrideSvc.ListLocalAsync(accountId, siteId, cancelToken));
         }
 
         [HttpGet("Site/{siteId:int}")]

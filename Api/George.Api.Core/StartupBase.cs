@@ -388,6 +388,7 @@ namespace George.Api.Core
 			services.AddScoped<BusinessTypeStorage>();
 			services.AddScoped<SiteStorage>();
 			services.AddScoped<ProductStorage>();
+			services.AddScoped<ProductSiteOverrideStorage>();
 			services.AddScoped<CategoryStorage>();
 			services.AddScoped<BrandStorage>();
 			services.AddScoped<AttributeStorage>();
@@ -420,6 +421,7 @@ namespace George.Api.Core
 			services.AddScoped<BusinessTypeService>();
 			services.AddScoped<SiteService>();
 			services.AddScoped<ProductService>();
+			services.AddScoped<ProductSiteOverrideService>();
 			services.AddScoped<CategoryService>();
 			services.AddScoped<BrandService>();
 			services.AddScoped<AttributeService>();

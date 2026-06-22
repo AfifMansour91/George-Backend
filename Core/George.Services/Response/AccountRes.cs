@@ -24,6 +24,8 @@ namespace George.Services.Response
         public string WizardStatus { get; set; } = "In Progress";
         public IdNamePair? WizardTypeIdNamePair { get; set; }
         public string WizardType { get; set; } = "all_sites";   // you can store it or default it
+        /// <summary>MultiSite Phase 2: ongoing management mode ('separate' | 'network'). Derived from WizardType when not set.</summary>
+        public string? ManagementMode { get; set; }
         public decimal WizardStep { get; set; }
         public IdNamePair? ContentOwnerIdNamePair { get; set; }
         public string ContentOwner { get; set; } = "Company";

@@ -72,6 +72,11 @@ namespace George.Services
                         : "all_sites";
                     dest.WizardStep = src?.WizardStep ?? 0;
 
+                    // MultiSite Phase 2: resolve ongoing management mode (explicit, else derive from wizard type).
+                    dest.ManagementMode = !string.IsNullOrEmpty(src?.ManagementMode)
+                        ? src!.ManagementMode
+                        : (dest.WizardType == "all_sites" ? "network" : "separate");
+
                     dest.ContentOwner = src?.ContentOwner?.Name ?? "Company";
 
                     dest.CreatedDate = SpecifyUtc(src.CreationTime);
@@ -117,10 +122,15 @@ namespace George.Services
                     dest.LogoUrl = src.LogoUrl;
                 });
             CreateMap<UpdateAccountReq, Account>()
+                .ForMember(dest => dest.ManagementMode, opt => opt.Ignore())
                 .AfterMap((src, dest, context) =>
                 {
                     // LogoUrl is handled explicitly in AccountService.UpdateAccountAsync
                     // to preserve existing value if not provided in request
+
+                    // MultiSite Phase 2: only set management mode when provided (null = keep existing).
+                    if (!string.IsNullOrEmpty(src.ManagementMode))
+                        dest.ManagementMode = src.ManagementMode;
                 });
 
             /////////////////////////// Site

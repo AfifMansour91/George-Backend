@@ -276,11 +276,20 @@ namespace George.Data
                 product.DisplayOrder = 0;
             _dbContext.Product.Add(product);
 
-            // Add sites
-            if (siteIds != null && siteIds.Any())
+            // Add sites. When no site list is provided, assign the product to ALL of the account's sites
+            // ("all sites" mode sends an empty list). Without this the product would be created on no sites.
+            var effectiveSiteIds = (siteIds != null && siteIds.Any())
+                ? siteIds
+                : (product.AccountId.HasValue
+                    ? await _dbContext.Site
+                        .Where(s => s.AccountId == product.AccountId.Value && !s.IsDeleted)
+                        .Select(s => s.Id)
+                        .ToListAsync(cancelToken)
+                    : new List<int>());
+            if (effectiveSiteIds.Any())
             {
                 var sites = await _dbContext.Site
-                    .Where(s => siteIds.Contains(s.Id))
+                    .Where(s => effectiveSiteIds.Contains(s.Id))
                     .ToListAsync(cancelToken);
                 foreach (var site in sites)
                 {

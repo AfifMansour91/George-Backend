@@ -54,6 +54,7 @@ namespace George.Services
         private readonly IFileStorage _fileStorage;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IServiceScopeFactory _scopeFactory;
+        private readonly ProductSiteOverrideStorage _overrideStorage;
 
         public WooCommerceService(
             ILogger<WooCommerceService> logger,
@@ -68,7 +69,8 @@ namespace George.Services
             MediaStorage mediaStorage,
             IFileStorage fileStorage,
             IHttpClientFactory httpClientFactory,
-            IServiceScopeFactory scopeFactory
+            IServiceScopeFactory scopeFactory,
+            ProductSiteOverrideStorage overrideStorage
         ) : base(logger, mapper, cache)
         {
             _siteStorage = siteStorage;
@@ -81,6 +83,7 @@ namespace George.Services
             _fileStorage = fileStorage;
             _httpClientFactory = httpClientFactory;
             _scopeFactory = scopeFactory;
+            _overrideStorage = overrideStorage;
         }
 
         public async Task<IApiResponse<WooCommerceSyncRes>> SyncToWooCommerceAsync(
@@ -1725,12 +1728,33 @@ namespace George.Services
             {
                 await EnsureAssignedBrandsSyncedToWooForSiteAsync(siteId, product, cancelToken).ConfigureAwait(false);
 
+                // MultiSite Phase 2: load this site's per-site override (price/stock/availability) so the
+                // payload pushes the effective values for this branch. Null when the site has no override
+                // (then the canonical values are used, unchanged behavior).
+                SiteOverrideValues? siteOverride = null;
+                try
+                {
+                    var ovList = await _overrideStorage.GetOverridesForSiteAsync(new[] { product.Id }, siteId, cancelToken).ConfigureAwait(false);
+                    siteOverride = ovList.Count > 0 ? ovList[0] : null;
+                }
+                catch (Exception ovEx)
+                {
+                    _logger.LogWarning(ovEx, "Failed to load per-site override for product {ProductId} site {SiteId}; using canonical values", product.Id, siteId);
+                }
+
                 // Map stock status
                 var stockStatus = "instock";
                 if (product.StockStatus?.Name == "out_of_stock" || product.Status?.Name == "outOfStock")
                     stockStatus = "outofstock";
                 else if (product.StockStatus?.Name == "on_backorder")
                     stockStatus = "onbackorder";
+                // Per-site stock status override.
+                if (!string.IsNullOrEmpty(siteOverride?.StockStatus))
+                {
+                    stockStatus = siteOverride!.StockStatus == "out_of_stock" ? "outofstock"
+                        : siteOverride.StockStatus == "on_backorder" ? "onbackorder"
+                        : "instock";
+                }
 
                 // Map visibility
                 var catalogVisibility = "visible";
@@ -2049,14 +2073,24 @@ namespace George.Services
                 // For simple products, add pricing and stock and clear attributes (so WooCommerce removes variation attributes when product was variable before)
                 if (product.ProductVariant == null || !product.ProductVariant.Any(v => !v.IsDeleted))
                 {
+                    // MultiSite Phase 2: prefer the per-site override values when present (else canonical).
+                    var simpleRegularPrice = siteOverride?.Price ?? product.Price;
+                    var simpleSalePrice = siteOverride?.SalePrice ?? product.SalePrice;
+                    var simpleSaleFrom = siteOverride?.SalePriceStartDate ?? product.SalePriceStartDate;
+                    var simpleSaleTo = siteOverride?.SalePriceEndDate ?? product.SalePriceEndDate;
+                    var simpleManageStock = !string.IsNullOrEmpty(siteOverride?.StockManagementType)
+                        ? IsStockQuantityManagementName(siteOverride!.StockManagementType)
+                        : IsStockQuantityManagementName(product.StockManagementType?.Name);
+                    var simpleStockQty = siteOverride?.StockQuantity ?? product.StockQuantity;
+
                     wooProduct["attributes"] = new List<object>();
-                    wooProduct["regular_price"] = product.Price?.ToString() ?? "0";
+                    wooProduct["regular_price"] = simpleRegularPrice?.ToString() ?? "0";
                     // WooCommerce rejects empty string for sale_price and date fields; use null when no value (avoids 400 Bad Request on update)
-                    wooProduct["sale_price"] = product.SalePrice.HasValue ? product.SalePrice.Value.ToString() : (object?)null;
-                    wooProduct["date_on_sale_from"] = product.SalePriceStartDate.HasValue ? product.SalePriceStartDate.Value.ToString("yyyy-MM-ddTHH:mm:ss") : (object?)null;
-                    wooProduct["date_on_sale_to"] = product.SalePriceEndDate.HasValue ? product.SalePriceEndDate.Value.ToString("yyyy-MM-ddTHH:mm:ss") : (object?)null;
-                    wooProduct["manage_stock"] = IsStockQuantityManagementName(product.StockManagementType?.Name);
-                    wooProduct["stock_quantity"] = product.StockQuantity ?? 0;
+                    wooProduct["sale_price"] = simpleSalePrice.HasValue ? simpleSalePrice.Value.ToString() : (object?)null;
+                    wooProduct["date_on_sale_from"] = simpleSaleFrom.HasValue ? simpleSaleFrom.Value.ToString("yyyy-MM-ddTHH:mm:ss") : (object?)null;
+                    wooProduct["date_on_sale_to"] = simpleSaleTo.HasValue ? simpleSaleTo.Value.ToString("yyyy-MM-ddTHH:mm:ss") : (object?)null;
+                    wooProduct["manage_stock"] = simpleManageStock;
+                    wooProduct["stock_quantity"] = simpleStockQty ?? 0;
                     wooProduct["stock_status"] = stockStatus;
                     wooProduct["backorders"] = product.StockStatus?.Name == "on_backorder" ? "yes" : "no";
                 }
@@ -2131,7 +2165,8 @@ namespace George.Services
                     if (IsStockQuantityManagementName(smt))
                     {
                         wooProduct["manage_stock"] = true;
-                        wooProduct["stock_quantity"] = product.StockQuantity ?? 0;
+                        // MultiSite Phase 2: per-site parent stock override when present.
+                        wooProduct["stock_quantity"] = (siteOverride?.StockQuantity ?? product.StockQuantity) ?? 0;
                         wooProduct["stock_status"] = stockStatus;
                         wooProduct["backorders"] = product.StockStatus?.Name == "on_backorder" ? "yes" : "no";
                     }
@@ -2955,6 +2990,18 @@ namespace George.Services
             else if (product.StockStatus?.Name == "on_backorder")
                 productStockStatus = "onbackorder";
 
+            // MultiSite Phase 2: per-site variant stock (variantId → quantity) for this site, when present.
+            Dictionary<int, decimal?> perSiteVariantStock;
+            try
+            {
+                perSiteVariantStock = await _overrideStorage.GetVariantStockForSiteAsync(product.Id, siteId, cancelToken).ConfigureAwait(false);
+            }
+            catch (Exception vsEx)
+            {
+                _logger.LogWarning(vsEx, "Failed to load per-site variant stock for product {ProductId} site {SiteId}; using canonical", product.Id, siteId);
+                perSiteVariantStock = new Dictionary<int, decimal?>();
+            }
+
             foreach (var variant in variants)
             {
                 try
@@ -3047,7 +3094,13 @@ namespace George.Services
                         wooVariation["date_on_sale_to"] = "";
                     }
                     if (manageVariationStockInWoo)
-                        wooVariation["stock_quantity"] = ToWooVariationStockQuantity(variant.StockQuantity, variationTrackQuantity);
+                    {
+                        // MultiSite Phase 2: prefer this site's per-variant stock when present (else canonical).
+                        var effVariantStock = (variant.Id > 0 && perSiteVariantStock.TryGetValue(variant.Id, out var siteVarQty))
+                            ? siteVarQty
+                            : variant.StockQuantity;
+                        wooVariation["stock_quantity"] = ToWooVariationStockQuantity(effVariantStock, variationTrackQuantity);
+                    }
                     if (!string.IsNullOrEmpty(variant.ImageUrl))
                     {
                         var vUrl = variant.ImageUrl.Trim();

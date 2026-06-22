@@ -79,6 +79,12 @@ namespace George.Services.Request
         public string? WeightUnit { get; set; }
         /// <summary>Site assignment. Null or empty = do not change which sites the product is on (update); Woo sync falls back to existing sites on the product.</summary>
         public List<int>? SiteIds { get; set; }
+
+        /// <summary>MultiSite Phase 2: 'network' (default) or 'local'. Omit on update = keep existing.</summary>
+        public string? ManagementMode { get; set; }
+        /// <summary>When creating a local product: the owning site id.</summary>
+        public int? OwnerSiteId { get; set; }
+
         public int? AccountId { get; set; }
         /// <summary>List sort order (ascending). When omitted on create, defaults to 0 in storage.</summary>
         public int? DisplayOrder { get; set; }
@@ -144,6 +150,16 @@ namespace George.Services.Request
         [Required]
         [ValidId]
         public int Id { get; set; }
+
+        /// <summary>
+        /// MultiSite Phase 2: 'all_sites' updates the canonical product and clears per-field overrides on
+        /// non-excluded sites; 'selected_site' writes a per-site override only (requires SiteId).
+        /// Null/empty = legacy behavior (update canonical directly).
+        /// </summary>
+        public string? EditScope { get; set; }
+
+        /// <summary>Required when EditScope = 'selected_site'.</summary>
+        public int? SiteId { get; set; }
     }
 
     public class UpdateProductOrderReq
