@@ -3126,19 +3126,19 @@ namespace George.Services
             else if (product.StockStatus?.Name == "on_backorder")
                 productStockStatus = "onbackorder";
 
-            // MultiSite Phase 2: per-site variant stock (variantId → quantity) for this site, when present.
+            // MultiSite Phase 2: per-site variant overrides (price/sale/stock/exclusion) for this site, when present.
             // Skipped for non-network accounts (no overrides possible) so single-site sync is unchanged.
-            Dictionary<int, decimal?> perSiteVariantStock = new Dictionary<int, decimal?>();
+            Dictionary<int, ProductSiteOverrideStorage.VariantSiteOverride> perSiteVariantOverrides = new();
             if (await IsSiteNetworkManagedCachedAsync(siteId, cancelToken).ConfigureAwait(false))
             {
                 try
                 {
-                    perSiteVariantStock = await _overrideStorage.GetVariantStockForSiteAsync(product.Id, siteId, cancelToken).ConfigureAwait(false);
+                    perSiteVariantOverrides = await _overrideStorage.GetVariantOverridesForSiteAsync(product.Id, siteId, cancelToken).ConfigureAwait(false);
                 }
                 catch (Exception vsEx)
                 {
-                    _logger.LogWarning(vsEx, "Failed to load per-site variant stock for product {ProductId} site {SiteId}; using canonical", product.Id, siteId);
-                    perSiteVariantStock = new Dictionary<int, decimal?>();
+                    _logger.LogWarning(vsEx, "Failed to load per-site variant overrides for product {ProductId} site {SiteId}; using canonical", product.Id, siteId);
+                    perSiteVariantOverrides = new();
                 }
             }
 
@@ -3146,6 +3146,9 @@ namespace George.Services
             {
                 try
                 {
+                    // Per-site exclusion: a variant "removed" in this branch is not pushed to this store.
+                    if (variant.Id > 0 && perSiteVariantOverrides.TryGetValue(variant.Id, out var vExcl) && vExcl.IsExcluded)
+                        continue;
                     // Only derive in/out from quantity when quantity is actually tracked per variation.
                     // Binary in/out variations carry no quantity (StockQuantity null) and must use the
                     // product-level status, else they were wrongly forced "outofstock".
@@ -3204,9 +3207,11 @@ namespace George.Services
                         : (variant.Weight.HasValue && variant.Weight.Value > 0
                             ? variant.Weight.Value.ToString(CultureInfo.InvariantCulture)
                             : "");
+                    // MultiSite Phase 2: per-site variant price/sale override (null = inherit canonical variant).
+                    var siteVarOvr = (variant.Id > 0 && perSiteVariantOverrides.TryGetValue(variant.Id, out var ovrRow)) ? ovrRow : null;
                     var wooVariation = new Dictionary<string, object>
                     {
-                        ["regular_price"] = FormatWooPrice(variant.Price ?? product.Price),
+                        ["regular_price"] = FormatWooPrice(siteVarOvr?.Price ?? variant.Price ?? product.Price),
                         ["sku"] = variantWooSku,
                         ["manage_stock"] = manageVariationStockInWoo,
                         ["stock_status"] = variantStockStatus,
@@ -3214,7 +3219,7 @@ namespace George.Services
                         ["attributes"] = variationAttributesList
                     };
                     // Always send sale_price / schedule on PUT so Woo clears stale values when sale is removed or changed per variation.
-                    var variationSale = variant.SalePrice;
+                    var variationSale = siteVarOvr?.SalePrice ?? variant.SalePrice;
                     if (!variationSale.HasValue || variationSale.Value <= 0)
                     {
                         // Parent sale applies only when the variant row has no own sale (saved at product level in George).
@@ -3239,9 +3244,9 @@ namespace George.Services
                     if (manageVariationStockInWoo)
                     {
                         // MultiSite Phase 2: prefer this site's per-variant stock when present (else canonical).
-                        // A row with a null quantity (status-only upsert) must inherit canonical, not push 0.
-                        var effVariantStock = (variant.Id > 0 && perSiteVariantStock.TryGetValue(variant.Id, out var siteVarQty) && siteVarQty.HasValue)
-                            ? siteVarQty
+                        // A row with a null quantity (status-only override) must inherit canonical, not push 0.
+                        var effVariantStock = (siteVarOvr?.StockQuantity).HasValue
+                            ? siteVarOvr!.StockQuantity
                             : variant.StockQuantity;
                         wooVariation["stock_quantity"] = ToWooVariationStockQuantity(effVariantStock, variationTrackQuantity);
                     }

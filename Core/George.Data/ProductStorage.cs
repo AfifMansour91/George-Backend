@@ -961,8 +961,9 @@ namespace George.Data
             await CreateProductOptionsAsync(productId, options, limitAttributeToSiteIds, cancelToken);
         }
 
-        public async Task CreateProductVariantsAsync(int productId, List<ProductVariantDto> variants, List<ProductOptionDto>? options, CancellationToken cancelToken)
+        public async Task<List<int>> CreateProductVariantsAsync(int productId, List<ProductVariantDto> variants, List<ProductOptionDto>? options, CancellationToken cancelToken)
         {
+            var createdIds = new List<int>();
             foreach (var variant in variants)
             {
                 var productVariant = new ProductVariant
@@ -978,6 +979,7 @@ namespace George.Data
                 };
                 _dbContext.ProductVariant.Add(productVariant);
                 await _dbContext.SaveChangesAsync(cancelToken);
+                createdIds.Add(productVariant.Id);
 
                 // Map option values if provided
                 if (variant.OptionValues != null && variant.OptionValues.Any())
@@ -994,6 +996,7 @@ namespace George.Data
                     await _dbContext.SaveChangesAsync(cancelToken);
                 }
             }
+            return createdIds;
         }
 
         public async Task UpdateProductVariantsAsync(int productId, List<ProductVariantDto>? variants, List<ProductOptionDto>? options, CancellationToken cancelToken)

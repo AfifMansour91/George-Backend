@@ -129,6 +129,26 @@ namespace George.Services
                     item.ImageNames = new List<string>();
                 }
             }
+
+            // Per-site VARIATIONS: overlay each variant's per-site price/sale/stock and drop variants excluded
+            // for this site, so the edit form and lists reflect the branch's effective variations.
+            var variantOverrides = await _overrideStorage.GetVariantOverridesForSiteAsync(ids, siteId, cancelToken);
+            if (variantOverrides.Count > 0)
+            {
+                foreach (var item in items)
+                {
+                    if (item.Variants == null || item.Variants.Count == 0) continue;
+                    if (!variantOverrides.TryGetValue(item.Id, out var vmap) || vmap.Count == 0) continue;
+                    item.Variants = item.Variants.Where(v => !(vmap.TryGetValue(v.Id, out var ovr) && ovr.IsExcluded)).ToList();
+                    foreach (var v in item.Variants)
+                    {
+                        if (!vmap.TryGetValue(v.Id, out var ov)) continue;
+                        if (ov.Price.HasValue) v.Price = ov.Price;
+                        if (ov.SalePrice.HasValue) v.SalePrice = ov.SalePrice;
+                        if (ov.StockQuantity.HasValue) v.StockQuantity = ov.StockQuantity;
+                    }
+                }
+            }
         }
 
         /// <summary>Get products the customer (by phone at site) has ordered in the past. For kiosk "past purchases". Returns same shape as GetProductsAsync.</summary>
@@ -367,6 +387,80 @@ namespace George.Services
                 if (req.ImageUrls != null)
                 {
                     await _overrideStorage.SetSiteImagesAsync(productId, siteId, req.ImageUrls, cancelToken);
+                }
+
+                // Per-site VARIATIONS: a selected-site edit must NOT mutate the canonical variants of OTHER sites.
+                // Existing variants get per-site overrides (price/sale/stock); a variant the user removed in this
+                // branch is hidden here only; a brand-NEW variant added in this branch is created canonically but
+                // excluded from every OTHER site, so it effectively lives only in this branch.
+                if (req.Variants != null)
+                {
+                    var canonicalVariantIds = existingProduct.ProductVariant?.Select(v => v.Id).ToList() ?? new List<int>();
+                    var keptIds = new HashSet<int>(req.Variants.Where(v => v.Id.HasValue).Select(v => v.Id!.Value));
+
+                    // 1) Create brand-new variants (no Id) canonically, then exclude them from the other sites.
+                    var newVariantReqs = req.Variants.Where(v => !v.Id.HasValue).ToList();
+                    if (newVariantReqs.Count > 0)
+                    {
+                        var newDtos = newVariantReqs.Select(v => new ProductVariantDto
+                        {
+                            ImageUrl = v.ImageUrl,
+                            OptionValues = v.OptionValues,
+                            Price = v.Price,
+                            SalePrice = v.SalePrice,
+                            StockQuantity = v.StockQuantity,
+                            Sku = v.Sku,
+                            Weight = v.Weight,
+                        }).ToList();
+                        var createdIds = await _productStorage.CreateProductVariantsAsync(productId, newDtos, null, cancelToken);
+
+                        // Exclude each newly-created variant from all OTHER account sites (it lives only here).
+                        if (existingProduct.AccountId.HasValue)
+                        {
+                            var otherSiteIds = (await _overrideStorage.GetAccountSiteIdsAsync(existingProduct.AccountId.Value, cancelToken))
+                                .Where(sid => sid != siteId).ToList();
+                            foreach (var otherSite in otherSiteIds)
+                            {
+                                var excludeNew = createdIds.Select(cid => new ProductSiteOverrideStorage.VariantSiteOverrideUpsert
+                                {
+                                    VariantId = cid,
+                                    IsExcluded = true,
+                                }).ToList();
+                                if (excludeNew.Count > 0)
+                                    await _overrideStorage.UpsertVariantOverridesAsync(productId, otherSite, excludeNew, cancelToken);
+                            }
+                        }
+                    }
+
+                    var variantOverrides = new List<ProductSiteOverrideStorage.VariantSiteOverrideUpsert>();
+                    foreach (var v in req.Variants)
+                    {
+                        if (!v.Id.HasValue) continue; // new variants handled above
+                        variantOverrides.Add(new ProductSiteOverrideStorage.VariantSiteOverrideUpsert
+                        {
+                            VariantId = v.Id.Value,
+                            Price = v.Price,
+                            SalePrice = v.SalePrice,
+                            StockQuantity = v.StockQuantity,
+                            StockStatus = null,
+                            IsExcluded = v.IsExcluded ?? false,
+                        });
+                    }
+                    // Canonical variants the user removed in THIS branch → hide them here (not deleted canonically).
+                    foreach (var cid in canonicalVariantIds.Where(id => !keptIds.Contains(id)))
+                    {
+                        variantOverrides.Add(new ProductSiteOverrideStorage.VariantSiteOverrideUpsert
+                        {
+                            VariantId = cid,
+                            Price = null,
+                            SalePrice = null,
+                            StockQuantity = null,
+                            StockStatus = null,
+                            IsExcluded = true,
+                        });
+                    }
+                    if (variantOverrides.Count > 0)
+                        await _overrideStorage.UpsertVariantOverridesAsync(productId, siteId, variantOverrides, cancelToken);
                 }
 
                 // Return the canonical product with the site's effective override applied (for the edited site).

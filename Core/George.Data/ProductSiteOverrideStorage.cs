@@ -108,6 +108,15 @@ namespace George.Data
                 .ToListAsync(cancelToken);
         }
 
+        /// <summary>All non-deleted site ids for an account (used to exclude a site-only variant from the other sites).</summary>
+        public async Task<List<int>> GetAccountSiteIdsAsync(int accountId, CancellationToken cancelToken)
+        {
+            return await _dbContext.Site
+                .Where(s => s.AccountId == accountId && !s.IsDeleted)
+                .Select(s => s.Id)
+                .ToListAsync(cancelToken);
+        }
+
         /// <summary>Per-site stock for a product's variants at one site: variantId → stockQuantity.</summary>
         public async Task<Dictionary<int, decimal?>> GetVariantStockForSiteAsync(int productId, int siteId, CancellationToken cancelToken)
         {
@@ -118,6 +127,119 @@ namespace George.Data
             var map = new Dictionary<int, decimal?>();
             foreach (var r in rows) map[r.ProductVariantId] = r.StockQuantity;
             return map;
+        }
+
+        /// <summary>Resolved per-site override values for a single variant (null field = inherit canonical).</summary>
+        public sealed class VariantSiteOverride
+        {
+            public decimal? StockQuantity { get; set; }
+            public string? StockStatus { get; set; }
+            public decimal? Price { get; set; }
+            public decimal? SalePrice { get; set; }
+            public bool IsExcluded { get; set; }
+        }
+
+        /// <summary>Full per-site variant overrides for a product at one site: variantId → override.</summary>
+        public async Task<Dictionary<int, VariantSiteOverride>> GetVariantOverridesForSiteAsync(int productId, int siteId, CancellationToken cancelToken)
+        {
+            var rows = await _dbContext.ProductSiteVariantStock
+                .Where(v => v.SiteId == siteId && v.ProductId == productId)
+                .Select(v => new { v.ProductVariantId, v.StockQuantity, v.StockStatusId, v.Price, v.SalePrice, v.IsExcluded })
+                .ToListAsync(cancelToken);
+            // Resolve stock status ids to names in one pass.
+            var statusIds = rows.Where(r => r.StockStatusId.HasValue).Select(r => r.StockStatusId!.Value).Distinct().ToList();
+            var statusNames = statusIds.Count == 0
+                ? new Dictionary<int, string>()
+                : await _dbContext.StockStatus.Where(s => statusIds.Contains(s.Id))
+                    .ToDictionaryAsync(s => s.Id, s => s.Name, cancelToken);
+            var map = new Dictionary<int, VariantSiteOverride>();
+            foreach (var r in rows)
+            {
+                map[r.ProductVariantId] = new VariantSiteOverride
+                {
+                    StockQuantity = r.StockQuantity,
+                    StockStatus = r.StockStatusId.HasValue && statusNames.TryGetValue(r.StockStatusId.Value, out var n) ? n : null,
+                    Price = r.Price,
+                    SalePrice = r.SalePrice,
+                    IsExcluded = r.IsExcluded,
+                };
+            }
+            return map;
+        }
+
+        /// <summary>Batched per-site variant overrides for many products at one site: productId → (variantId → override).</summary>
+        public async Task<Dictionary<int, Dictionary<int, VariantSiteOverride>>> GetVariantOverridesForSiteAsync(IReadOnlyCollection<int> productIds, int siteId, CancellationToken cancelToken)
+        {
+            var result = new Dictionary<int, Dictionary<int, VariantSiteOverride>>();
+            if (productIds == null || productIds.Count == 0) return result;
+            var rows = await _dbContext.ProductSiteVariantStock
+                .Where(v => v.SiteId == siteId && v.ProductId != null && productIds.Contains(v.ProductId.Value))
+                .Select(v => new { v.ProductId, v.ProductVariantId, v.StockQuantity, v.StockStatusId, v.Price, v.SalePrice, v.IsExcluded })
+                .ToListAsync(cancelToken);
+            var statusIds = rows.Where(r => r.StockStatusId.HasValue).Select(r => r.StockStatusId!.Value).Distinct().ToList();
+            var statusNames = statusIds.Count == 0
+                ? new Dictionary<int, string>()
+                : await _dbContext.StockStatus.Where(s => statusIds.Contains(s.Id))
+                    .ToDictionaryAsync(s => s.Id, s => s.Name, cancelToken);
+            foreach (var r in rows)
+            {
+                if (!result.TryGetValue(r.ProductId!.Value, out var inner))
+                {
+                    inner = new Dictionary<int, VariantSiteOverride>();
+                    result[r.ProductId.Value] = inner;
+                }
+                inner[r.ProductVariantId] = new VariantSiteOverride
+                {
+                    StockQuantity = r.StockQuantity,
+                    StockStatus = r.StockStatusId.HasValue && statusNames.TryGetValue(r.StockStatusId.Value, out var n) ? n : null,
+                    Price = r.Price,
+                    SalePrice = r.SalePrice,
+                    IsExcluded = r.IsExcluded,
+                };
+            }
+            return result;
+        }
+
+        /// <summary>Per-site variant override upsert payload.</summary>
+        public sealed class VariantSiteOverrideUpsert
+        {
+            public int VariantId { get; set; }
+            public decimal? Price { get; set; }
+            public decimal? SalePrice { get; set; }
+            public decimal? StockQuantity { get; set; }
+            public string? StockStatus { get; set; }
+            public bool IsExcluded { get; set; }
+        }
+
+        /// <summary>
+        /// Upsert per-site variant overrides (price/sale/stock/exclusion). Each item fully describes the variant's
+        /// state for this site; Price/SalePrice/StockQuantity are assigned as given (null clears back to inherit).
+        /// </summary>
+        public async Task UpsertVariantOverridesAsync(int productId, int siteId, IEnumerable<VariantSiteOverrideUpsert> items, CancellationToken cancelToken)
+        {
+            foreach (var item in items)
+            {
+                var row = await _dbContext.ProductSiteVariantStock
+                    .FirstOrDefaultAsync(v => v.ProductVariantId == item.VariantId && v.SiteId == siteId, cancelToken);
+                if (row == null)
+                {
+                    row = new ProductSiteVariantStock
+                    {
+                        ProductVariantId = item.VariantId,
+                        SiteId = siteId,
+                        ProductId = productId,
+                        CreationTime = DateTime.UtcNow,
+                    };
+                    _dbContext.ProductSiteVariantStock.Add(row);
+                }
+                row.Price = item.Price;
+                row.SalePrice = item.SalePrice;
+                if (item.StockQuantity.HasValue) row.StockQuantity = item.StockQuantity;
+                if (item.StockStatus.HasValue()) row.StockStatusId = await ResolveStockStatusIdAsync(item.StockStatus, cancelToken);
+                row.IsExcluded = item.IsExcluded;
+                row.UpdatedDate = DateTime.UtcNow;
+            }
+            await _dbContext.SaveChangesAsync(cancelToken);
         }
 
         /// <summary>Per-site category assignment for a product (with parent id so callers can split main/sub).</summary>

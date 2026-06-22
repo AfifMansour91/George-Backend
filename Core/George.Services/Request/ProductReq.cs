@@ -14,6 +14,8 @@ namespace George.Services.Request
 
     public class ProductVariantReq
     {
+        /// <summary>Canonical ProductVariant id. Sent by the edit form so a per-site edit maps to the right variant.</summary>
+        public int? Id { get; set; }
         public string? ImageUrl { get; set; }
         public Dictionary<string, string>? OptionValues { get; set; }
         public decimal? Price { get; set; }
@@ -21,6 +23,8 @@ namespace George.Services.Request
         public decimal? StockQuantity { get; set; }
         public string? Sku { get; set; }
         public decimal? Weight { get; set; }
+        /// <summary>MultiSite: when editing a single site, true hides this variant for that site only.</summary>
+        public bool? IsExcluded { get; set; }
     }
 
     public class WeightConfigReq

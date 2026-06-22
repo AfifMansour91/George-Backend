@@ -6,8 +6,9 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 /// <summary>
-/// MultiSite Phase 2 — per-(variant, site) stock. Holds the stock of a product variant for a given
-/// site (stock is always per-site). Absence of a row means the site inherits the canonical variant stock.
+/// MultiSite Phase 2 — per-(variant, site) override row. Originally per-site stock; extended to also hold
+/// the per-site variant price/sale price and an exclusion flag (a variant "deleted" in one branch is hidden
+/// there, not removed from the canonical product). Absence of a row / null field means inherit canonical.
 /// </summary>
 [Index("ProductVariantId", "SiteId", Name = "UX_ProductSiteVariantStock_Variant_Site", IsUnique = true)]
 [Index("SiteId", Name = "IX_ProductSiteVariantStock_SiteId")]
@@ -36,6 +37,17 @@ public partial class ProductSiteVariantStock
     public decimal? StockQuantity { get; set; }
 
     public int? StockStatusId { get; set; }
+
+    /// <summary>Per-site regular price for this variant (null = inherit canonical variant price).</summary>
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? Price { get; set; }
+
+    /// <summary>Per-site sale price for this variant (null = inherit canonical variant sale price).</summary>
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? SalePrice { get; set; }
+
+    /// <summary>When true, this variant is hidden/removed for this site only (canonical keeps it).</summary>
+    public bool IsExcluded { get; set; }
 
     [ForeignKey("ProductVariantId")]
     [InverseProperty("ProductSiteVariantStock")]
