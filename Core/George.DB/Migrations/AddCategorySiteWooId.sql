@@ -4,6 +4,11 @@
 -- 1st store's id and overwrote/corrupted whatever category sat at that id ("categories mess"). This table maps
 -- (CategoryId, SiteId) -> WooCommerceCategoryId. Consulted only for network-managed accounts. Idempotent.
 
+-- Self-repair: drop a malformed leftover table missing its [Id] PK (from an earlier partial run) so it is recreated correctly.
+IF OBJECT_ID(N'[dbo].[CategorySiteWooId]', N'U') IS NOT NULL AND COL_LENGTH(N'[dbo].[CategorySiteWooId]', N'Id') IS NULL
+    DROP TABLE [dbo].[CategorySiteWooId];
+GO
+
 IF OBJECT_ID(N'[dbo].[CategorySiteWooId]', N'U') IS NULL
 BEGIN
     CREATE TABLE [dbo].[CategorySiteWooId] (

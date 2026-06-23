@@ -118,6 +118,49 @@ namespace George.Services
             return CreateResponse(response);
         }
 
+        /// <summary>For the given products, which have a per-site override on price / sku / stock (drives "הצג").</summary>
+        public async Task<IApiResponse<List<ProductFieldOverrideFlagsRes>>> GetFieldOverrideFlagsAsync(IReadOnlyCollection<int> productIds, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<List<ProductFieldOverrideFlagsRes>>();
+            var rows = await _overrideStorage.GetFieldOverrideFlagsAsync(productIds, cancelToken);
+            response.Data = rows.Select(r => new ProductFieldOverrideFlagsRes
+            {
+                ProductId = r.ProductId,
+                PriceOverridden = r.PriceOverridden,
+                SkuOverridden = r.SkuOverridden,
+                StockOverridden = r.StockOverridden,
+            }).ToList();
+            return CreateResponse(response);
+        }
+
+        /// <summary>Per-site price/sku/stock for a product (for the per-branch edit popup).</summary>
+        public async Task<IApiResponse<ProductSiteFieldValuesRes>> GetSiteFieldValuesAsync(int productId, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<ProductSiteFieldValuesRes>();
+            var data = await _overrideStorage.GetSiteFieldValuesAsync(productId, cancelToken);
+            if (data == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
+            response.Data = new ProductSiteFieldValuesRes
+            {
+                ProductId = data.ProductId,
+                BasePrice = data.BasePrice,
+                BaseSku = data.BaseSku,
+                BaseStock = data.BaseStock,
+                Sites = data.Sites.Select(s => new SiteFieldValueRes
+                {
+                    SiteId = s.SiteId,
+                    SiteName = s.SiteName,
+                    Price = s.Price,
+                    Sku = s.Sku,
+                    StockQuantity = s.StockQuantity,
+                    PriceOverridden = s.PriceOverridden,
+                    SkuOverridden = s.SkuOverridden,
+                    StockOverridden = s.StockOverridden,
+                }).ToList(),
+            };
+            return CreateResponse(response);
+        }
+
         public async Task<IApiResponse<bool>> UpdateVariantStockAsync(int productId, ProductSiteVariantStockReq req, CancellationToken cancelToken)
         {
             var response = new ApiResponse<bool>();

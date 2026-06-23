@@ -113,6 +113,28 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _overrideSvc.ListLocalAsync(accountId, siteId, cancelToken));
         }
 
+        /// <summary>Per-site price/sku/stock for a product (powers the per-branch edit popup opened from "הצג").</summary>
+        [HttpGet("{productId:int}/site-field-values")]
+        [ProducesResponseType(typeof(IApiResponse<ProductSiteFieldValuesRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetSiteFieldValuesAsync([FromRoute] int productId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _overrideSvc.GetSiteFieldValuesAsync(productId, cancelToken));
+        }
+
+        /// <summary>Which of the given products have a per-site override on price / sku / stock (drives the "הצג" affordance). Query: productIds=1,2,3.</summary>
+        [HttpGet("site-override-flags")]
+        [ProducesResponseType(typeof(IApiResponse<List<ProductFieldOverrideFlagsRes>>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetFieldOverrideFlagsAsync([FromQuery] string? productIds, CancellationToken cancelToken = default)
+        {
+            var ids = (productIds ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(s => int.TryParse(s, out var n) ? n : 0)
+                .Where(n => n > 0)
+                .Distinct()
+                .ToList();
+            return await SafeCallWithErrorCatchingAsync(() => _overrideSvc.GetFieldOverrideFlagsAsync(ids, cancelToken));
+        }
+
         [HttpGet("Site/{siteId:int}")]
         [ProducesResponseType(typeof(IApiResponse<ApiListResponse<ProductRes>>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetProductsBySiteAsync(

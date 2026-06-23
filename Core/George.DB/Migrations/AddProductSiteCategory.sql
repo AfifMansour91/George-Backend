@@ -2,6 +2,11 @@
 -- A product can be assigned to different categories per branch. When rows exist for a (product, site),
 -- they replace the canonical ProductCategory for that site (effective view). Idempotent.
 
+-- Self-repair: drop a malformed leftover table missing its [Id] PK (from an earlier partial run) so it is recreated correctly.
+IF OBJECT_ID(N'[dbo].[ProductSiteCategory]', N'U') IS NOT NULL AND COL_LENGTH(N'[dbo].[ProductSiteCategory]', N'Id') IS NULL
+    DROP TABLE [dbo].[ProductSiteCategory];
+GO
+
 IF OBJECT_ID(N'[dbo].[ProductSiteCategory]', N'U') IS NULL
 BEGIN
     CREATE TABLE [dbo].[ProductSiteCategory] (

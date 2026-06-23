@@ -117,6 +117,102 @@ namespace George.Data
                 .ToListAsync(cancelToken);
         }
 
+        /// <summary>Which of price/sku/stock a product has a per-site override for (any site). Drives the "הצג" affordance.</summary>
+        public sealed class ProductFieldOverrideFlags
+        {
+            public int ProductId { get; set; }
+            public bool PriceOverridden { get; set; }
+            public bool SkuOverridden { get; set; }
+            public bool StockOverridden { get; set; }
+        }
+
+        /// <summary>For a batch of products: which have a per-site override on price / sku / stock (any of their sites).</summary>
+        public async Task<List<ProductFieldOverrideFlags>> GetFieldOverrideFlagsAsync(IReadOnlyCollection<int> productIds, CancellationToken cancelToken)
+        {
+            if (productIds == null || productIds.Count == 0) return new List<ProductFieldOverrideFlags>();
+            var rows = await _dbContext.ProductSiteOverride
+                .Where(o => !o.IsDeleted && productIds.Contains(o.ProductId))
+                .Select(o => new { o.ProductId, o.Price, o.Sku, o.StockQuantity })
+                .ToListAsync(cancelToken);
+            return rows.GroupBy(r => r.ProductId).Select(g => new ProductFieldOverrideFlags
+            {
+                ProductId = g.Key,
+                PriceOverridden = g.Any(x => x.Price != null),
+                SkuOverridden = g.Any(x => !string.IsNullOrEmpty(x.Sku)),
+                StockOverridden = g.Any(x => x.StockQuantity != null),
+            }).ToList();
+        }
+
+        /// <summary>One site's effective price/sku/stock for a product, with flags for which are per-site overrides.</summary>
+        public sealed class SiteFieldValueRow
+        {
+            public int SiteId { get; set; }
+            public string SiteName { get; set; } = "";
+            public decimal? Price { get; set; }
+            public string? Sku { get; set; }
+            public decimal? StockQuantity { get; set; }
+            public bool PriceOverridden { get; set; }
+            public bool SkuOverridden { get; set; }
+            public bool StockOverridden { get; set; }
+        }
+
+        /// <summary>Per-site price/sku/stock for a product across all its sites, plus the canonical base values.</summary>
+        public sealed class ProductSiteFieldValues
+        {
+            public int ProductId { get; set; }
+            public decimal? BasePrice { get; set; }
+            public string? BaseSku { get; set; }
+            public decimal? BaseStock { get; set; }
+            public List<SiteFieldValueRow> Sites { get; set; } = new List<SiteFieldValueRow>();
+        }
+
+        /// <summary>Builds the per-site field view for the "edit per branch" popup (effective = override ?? canonical).</summary>
+        public async Task<ProductSiteFieldValues?> GetSiteFieldValuesAsync(int productId, CancellationToken cancelToken)
+        {
+            var product = await _dbContext.Product
+                .Where(p => p.Id == productId)
+                .Select(p => new { p.Price, p.Sku, p.StockQuantity })
+                .FirstOrDefaultAsync(cancelToken);
+            if (product == null) return null;
+
+            var sites = await _dbContext.Product
+                .Where(p => p.Id == productId)
+                .SelectMany(p => p.Site)
+                .Where(s => !s.IsDeleted)
+                .Select(s => new { s.Id, s.SiteName })
+                .ToListAsync(cancelToken);
+
+            var overrides = await _dbContext.ProductSiteOverride
+                .Where(o => !o.IsDeleted && o.ProductId == productId)
+                .Select(o => new { o.SiteId, o.Price, o.Sku, o.StockQuantity })
+                .ToListAsync(cancelToken);
+            var ovrBySite = overrides.GroupBy(o => o.SiteId).ToDictionary(g => g.Key, g => g.First());
+
+            var result = new ProductSiteFieldValues
+            {
+                ProductId = productId,
+                BasePrice = product.Price,
+                BaseSku = product.Sku,
+                BaseStock = product.StockQuantity,
+            };
+            foreach (var s in sites.OrderBy(s => s.Id))
+            {
+                ovrBySite.TryGetValue(s.Id, out var o);
+                result.Sites.Add(new SiteFieldValueRow
+                {
+                    SiteId = s.Id,
+                    SiteName = string.IsNullOrEmpty(s.SiteName) ? s.Id.ToString() : s.SiteName,
+                    Price = o?.Price ?? product.Price,
+                    Sku = string.IsNullOrEmpty(o?.Sku) ? product.Sku : o!.Sku,
+                    StockQuantity = o?.StockQuantity ?? product.StockQuantity,
+                    PriceOverridden = o?.Price != null,
+                    SkuOverridden = !string.IsNullOrEmpty(o?.Sku),
+                    StockOverridden = o?.StockQuantity != null,
+                });
+            }
+            return result;
+        }
+
         /// <summary>Per-site stock for a product's variants at one site: variantId → stockQuantity.</summary>
         public async Task<Dictionary<int, decimal?>> GetVariantStockForSiteAsync(int productId, int siteId, CancellationToken cancelToken)
         {
@@ -460,6 +556,7 @@ namespace George.Data
 
             if (All("price")) { row.Price = null; }
             if (All("salePrice")) { row.SalePrice = null; row.SalePriceStartDate = null; row.SalePriceEndDate = null; }
+            if (All("sku")) { row.Sku = null; }
             if (All("availability")) { row.Availability = null; }
             if (All("stock"))
             {

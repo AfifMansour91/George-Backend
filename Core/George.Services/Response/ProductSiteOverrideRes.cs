@@ -37,4 +37,36 @@ namespace George.Services.Response
         public List<LocalProductEntryRes> Items { get; set; } = new();
         public int Total { get; set; }
     }
+
+    /// <summary>Which of price/sku/stock a product has a per-site override on (drives the "הצג" / Show affordance).</summary>
+    public class ProductFieldOverrideFlagsRes
+    {
+        public int ProductId { get; set; }
+        public bool PriceOverridden { get; set; }
+        public bool SkuOverridden { get; set; }
+        public bool StockOverridden { get; set; }
+    }
+
+    /// <summary>One site's effective price/sku/stock for a product, with per-field override flags.</summary>
+    public class SiteFieldValueRes
+    {
+        public int SiteId { get; set; }
+        public string SiteName { get; set; } = "";
+        public decimal? Price { get; set; }
+        public string? Sku { get; set; }
+        public decimal? StockQuantity { get; set; }
+        public bool PriceOverridden { get; set; }
+        public bool SkuOverridden { get; set; }
+        public bool StockOverridden { get; set; }
+    }
+
+    /// <summary>Per-site price/sku/stock for a product (for the per-branch edit popup), plus the canonical base values.</summary>
+    public class ProductSiteFieldValuesRes
+    {
+        public int ProductId { get; set; }
+        public decimal? BasePrice { get; set; }
+        public string? BaseSku { get; set; }
+        public decimal? BaseStock { get; set; }
+        public List<SiteFieldValueRes> Sites { get; set; } = new();
+    }
 }

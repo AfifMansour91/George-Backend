@@ -3,6 +3,11 @@
 -- column can only track one, so syncing a multi-site product to the 2nd store used the wrong id and only
 -- one site actually updated. This table maps (ProductId, SiteId) -> WooCommerceProductId. Idempotent.
 
+-- Self-repair: drop a malformed leftover table missing its [Id] PK (from an earlier partial run) so it is recreated correctly.
+IF OBJECT_ID(N'[dbo].[ProductSiteWooId]', N'U') IS NOT NULL AND COL_LENGTH(N'[dbo].[ProductSiteWooId]', N'Id') IS NULL
+    DROP TABLE [dbo].[ProductSiteWooId];
+GO
+
 IF OBJECT_ID(N'[dbo].[ProductSiteWooId]', N'U') IS NULL
 BEGIN
     CREATE TABLE [dbo].[ProductSiteWooId] (

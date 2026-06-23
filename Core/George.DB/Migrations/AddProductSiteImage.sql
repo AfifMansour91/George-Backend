@@ -2,6 +2,11 @@
 -- A product can have different images per branch. When rows exist for a (product, site), they replace
 -- the canonical ProductImage list for that site (effective view). Idempotent.
 
+-- Self-repair: drop a malformed leftover table missing its [Id] PK (from an earlier partial run) so it is recreated correctly.
+IF OBJECT_ID(N'[dbo].[ProductSiteImage]', N'U') IS NOT NULL AND COL_LENGTH(N'[dbo].[ProductSiteImage]', N'Id') IS NULL
+    DROP TABLE [dbo].[ProductSiteImage];
+GO
+
 IF OBJECT_ID(N'[dbo].[ProductSiteImage]', N'U') IS NULL
 BEGIN
     CREATE TABLE [dbo].[ProductSiteImage] (
