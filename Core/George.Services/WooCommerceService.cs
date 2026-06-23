@@ -2833,6 +2833,11 @@ namespace George.Services
                 row["lineTotal"] = afterPicking
                     ? OrderItemLineDisplay.GetOcStoreosBillableLineTotal(line)
                     : line.TotalPrice;
+                if (line.PromotionId is > 0)
+                {
+                    row["promotionExternalId"] = $"george-{line.PromotionId.Value}";
+                    row["discountAmount"] = line.DiscountAmount ?? 0m;
+                }
                 row["saleUnits"] = line.SaleUnits;
                 row["saleTotalWeight"] = line.SaleTotalWeight;
                 if (line.WooCommerceProductId.HasValue)
@@ -2863,11 +2868,32 @@ namespace George.Services
             var shippingCity = string.IsNullOrWhiteSpace(order.DeliveryCity) ? "" : order.DeliveryCity.Trim();
             var shippingZip = TryExtractPostalCodeFromOrderAddress(order);
             var safeOrderDate = order.CreationTime == default ? DateTime.UtcNow : order.CreationTime;
+
+            // Promotions actually applied (after picking) so the store can mirror them on the order
+            // without re-running its own engine over our numbers. Spec §2.2.
+            var appliedPromotions = activeLines
+                .Where(l => l.PromotionId is > 0 && (!afterPicking || OrderItemLineDisplay.IsOcStoreosBillableLine(l)))
+                .GroupBy(l => l.PromotionId!.Value)
+                .Select(g => new Dictionary<string, object?>
+                {
+                    ["externalId"] = $"george-{g.Key}",
+                    ["discountAmount"] = g.Sum(x => x.DiscountAmount ?? 0m),
+                    ["lines"] = g.Select(x => new Dictionary<string, object?>
+                    {
+                        ["productId"] = x.WooCommerceProductId
+                            ?? (x.ProductId.HasValue && productSkuAndWoo.TryGetValue(x.ProductId.Value, out var sw) ? sw.WooCommerceId : null),
+                        ["sku"] = x.ProductId.HasValue && productSkuAndWoo.TryGetValue(x.ProductId.Value, out var sw2) ? sw2.Sku : x.LineSku,
+                        ["discountAmount"] = x.DiscountAmount ?? 0m,
+                    }).ToList(),
+                })
+                .ToList();
+
             var payload = new Dictionary<string, object?>
             {
                 ["orderNumber"] = orderNumberValue,
                 ["externalOrderId"] = order.ExternalOrderId,
                 ["source"] = order.Source,
+                ["appliedPromotions"] = appliedPromotions,
                 ["siteId"] = order.WooCommerceSiteId ?? siteId.ToString(CultureInfo.InvariantCulture),
                 ["status"] = wcStatus ?? "pending",
                 ["orderDate"] = safeOrderDate.ToString("yyyy-MM-ddTHH:mm:ssZ"),
@@ -2913,6 +2939,9 @@ namespace George.Services
             using var httpClient = _httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(30);
             httpClient.DefaultRequestHeaders.Clear();
+            // TODO(auth): this outbound order sync is currently unauthenticated (auth=None). Once the
+            // WordPress oc-storeos plugin agrees on a scheme (e.g. X-OC-Storeos-Secret), add the header
+            // here from a per-site secret. Spec §4 Q6 / §5.
             using var content = new StringContent(body, Encoding.UTF8, "application/json");
             var url = $"{ocV1Base}/orders";
             var response = await httpClient.PostAsync(url, content, cancelToken);

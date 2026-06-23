@@ -186,12 +186,9 @@ public static class PromotionCatalogBadgeResolver
     {
         if (!payload.TryGetProperty("condition", out var cond) || cond.ValueKind != JsonValueKind.Object) return;
         AddExcluded(rule, cond);
+        // productScope is the BUY condition. "all" = "buy anything" — that must NOT badge the whole
+        // catalog; only the reward (gift) products — and specific trigger products — get the badge.
         var productScope = (ReadString(cond, "productScope") ?? "all").ToLowerInvariant();
-        if (productScope == "all")
-        {
-            rule.AllProducts = true;
-            return;
-        }
         if (productScope == "specific_products")
             AddIntSet(rule.ProductIds, cond, "productIds");
         else if (productScope == "specific_categories")

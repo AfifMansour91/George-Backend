@@ -49,6 +49,15 @@ public class WooCommerceOrderPayload
     [JsonPropertyName("orderTotal")]
     public decimal? OrderTotal { get; set; }
 
+    /// <summary>
+    /// Promotions actually applied by WooCommerce on this order. When present, George trusts these
+    /// numbers instead of re-running its own evaluator on the web order (avoids divergence + the
+    /// double-count with the /redemptions channel). Empty array = "no promotions" (vs. null = "not sent").
+    /// Spec: shop-manager/docs/wooCommerceEngines/ORDER_PROMOTION_SYNC_SPEC.md §1.
+    /// </summary>
+    [JsonPropertyName("appliedPromotions")]
+    public List<WooCommerceAppliedPromotionPayload>? AppliedPromotions { get; set; }
+
     [JsonPropertyName("customerNotes")]
     public string? CustomerNotes { get; set; }
 
@@ -386,4 +395,52 @@ public class WooCommerceOrderItemPayload
     /// <summary>Combined display e.g. "3 יח', 600 גר'" (optional).</summary>
     [JsonPropertyName("saleUnitsLine")]
     public string? SaleUnitsLine { get; set; }
+}
+
+/// <summary>One promotion that WooCommerce applied to the order. Spec §1.2.</summary>
+public class WooCommerceAppliedPromotionPayload
+{
+    /// <summary>George external id (<c>george-{id}</c>) round-tripped back to us. Null for promotions authored locally in WooCommerce.</summary>
+    [JsonPropertyName("externalId")]
+    public string? ExternalId { get; set; }
+
+    /// <summary>WooCommerce promotion id (always sent; for support/diagnostics when <see cref="ExternalId"/> is null).</summary>
+    [JsonPropertyName("wooPromotionId")]
+    public long? WooPromotionId { get; set; }
+
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    /// <summary><c>discount</c> | <c>buy_x_pay_y</c> | <c>buy_x_get_y</c>.</summary>
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+
+    [JsonPropertyName("couponCode")]
+    public string? CouponCode { get; set; }
+
+    /// <summary>Total discount (NIS, positive) this promotion gave on the order = sum of <see cref="Lines"/> discounts.</summary>
+    [JsonPropertyName("discountAmount")]
+    public decimal DiscountAmount { get; set; }
+
+    /// <summary>Per-line allocation so George can stamp the right OrderItem(s). Matched by WooCommerce product id / sku.</summary>
+    [JsonPropertyName("lines")]
+    public List<WooCommerceAppliedPromotionLinePayload>? Lines { get; set; }
+}
+
+/// <summary>One discounted line within an applied promotion. Spec §1.2.</summary>
+public class WooCommerceAppliedPromotionLinePayload
+{
+    /// <summary>WooCommerce product id of the discounted line.</summary>
+    [JsonPropertyName("productId")]
+    public int? ProductId { get; set; }
+
+    [JsonPropertyName("sku")]
+    public string? Sku { get; set; }
+
+    [JsonPropertyName("quantityAffected")]
+    public decimal? QuantityAffected { get; set; }
+
+    /// <summary>Portion of the promotion discount attributed to this line (NIS, positive).</summary>
+    [JsonPropertyName("discountAmount")]
+    public decimal DiscountAmount { get; set; }
 }

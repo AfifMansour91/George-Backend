@@ -56,6 +56,8 @@ public partial class GeorgeDBContextBase : DbContext
 
     public virtual DbSet<PromotionDailyMetric> PromotionDailyMetric { get; set; }
 
+    public virtual DbSet<PromotionOrderRedemption> PromotionOrderRedemption { get; set; }
+
     public virtual DbSet<OrderPaymentEvent> OrderPaymentEvent { get; set; }
 
     public virtual DbSet<RealtimeHubLog> RealtimeHubLog { get; set; }
@@ -551,6 +553,13 @@ public partial class GeorgeDBContextBase : DbContext
             entity.HasOne(d => d.Promotion).WithMany(p => p.PromotionDailyMetric)
                 .OnDelete(DeleteBehavior.Cascade)
                 .HasConstraintName("FK_PromotionDailyMetric_Promotion");
+        });
+
+        modelBuilder.Entity<PromotionOrderRedemption>(entity =>
+        {
+            entity.HasIndex(e => new { e.SiteId, e.OrderId, e.PromotionId }, "UX_PromotionOrderRedemption_Site_Order_Promotion").IsUnique();
+            entity.HasIndex(e => e.PromotionId, "IX_PromotionOrderRedemption_PromotionId");
+            entity.HasIndex(e => new { e.SiteId, e.ExternalOrderId }, "IX_PromotionOrderRedemption_Site_ExternalOrder");
         });
 
         modelBuilder.Entity<OrderItem>(entity =>

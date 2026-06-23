@@ -360,7 +360,7 @@ public class PromotionService : ServiceBase
         if (req?.Redemptions == null || req.Redemptions.Count == 0)
             return response;
 
-        var rows = new List<(int PromotionId, decimal DiscountAmount, DateTime RedeemedAtUtc, string Channel)>();
+        var rows = new List<(int PromotionId, decimal DiscountAmount, DateTime RedeemedAtUtc, string Channel, string? ExternalOrderId)>();
         foreach (var r in req.Redemptions)
         {
             if (!PromotionPromengWireMapper.TryParseExternalId(r.PromotionExternalId, out var promoId))
@@ -369,7 +369,8 @@ public class PromotionService : ServiceBase
                 promoId,
                 Math.Max(0m, r.DiscountAmount),
                 ParseRedemptionTimestamp(r.RedeemedAt),
-                string.IsNullOrWhiteSpace(r.Channel) ? PromotionWire.Channel.Web : r.Channel.Trim()));
+                string.IsNullOrWhiteSpace(r.Channel) ? PromotionWire.Channel.Web : r.Channel.Trim(),
+                r.OrderId.HasValue ? r.OrderId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : null));
         }
 
         if (rows.Count == 0)

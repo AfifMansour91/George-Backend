@@ -231,20 +231,14 @@ namespace George.Services
                     cancelToken).ConfigureAwait(false);
             }
 
-            try
-            {
-                await _promotionStorage
-                    .RecordPromotionMetricsFromOrderAsync(
-                        created.CreationTime,
-                        MapOrderSourceToPromotionChannel(order.Source),
-                        items,
-                        cancelToken)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "RecordPromotionMetricsFromOrderAsync failed orderId={OrderId}", created.Id);
-            }
+            await PersistOrderPromotionRedemptionsAsync(
+                req.SiteId,
+                created.Id,
+                order.ExternalOrderId,
+                order.Source,
+                created.CreationTime,
+                ResolvedPromotionsFromStampedItems(items),
+                cancelToken).ConfigureAwait(false);
 
             await RecordOrderStatusChangeAsync(
                 created.Id,
@@ -1704,50 +1698,33 @@ namespace George.Services
 
                 try
                 {
-                    var oldPromoItems = updated.OrderItem?.Where(i => i.PromotionId is > 0).ToList() ?? new List<OrderItem>();
-                    if (oldPromoItems.Count > 0)
-                    {
-                        await _promotionStorage
-                            .ReversePromotionMetricsFromOrderAsync(
-                                updated.CreationTime,
-                                MapOrderSourceToPromotionChannel(updated.Source),
-                                oldPromoItems,
-                                cancelToken)
-                            .ConfigureAwait(false);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "ReversePromotionMetricsFromOrderAsync failed woo update orderId={OrderId}", existing.Id);
-                }
-
-                try
-                {
-                    await ApplyPromotionsToOrderItemsAsync(
-                        siteId, "woocommerce", updateCustomer.Id, updated.CouponCode, updated.CustomerPhone, updateItems, wooUpdateProductCache, cancelToken)
+                    await _promotionStorage
+                        .ReverseOrderPromotionRedemptionsAsync(siteId, existing.Id, cancelToken)
                         .ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "ApplyPromotionsToOrderItemsAsync failed woo update siteId={SiteId}", siteId);
+                    _logger.LogError(ex, "ReverseOrderPromotionRedemptionsAsync failed woo update orderId={OrderId}", existing.Id);
+                }
+
+                IReadOnlyList<ResolvedOrderPromotion> wooUpdatePromos;
+                try
+                {
+                    wooUpdatePromos = await ResolveWooCommerceOrderPromotionsAsync(
+                        siteId, updated.Source, updateCustomer.Id, updated.CouponCode, updated.CustomerPhone, updateItems, payload, wooUpdateProductCache, cancelToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "ResolveWooCommerceOrderPromotionsAsync failed woo update siteId={SiteId}", siteId);
+                    wooUpdatePromos = System.Array.Empty<ResolvedOrderPromotion>();
                 }
 
                 await _orderStorage.ReplaceOrderItemsAsync(existing.Id, updateItems, cancelToken).ConfigureAwait(false);
 
-                try
-                {
-                    await _promotionStorage
-                        .RecordPromotionMetricsFromOrderAsync(
-                            updated.CreationTime,
-                            MapOrderSourceToPromotionChannel(updated.Source),
-                            updateItems,
-                            cancelToken)
-                        .ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "RecordPromotionMetricsFromOrderAsync failed woo update orderId={OrderId}", existing.Id);
-                }
+                await PersistOrderPromotionRedemptionsAsync(
+                    siteId, existing.Id, updated.ExternalOrderId, updated.Source, updated.CreationTime, wooUpdatePromos, cancelToken)
+                    .ConfigureAwait(false);
                 var loaded = await _orderStorage.GetOrderByIdAsync(existing.Id, cancelToken).ConfigureAwait(false);
                 if (loaded != null && payload.HasEmbeddedGatewayPayment())
                     await TryApplyEmbeddedWooCommerceGatewayPaymentAsync(loaded, payload, cancelToken).ConfigureAwait(false);
@@ -1856,33 +1833,24 @@ namespace George.Services
                 items.Add(oi);
             }
 
+            IReadOnlyList<ResolvedOrderPromotion> wooCreatePromos;
             try
             {
-                await ApplyPromotionsToOrderItemsAsync(
-                    siteId, order.Source, customer.Id, order.CouponCode, order.CustomerPhone, items, wooProductCache, cancelToken)
+                wooCreatePromos = await ResolveWooCommerceOrderPromotionsAsync(
+                    siteId, order.Source, customer.Id, order.CouponCode, order.CustomerPhone, items, payload, wooProductCache, cancelToken)
                     .ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "ApplyPromotionsToOrderItemsAsync failed woo create siteId={SiteId}", siteId);
+                _logger.LogError(ex, "ResolveWooCommerceOrderPromotionsAsync failed woo create siteId={SiteId}", siteId);
+                wooCreatePromos = System.Array.Empty<ResolvedOrderPromotion>();
             }
 
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken).ConfigureAwait(false);
 
-            try
-            {
-                await _promotionStorage
-                    .RecordPromotionMetricsFromOrderAsync(
-                        created.CreationTime,
-                        MapOrderSourceToPromotionChannel(order.Source),
-                        items,
-                        cancelToken)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "RecordPromotionMetricsFromOrderAsync failed woo create orderId={OrderId}", created.Id);
-            }
+            await PersistOrderPromotionRedemptionsAsync(
+                siteId, created.Id, order.ExternalOrderId, order.Source, created.CreationTime, wooCreatePromos, cancelToken)
+                .ConfigureAwait(false);
 
             await RecordOrderStatusChangeAsync(
                 created.Id,
@@ -3009,20 +2977,13 @@ namespace George.Services
         {
             try
             {
-                var items = order.OrderItem?.Where(i => i.PromotionId is > 0).ToList() ?? new List<OrderItem>();
-                if (items.Count == 0)
-                    return;
                 await _promotionStorage
-                    .ReversePromotionMetricsFromOrderAsync(
-                        order.CreationTime,
-                        MapOrderSourceToPromotionChannel(order.Source),
-                        items,
-                        cancelToken)
+                    .ReverseOrderPromotionRedemptionsAsync(order.SiteId, order.Id, cancelToken)
                     .ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "ReversePromotionMetricsFromOrderAsync failed orderId={OrderId}", order.Id);
+                _logger.LogError(ex, "ReverseOrderPromotionRedemptionsAsync failed orderId={OrderId}", order.Id);
             }
         }
 

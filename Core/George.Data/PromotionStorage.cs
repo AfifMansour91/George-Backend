@@ -221,84 +221,118 @@ public class PromotionStorage : StorageBase
     }
 
     /// <summary>
-    /// Increment per-promotion daily aggregates from order lines stamped at finalize.
-    /// Spec: <c>Sprint4/מבצעים.md</c> — מימושים / הכנסות / הנחות.
-    /// One redemption per order per promotion; revenue and discount summed across matching lines.
+    /// Record an order's promotion redemptions idempotently. One <see cref="PromotionOrderRedemption"/>
+    /// row per (site, order, promotion); the <see cref="PromotionDailyMetric"/> delta is applied only
+    /// when a row is newly inserted, so re-syncing the same order never inflates KPIs.
+    /// Spec: <c>shop-manager/docs/wooCommerceEngines/ORDER_PROMOTION_SYNC_SPEC.md</c>.
     /// </summary>
-    public Task RecordPromotionMetricsFromOrderAsync(
-        DateTime orderCreationTimeUtc,
+    public async Task RecordOrderPromotionRedemptionsAsync(
+        int siteId,
+        int orderId,
+        string? externalOrderId,
         string? orderChannel,
-        IReadOnlyList<OrderItem> items,
-        CancellationToken cancelToken) =>
-        ApplyPromotionMetricsDeltaAsync(orderCreationTimeUtc, orderChannel, items, redemptionDelta: 1, cancelToken);
-
-    /// <summary>Undo <see cref="RecordPromotionMetricsFromOrderAsync"/> when an order is cancelled.</summary>
-    public Task ReversePromotionMetricsFromOrderAsync(
-        DateTime orderCreationTimeUtc,
-        string? orderChannel,
-        IReadOnlyList<OrderItem> items,
-        CancellationToken cancelToken) =>
-        ApplyPromotionMetricsDeltaAsync(orderCreationTimeUtc, orderChannel, items, redemptionDelta: -1, cancelToken);
-
-    /// <summary>
-    /// RevenueNis = sum of net line totals (TotalPrice − DiscountAmount) on promoted lines.
-    /// DiscountNis = sum of promotion discounts. Yield KPI = RevenueNis / DiscountNis.
-    /// </summary>
-    private async Task ApplyPromotionMetricsDeltaAsync(
-        DateTime orderCreationTimeUtc,
-        string? orderChannel,
-        IReadOnlyList<OrderItem> items,
-        int redemptionDelta,
+        DateTime redeemedAtUtc,
+        IReadOnlyList<(int PromotionId, decimal DiscountAmount, decimal RevenueNis)> rows,
         CancellationToken cancelToken)
     {
-        if (items == null || items.Count == 0)
+        if (orderId <= 0 || rows == null || rows.Count == 0)
             return;
 
         var channel = NormalizeMetricChannel(orderChannel);
-        var groups = items
-            .Where(i => i.PromotionId is > 0)
-            .GroupBy(i => i.PromotionId!.Value)
-            .Select(g => new
-            {
-                PromotionId = g.Key,
-                RevenueNis = g.Sum(x => (x.TotalPrice ?? 0m) - (x.DiscountAmount ?? 0m)),
-                DiscountNis = g.Sum(x => x.DiscountAmount ?? 0m),
-            })
-            .ToList();
+        var metricDate = DateTime.SpecifyKind(redeemedAtUtc.Date, DateTimeKind.Utc);
 
-        if (groups.Count == 0)
-            return;
+        var alreadyCounted = (await _dbContext.PromotionOrderRedemption
+            .Where(r => r.SiteId == siteId && r.OrderId == orderId)
+            .Select(r => r.PromotionId)
+            .ToListAsync(cancelToken)
+            .ConfigureAwait(false)).ToHashSet();
 
-        var metricDate = DateTime.SpecifyKind(orderCreationTimeUtc.Date, DateTimeKind.Utc);
-        var promoIds = groups.Select(g => g.PromotionId).ToList();
-
-        var existing = await _dbContext.PromotionDailyMetric
-            .Where(m => m.MetricDateUtc == metricDate && m.Channel == channel && promoIds.Contains(m.PromotionId))
-            .ToDictionaryAsync(m => m.PromotionId, cancelToken)
-            .ConfigureAwait(false);
-
-        foreach (var g in groups)
+        var changed = false;
+        foreach (var g in rows.GroupBy(r => r.PromotionId))
         {
-            if (!existing.TryGetValue(g.PromotionId, out var row))
-            {
-                if (redemptionDelta < 0)
-                    continue;
-                row = new PromotionDailyMetric
-                {
-                    PromotionId = g.PromotionId,
-                    MetricDateUtc = metricDate,
-                    Channel = channel,
-                };
-                _dbContext.PromotionDailyMetric.Add(row);
-                existing[g.PromotionId] = row;
-            }
+            var promotionId = g.Key;
+            if (promotionId <= 0 || alreadyCounted.Contains(promotionId)) continue;
 
-            row.RedemptionsCount = Math.Max(0, row.RedemptionsCount + redemptionDelta);
-            row.RevenueNis = Math.Max(0m, row.RevenueNis + redemptionDelta * g.RevenueNis);
-            row.DiscountNis = Math.Max(0m, row.DiscountNis + redemptionDelta * g.DiscountNis);
+            var discount = Math.Max(0m, g.Sum(x => x.DiscountAmount));
+            var revenue = Math.Max(0m, g.Sum(x => x.RevenueNis));
+
+            _dbContext.PromotionOrderRedemption.Add(new PromotionOrderRedemption
+            {
+                SiteId = siteId,
+                OrderId = orderId,
+                ExternalOrderId = string.IsNullOrWhiteSpace(externalOrderId) ? null : externalOrderId.Trim(),
+                PromotionId = promotionId,
+                DiscountAmount = discount,
+                RevenueNis = revenue,
+                Channel = channel,
+                RedeemedAtUtc = redeemedAtUtc,
+                RecordedAtUtc = DateTime.UtcNow,
+                Source = "order",
+            });
+            await ApplyDailyMetricDeltaAsync(promotionId, metricDate, channel, +1, revenue, discount, cancelToken)
+                .ConfigureAwait(false);
+            alreadyCounted.Add(promotionId);
+            changed = true;
         }
 
+        if (changed)
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Undo an order's recorded redemptions (cancellation / pre-update reset): subtracts the exact KPI each row added, then deletes the rows.</summary>
+    public async Task ReverseOrderPromotionRedemptionsAsync(int siteId, int orderId, CancellationToken cancelToken)
+    {
+        if (orderId <= 0) return;
+        var rows = await _dbContext.PromotionOrderRedemption
+            .Where(r => r.SiteId == siteId && r.OrderId == orderId)
+            .ToListAsync(cancelToken)
+            .ConfigureAwait(false);
+        if (rows.Count == 0) return;
+
+        foreach (var r in rows)
+        {
+            var metricDate = DateTime.SpecifyKind(r.RedeemedAtUtc.Date, DateTimeKind.Utc);
+            await ApplyDailyMetricDeltaAsync(r.PromotionId, metricDate, r.Channel, -1, r.RevenueNis, r.DiscountAmount, cancelToken)
+                .ConfigureAwait(false);
+        }
+        _dbContext.PromotionOrderRedemption.RemoveRange(rows);
         await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Apply a delta to a single (promotion, day, channel) KPI bucket on the tracked context. Caller saves.
+    /// RevenueNis = net line totals; DiscountNis = promotion discounts. Yield KPI = RevenueNis / DiscountNis.
+    /// </summary>
+    private async Task ApplyDailyMetricDeltaAsync(
+        int promotionId,
+        DateTime metricDate,
+        string channel,
+        int redemptionDelta,
+        decimal revenueDelta,
+        decimal discountDelta,
+        CancellationToken cancelToken)
+    {
+        var row = await _dbContext.PromotionDailyMetric
+            .FirstOrDefaultAsync(
+                m => m.PromotionId == promotionId && m.MetricDateUtc == metricDate && m.Channel == channel,
+                cancelToken)
+            .ConfigureAwait(false);
+
+        if (row == null)
+        {
+            if (redemptionDelta < 0) return;
+            row = new PromotionDailyMetric
+            {
+                PromotionId = promotionId,
+                MetricDateUtc = metricDate,
+                Channel = channel,
+            };
+            _dbContext.PromotionDailyMetric.Add(row);
+        }
+
+        row.RedemptionsCount = Math.Max(0, row.RedemptionsCount + redemptionDelta);
+        row.RevenueNis = Math.Max(0m, row.RevenueNis + redemptionDelta * revenueDelta);
+        row.DiscountNis = Math.Max(0m, row.DiscountNis + redemptionDelta * discountDelta);
     }
 
     /// <summary>
@@ -306,52 +340,84 @@ public class PromotionStorage : StorageBase
     /// </summary>
     public async Task<int> RecordExternalRedemptionsAsync(
         int siteId,
-        IReadOnlyList<(int PromotionId, decimal DiscountAmount, DateTime RedeemedAtUtc, string Channel)> rows,
+        IReadOnlyList<(int PromotionId, decimal DiscountAmount, DateTime RedeemedAtUtc, string Channel, string? ExternalOrderId)> rows,
         CancellationToken cancelToken)
     {
         if (rows == null || rows.Count == 0) return 0;
 
         var promoIds = rows.Select(r => r.PromotionId).Distinct().ToList();
-        var validIds = await _dbContext.Promotion.AsNoTracking()
+        var validSet = (await _dbContext.Promotion.AsNoTracking()
             .Where(p => p.SiteId == siteId && !p.IsDeleted && promoIds.Contains(p.Id))
             .Select(p => p.Id)
             .ToListAsync(cancelToken)
-            .ConfigureAwait(false);
-        var validSet = validIds.ToHashSet();
+            .ConfigureAwait(false)).ToHashSet();
+
+        // Resolve external order ids to George orders so a redemption already counted via the order
+        // sync (Source=order) is not counted again here (the double-count fix).
+        var extIds = rows
+            .Where(r => !string.IsNullOrWhiteSpace(r.ExternalOrderId))
+            .Select(r => r.ExternalOrderId!.Trim())
+            .Distinct()
+            .ToList();
+        var orderByExternalId = extIds.Count == 0
+            ? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            : (await _dbContext.Order.AsNoTracking()
+                .Where(o => o.SiteId == siteId && o.ExternalOrderId != null && extIds.Contains(o.ExternalOrderId))
+                .Select(o => new { o.Id, o.ExternalOrderId })
+                .ToListAsync(cancelToken)
+                .ConfigureAwait(false))
+                .GroupBy(o => o.ExternalOrderId!.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+
+        var orderIds = orderByExternalId.Values.Distinct().ToList();
+        var countedByOrder = orderIds.Count == 0
+            ? new HashSet<(int, int)>()
+            : (await _dbContext.PromotionOrderRedemption.AsNoTracking()
+                .Where(r => r.SiteId == siteId && orderIds.Contains(r.OrderId))
+                .Select(r => new { r.OrderId, r.PromotionId })
+                .ToListAsync(cancelToken)
+                .ConfigureAwait(false))
+                .Select(r => (r.OrderId, r.PromotionId))
+                .ToHashSet();
 
         var recorded = 0;
-        foreach (var group in rows.Where(r => validSet.Contains(r.PromotionId)).GroupBy(r => new
+        foreach (var r in rows.Where(r => validSet.Contains(r.PromotionId)))
         {
-            r.PromotionId,
-            MetricDate = DateTime.SpecifyKind(r.RedeemedAtUtc.Date, DateTimeKind.Utc),
-            Channel = NormalizeMetricChannel(r.Channel),
-        }))
-        {
-            var discountSum = group.Sum(g => Math.Max(0m, g.DiscountAmount));
-            var count = group.Count();
+            var channel = NormalizeMetricChannel(r.Channel);
+            var metricDate = DateTime.SpecifyKind(r.RedeemedAtUtc.Date, DateTimeKind.Utc);
+            var discount = Math.Max(0m, r.DiscountAmount);
+            var ext = string.IsNullOrWhiteSpace(r.ExternalOrderId) ? null : r.ExternalOrderId.Trim();
 
-            var row = await _dbContext.PromotionDailyMetric
-                .FirstOrDefaultAsync(
-                    m => m.PromotionId == group.Key.PromotionId
-                         && m.MetricDateUtc == group.Key.MetricDate
-                         && m.Channel == group.Key.Channel,
-                    cancelToken)
-                .ConfigureAwait(false);
-
-            if (row == null)
+            if (ext != null && orderByExternalId.TryGetValue(ext, out var orderId))
             {
-                row = new PromotionDailyMetric
-                {
-                    PromotionId = group.Key.PromotionId,
-                    MetricDateUtc = group.Key.MetricDate,
-                    Channel = group.Key.Channel,
-                };
-                _dbContext.PromotionDailyMetric.Add(row);
-            }
+                if (countedByOrder.Contains((orderId, r.PromotionId)))
+                    continue; // already counted via the order payload — skip (no double count).
 
-            row.RedemptionsCount = Math.Max(0, row.RedemptionsCount + count);
-            row.DiscountNis = Math.Max(0m, row.DiscountNis + discountSum);
-            recorded += count;
+                _dbContext.PromotionOrderRedemption.Add(new PromotionOrderRedemption
+                {
+                    SiteId = siteId,
+                    OrderId = orderId,
+                    ExternalOrderId = ext,
+                    PromotionId = r.PromotionId,
+                    DiscountAmount = discount,
+                    RevenueNis = 0m, // external reports carry no line revenue.
+                    Channel = channel,
+                    RedeemedAtUtc = r.RedeemedAtUtc,
+                    RecordedAtUtc = DateTime.UtcNow,
+                    Source = "external",
+                });
+                await ApplyDailyMetricDeltaAsync(r.PromotionId, metricDate, channel, +1, 0m, discount, cancelToken)
+                    .ConfigureAwait(false);
+                countedByOrder.Add((orderId, r.PromotionId));
+                recorded++;
+            }
+            else
+            {
+                // No matching George order (store using Promeng without order sync) — legacy aggregate.
+                await ApplyDailyMetricDeltaAsync(r.PromotionId, metricDate, channel, +1, 0m, discount, cancelToken)
+                    .ConfigureAwait(false);
+                recorded++;
+            }
         }
 
         if (recorded > 0)
