@@ -45,7 +45,11 @@ public class CustomerService : ServiceBase
             MarketingApproval = c.MarketingApproval,
             CreatedAt = ToUtcIsoString(c.CreationTime),
             IsReturning = row.OrderCountAtSite > 1,
-            LastOrderId = row.LastOrderIdAtSite
+            LastOrderId = row.LastOrderIdAtSite,
+            LastOrderDate = row.LastOrderAtSite.HasValue ? ToUtcIsoString(row.LastOrderAtSite.Value) : null,
+            ChurnThresholdDays = row.ChurnThresholdDays,
+            IsActive = row.IsActive,
+            IsAtRisk = row.IsAtRisk
         };
     }
 
@@ -132,10 +136,41 @@ public class CustomerService : ServiceBase
         var response = new ApiResponse<CustomerStatsRes> { Data = new CustomerStatsRes() };
         var dto = await _customerStorage.GetCustomerStatsAsync(siteId, cancelToken).ConfigureAwait(false);
         response.Data!.TotalCustomers = dto.TotalCustomers;
-        response.Data.ReturningCustomersPercent = dto.ReturningCustomersPercent;
-        response.Data.AverageReturnDays = dto.AverageReturnDays;
+        response.Data.ActiveCustomers = dto.ActiveCustomers;
+        response.Data.ActiveCustomersTrendPercent = dto.ActiveCustomersTrendPercent;
+        response.Data.Aov = dto.Aov;
+        response.Data.AovTrendPercent = dto.AovTrendPercent;
         response.Data.AverageOrdersPerCustomer = dto.AverageOrdersPerCustomer;
+        response.Data.AverageOrdersPerCustomerTrend = dto.AverageOrdersPerCustomerTrend;
+        response.Data.AverageReturnDays = dto.AverageReturnDays;
+        response.Data.AverageReturnDaysTrend = dto.AverageReturnDaysTrend;
+        response.Data.AtRiskCustomers = dto.AtRiskCustomers;
+        response.Data.AtRiskCustomersTrendPercent = dto.AtRiskCustomersTrendPercent;
+        response.Data.ChurnThresholdDays = dto.ChurnThresholdDays;
+        response.Data.HasComparison = dto.HasComparison;
+        response.Data.ReturningCustomersPercent = dto.ReturningCustomersPercent;
         return response;
+    }
+
+    public async Task<IApiResponse<CustomerDetailRes>> CreateCustomerAsync(int? siteId, CustomerCreateReq req, CancellationToken cancelToken = default)
+    {
+        var response = new ApiResponse<CustomerDetailRes>();
+        if (req == null || string.IsNullOrWhiteSpace(req.Name))
+            return CreateResponse(response, StatusCode.InvalidRequest, "Name is required");
+        if (siteId is not int sid || sid <= 0)
+            return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required");
+
+        var created = await _customerStorage.CreateCustomerAsync(
+            sid,
+            req.Name.Trim(),
+            string.IsNullOrWhiteSpace(req.Phone) ? null : req.Phone.Trim(),
+            string.IsNullOrWhiteSpace(req.Email) ? null : req.Email.Trim(),
+            string.IsNullOrWhiteSpace(req.City) ? null : req.City.Trim(),
+            string.IsNullOrWhiteSpace(req.Notes) ? null : req.Notes.Trim(),
+            cancelToken).ConfigureAwait(false);
+        if (created == null)
+            return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
+        return await GetCustomerAsync(created.Id, sid, cancelToken).ConfigureAwait(false);
     }
 
     public async Task<IApiResponse<CustomerDetailRes>> GetCustomerAsync(int id, int? siteId, CancellationToken cancelToken = default)

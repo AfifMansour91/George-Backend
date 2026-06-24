@@ -15,4 +15,13 @@ public class CustomerRes
     public string? CreatedAt { get; set; }
     public bool? IsReturning { get; set; }
     public int? LastOrderId { get; set; }
+    /// <summary>ISO 8601 (UTC) date of the customer's most recent order at this site, or null when none. Used for active / at-risk-of-churn filtering on the client.</summary>
+    public string? LastOrderDate { get; set; }
+
+    /// <summary>Personal inactivity threshold (days): single-order customers use the site default; customers with history use avg gap × 2.</summary>
+    public int? ChurnThresholdDays { get; set; }
+    /// <summary>Has ≥1 order and last order is within the personal threshold.</summary>
+    public bool IsActive { get; set; }
+    /// <summary>Has ≥1 order and last order passed the personal threshold (at risk of churn).</summary>
+    public bool IsAtRisk { get; set; }
 }

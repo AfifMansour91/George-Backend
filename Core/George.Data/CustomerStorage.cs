@@ -182,6 +182,35 @@ public class CustomerStorage : StorageBase
         public decimal TotalRevenueAtSite { get; set; }
         public int? LastOrderIdAtSite { get; set; }
         public DateTime? LastOrderAtSite { get; set; }
+        public int? ChurnThresholdDays { get; set; }
+        public bool IsActive { get; set; }
+        public bool IsAtRisk { get; set; }
+    }
+
+    internal const int DefaultInactiveAfterDays = 14;
+
+    /// <summary>Personal inactivity threshold (days) for a customer: single-order customers use the site default;
+    /// customers with history use the average gap between consecutive orders × 2.</summary>
+    internal static int ChurnThresholdForOrders(IReadOnlyList<DateTime> orderedDatesAsc, int defaultDays)
+    {
+        if (orderedDatesAsc.Count <= 1) return defaultDays;
+        double sumGaps = 0;
+        for (var i = 1; i < orderedDatesAsc.Count; i++)
+            sumGaps += (orderedDatesAsc[i] - orderedDatesAsc[i - 1]).TotalDays;
+        var avgGap = sumGaps / (orderedDatesAsc.Count - 1);
+        var threshold = (int)Math.Round(avgGap * 2);
+        return threshold < 1 ? 1 : threshold;
+    }
+
+    private async Task<int> GetSiteInactiveAfterDaysAsync(int siteId, CancellationToken cancelToken)
+    {
+        var configured = await _dbContext.Set<Site>()
+            .AsNoTracking()
+            .Where(s => s.Id == siteId)
+            .Select(s => s.CustomerInactiveAfterDays)
+            .FirstOrDefaultAsync(cancelToken)
+            .ConfigureAwait(false);
+        return configured is int d && d > 0 ? d : DefaultInactiveAfterDays;
     }
 
     public async Task<DataListResult<CustomerListRow>> GetCustomersAsync(
@@ -214,25 +243,41 @@ public class CustomerStorage : StorageBase
             .Select(o => new { o.CustomerId!.Value, o.Total, o.CreationTime, o.Id })
             .ToListAsync(cancelToken).ConfigureAwait(false);
 
+        var defaultDays = await GetSiteInactiveAfterDaysAsync(siteId, cancelToken).ConfigureAwait(false);
+        var now = DateTime.UtcNow;
+
         var statsByCustomer = ordersAtSite
             .GroupBy(x => x.Value)
             .ToDictionary(g => g.Key, g =>
             {
-                var list = g.OrderByDescending(x => x.CreationTime).ToList();
-                var last = list[0];
-                return (OrderCountAtSite: list.Count,
-                    TotalRevenueAtSite: list.Where(x => x.Total.HasValue).Sum(x => x.Total!.Value),
+                var asc = g.OrderBy(x => x.CreationTime).ToList();
+                var last = asc[asc.Count - 1];
+                var dates = asc.Select(x => x.CreationTime).ToList();
+                var threshold = ChurnThresholdForOrders(dates, defaultDays);
+                var atRisk = (now - last.CreationTime).TotalDays >= threshold;
+                return (OrderCountAtSite: asc.Count,
+                    TotalRevenueAtSite: asc.Where(x => x.Total.HasValue).Sum(x => x.Total!.Value),
                     LastOrderIdAtSite: (int?)last.Id,
-                    LastOrderAtSite: (DateTime?)last.CreationTime);
+                    LastOrderAtSite: (DateTime?)last.CreationTime,
+                    ChurnThresholdDays: (int?)threshold,
+                    IsAtRisk: atRisk,
+                    IsActive: !atRisk);
             });
 
-        var rows = customersAtSite.Select(c => new CustomerListRow
+        var rows = customersAtSite.Select(c =>
         {
-            Customer = c,
-            OrderCountAtSite = statsByCustomer.TryGetValue(c.Id, out var s) ? s.OrderCountAtSite : 0,
-            TotalRevenueAtSite = statsByCustomer.TryGetValue(c.Id, out var s2) ? s2.TotalRevenueAtSite : 0,
-            LastOrderIdAtSite = statsByCustomer.TryGetValue(c.Id, out var s3) ? s3.LastOrderIdAtSite : null,
-            LastOrderAtSite = statsByCustomer.TryGetValue(c.Id, out var s4) ? s4.LastOrderAtSite : null
+            var has = statsByCustomer.TryGetValue(c.Id, out var s);
+            return new CustomerListRow
+            {
+                Customer = c,
+                OrderCountAtSite = has ? s.OrderCountAtSite : 0,
+                TotalRevenueAtSite = has ? s.TotalRevenueAtSite : 0,
+                LastOrderIdAtSite = has ? s.LastOrderIdAtSite : null,
+                LastOrderAtSite = has ? s.LastOrderAtSite : null,
+                ChurnThresholdDays = has ? s.ChurnThresholdDays : null,
+                IsActive = has && s.IsActive,
+                IsAtRisk = has && s.IsAtRisk,
+            };
         }).ToList();
 
         if (filter?.Search?.Trim() is { } search)
@@ -302,10 +347,66 @@ public class CustomerStorage : StorageBase
         return (orders.Count, totalRevenue, last.Id, last.CreationTime, averageReturnDays);
     }
 
+    /// <summary>Point-in-time customer snapshot used for both "now" and "30 days ago" (for trends).</summary>
+    private readonly struct StatsSnapshot
+    {
+        public int ActiveCustomers { get; init; }
+        public int AtRiskCustomers { get; init; }
+        public int CustomersWithOrders { get; init; }
+        public decimal AverageOrdersPerCustomer { get; init; }
+        public decimal AverageReturnDays { get; init; }
+        public int ReturningPercent { get; init; }
+    }
+
+    /// <summary>Computes a snapshot of customer metrics as they stood at <paramref name="refTime"/>, using only orders up to that time.
+    /// Each customer's churn threshold is derived from their order cadence as of refTime. Averages exclude customers with 0 orders.</summary>
+    private static StatsSnapshot ComputeSnapshot(IEnumerable<List<DateTime>> customerOrderDatesAsc, DateTime refTime, int defaultDays)
+    {
+        int withOrders = 0, active = 0, atRisk = 0, returning = 0, totalOrders = 0;
+        var returnGaps = new List<double>();
+        foreach (var allDates in customerOrderDatesAsc)
+        {
+            var dates = allDates.Count > 0 && allDates[allDates.Count - 1] <= refTime
+                ? allDates
+                : allDates.Where(d => d <= refTime).ToList();
+            if (dates.Count == 0) continue;
+            withOrders++;
+            totalOrders += dates.Count;
+            var threshold = ChurnThresholdForOrders(dates, defaultDays);
+            if ((refTime - dates[dates.Count - 1]).TotalDays >= threshold) atRisk++;
+            else active++;
+            if (dates.Count >= 2)
+            {
+                returning++;
+                for (var i = 1; i < dates.Count; i++)
+                    returnGaps.Add((dates[i] - dates[i - 1]).TotalDays);
+            }
+        }
+        return new StatsSnapshot
+        {
+            ActiveCustomers = active,
+            AtRiskCustomers = atRisk,
+            CustomersWithOrders = withOrders,
+            AverageOrdersPerCustomer = withOrders > 0 ? (decimal)totalOrders / withOrders : 0m,
+            AverageReturnDays = returnGaps.Count > 0 ? (decimal)returnGaps.Average() : 0m,
+            ReturningPercent = withOrders > 0 ? (int)Math.Round(100m * returning / withOrders) : 0,
+        };
+    }
+
+    /// <summary>Percent change vs a previous value; null when the previous value is non-positive (can't form a ratio).</summary>
+    private static decimal? PercentChange(decimal current, decimal previous)
+    {
+        if (previous <= 0) return null;
+        return Math.Round((current - previous) / previous * 100m, 1);
+    }
+
     public async Task<CustomerStatsDto> GetCustomerStatsAsync(int? siteId, CancellationToken cancelToken)
     {
         var result = new CustomerStatsDto();
         if (siteId is not int sid || sid <= 0) return result;
+
+        var defaultDays = await GetSiteInactiveAfterDaysAsync(sid, cancelToken).ConfigureAwait(false);
+        result.ChurnThresholdDays = defaultDays;
 
         result.TotalCustomers = await CustomerSet.CountAsync(c => c.SiteId == sid, cancelToken).ConfigureAwait(false);
         if (result.TotalCustomers == 0) return result;
@@ -313,22 +414,82 @@ public class CustomerStorage : StorageBase
         var ordersAtSite = await _dbContext.Order
             .AsNoTracking()
             .Where(o => !o.IsDeleted && o.Status != "Cancelled" && o.SiteId == sid && o.CustomerId != null)
-            .Select(o => new { o.CustomerId!.Value, o.CreationTime })
+            .Select(o => new { o.CustomerId!.Value, o.CreationTime, o.Total })
             .ToListAsync(cancelToken).ConfigureAwait(false);
 
-        var byCustomer = ordersAtSite.GroupBy(x => x.Value).Select(g => g.OrderBy(x => x.CreationTime).ToList()).ToList();
-        var totalOrders = byCustomer.Sum(x => x.Count);
-        result.AverageOrdersPerCustomer = (decimal)totalOrders / result.TotalCustomers;
-        result.ReturningCustomersPercent = (int)Math.Round(100m * byCustomer.Count(x => x.Count > 1) / result.TotalCustomers);
-
-        var returnDays = new List<int>();
-        foreach (var list in byCustomer.Where(x => x.Count >= 2))
+        if (ordersAtSite.Count == 0)
         {
-            for (var i = 1; i < list.Count; i++)
-                returnDays.Add((int)(list[i].CreationTime - list[i - 1].CreationTime).TotalDays);
+            result.ChurnThresholdDays = defaultDays;
+            return result;
         }
-        result.AverageReturnDays = returnDays.Count > 0 ? (int)Math.Round(returnDays.Average()) : 0;
+
+        var now = DateTime.UtcNow;
+        var t30 = now.AddDays(-30);
+        var t60 = now.AddDays(-60);
+
+        var customerOrderDates = ordersAtSite
+            .GroupBy(x => x.Value)
+            .Select(g => g.Select(x => x.CreationTime).OrderBy(d => d).ToList())
+            .ToList();
+
+        var current = ComputeSnapshot(customerOrderDates, now, defaultDays);
+        result.ActiveCustomers = current.ActiveCustomers;
+        result.AtRiskCustomers = current.AtRiskCustomers;
+        result.AverageOrdersPerCustomer = current.AverageOrdersPerCustomer;
+        result.AverageReturnDays = (int)Math.Round(current.AverageReturnDays);
+        result.ReturningCustomersPercent = current.ReturningPercent;
+
+        // AOV: last 30 days (sum of order totals ÷ order count).
+        var aovWindow = ordersAtSite.Where(o => o.CreationTime > t30 && o.CreationTime <= now && o.Total.HasValue).ToList();
+        result.Aov = aovWindow.Count > 0 ? aovWindow.Sum(o => o.Total!.Value) / aovWindow.Count : 0m;
+
+        // Trends vs 30 days ago — only when the site has ≥30 days of order history.
+        var earliestOrder = ordersAtSite.Min(o => o.CreationTime);
+        result.HasComparison = (now - earliestOrder).TotalDays >= 30;
+        if (result.HasComparison)
+        {
+            var prior = ComputeSnapshot(customerOrderDates, t30, defaultDays);
+            result.ActiveCustomersTrendPercent = PercentChange(current.ActiveCustomers, prior.ActiveCustomers);
+            result.AtRiskCustomersTrendPercent = PercentChange(current.AtRiskCustomers, prior.AtRiskCustomers);
+            result.AverageOrdersPerCustomerTrend = Math.Round(current.AverageOrdersPerCustomer - prior.AverageOrdersPerCustomer, 1);
+            result.AverageReturnDaysTrend = Math.Round(current.AverageReturnDays - prior.AverageReturnDays, 1);
+
+            var aovPrevWindow = ordersAtSite.Where(o => o.CreationTime > t60 && o.CreationTime <= t30 && o.Total.HasValue).ToList();
+            var aovPrev = aovPrevWindow.Count > 0 ? aovPrevWindow.Sum(o => o.Total!.Value) / aovPrevWindow.Count : 0m;
+            result.AovTrendPercent = PercentChange(result.Aov, aovPrev);
+        }
+
         return result;
+    }
+
+    /// <summary>Create a new customer for the given site from the customers screen. The owning account is resolved from the site. When a phone is supplied that already exists for the site, the existing (or soft-deleted) row is updated/reactivated instead of inserting a duplicate.</summary>
+    public async Task<Customer?> CreateCustomerAsync(
+        int siteId,
+        string name,
+        string? phone,
+        string? email,
+        string? city,
+        string? notes,
+        CancellationToken cancelToken = default)
+    {
+        var accountId = await _dbContext.Set<Site>()
+            .AsNoTracking()
+            .Where(s => s.Id == siteId)
+            .Select(s => (int?)s.AccountId)
+            .FirstOrDefaultAsync(cancelToken)
+            .ConfigureAwait(false);
+        if (accountId == null) return null;
+
+        return await GetOrCreateCustomerByPhoneAsync(
+            siteId,
+            accountId.Value,
+            phone,
+            name,
+            email,
+            city,
+            defaultAddress: null,
+            notes: notes,
+            cancelToken: cancelToken).ConfigureAwait(false);
     }
 
     public async Task<Order?> GetLastOrderByCustomerIdAsync(int customerId, int? siteId, CancellationToken cancelToken)
@@ -439,8 +600,18 @@ public class CustomerStorage : StorageBase
     public class CustomerStatsDto
     {
         public int TotalCustomers { get; set; }
-        public int ReturningCustomersPercent { get; set; }
-        public int AverageReturnDays { get; set; }
+        public int ActiveCustomers { get; set; }
+        public decimal? ActiveCustomersTrendPercent { get; set; }
+        public decimal Aov { get; set; }
+        public decimal? AovTrendPercent { get; set; }
         public decimal AverageOrdersPerCustomer { get; set; }
+        public decimal? AverageOrdersPerCustomerTrend { get; set; }
+        public int AverageReturnDays { get; set; }
+        public decimal? AverageReturnDaysTrend { get; set; }
+        public int AtRiskCustomers { get; set; }
+        public decimal? AtRiskCustomersTrendPercent { get; set; }
+        public int ChurnThresholdDays { get; set; }
+        public bool HasComparison { get; set; }
+        public int ReturningCustomersPercent { get; set; }
     }
 }

@@ -48,6 +48,13 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _customerSvc.GetCustomersAsync(request, cancelToken));
         }
 
+        [HttpPost]
+        [ProducesResponseType(typeof(IApiResponse<CustomerDetailRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> CreateCustomerAsync([FromBody] CustomerCreateReq? req, [FromQuery] int? siteId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _customerSvc.CreateCustomerAsync(siteId, req ?? new CustomerCreateReq(), cancelToken));
+        }
+
         [HttpGet("Stats")]
         [ProducesResponseType(typeof(IApiResponse<CustomerStatsRes>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetStatsAsync([FromQuery] int? siteId, CancellationToken cancelToken = default)
