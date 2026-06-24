@@ -2275,7 +2275,9 @@ namespace George.Services
                             {
                                 ["id"] = attrId,
                                 ["position"] = preservedAttributeCount + index,
-                                ["visible"] = true,
+                                // Variation attributes drive the dropdown only; they must NOT be "visible on the
+                                // product page" or Woo also lists the option values in the Additional-information table.
+                                ["visible"] = false,
                                 ["variation"] = true,
                                 ["options"] = GetProductOptionValuesForWooSync(option, product)
                             };

@@ -37,13 +37,16 @@ namespace George.Services
                 Data = new ApiListResponse<CategoryRes>()
             };
 
-            // Safety net: a non-master (account) user may only ever see their OWN account's categories, regardless
+            // Safety net: an account-scoped user may only ever see their OWN account's categories, regardless
             // of what the client sends. Without this the list endpoint returned categories from EVERY account when
-            // the client omitted AccountId. Master/super-admin users are unrestricted (can query any/all accounts).
+            // the client omitted AccountId. Master AND system-admin (UserRole.Admin / super-admin) users are
+            // unrestricted: they browse and impersonate any account, so we must NOT pin them to their home account
+            // — doing so overrode the impersonated AccountId the client sent and hid the impersonated account's
+            // categories. Same isMaster-or-Admin rule used by DashboardService / SiteAccessService.
             if (!AuthUser.IsMaster && AuthUser.Id > 0)
             {
                 var user = await _userStorage.GetUserAsync(AuthUser.Id, cancelToken);
-                if (user?.AccountId != null)
+                if (user?.AccountId != null && user.RoleId != (int)UserRole.Admin)
                 {
                     request.Filter ??= new CategoryFilter();
                     request.Filter.AccountId = user.AccountId.Value;
