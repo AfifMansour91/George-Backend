@@ -467,7 +467,18 @@ namespace George.Services
                 var reloaded = await _productStorage.GetProductAsync(productId, cancelToken);
                 response.Data = MapProductToRes(reloaded!);
                 await ApplyEffectiveSiteValuesAsync(new List<ProductRes> { response.Data }, siteId, cancelToken);
-                // TODO (Woo per-site sync, todo 5): push effective values to this site's WooCommerce store.
+
+                // MultiSite Phase 2: push the per-site effective values to THIS site's WooCommerce store only.
+                // The override path mutates no canonical data and returns here, so the regular assigned-sites sync
+                // (in the canonical branch below) is never reached — without this, per-site edits (name/price/
+                // stock/category) never reach WooCommerce. SyncProductAsync overlays the site's override when the
+                // account is network-managed. Fire-and-forget, same pattern as the canonical update path.
+                var productIdForSiteSync = productId;
+                var editedSiteId = siteId;
+                _ = Task.Run(async () =>
+                {
+                    await SyncProductToWooCommerceForAssignedSitesAsync(productIdForSiteSync, new List<int> { editedSiteId }, CancellationToken.None);
+                }, CancellationToken.None);
                 return CreateResponse(response);
             }
 
