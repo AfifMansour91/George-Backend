@@ -3340,6 +3340,12 @@ namespace George.Services
                             if (wooVariationIdToUse.HasValue)
                                 mediaId = await TryGetWooVariationCompatImageMediaIdAsync(baseUrl, wooProductId, wooVariationIdToUse.Value, compatFile, httpClient, cancelToken).ConfigureAwait(false);
 
+                            // Reuse a previously-uploaded attachment with the same deterministic filename instead of
+                            // uploading a fresh copy on every sync. The compat filename is stable per (product, variant,
+                            // image url), so a media-library lookup by slug stops the library filling with duplicates.
+                            if (!mediaId.HasValue)
+                                mediaId = await TryFindWordPressMediaIdByCompatFileNameAsync(wpJsonBaseForMedia, compatFile, httpClient, cancelToken).ConfigureAwait(false);
+
                             string? woltSideloadSrc = null;
                             if (!mediaId.HasValue)
                             {
@@ -3381,6 +3387,13 @@ namespace George.Services
                             var variationImageFileName = await ResolveWooImageSideloadFileNameAsync(vUrl, variant.Sku, cancelToken).ConfigureAwait(false);
                             wooVariation["image"] = new { src = vUrl, name = variationImageFileName };
                         }
+                    }
+                    else
+                    {
+                        // No image on this variant: explicitly clear it in Woo (image_id 0). Without sending "image",
+                        // a PUT leaves the previously-synced variation image in place, so removing a variant image in
+                        // George never took effect on the website.
+                        wooVariation["image"] = new { id = 0 };
                     }
 
                     variantSyncWork.Add((variant, wooVariationIdToUse, wooVariation));
@@ -4096,12 +4109,57 @@ namespace George.Services
                 var body = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
                 var v = TryDeserialize<WooVariationReadForImage>(body);
                 if (v?.image == null || v.image.id <= 0) return null;
-                if (string.Equals((v.image.name ?? "").Trim(), compatImageFileName, StringComparison.OrdinalIgnoreCase))
+                // WordPress stores the attachment title without the file extension, so compare by stem; otherwise
+                // the names never matched ("george-woo-var-…" vs "george-woo-var-….jpg") and every sync re-uploaded.
+                if (string.Equals(
+                        Path.GetFileNameWithoutExtension((v.image.name ?? "").Trim()),
+                        Path.GetFileNameWithoutExtension(compatImageFileName.Trim()),
+                        StringComparison.OrdinalIgnoreCase))
                     return v.image.id;
             }
             catch
             {
                 // ignore
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Looks up an existing WordPress media attachment by the deterministic compat filename (matched on slug,
+        /// which WordPress derives from the filename stem). Lets variation-image sync reuse an already-uploaded
+        /// attachment instead of POSTing a duplicate to wp/v2/media on every product save. Returns null on any
+        /// failure (e.g. media GET not permitted with WooCommerce keys) so the caller falls back to uploading.
+        /// </summary>
+        private async Task<int?> TryFindWordPressMediaIdByCompatFileNameAsync(
+            string wpJsonBaseUrl,
+            string compatFileName,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            try
+            {
+                var slug = Path.GetFileNameWithoutExtension(compatFileName)?.Trim();
+                if (string.IsNullOrWhiteSpace(slug))
+                    return null;
+
+                var url = $"{wpJsonBaseUrl.TrimEnd('/')}/wp/v2/media?slug={Uri.EscapeDataString(slug)}&per_page=1&_fields=id";
+                using var resp = await httpClient.GetAsync(url, cancelToken).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode)
+                    return null;
+
+                var body = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+                using var doc = JsonDocument.Parse(body);
+                if (doc.RootElement.ValueKind == JsonValueKind.Array && doc.RootElement.GetArrayLength() > 0)
+                {
+                    var first = doc.RootElement[0];
+                    if (first.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number && idEl.TryGetInt32(out var id) && id > 0)
+                        return id;
+                }
+            }
+            catch
+            {
+                // ignore; caller falls back to uploading
             }
 
             return null;

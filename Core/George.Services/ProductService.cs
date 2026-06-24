@@ -389,6 +389,17 @@ namespace George.Services
                     await _overrideStorage.SetSiteImagesAsync(productId, siteId, req.ImageUrls, cancelToken);
                 }
 
+                // Product OPTIONS are structural (the variation dimensions + allowed values), not a per-site price/
+                // stock value — they are shared by every site's variant dropdown, exactly like the canonical variants
+                // created below. Persist them canonically here too. Without this, adding variations to a previously
+                // option-less product on a single site leaves ProductOption empty, so the WooCommerce sync registers
+                // no variation attribute and skips every variant (variable product with zero variations in Woo).
+                if (req.ProductOptions != null)
+                {
+                    var optionDtos = req.ProductOptions.Select(o => new ProductOptionDto { Name = o.Name, Values = o.Values ?? new List<string>() }).ToList();
+                    await _productStorage.UpdateProductOptionsAsync(productId, optionDtos, cancelToken: cancelToken);
+                }
+
                 // Per-site VARIATIONS: a selected-site edit must NOT mutate the canonical variants of OTHER sites.
                 // Existing variants get per-site overrides (price/sale/stock); a variant the user removed in this
                 // branch is hidden here only; a brand-NEW variant added in this branch is created canonically but
