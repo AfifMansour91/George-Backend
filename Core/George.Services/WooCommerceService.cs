@@ -55,6 +55,7 @@ namespace George.Services
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ProductSiteOverrideStorage _overrideStorage;
+        private readonly IIntegrationLogQueue _integrationLogQueue;
         // Per-instance cache of "is this site network-managed?" so single-site/non-network syncs skip all
         // per-site override lookups entirely (zero overhead + absolute separation from the override feature).
         // ConcurrentDictionary: a batch may sync multiple products in parallel on one service instance.
@@ -90,9 +91,11 @@ namespace George.Services
             IFileStorage fileStorage,
             IHttpClientFactory httpClientFactory,
             IServiceScopeFactory scopeFactory,
-            ProductSiteOverrideStorage overrideStorage
+            ProductSiteOverrideStorage overrideStorage,
+            IIntegrationLogQueue integrationLogQueue
         ) : base(logger, mapper, cache)
         {
+            _integrationLogQueue = integrationLogQueue;
             _siteStorage = siteStorage;
             _categoryStorage = categoryStorage;
             _productStorage = productStorage;
@@ -2944,21 +2947,67 @@ namespace George.Services
             // here from a per-site secret. Spec §4 Q6 / §5.
             using var content = new StringContent(body, Encoding.UTF8, "application/json");
             var url = $"{ocV1Base}/orders";
-            var response = await httpClient.PostAsync(url, content, cancelToken);
-            if (response.IsSuccessStatusCode)
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int? httpStatus = null;
+            var success = false;
+            string? responseBody = null;
+            string? errorText = null;
+            try
             {
-                _logger.LogInformation(
-                    "oc-storeos POST /orders succeeded. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}, httpStatus={HttpStatus}",
-                    siteId, orderId, order.ExternalOrderId, (int)response.StatusCode);
+                var response = await httpClient.PostAsync(url, content, cancelToken);
+                httpStatus = (int)response.StatusCode;
+                success = response.IsSuccessStatusCode;
+                responseBody = await response.Content.ReadAsStringAsync(cancelToken);
+                if (success)
+                {
+                    _logger.LogInformation(
+                        "oc-storeos POST /orders succeeded. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}, httpStatus={HttpStatus}",
+                        siteId, orderId, order.ExternalOrderId, httpStatus);
+                }
+                else
+                {
+                    errorText = responseBody;
+                    _logger.LogWarning(
+                        "oc-storeos POST /orders failed. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}, httpStatus={HttpStatus}, error={Error}",
+                        siteId, orderId, order.ExternalOrderId, httpStatus, errorText);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                var err = await response.Content.ReadAsStringAsync(cancelToken);
-                _logger.LogWarning(
-                    "oc-storeos POST /orders failed. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}, httpStatus={HttpStatus}, error={Error}",
-                    siteId, orderId, order.ExternalOrderId, (int)response.StatusCode, err);
+                errorText = ex.Message;
+                _logger.LogWarning(ex,
+                    "oc-storeos POST /orders threw. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}",
+                    siteId, orderId, order.ExternalOrderId);
             }
+            sw.Stop();
+
+            // Persist the full request/response so the admin sync-logs screen can show what was sent.
+            // Best-effort: a logging failure must never break the order sync.
+            // Non-blocking: enqueue for the background batch writer so the sync doesn't wait for the DB write.
+            _integrationLogQueue.TryEnqueue(new IntegrationLog
+            {
+                SiteId = siteId,
+                EntityType = IntegrationLogEntityType.Order.ToWire(),
+                EntityId = orderId,
+                ExternalId = order.ExternalOrderId,
+                Direction = IntegrationLogDirection.Outbound.ToWire(),
+                Operation = IntegrationLogOperation.OutboundOrderSync.ToWire(),
+                Level = (success ? IntegrationLogLevel.Info : IntegrationLogLevel.Error).ToWire(),
+                Url = url,
+                HttpStatus = httpStatus,
+                Success = success,
+                RequestJson = body,
+                ResponseBody = TruncateForLog(responseBody, 8000),
+                DurationMs = (int)sw.ElapsedMilliseconds,
+                Error = TruncateForLog(errorText, 1000),
+                CreatedAtUtc = DateTime.UtcNow,
+            });
         }
+
+        /// <summary>Trim a value to fit a log column / keep huge responses bounded. Null/empty pass through.</summary>
+        private static string? TruncateForLog(string? value, int maxChars) =>
+            string.IsNullOrEmpty(value) || value!.Length <= maxChars ? value : value.Substring(0, maxChars);
 
         /// <summary>Parses slot text like "11:00 - 12:00" or "11:00-12:00" into start/end; single time yields both equal.</summary>
         private static void ParseDeliverySlotWindow(string? deliveryOrPickupTime, out string? slotStart, out string? slotEnd)

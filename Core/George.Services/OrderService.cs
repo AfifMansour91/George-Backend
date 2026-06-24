@@ -36,6 +36,7 @@ namespace George.Services
         private readonly PromotionStorage _promotionStorage;
         private readonly Payments.PaymentService _paymentService;
         private readonly IOrderRealtimeNotifier _orderRealtimeNotifier;
+        private readonly IIntegrationLogQueue _integrationLogQueue;
         private readonly string? _publicAppBaseUrl;
         private static readonly Dictionary<string, string> VoucherSourceLabels = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -69,10 +70,12 @@ namespace George.Services
             PromotionStorage promotionStorage,
             Payments.PaymentService paymentService,
             IOrderRealtimeNotifier orderRealtimeNotifier,
+            IIntegrationLogQueue integrationLogQueue,
             IConfiguration configuration)
             : base(logger, mapper, cache)
         {
             _orderStorage = orderStorage;
+            _integrationLogQueue = integrationLogQueue;
             _customerStorage = customerStorage;
             _siteStorage = siteStorage;
             _accountStorage = accountStorage;
@@ -220,6 +223,9 @@ namespace George.Services
             }
 
             var created = await _orderStorage.CreateOrderAsync(order, items, cancelToken);
+
+            await LogOrderEventAsync(IntegrationLogOperation.Create, IntegrationLogDirection.Internal, req.SiteId, created.Id, order.ExternalOrderId, true,
+                requestJson: OrderLogSnapshot(order), cancelToken: cancelToken).ConfigureAwait(false);
 
             if (req.SavePermanentCustomerDiscount.HasValue)
             {
@@ -467,6 +473,8 @@ namespace George.Services
                     _logger.LogWarning("Send reminder SMS returned false for order {OrderId}.", orderId);
                     return CreateResponse(response, StatusCode.InvalidRequest, "SMS send failed. Check SMS provider configuration and customer phone.");
                 }
+                await LogOrderEventAsync(IntegrationLogOperation.Reminder, IntegrationLogDirection.Internal, order.SiteId, order.Id, order.ExternalOrderId, true,
+                    cancelToken: cancelToken).ConfigureAwait(false);
                 return response;
             }
             catch (Exception ex)
@@ -609,7 +617,11 @@ namespace George.Services
             }
             response.Data = _mapper.Map<OrderRes>(loaded);
             if (loaded != null)
+            {
                 await EnrichOrderResAsync(response.Data, loaded, cancelToken).ConfigureAwait(false);
+                await LogOrderEventAsync(IntegrationLogOperation.Update, IntegrationLogDirection.Internal, loaded.SiteId, loaded.Id, loaded.ExternalOrderId, true,
+                    requestJson: OrderLogSnapshot(loaded), cancelToken: cancelToken).ConfigureAwait(false);
+            }
             return response;
         }
 
@@ -643,6 +655,8 @@ namespace George.Services
                 DateTime.UtcNow,
                 cancelToken).ConfigureAwait(false);
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, order, "order cancel", statusOverrideForWcRest: "cancelled", cancelToken).ConfigureAwait(false);
+            await LogOrderEventAsync(IntegrationLogOperation.Cancel, IntegrationLogDirection.Internal, order.SiteId, order.Id, order.ExternalOrderId, true,
+                requestJson: OrderLogSnapshot(order), cancelToken: cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(order);
             await EnrichOrderResAsync(response.Data!, order, cancelToken).ConfigureAwait(false);
             return response;
@@ -774,7 +788,11 @@ namespace George.Services
             var forResponse = loaded ?? updated;
             response.Data = _mapper.Map<OrderRes>(forResponse);
             if (forResponse != null)
+            {
                 await EnrichOrderResAsync(response.Data, forResponse, cancelToken).ConfigureAwait(false);
+                await LogOrderEventAsync(IntegrationLogOperation.AddItems, IntegrationLogDirection.Internal, forResponse.SiteId, forResponse.Id, forResponse.ExternalOrderId, true,
+                    requestJson: OrderLogSnapshot(forResponse), cancelToken: cancelToken).ConfigureAwait(false);
+            }
             return response;
         }
 
@@ -818,7 +836,11 @@ namespace George.Services
             var forResponse = loaded ?? updated;
             response.Data = _mapper.Map<OrderRes>(forResponse);
             if (forResponse != null)
+            {
                 await EnrichOrderResAsync(response.Data, forResponse, cancelToken).ConfigureAwait(false);
+                await LogOrderEventAsync(IntegrationLogOperation.RemoveItem, IntegrationLogDirection.Internal, forResponse.SiteId, forResponse.Id, forResponse.ExternalOrderId, true,
+                    requestJson: OrderLogSnapshot(forResponse), cancelToken: cancelToken).ConfigureAwait(false);
+            }
             return response;
         }
 
@@ -875,7 +897,11 @@ namespace George.Services
             var forResponse = loaded ?? updated;
             response.Data = _mapper.Map<OrderRes>(forResponse);
             if (forResponse != null)
+            {
                 await EnrichOrderResAsync(response.Data, forResponse, cancelToken).ConfigureAwait(false);
+                await LogOrderEventAsync(IntegrationLogOperation.Picking, IntegrationLogDirection.Internal, forResponse.SiteId, forResponse.Id, forResponse.ExternalOrderId, true,
+                    requestJson: OrderLogSnapshot(forResponse), cancelToken: cancelToken).ConfigureAwait(false);
+            }
             return response;
         }
 
@@ -1725,6 +1751,8 @@ namespace George.Services
                 await PersistOrderPromotionRedemptionsAsync(
                     siteId, existing.Id, updated.ExternalOrderId, updated.Source, updated.CreationTime, wooUpdatePromos, cancelToken)
                     .ConfigureAwait(false);
+                await LogOrderEventAsync(IntegrationLogOperation.Update, IntegrationLogDirection.Inbound, siteId, existing.Id, updated.ExternalOrderId, true,
+                    requestJson: OrderLogSnapshot(updated), cancelToken: cancelToken).ConfigureAwait(false);
                 var loaded = await _orderStorage.GetOrderByIdAsync(existing.Id, cancelToken).ConfigureAwait(false);
                 if (loaded != null && payload.HasEmbeddedGatewayPayment())
                     await TryApplyEmbeddedWooCommerceGatewayPaymentAsync(loaded, payload, cancelToken).ConfigureAwait(false);
@@ -1851,6 +1879,9 @@ namespace George.Services
             await PersistOrderPromotionRedemptionsAsync(
                 siteId, created.Id, order.ExternalOrderId, order.Source, created.CreationTime, wooCreatePromos, cancelToken)
                 .ConfigureAwait(false);
+
+            await LogOrderEventAsync(IntegrationLogOperation.Create, IntegrationLogDirection.Inbound, siteId, created.Id, order.ExternalOrderId, true,
+                requestJson: OrderLogSnapshot(order), cancelToken: cancelToken).ConfigureAwait(false);
 
             await RecordOrderStatusChangeAsync(
                 created.Id,
@@ -2581,6 +2612,8 @@ namespace George.Services
                     loaded.GatewayPaymentExternalOrderId,
                     loaded.GatewayPaymentSiteId);
                 await _paymentService.PersistOrderPaymentStateAsync(loaded, cancelToken).ConfigureAwait(false);
+                await LogOrderEventAsync(IntegrationLogOperation.Payment, IntegrationLogDirection.Inbound, siteId, loaded.Id, loaded.ExternalOrderId, true,
+                    requestJson: OrderLogSnapshot(loaded), cancelToken: cancelToken).ConfigureAwait(false);
                 await _paymentService.LogWooCommerceGatewayPaymentEventAsync(
                     loaded.Id,
                     payment.Payment,

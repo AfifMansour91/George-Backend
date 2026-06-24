@@ -58,6 +58,8 @@ public partial class GeorgeDBContextBase : DbContext
 
     public virtual DbSet<PromotionOrderRedemption> PromotionOrderRedemption { get; set; }
 
+    public virtual DbSet<IntegrationLog> IntegrationLog { get; set; }
+
     public virtual DbSet<OrderPaymentEvent> OrderPaymentEvent { get; set; }
 
     public virtual DbSet<RealtimeHubLog> RealtimeHubLog { get; set; }
@@ -560,6 +562,14 @@ public partial class GeorgeDBContextBase : DbContext
             entity.HasIndex(e => new { e.SiteId, e.OrderId, e.PromotionId }, "UX_PromotionOrderRedemption_Site_Order_Promotion").IsUnique();
             entity.HasIndex(e => e.PromotionId, "IX_PromotionOrderRedemption_PromotionId");
             entity.HasIndex(e => new { e.SiteId, e.ExternalOrderId }, "IX_PromotionOrderRedemption_Site_ExternalOrder");
+        });
+
+        modelBuilder.Entity<IntegrationLog>(entity =>
+        {
+            entity.HasIndex(e => new { e.SiteId, e.CreatedAtUtc }, "IX_IntegrationLog_Site_Created");
+            entity.HasIndex(e => new { e.SiteId, e.EntityType, e.CreatedAtUtc }, "IX_IntegrationLog_Site_Type_Created");
+            entity.HasIndex(e => new { e.EntityType, e.EntityId }, "IX_IntegrationLog_Entity");
+            entity.HasIndex(e => e.ExternalId, "IX_IntegrationLog_ExternalId");
         });
 
         modelBuilder.Entity<OrderItem>(entity =>

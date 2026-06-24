@@ -29,6 +29,7 @@ namespace George.Api
 			services.AddHostedService<DataRefreshService>();
 			services.AddHostedService<PromotionExpiryService>();
 			services.AddHostedService<ExpiredTimedProductLabelsHostedService>();
+			services.AddHostedService<IntegrationLogBackgroundWriter>();
 		}
 
 		protected override void Initialize(IServiceCollection services)
