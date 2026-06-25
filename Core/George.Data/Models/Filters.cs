@@ -171,6 +171,8 @@ namespace George.Common
     {
         public int? AccountId { get; set; }
         public int? SiteId { get; set; }
+        /// <summary>Filter to a single customer's orders (all statuses unless Status is also specified).</summary>
+        public int? CustomerId { get; set; }
         /// <summary>One or more statuses; bound from repeated query params (e.g. Filter.Status=Completed&amp;Filter.Status=Cancelled).</summary>
         public List<string>? Status { get; set; }       // New | InTreatment | Ready | Completed | Cancelled
         public string? Source { get; set; }       // Website | Kiosk | Phone

@@ -85,16 +85,16 @@ namespace George.Api.Controllers
 
         [HttpDelete("{id:int}")]
         [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
-        public async Task<IActionResult> DeleteCustomerAsync([FromRoute] int id, [FromQuery] int? siteId, CancellationToken cancelToken = default)
+        public async Task<IActionResult> DeleteCustomerAsync([FromRoute] int id, [FromQuery] int? siteId, [FromQuery] bool withOrders = false, CancellationToken cancelToken = default)
         {
-            return await SafeCallWithErrorCatchingAsync(() => _customerSvc.DeleteCustomerAsync(id, siteId, cancelToken));
+            return await SafeCallWithErrorCatchingAsync(() => _customerSvc.DeleteCustomerAsync(id, siteId, withOrders, cancelToken));
         }
 
         [HttpPost("DeleteMany")]
         [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
-        public async Task<IActionResult> DeleteManyAsync([FromBody] DeleteManyCustomerReq? req, [FromQuery] int? siteId, CancellationToken cancelToken = default)
+        public async Task<IActionResult> DeleteManyAsync([FromBody] DeleteManyCustomerReq? req, [FromQuery] int? siteId, [FromQuery] bool withOrders = false, CancellationToken cancelToken = default)
         {
-            return await SafeCallWithErrorCatchingAsync(() => _customerSvc.DeleteManyAsync(req ?? new DeleteManyCustomerReq(), siteId, cancelToken));
+            return await SafeCallWithErrorCatchingAsync(() => _customerSvc.DeleteManyAsync(req ?? new DeleteManyCustomerReq(), siteId, withOrders, cancelToken));
         }
 
         [ApiExplorerSettings(IgnoreApi = true)]

@@ -32,6 +32,9 @@ namespace George.Data
             else if (filter?.AccountId.HasValue == true)
                 query = query.Where(o => o.AccountId == filter.AccountId!.Value);
 
+            if (filter?.CustomerId.HasValue == true)
+                query = query.Where(o => o.CustomerId == filter.CustomerId!.Value);
+
             if (filter?.Status != null && filter.Status.Count > 0)
             {
                 var statuses = filter.Status.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s!.Trim()).ToList();
@@ -40,7 +43,8 @@ namespace George.Data
                 else if (statuses.Count > 1)
                     query = query.Where(o => statuses.Contains(o.Status));
             }
-            else
+            // Default to active orders only — UNLESS listing a specific customer's orders, where we want all of them.
+            else if (filter?.CustomerId.HasValue != true)
                 query = query.Where(o => o.Status != "Completed" && o.Status != "Cancelled");
 
             if (filter?.Source.HasValue() == true)

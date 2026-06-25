@@ -11,15 +11,29 @@ namespace George.Services;
 public class CustomerService : ServiceBase
 {
     private readonly CustomerStorage _customerStorage;
+    private readonly OrderService _orderService;
 
     public CustomerService(
         ILogger<CustomerService> logger,
         IMapper mapper,
         CacheManager cache,
-        CustomerStorage customerStorage)
+        CustomerStorage customerStorage,
+        OrderService orderService)
         : base(logger, mapper, cache)
     {
         _customerStorage = customerStorage;
+        _orderService = orderService;
+    }
+
+    /// <summary>Cancel all of a customer's active orders (same side effects as a single cancel: stock restore, promotion-metric reversal, soft-delete).</summary>
+    private async Task CancelCustomerOrdersAsync(int customerId, int? siteId, CancellationToken cancelToken)
+    {
+        var orderIds = await _customerStorage.GetActiveOrderIdsByCustomerAsync(customerId, siteId, cancelToken).ConfigureAwait(false);
+        if (orderIds.Count == 0) return;
+        // The action filter only sets AuthUser on this service — forward it so cancels record the right actor.
+        _orderService.AuthUser = AuthUser;
+        foreach (var orderId in orderIds)
+            await _orderService.CancelOrderAsync(orderId, softDelete: true, cancelToken).ConfigureAwait(false);
     }
 
     /// <summary>Serialize DateTime as ISO 8601 with Z so clients display correct local time.</summary>
@@ -216,20 +230,27 @@ public class CustomerService : ServiceBase
         return await GetCustomerAsync(id, siteId, cancelToken).ConfigureAwait(false);
     }
 
-    public async Task<IApiResponse<bool>> DeleteCustomerAsync(int id, int? siteId, CancellationToken cancelToken = default)
+    public async Task<IApiResponse<bool>> DeleteCustomerAsync(int id, int? siteId, bool withOrders, CancellationToken cancelToken = default)
     {
         var response = new ApiResponse<bool> { Data = true };
+        if (withOrders)
+            await CancelCustomerOrdersAsync(id, siteId, cancelToken).ConfigureAwait(false);
         var deleted = await _customerStorage.DeleteCustomerAsync(id, siteId, cancelToken).ConfigureAwait(false);
         if (!deleted)
             return CreateResponse(response, StatusCode.ItemNotFound);
         return response;
     }
 
-    public async Task<IApiResponse<bool>> DeleteManyAsync(DeleteManyCustomerReq req, int? siteId, CancellationToken cancelToken = default)
+    public async Task<IApiResponse<bool>> DeleteManyAsync(DeleteManyCustomerReq req, int? siteId, bool withOrders, CancellationToken cancelToken = default)
     {
         var response = new ApiResponse<bool> { Data = true };
         if (req?.Ids != null && req.Ids.Count > 0)
+        {
+            if (withOrders)
+                foreach (var id in req.Ids)
+                    await CancelCustomerOrdersAsync(id, siteId, cancelToken).ConfigureAwait(false);
             await _customerStorage.DeleteCustomersAsync(req.Ids, siteId, cancelToken).ConfigureAwait(false);
+        }
         return response;
     }
 }

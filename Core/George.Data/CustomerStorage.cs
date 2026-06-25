@@ -494,10 +494,18 @@ public class CustomerStorage : StorageBase
 
     public async Task<Order?> GetLastOrderByCustomerIdAsync(int customerId, int? siteId, CancellationToken cancelToken)
     {
+        // Scope to the customer's OWN branch (a Customer row is per-site, so this is the branch the customer
+        // belongs to). We intentionally do NOT use the caller's `siteId` (the globally-selected site filter) —
+        // that caused the "last order empty while count > 0" bug when a different branch was selected.
+        var customerSiteId = await _dbContext.Set<Customer>()
+            .Where(c => c.Id == customerId)
+            .Select(c => (int?)c.SiteId)
+            .FirstOrDefaultAsync(cancelToken).ConfigureAwait(false);
+
         var query = _dbContext.Order
             .Where(o => !o.IsDeleted && o.Status != "Cancelled" && o.CustomerId == customerId);
-        if (siteId.HasValue && siteId.Value > 0)
-            query = query.Where(o => o.SiteId == siteId.Value);
+        if (customerSiteId.HasValue)
+            query = query.Where(o => o.SiteId == customerSiteId.Value);
         var lastOrderId = await query.OrderByDescending(o => o.CreationTime).Select(o => o.Id).FirstOrDefaultAsync(cancelToken).ConfigureAwait(false);
         if (lastOrderId == 0) return null;
         return await _dbContext.Order
@@ -564,6 +572,17 @@ public class CustomerStorage : StorageBase
             .Select(c => new { c.Id, c.Notes })
             .ToDictionaryAsync(x => x.Id, x => x.Notes, cancelToken)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>Non-cancelled, non-deleted order ids for a customer (site-scoped when siteId provided). Used when deleting a customer "with orders".</summary>
+    public async Task<List<int>> GetActiveOrderIdsByCustomerAsync(int customerId, int? siteId, CancellationToken cancelToken)
+    {
+        var query = _dbContext.Order
+            .AsNoTracking()
+            .Where(o => !o.IsDeleted && o.Status != "Cancelled" && o.CustomerId == customerId);
+        if (siteId.HasValue && siteId.Value > 0)
+            query = query.Where(o => o.SiteId == siteId.Value);
+        return await query.Select(o => o.Id).ToListAsync(cancelToken).ConfigureAwait(false);
     }
 
     /// <summary>Soft-delete customer (removes from that site only). If siteId is provided, only deletes when customer belongs to that site.</summary>
