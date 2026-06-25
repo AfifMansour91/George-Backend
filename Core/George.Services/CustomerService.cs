@@ -12,17 +12,56 @@ public class CustomerService : ServiceBase
 {
     private readonly CustomerStorage _customerStorage;
     private readonly OrderService _orderService;
+    private readonly IIntegrationLogQueue _integrationLogQueue;
+    private readonly IntegrationLogStorage _integrationLogStorage;
+    private readonly UserStorage _userStorage;
 
     public CustomerService(
         ILogger<CustomerService> logger,
         IMapper mapper,
         CacheManager cache,
         CustomerStorage customerStorage,
-        OrderService orderService)
+        OrderService orderService,
+        IIntegrationLogQueue integrationLogQueue,
+        IntegrationLogStorage integrationLogStorage,
+        UserStorage userStorage)
         : base(logger, mapper, cache)
     {
         _customerStorage = customerStorage;
         _orderService = orderService;
+        _integrationLogQueue = integrationLogQueue;
+        _integrationLogStorage = integrationLogStorage;
+        _userStorage = userStorage;
+    }
+
+    /// <summary>Build the customer's activity timeline (newest first) from IntegrationLog rows, resolving actor names.</summary>
+    private async Task<List<CustomerActivityItem>> BuildActivityAsync(int customerId, CancellationToken cancelToken)
+    {
+        var logs = await _integrationLogStorage.GetForEntityAsync(CustomerActivityLog.EntityTypeCustomer, customerId, cancelToken).ConfigureAwait(false);
+        if (logs.Count == 0) return new List<CustomerActivityItem>();
+        var capped = logs.Take(50).ToList();
+
+        // Resolve actor names once per distinct user id.
+        var actorIds = capped
+            .Select(l => CustomerActivityLog.ParsePayload(l.RequestJson)?.ActorUserId)
+            .Where(id => id is > 0).Select(id => id!.Value).Distinct().ToList();
+        var names = new Dictionary<int, string?>();
+        foreach (var uid in actorIds)
+            names[uid] = await _userStorage.GetUserNameAsync(uid, cancelToken).ConfigureAwait(false);
+
+        return capped.Select(l =>
+        {
+            var p = CustomerActivityLog.ParsePayload(l.RequestJson);
+            return new CustomerActivityItem
+            {
+                Id = l.Id.ToString(),
+                Title = p?.Title ?? l.Operation,
+                Subtitle = p?.Subtitle,
+                Date = ToUtcIsoString(l.CreatedAtUtc),
+                Type = l.Operation,
+                ActorName = p?.ActorUserId is int uid && names.TryGetValue(uid, out var n) && !string.IsNullOrWhiteSpace(n) ? n : null,
+            };
+        }).ToList();
     }
 
     /// <summary>Cancel all of a customer's active orders (same side effects as a single cancel: stock restore, promotion-metric reversal, soft-delete).</summary>
@@ -174,6 +213,7 @@ public class CustomerService : ServiceBase
         if (siteId is not int sid || sid <= 0)
             return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required");
 
+        var actorId = AuthUser.Id;
         var created = await _customerStorage.CreateCustomerAsync(
             sid,
             req.Name.Trim(),
@@ -181,7 +221,9 @@ public class CustomerService : ServiceBase
             string.IsNullOrWhiteSpace(req.Email) ? null : req.Email.Trim(),
             string.IsNullOrWhiteSpace(req.City) ? null : req.City.Trim(),
             string.IsNullOrWhiteSpace(req.Notes) ? null : req.Notes.Trim(),
-            cancelToken).ConfigureAwait(false);
+            onCreated: c => _integrationLogQueue.TryEnqueue(
+                CustomerActivityLog.Build(sid, c.Id, CustomerActivityLog.OpCreated, "הלקוח נוצר", "נוצר דרך ממשק הניהול", actorId)),
+            cancelToken: cancelToken).ConfigureAwait(false);
         if (created == null)
             return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
         return await GetCustomerAsync(created.Id, sid, cancelToken).ConfigureAwait(false);
@@ -195,7 +237,24 @@ public class CustomerService : ServiceBase
             return CreateResponse(response, StatusCode.ItemNotFound);
         var (orderCount, totalRevenue, lastOrderId, lastOrderAt, averageReturnDays) = await _customerStorage.GetCustomerGlobalStatsAsync(id, cancelToken).ConfigureAwait(false);
         response.Data = MapCustomerToDetailRes(customer, orderCount, totalRevenue, lastOrderId, lastOrderAt, averageReturnDays);
+        response.Data.Activity = await BuildActivityAsync(id, cancelToken).ConfigureAwait(false);
         return response;
+    }
+
+    /// <summary>Add a manual activity note to the customer timeline (records the acting user + time). Written synchronously so it shows immediately.</summary>
+    public async Task<IApiResponse<CustomerDetailRes>> AddActivityNoteAsync(int id, int? siteId, string? text, CancellationToken cancelToken = default)
+    {
+        var response = new ApiResponse<CustomerDetailRes>();
+        var note = text?.Trim();
+        if (string.IsNullOrWhiteSpace(note))
+            return CreateResponse(response, StatusCode.InvalidRequest, "Note text is required");
+        var customer = await _customerStorage.GetCustomerByIdAsync(id, siteId, cancelToken).ConfigureAwait(false);
+        if (customer == null)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+        var row = CustomerActivityLog.Build(customer.SiteId, id, CustomerActivityLog.OpNote, note!, null, AuthUser.Id);
+        try { await _integrationLogStorage.AddAsync(row, cancelToken).ConfigureAwait(false); }
+        catch { /* timeline write must not break the request */ }
+        return await GetCustomerAsync(id, siteId, cancelToken).ConfigureAwait(false);
     }
 
     public async Task<IApiResponse<CustomerLastOrderRes?>> GetLastOrderAsync(int id, int? siteId, CancellationToken cancelToken = default)
@@ -224,7 +283,12 @@ public class CustomerService : ServiceBase
         var response = new ApiResponse<CustomerDetailRes>();
         if (req == null || string.IsNullOrWhiteSpace(req.Name))
             return CreateResponse(response, StatusCode.InvalidRequest, "Name is required");
-        var updated = await _customerStorage.UpdateCustomerAsync(id, siteId, req.Name.Trim(), req.Notes, cancelToken).ConfigureAwait(false);
+        var (updated, phoneConflict) = await _customerStorage.UpdateCustomerAsync(
+            id, siteId, req.Name.Trim(), req.Notes, req.Email, req.Phone, req.City,
+            req.DeliveryStreet, req.DeliveryApartment, req.DeliveryFloor, req.DeliveryEntranceCode,
+            req.MarketingEmail, req.MarketingSms, cancelToken).ConfigureAwait(false);
+        if (phoneConflict)
+            return CreateResponse(response, StatusCode.InvalidRequest, "Phone number already in use by another customer");
         if (updated == null)
             return CreateResponse(response, StatusCode.ItemNotFound);
         return await GetCustomerAsync(id, siteId, cancelToken).ConfigureAwait(false);

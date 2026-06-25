@@ -45,6 +45,7 @@ public class CustomerStorage : StorageBase
         string? deliveryApartment = null,
         string? deliveryFloor = null,
         string? deliveryEntranceCode = null,
+        Action<Customer>? onCreated = null,
         CancellationToken cancelToken = default)
     {
         var normalized = NormalizePhone(phone);
@@ -102,6 +103,7 @@ public class CustomerStorage : StorageBase
         try
         {
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            onCreated?.Invoke(newCustomer);
             return newCustomer;
         }
         catch (DbUpdateException) when (normalized.Length >= 4)
@@ -470,6 +472,7 @@ public class CustomerStorage : StorageBase
         string? email,
         string? city,
         string? notes,
+        Action<Customer>? onCreated = null,
         CancellationToken cancelToken = default)
     {
         var accountId = await _dbContext.Set<Site>()
@@ -489,6 +492,7 @@ public class CustomerStorage : StorageBase
             city,
             defaultAddress: null,
             notes: notes,
+            onCreated: onCreated,
             cancelToken: cancelToken).ConfigureAwait(false);
     }
 
@@ -544,20 +548,53 @@ public class CustomerStorage : StorageBase
         await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
     }
 
-    /// <summary>Update customer name and optional permanent notes. If siteId is provided, only updates when customer belongs to that site.</summary>
-    public async Task<Customer?> UpdateCustomerAsync(int customerId, int? siteId, string name, string? notes, CancellationToken cancelToken)
+    /// <summary>Update customer CRM fields (name, note, contact, address, marketing). Null fields are left unchanged.
+    /// Returns (customer, phoneConflict): when the new phone collides with another customer at the site, returns (null, true).</summary>
+    public async Task<(Customer? Customer, bool PhoneConflict)> UpdateCustomerAsync(
+        int customerId, int? siteId,
+        string name, string? notes, string? email, string? phone, string? city,
+        string? deliveryStreet, string? deliveryApartment, string? deliveryFloor, string? deliveryEntranceCode,
+        bool? marketingEmail, bool? marketingSms,
+        CancellationToken cancelToken)
     {
         var query = _dbContext.Set<Customer>().Where(x => x.Id == customerId && !x.IsDeleted);
         if (siteId.HasValue && siteId.Value > 0)
             query = query.Where(x => x.SiteId == siteId.Value);
         var c = await query.FirstOrDefaultAsync(cancelToken).ConfigureAwait(false);
-        if (c == null) return null;
+        if (c == null) return (null, false);
+
         c.Name = string.IsNullOrWhiteSpace(name) ? "" : name.Trim();
-        if (notes != null)
-            c.Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+        if (notes != null) c.Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+        if (email != null) c.Email = string.IsNullOrWhiteSpace(email) ? null : email.Trim();
+        if (city != null) c.City = string.IsNullOrWhiteSpace(city) ? null : city.Trim();
+        if (deliveryStreet != null) c.DeliveryStreet = string.IsNullOrWhiteSpace(deliveryStreet) ? null : deliveryStreet.Trim();
+        if (deliveryApartment != null) c.DeliveryApartment = string.IsNullOrWhiteSpace(deliveryApartment) ? null : deliveryApartment.Trim();
+        if (deliveryFloor != null) c.DeliveryFloor = string.IsNullOrWhiteSpace(deliveryFloor) ? null : deliveryFloor.Trim();
+        if (deliveryEntranceCode != null) c.DeliveryEntranceCode = string.IsNullOrWhiteSpace(deliveryEntranceCode) ? null : deliveryEntranceCode.Trim();
+        if (marketingEmail.HasValue) c.MarketingEmail = marketingEmail.Value;
+        if (marketingSms.HasValue) c.MarketingSms = marketingSms.Value;
+
+        if (phone != null)
+        {
+            var newNormalized = NormalizePhone(phone);
+            if (newNormalized != c.NormalizedPhone)
+            {
+                if (newNormalized.Length >= 4)
+                {
+                    var conflict = await _dbContext.Set<Customer>()
+                        .IgnoreQueryFilters()
+                        .AnyAsync(x => x.SiteId == c.SiteId && x.Id != c.Id && x.NormalizedPhone == newNormalized, cancelToken)
+                        .ConfigureAwait(false);
+                    if (conflict) return (null, true);
+                }
+                c.NormalizedPhone = newNormalized;
+            }
+            c.Phone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
+        }
+
         c.UpdatedDate = DateTime.UtcNow;
         await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
-        return c;
+        return (c, false);
     }
 
     public async Task<Dictionary<int, string?>> GetNotesByCustomerIdsAsync(

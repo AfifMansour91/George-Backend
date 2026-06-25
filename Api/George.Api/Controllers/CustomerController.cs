@@ -83,6 +83,13 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _customerSvc.UpdateCustomerAsync(id, siteId, req ?? new CustomerUpdateReq(), cancelToken));
         }
 
+        [HttpPost("{id:int}/Activity")]
+        [ProducesResponseType(typeof(IApiResponse<CustomerDetailRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> AddActivityNoteAsync([FromRoute] int id, [FromBody] CustomerActivityNoteReq? req, [FromQuery] int? siteId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _customerSvc.AddActivityNoteAsync(id, siteId, req?.Text, cancelToken));
+        }
+
         [HttpDelete("{id:int}")]
         [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> DeleteCustomerAsync([FromRoute] int id, [FromQuery] int? siteId, [FromQuery] bool withOrders = false, CancellationToken cancelToken = default)

@@ -22,6 +22,7 @@ public class PaymentService : ServiceBase
     private readonly SmsProvider _smsProvider;
     private readonly PaymentTokenProtector _tokenProtector;
     private readonly CardcomGateway _cardcom;
+    private readonly IIntegrationLogQueue _integrationLogQueue;
     private readonly string? _publicAppBaseUrl;
     private readonly string? _publicApiBaseUrl;
 
@@ -36,6 +37,7 @@ public class PaymentService : ServiceBase
         SmsProvider smsProvider,
         PaymentTokenProtector tokenProtector,
         CardcomGateway cardcom,
+        IIntegrationLogQueue integrationLogQueue,
         IConfiguration configuration)
         : base(logger, mapper, cache)
     {
@@ -46,6 +48,7 @@ public class PaymentService : ServiceBase
         _smsProvider = smsProvider;
         _tokenProtector = tokenProtector;
         _cardcom = cardcom;
+        _integrationLogQueue = integrationLogQueue;
         _publicAppBaseUrl = configuration["App:PublicBaseUrl"] ?? configuration["PublicAppBaseUrl"] ?? configuration["Client:BaseUrl"];
         _publicApiBaseUrl = configuration["Payment:PublicApiBaseUrl"] ?? configuration["App:ApiPublicBaseUrl"];
     }
@@ -710,6 +713,12 @@ public class PaymentService : ServiceBase
         await TryPatchLinkedPaymentMethodFromOrderAsync(order, cancelToken);
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
         await TrySendInvoiceSmsAfterCaptureAsync(order, creds, cancelToken);
+
+        // Customer activity timeline: "charged".
+        if (order.CustomerId is int chargedCustomerId)
+            _integrationLogQueue.TryEnqueue(CustomerActivityLog.Build(
+                order.SiteId, chargedCustomerId, CustomerActivityLog.OpCharged, "הלקוח חויב",
+                $"₪{finalAmount:0.##}", AuthUser.Id));
 
         response.Data = new FinalizePickingPaymentRes
         {

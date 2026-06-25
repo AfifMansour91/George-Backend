@@ -30,6 +30,9 @@ public class CustomerActivityItem
     public string Id { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string? Subtitle { get; set; }
+    /// <summary>ISO 8601 (UTC) timestamp of the event; the client formats it.</summary>
     public string Date { get; set; } = string.Empty;
     public string? Type { get; set; }
+    /// <summary>Display name of the user who performed/added the event (when applicable).</summary>
+    public string? ActorName { get; set; }
 }

@@ -171,7 +171,9 @@ namespace George.Services
                 deliveryApartment: req.DeliveryApartment,
                 deliveryFloor: req.DeliveryFloor,
                 deliveryEntranceCode: req.DeliveryEntranceCode,
-                cancelToken).ConfigureAwait(false);
+                onCreated: c => _integrationLogQueue.TryEnqueue(
+                    CustomerActivityLog.Build(req.SiteId, c.Id, CustomerActivityLog.OpCreated, "הלקוח נוצר", "נוצר אוטומטית בעקבות הזמנה", AuthUser.Id)),
+                cancelToken: cancelToken).ConfigureAwait(false);
 
             var order = _mapper.Map<Order>(req);
             RebuildDeliveryAddressFromStreetAndCity(order);
@@ -226,6 +228,11 @@ namespace George.Services
 
             await LogOrderEventAsync(IntegrationLogOperation.Create, IntegrationLogDirection.Internal, req.SiteId, created.Id, order.ExternalOrderId, true,
                 requestJson: OrderLogSnapshot(order), cancelToken: cancelToken).ConfigureAwait(false);
+
+            // Customer activity timeline: "placed an order".
+            _integrationLogQueue.TryEnqueue(CustomerActivityLog.Build(
+                req.SiteId, customer.Id, CustomerActivityLog.OpOrderPlaced, "הלקוח ביצע הזמנה",
+                $"#{created.OrderNumber ?? created.Id.ToString()} · ₪{(order.Total ?? 0m):0.##}", AuthUser.Id));
 
             if (req.SavePermanentCustomerDiscount.HasValue)
             {
@@ -583,7 +590,7 @@ namespace George.Services
                         deliveryApartment: loaded.DeliveryApartment,
                         deliveryFloor: loaded.DeliveryFloor,
                         deliveryEntranceCode: loaded.DeliveryEntranceCode,
-                        cancelToken).ConfigureAwait(false);
+                        cancelToken: cancelToken).ConfigureAwait(false);
                 }
 
                 if (req.SavePermanentCustomerDiscount.HasValue)
@@ -1630,7 +1637,7 @@ namespace George.Services
                     siteId, site.AccountId, payload.Customer?.Phone ?? "", payload.Customer?.Name ?? "", email: payload.Customer?.Email,
                     city: sa?.City, defaultAddress: wcMainAddr, notes: null, marketingSms: null,
                     deliveryStreet: sa?.Street, deliveryApartment: sa?.Apartment, deliveryFloor: sa?.Floor, deliveryEntranceCode: sa?.ResolvedEntranceCode,
-                    cancelToken).ConfigureAwait(false);
+                    cancelToken: cancelToken).ConfigureAwait(false);
                 var updated = await _orderStorage.UpdateOrderAsync(existing.Id, o =>
                 {
                     o.Status = status;
@@ -1822,7 +1829,9 @@ namespace George.Services
                 req.SiteId, req.AccountId, req.CustomerPhone, req.CustomerName ?? "", email: req.CustomerEmail,
                 city: saNew?.City, defaultAddress: wcMainAddrForCustomer, notes: null, marketingSms: null,
                 deliveryStreet: saNew?.Street, deliveryApartment: saNew?.Apartment, deliveryFloor: saNew?.Floor, deliveryEntranceCode: saNew?.ResolvedEntranceCode,
-                cancelToken).ConfigureAwait(false);
+                onCreated: c => _integrationLogQueue.TryEnqueue(
+                    CustomerActivityLog.Build(req.SiteId, c.Id, CustomerActivityLog.OpCreated, "הלקוח נוצר", "נוצר אוטומטית בעקבות הזמנה מהאתר", null)),
+                cancelToken: cancelToken).ConfigureAwait(false);
             var order = _mapper.Map<Order>(req);
             ApplyWooCommerceShippingAddressToOrder(order, payload.ShippingAddress);
             order.CustomerId = customer.Id;
@@ -1882,6 +1891,11 @@ namespace George.Services
 
             await LogOrderEventAsync(IntegrationLogOperation.Create, IntegrationLogDirection.Inbound, siteId, created.Id, order.ExternalOrderId, true,
                 requestJson: OrderLogSnapshot(order), cancelToken: cancelToken).ConfigureAwait(false);
+
+            // Customer activity timeline: "placed an order" (website/Woo).
+            _integrationLogQueue.TryEnqueue(CustomerActivityLog.Build(
+                siteId, customer.Id, CustomerActivityLog.OpOrderPlaced, "הלקוח ביצע הזמנה",
+                $"#{created.OrderNumber ?? created.Id.ToString()} · ₪{(order.Total ?? 0m):0.##}", null));
 
             await RecordOrderStatusChangeAsync(
                 created.Id,
