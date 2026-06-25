@@ -48,7 +48,13 @@ namespace George.Data
                 query = query.Where(o => o.Status != "Completed" && o.Status != "Cancelled");
 
             if (filter?.Source.HasValue() == true)
-                query = query.Where(o => o.Source == filter.Source!.Trim());
+            {
+                // UI sends "Website" for storefront orders, but they are stored as "WooCommerce".
+                var source = filter.Source!.Trim();
+                if (string.Equals(source, "Website", StringComparison.OrdinalIgnoreCase))
+                    source = "WooCommerce";
+                query = query.Where(o => o.Source == source);
+            }
 
             if (filter?.DeliveryType.HasValue() == true)
                 query = query.Where(o => o.DeliveryType == filter.DeliveryType!.Trim());
