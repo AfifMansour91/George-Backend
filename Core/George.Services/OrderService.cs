@@ -1083,6 +1083,17 @@ namespace George.Services
         private static DateTime? ToUnspecifiedCalendarDate(DateTime? value) =>
             value.HasValue ? DateTime.SpecifyKind(value.Value.Date, DateTimeKind.Unspecified) : null;
 
+        /// <summary>True when the order is scheduled for a future calendar day (delivery date for shipping, pickup date for pickup) in Israel calendar time.</summary>
+        private static bool IsFutureScheduledOrder(Order order)
+        {
+            var today = GetIsraelCalendarTodayUnspecified();
+            var isPickup = string.Equals(order.DeliveryType, "Pickup", StringComparison.OrdinalIgnoreCase);
+            var scheduled = isPickup
+                ? (ToUnspecifiedCalendarDate(order.PickupDate) ?? ToUnspecifiedCalendarDate(order.DeliveryDate))
+                : (ToUnspecifiedCalendarDate(order.DeliveryDate) ?? ToUnspecifiedCalendarDate(order.PickupDate));
+            return scheduled.HasValue && scheduled.Value > today;
+        }
+
         private static DateTime? ParseWooCommerceDate(string dateStr)
         {
             if (string.IsNullOrWhiteSpace(dateStr)) return null;
@@ -1931,7 +1942,16 @@ namespace George.Services
                 return;
 
             var site = await _siteStorage.GetSiteAsync(order.SiteId, cancelToken).ConfigureAwait(false);
-            if (site == null || site.AutoPrintEnabled != true || site.PrintNewOrderImmediate != true)
+            if (site == null || site.AutoPrintEnabled != true)
+                return;
+
+            // Future (scheduled) orders use their own immediate-print toggle (PrintFutureImmediate);
+            // same-day orders use PrintNewOrderImmediate. Without this split a future order printed
+            // immediately whenever the same-day toggle was on, ignoring the future-order setting.
+            var immediatePrintEnabled = IsFutureScheduledOrder(order)
+                ? site.PrintFutureImmediate == true
+                : site.PrintNewOrderImmediate == true;
+            if (!immediatePrintEnabled)
                 return;
 
             // Ensure voucher is generated from a fully loaded order (including OrderItem rows).
