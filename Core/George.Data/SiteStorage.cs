@@ -156,6 +156,7 @@ namespace George.Data
             if (updated.DepreciationPercentagesJson != null) dbSite.DepreciationPercentagesJson = updated.DepreciationPercentagesJson;
             if (updated.PrepTimeMinutes.HasValue) dbSite.PrepTimeMinutes = updated.PrepTimeMinutes;
             if (updated.CustomerInactiveAfterDays.HasValue) dbSite.CustomerInactiveAfterDays = updated.CustomerInactiveAfterDays;
+            if (updated.IncludeIncompleteOrdersInStats.HasValue) dbSite.IncludeIncompleteOrdersInStats = updated.IncludeIncompleteOrdersInStats;
             if (updated.ShippingCost.HasValue) dbSite.ShippingCost = updated.ShippingCost;
             if (updated.FreeShippingAbove.HasValue) dbSite.FreeShippingAbove = updated.FreeShippingAbove;
             if (updated.IsraelCityPickerEnabled.HasValue) dbSite.IsraelCityPickerEnabled = updated.IsraelCityPickerEnabled;

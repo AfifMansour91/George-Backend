@@ -215,6 +215,18 @@ public class CustomerStorage : StorageBase
         return configured is int d && d > 0 ? d : DefaultInactiveAfterDays;
     }
 
+    /// <summary>Per-site setting: whether customer statistics include not-yet-completed orders (default true).</summary>
+    private async Task<bool> GetSiteIncludeIncompleteOrdersAsync(int siteId, CancellationToken cancelToken)
+    {
+        var v = await _dbContext.Set<Site>()
+            .AsNoTracking()
+            .Where(s => s.Id == siteId)
+            .Select(s => s.IncludeIncompleteOrdersInStats)
+            .FirstOrDefaultAsync(cancelToken)
+            .ConfigureAwait(false);
+        return v ?? true;
+    }
+
     public async Task<DataListResult<CustomerListRow>> GetCustomersAsync(
         CustomerFilter filter,
         PagingExDto paging,
@@ -239,9 +251,14 @@ public class CustomerStorage : StorageBase
             return res;
         }
 
-        var ordersAtSite = await _dbContext.Order
+        var includeIncomplete = await GetSiteIncludeIncompleteOrdersAsync(siteId, cancelToken).ConfigureAwait(false);
+        var ordersQuery = _dbContext.Order
             .AsNoTracking()
-            .Where(o => !o.IsDeleted && o.Status != "Cancelled" && o.SiteId == siteId && o.CustomerId != null && customerIds.Contains(o.CustomerId.Value))
+            .Where(o => !o.IsDeleted && o.SiteId == siteId && o.CustomerId != null && customerIds.Contains(o.CustomerId.Value));
+        ordersQuery = includeIncomplete
+            ? ordersQuery.Where(o => o.Status != "Cancelled")
+            : ordersQuery.Where(o => o.Status == "Completed");
+        var ordersAtSite = await ordersQuery
             .Select(o => new { o.CustomerId!.Value, o.Total, o.CreationTime, o.Id })
             .ToListAsync(cancelToken).ConfigureAwait(false);
 
@@ -333,9 +350,19 @@ public class CustomerStorage : StorageBase
     /// <summary>Global order stats for a customer (all sites). Excludes cancelled orders. Returns (orderCount, totalRevenue, lastOrderId, lastOrderAt, averageReturnDays).</summary>
     public async Task<(int OrderCount, decimal TotalRevenue, int? LastOrderId, DateTime? LastOrderAt, int AverageReturnDays)> GetCustomerGlobalStatsAsync(int customerId, CancellationToken cancelToken)
     {
-        var orders = await _dbContext.Order
+        // Respect the customer's own site "include incomplete orders in stats" setting.
+        var custSiteId = await _dbContext.Set<Customer>().AsNoTracking()
+            .Where(c => c.Id == customerId).Select(c => (int?)c.SiteId)
+            .FirstOrDefaultAsync(cancelToken).ConfigureAwait(false);
+        var includeIncomplete = custSiteId is int sid ? await GetSiteIncludeIncompleteOrdersAsync(sid, cancelToken).ConfigureAwait(false) : true;
+
+        var ordersQuery = _dbContext.Order
             .AsNoTracking()
-            .Where(o => !o.IsDeleted && o.Status != "Cancelled" && o.CustomerId == customerId)
+            .Where(o => !o.IsDeleted && o.CustomerId == customerId);
+        ordersQuery = includeIncomplete
+            ? ordersQuery.Where(o => o.Status != "Cancelled")
+            : ordersQuery.Where(o => o.Status == "Completed");
+        var orders = await ordersQuery
             .Select(o => new { o.Id, o.Total, o.CreationTime })
             .OrderBy(o => o.CreationTime)
             .ToListAsync(cancelToken).ConfigureAwait(false);
@@ -413,9 +440,14 @@ public class CustomerStorage : StorageBase
         result.TotalCustomers = await CustomerSet.CountAsync(c => c.SiteId == sid, cancelToken).ConfigureAwait(false);
         if (result.TotalCustomers == 0) return result;
 
-        var ordersAtSite = await _dbContext.Order
+        var includeIncomplete = await GetSiteIncludeIncompleteOrdersAsync(sid, cancelToken).ConfigureAwait(false);
+        var statsOrdersQuery = _dbContext.Order
             .AsNoTracking()
-            .Where(o => !o.IsDeleted && o.Status != "Cancelled" && o.SiteId == sid && o.CustomerId != null)
+            .Where(o => !o.IsDeleted && o.SiteId == sid && o.CustomerId != null);
+        statsOrdersQuery = includeIncomplete
+            ? statsOrdersQuery.Where(o => o.Status != "Cancelled")
+            : statsOrdersQuery.Where(o => o.Status == "Completed");
+        var ordersAtSite = await statsOrdersQuery
             .Select(o => new { o.CustomerId!.Value, o.CreationTime, o.Total })
             .ToListAsync(cancelToken).ConfigureAwait(false);
 

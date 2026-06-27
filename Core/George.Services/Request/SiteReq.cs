@@ -36,6 +36,8 @@ namespace George.Services.Request
         public int? PrepTimeMinutes { get; set; }
         /// <summary>Customer-behavior: single-order customer is inactive / at-risk after this many days without an order (default 14).</summary>
         public int? CustomerInactiveAfterDays { get; set; }
+        /// <summary>Customer-behavior: include not-yet-completed orders in customer statistics (default true).</summary>
+        public bool? IncludeIncompleteOrdersInStats { get; set; }
         public decimal? ShippingCost { get; set; }
         public decimal? FreeShippingAbove { get; set; }
         /// <summary>When true, manual/phone order uses searchable Israel city picker (default true).</summary>

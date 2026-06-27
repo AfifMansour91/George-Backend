@@ -20,6 +20,8 @@ namespace George.Services
         private readonly SmsProvider _smsProvider;
         private readonly TwilioVoiceOtpProvider _twilioVoiceOtpProvider;
         private readonly IConfiguration _configuration;
+        private readonly CustomerStorage _customerStorage;
+        private readonly IIntegrationLogQueue _integrationLogQueue;
 
         public KioskCustomerService(
             ILogger<KioskCustomerService> logger,
@@ -31,6 +33,8 @@ namespace George.Services
             AuthHelper authHelper,
             SmsProvider smsProvider,
             TwilioVoiceOtpProvider twilioVoiceOtpProvider,
+            CustomerStorage customerStorage,
+            IIntegrationLogQueue integrationLogQueue,
             IConfiguration configuration) : base(logger, mapper, cache)
         {
             _userStorage = userStorage;
@@ -39,7 +43,30 @@ namespace George.Services
             _authHelper = authHelper;
             _smsProvider = smsProvider;
             _twilioVoiceOtpProvider = twilioVoiceOtpProvider;
+            _customerStorage = customerStorage;
+            _integrationLogQueue = integrationLogQueue;
             _configuration = configuration;
+        }
+
+        /// <summary>On first kiosk registration, ensure a CRM Customer exists for this phone+site (with SMS marketing consent),
+        /// and record a "registered for SMS via kiosk" event on the customer timeline. Best-effort: never breaks the OTP flow.</summary>
+        private async Task BridgeKioskSignupToCrmAsync(int siteId, int accountId, string phone, CancellationToken cancelToken)
+        {
+            try
+            {
+                var customer = await _customerStorage.GetOrCreateCustomerByPhoneAsync(
+                    siteId, accountId, phone, name: "", email: null, city: null, defaultAddress: null, notes: null,
+                    marketingSms: true,
+                    onCreated: c => _integrationLogQueue.TryEnqueue(
+                        CustomerActivityLog.Build(siteId, c.Id, CustomerActivityLog.OpCreated, "הלקוח נוצר", "נוצר דרך הקיוסק", null)),
+                    cancelToken: cancelToken).ConfigureAwait(false);
+                _integrationLogQueue.TryEnqueue(CustomerActivityLog.Build(
+                    siteId, customer.Id, CustomerActivityLog.OpSmsSignup, "נרשם לקבל דיוור ב-SMS", "דרך הקיוסק", null));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "BridgeKioskSignupToCrmAsync failed siteId={SiteId}", siteId);
+            }
         }
 
         public async Task<IApiResponse<bool>> SendOtpAsync(SendKioskCustomerOtpReq request, CancellationToken cancelToken = default)
@@ -79,6 +106,9 @@ namespace George.Services
                 };
 
                 user = await _clientStorage.CreateClientAsync(user, new List<int> { request.SiteId }, cancelToken).ConfigureAwait(false);
+
+                // First kiosk registration → ensure a CRM customer + record the SMS-signup on the timeline.
+                await BridgeKioskSignupToCrmAsync(request.SiteId, site.AccountId, request.Phone, cancelToken).ConfigureAwait(false);
             }
             else
             {

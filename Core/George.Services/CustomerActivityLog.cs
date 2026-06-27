@@ -11,6 +11,7 @@ public static class CustomerActivityLog
     public const string OpCreated = "customer_created";
     public const string OpOrderPlaced = "order_placed";
     public const string OpCharged = "charged";
+    public const string OpSmsSignup = "sms_signup";
     public const string OpNote = "note";
 
     public sealed class Payload

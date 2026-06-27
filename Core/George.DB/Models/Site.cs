@@ -89,6 +89,9 @@ public partial class Site
     /// <summary>Customer-behavior: a customer with a single order is considered inactive / at-risk-of-churn after this many days without an order. Customers with order history use their personal cadence (avg gap × 2). Default 14.</summary>
     public int? CustomerInactiveAfterDays { get; set; }
 
+    /// <summary>Customer-behavior: when true (default), customer KPI/statistics include orders that haven't been completed yet; when false, only completed orders count.</summary>
+    public bool? IncludeIncompleteOrdersInStats { get; set; }
+
     [Column(TypeName = "decimal(18, 2)")]
     public decimal? ShippingCost { get; set; }
 
