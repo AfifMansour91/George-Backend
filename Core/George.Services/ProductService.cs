@@ -266,6 +266,11 @@ namespace George.Services
             var lookupDto = MapToLookupDto(req);
             await _productStorage.MapLookupsAsync(product, lookupDto, cancelToken);
 
+            // Keep the SKU unique within the account. Two products with the same SKU collide on a single
+            // WooCommerce product (Woo links by SKU), so duplicating one source twice — both get "{sku}-copy" —
+            // would make them overwrite each other on the store. Suffix ("-2", "-3", ...) until unique.
+            product.Sku = await _productStorage.EnsureUniqueSkuAsync(product.Sku, product.AccountId, excludeProductId: null, cancelToken);
+
             // Create product
             product = await _productStorage.CreateProductAsync(
                 product, 

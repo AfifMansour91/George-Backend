@@ -408,6 +408,27 @@ namespace George.Data
                 .FirstOrDefaultAsync(cancelToken);
         }
 
+        /// <summary>
+        /// The George product currently linked to a WooCommerce product id on this site: the per-site map
+        /// (ProductSiteWooId) first, then the legacy single Product.WooCommerceId column for products on the
+        /// site. Returns null when no George product claims that Woo product. Used to detect when a SKU lookup
+        /// would adopt a Woo product already owned by a DIFFERENT product (e.g. two products duplicated from one
+        /// source share "{sku}-copy"), which would make both products overwrite a single Woo product.
+        /// </summary>
+        public async Task<int?> GetProductIdBySiteWooProductIdAsync(int siteId, int wooProductId, CancellationToken cancelToken)
+        {
+            var bySiteMap = await _dbContext.ProductSiteWooId
+                .Where(x => x.SiteId == siteId && x.WooCommerceProductId == wooProductId)
+                .Select(x => (int?)x.ProductId)
+                .FirstOrDefaultAsync(cancelToken);
+            if (bySiteMap.HasValue) return bySiteMap;
+
+            return await _dbContext.Product
+                .Where(p => !p.IsDeleted && p.WooCommerceId == wooProductId && p.Site.Any(s => s.Id == siteId))
+                .Select(p => (int?)p.Id)
+                .FirstOrDefaultAsync(cancelToken);
+        }
+
         /// <summary>Upsert the per-site WooCommerce product id for a (product, site).</summary>
         public async Task SetSiteWooProductIdAsync(int productId, int siteId, int wooProductId, CancellationToken cancelToken)
         {

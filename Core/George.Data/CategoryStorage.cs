@@ -107,6 +107,13 @@ namespace George.Data
                     .Where(s => effectiveSiteIds.Contains(s.Id))
                     .ToListAsync(cancelToken);
 
+                // A category is owned by the account of the sites it lives in. Realign AccountId to those sites so it
+                // never points at the acting user's home account (e.g. a master/admin creating a category for another
+                // account's branch) — otherwise the account-scoped category list hides it from that branch's products.
+                var siteAccountId = sites.Select(s => (int?)s.AccountId).FirstOrDefault(a => a.HasValue);
+                if (siteAccountId.HasValue)
+                    category.AccountId = siteAccountId;
+
                 foreach (var site in sites)
                 {
                     category.Site.Add(site);
@@ -133,7 +140,7 @@ namespace George.Data
             dbCategory.IsEnabled = updated.IsEnabled;
             dbCategory.SortOrder = updated.SortOrder;
             dbCategory.DisplayAsMain = updated.DisplayAsMain;
-            dbCategory.AccountId = updated.AccountId;
+            dbCategory.AccountId = updated.AccountId ?? dbCategory.AccountId;
             dbCategory.ImageUrl = updated.ImageUrl;
             dbCategory.IconUrl = updated.IconUrl;
             dbCategory.ShowInKiosk = updated.ShowInKiosk;
@@ -150,6 +157,12 @@ namespace George.Data
                     var sites = await _dbContext.Site
                         .Where(s => siteIds.Contains(s.Id))
                         .ToListAsync(cancelToken);
+
+                    // Realign ownership to the account of the (new) sites — see CreateCategoryAsync. This also repairs
+                    // legacy rows whose AccountId was wrong (e.g. a master's home account) the next time they are saved.
+                    var siteAccountId = sites.Select(s => (int?)s.AccountId).FirstOrDefault(a => a.HasValue);
+                    if (siteAccountId.HasValue)
+                        dbCategory.AccountId = siteAccountId;
 
                     foreach (var site in sites)
                     {

@@ -64,6 +64,28 @@ namespace George.Services
             return response;
         }
 
+        // Categories are always account-scoped, but the create/edit client never sends AccountId. Derive it —
+        // preferring an explicit request value, then a known fallback (e.g. the existing row's account on update),
+        // then the signed-in user's account — so the row is never persisted with AccountId = NULL. A NULL-account
+        // category is hidden by the account-scoped read filter in GetCategoriesAsync and skipped by per-site
+        // WooCommerce sync, so it would never appear in the product create/edit category picker.
+        private async Task EnsureAccountIdAsync(Category model, CancellationToken cancelToken, int? fallbackAccountId = null)
+        {
+            if (model.AccountId.HasValue) return;
+
+            if (fallbackAccountId.HasValue)
+            {
+                model.AccountId = fallbackAccountId;
+                return;
+            }
+
+            if (AuthUser.Id > 0)
+            {
+                var user = await _userStorage.GetUserAsync(AuthUser.Id, cancelToken);
+                model.AccountId = user?.AccountId;
+            }
+        }
+
         public async Task<IApiResponse<CategoryRes>> GetCategoryAsync(int categoryId, CancellationToken cancelToken)
         {
             var response = new ApiResponse<CategoryRes>();
@@ -88,6 +110,13 @@ namespace George.Services
             model.IsActive = true;
             model.IsDeleted = false;
             model.ShowInKiosk = req.ShowInKiosk ?? true;
+
+            // The category client doesn't send AccountId, so derive it from the signed-in user. Without this the row
+            // is saved with AccountId = NULL, which makes it invisible to the account-scoped category list (see the
+            // safety net in GetCategoriesAsync) and skips per-site WooCommerce sync, so it never shows up in the
+            // product create/edit category picker. It also lets CategoryStorage auto-link the category to all of the
+            // account's sites when no explicit SiteIds are given.
+            await EnsureAccountIdAsync(model, cancelToken).ConfigureAwait(false);
 
             // Create the data in the DB.
             model = await _categoryStorage.CreateCategoryAsync(model, req.SiteIds, cancelToken).ConfigureAwait(false);
@@ -120,6 +149,11 @@ namespace George.Services
             Category? model = _mapper.Map<Category>(req);
             model.Id = categoryId;
             model.UpdateUserId = AuthUser.Id;
+
+            // UpdateCategoryAsync overwrites AccountId with the mapped value, but the client doesn't send it. Keep the
+            // existing account scope (and repair legacy rows that were saved with AccountId = NULL by falling back to
+            // the signed-in user's account) so the edit doesn't null it out and re-hide the category.
+            await EnsureAccountIdAsync(model, cancelToken, existingCategory.AccountId).ConfigureAwait(false);
 
             // Update the data in the DB.
             model = await _categoryStorage.UpdateCategoryAsync(model, req.SiteIds, cancelToken).ConfigureAwait(false);

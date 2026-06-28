@@ -264,6 +264,43 @@ namespace George.Data
                 .FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
         }
 
+        /// <summary>
+        /// Returns a SKU unique among non-deleted products in the same account so two products never share a
+        /// SKU. WooCommerce matches/links products by SKU, so two products with the same SKU collide on a single
+        /// Woo product (saving one overwrites the other). Duplicating one source product more than once yields
+        /// the same "{sku}-copy", which is exactly this collision. Appends "-2", "-3", ... until free. Empty SKU
+        /// returns null (no uniqueness needed). Products with a null account are compared to other null-account
+        /// products. Pass <paramref name="excludeProductId"/> to ignore the product being updated itself.
+        /// </summary>
+        public async Task<string?> EnsureUniqueSkuAsync(string? desiredSku, int? accountId, int? excludeProductId, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(desiredSku)) return null;
+            var baseSku = desiredSku.Trim();
+
+            var query = _dbContext.Product.AsNoTracking().Where(p => !p.IsDeleted && p.Sku != null);
+            query = accountId.HasValue
+                ? query.Where(p => p.AccountId == accountId.Value)
+                : query.Where(p => p.AccountId == null);
+            if (excludeProductId.HasValue)
+                query = query.Where(p => p.Id != excludeProductId.Value);
+
+            // Only pull SKUs that could collide with baseSku or its numbered variants.
+            var taken = await query
+                .Where(p => p.Sku == baseSku || p.Sku!.StartsWith(baseSku + "-"))
+                .Select(p => p.Sku!)
+                .ToListAsync(cancelToken);
+
+            bool IsTaken(string candidate) =>
+                taken.Any(s => string.Equals(s, candidate, StringComparison.OrdinalIgnoreCase));
+
+            if (!IsTaken(baseSku)) return baseSku;
+            for (var i = 2; ; i++)
+            {
+                var candidate = $"{baseSku}-{i}";
+                if (!IsTaken(candidate)) return candidate;
+            }
+        }
+
         public async Task<Product> CreateProductAsync(Product product, List<int>? siteIds, List<int>? categoryIds, List<int>? brandIds, List<string>? tags, List<int>? relatedProductIds, List<int>? complementaryProductIds, CancellationToken cancelToken)
         {
             // Normalize empty SKU to NULL to avoid unique constraint violations

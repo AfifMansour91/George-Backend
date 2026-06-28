@@ -1896,7 +1896,31 @@ namespace George.Services
                 // legacy field, else a multi-site product reuses another store's stale id (only one site updated).
                 int? existingWooId = await _overrideStorage.GetSiteWooProductIdAsync(product.Id, siteId, cancelToken).ConfigureAwait(false);
                 if (!existingWooId.HasValue && !string.IsNullOrWhiteSpace(product.Sku))
-                    existingWooId = await FindProductIdBySkuAsync(baseUrl, siteId, product.Sku, httpClient, cancelToken);
+                {
+                    var skuMatchWooId = await FindProductIdBySkuAsync(baseUrl, siteId, product.Sku, httpClient, cancelToken);
+                    if (skuMatchWooId.HasValue)
+                    {
+                        // Guard: a SKU lookup can resolve to a Woo product that ALREADY belongs to a DIFFERENT
+                        // George product on this site (e.g. two products duplicated from one source share the
+                        // "{sku}-copy" SKU). Adopting it would make both George products update — and overwrite —
+                        // one Woo product, so saving one makes the other vanish from the store. Only adopt the
+                        // match when it is unclaimed or already owned by THIS product; otherwise leave existingWooId
+                        // null so a new Woo product is created instead.
+                        var ownerProductId = await _overrideStorage
+                            .GetProductIdBySiteWooProductIdAsync(siteId, skuMatchWooId.Value, cancelToken)
+                            .ConfigureAwait(false);
+                        if (ownerProductId.HasValue && ownerProductId.Value != product.Id)
+                        {
+                            _logger.LogWarning(
+                                "Woo sync: SKU '{Sku}' for product {ProductId} matched Woo product {WooId} already owned by product {OwnerProductId} on site {SiteId}; creating a new Woo product to avoid overwriting it.",
+                                product.Sku, product.Id, skuMatchWooId.Value, ownerProductId.Value, siteId);
+                        }
+                        else
+                        {
+                            existingWooId = skuMatchWooId;
+                        }
+                    }
+                }
                 if (!existingWooId.HasValue)
                     existingWooId = product.WooCommerceId;
 
