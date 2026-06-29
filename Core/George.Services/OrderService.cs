@@ -433,6 +433,10 @@ namespace George.Services
         /// <summary>
         /// Order-ready SMS templates: kiosk orders are always Pickup; pick kiosk text when Source is Kiosk before Pickup branch.
         /// </summary>
+        /// <summary>Fallback text for the manual pickup reminder when the account has no template configured. Bug #10.</summary>
+        private const string DefaultOrderReadyReminderTemplate =
+            "היי [customer_name], רק תזכורת שההזמנה שלך מוכנה וממתינה לאיסוף. נשמח לראותך 🙂";
+
         private static string? ResolveOrderReadyCustomerMessageTemplate(AccountNotificationSettings settings, Order order)
         {
             var deliveryType = (order.DeliveryType ?? "").Trim();
@@ -458,13 +462,11 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.InvalidRequest, "Order has no customer phone.");
             var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken).ConfigureAwait(false);
             var settings = account?.AccountNotificationSettings;
-            if (settings == null)
-                return CreateResponse(response, StatusCode.InvalidRequest, "Notification settings not found.");
-            if (!string.Equals(settings.OrderReadyCustomerChannel, "sms", StringComparison.OrdinalIgnoreCase))
-                return CreateResponse(response, StatusCode.InvalidRequest, "Order ready customer channel is not SMS.");
-            var template = ResolveOrderReadyCustomerMessageTemplate(settings, order);
+            // Manual "send reminder" is an explicit user action — it always sends an SMS regardless of the
+            // auto-reminder channel setting (which only governs automatic Ready-order notifications). Bug #10.
+            var template = settings != null ? ResolveOrderReadyCustomerMessageTemplate(settings, order) : null;
             if (string.IsNullOrWhiteSpace(template))
-                return CreateResponse(response, StatusCode.InvalidRequest, "No reminder message template configured for this order.");
+                template = DefaultOrderReadyReminderTemplate;
             var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
             try
             {
@@ -868,13 +870,13 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.InvalidRequest, "Cannot update picking for a cancelled order.");
             var updates = req.Items
                 .Where(i => i.OrderItemId > 0)
-                .Select(i => (i.OrderItemId, i.PickedQuantity, i.TotalPrice, i.PickingUserConfirmed))
+                .Select(i => (i.OrderItemId, i.PickedQuantity, i.TotalPrice, i.PickingUserConfirmed, i.Notes))
                 .ToList();
             var updated = await _orderStorage.UpdatePickingAsync(orderId, updates, cancelToken);
             if (updated == null) return CreateResponse(response, StatusCode.ItemNotFound);
 
             var stockPushProductIds = new List<int>();
-            foreach (var (orderItemId, newPicked, _, _) in updates)
+            foreach (var (orderItemId, newPicked, _, _, _) in updates)
             {
                 var line = orderCheck.OrderItem?.FirstOrDefault(i => i.Id == orderItemId && !i.IsDeleted);
                 if (line == null || line.ProductId is not > 0) continue;

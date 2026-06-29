@@ -328,7 +328,7 @@ namespace George.Data
         /// <summary>Save picked quantity (and optional line total) for order items (שמור וצא).</summary>
         public async Task<Order?> UpdatePickingAsync(
             int orderId,
-            List<(int OrderItemId, decimal? PickedQuantity, decimal? TotalPrice, bool? PickingUserConfirmed)> updates,
+            List<(int OrderItemId, decimal? PickedQuantity, decimal? TotalPrice, bool? PickingUserConfirmed, string? Notes)> updates,
             CancellationToken cancelToken)
         {
             if (updates == null || updates.Count == 0) return null;
@@ -337,7 +337,7 @@ namespace George.Data
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
             if (db == null) return null;
             var itemMap = db.OrderItem?.ToDictionary(i => i.Id) ?? new Dictionary<int, OrderItem>();
-            foreach (var (orderItemId, pickedQty, totalPrice, confirmFromClient) in updates)
+            foreach (var (orderItemId, pickedQty, totalPrice, confirmFromClient, notes) in updates)
             {
                 if (!itemMap.TryGetValue(orderItemId, out var item)) continue;
                 var prevPicked = item.PickedQuantity;
@@ -345,6 +345,10 @@ namespace George.Data
 
                 item.PickedQuantity = pickedQty;
                 item.TotalPrice = totalPrice;
+
+                // Per-line note edited during picking. Null = leave existing untouched; "" clears it. Bug #7.
+                if (notes != null)
+                    item.Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
 
                 if (confirmFromClient == true)
                     item.PickingUserConfirmed = true;

@@ -3253,12 +3253,20 @@ namespace George.Services
                     // Per-site exclusion: a variant "removed" in this branch is not pushed to this store.
                     if (variant.Id > 0 && perSiteVariantOverrides.TryGetValue(variant.Id, out var vExcl) && vExcl.IsExcluded)
                         continue;
-                    // Only derive in/out from quantity when quantity is actually tracked per variation.
-                    // Binary in/out variations carry no quantity (StockQuantity null) and must use the
-                    // product-level status, else they were wrongly forced "outofstock".
-                    var variantStockStatus = variationTrackQuantity
-                        ? ((variant.StockQuantity ?? 0) > 0 ? "instock" : "outofstock")
-                        : productStockStatus;
+                    // Derive in/out per variation:
+                    // - Quantity-tracked variation stock: in/out follows the numeric quantity.
+                    // - Availability-only variation stock (variation management, not quantity-tracked): George stores
+                    //   per-variation salability as StockQuantity 1/0, so honor an EXPLICIT value here — otherwise
+                    //   removing stock from a single variation never reached Woo and it stayed "in stock". Bug #4.
+                    // - A truly null quantity (no per-variation value) still inherits the product-level status so
+                    //   binary in/out variations are not wrongly forced "outofstock".
+                    string variantStockStatus;
+                    if (variationTrackQuantity)
+                        variantStockStatus = (variant.StockQuantity ?? 0) > 0 ? "instock" : "outofstock";
+                    else if (stockManagedPerVariation && variant.StockQuantity.HasValue)
+                        variantStockStatus = variant.StockQuantity.Value > 0 ? "instock" : "outofstock";
+                    else
+                        variantStockStatus = productStockStatus;
 
                     var variantOptionValues = variant.ProductVariantOptionValue?
                         .Where(x => !string.IsNullOrWhiteSpace(x.OptionName))
@@ -4782,11 +4790,20 @@ namespace George.Services
 
                     foreach (var vv in wooVariations)
                     {
+                        // WooCommerce REST returns the PARENT sku on a variation that has no own sku
+                        // (WC_Product_Variation::get_sku() falls back to the parent in 'view' context).
+                        // Treat that echo as "no variation sku" so children stay empty. Bug #16.
+                        var rawVariantSku = string.IsNullOrWhiteSpace(vv.sku) ? null : vv.sku.Trim();
+                        if (rawVariantSku != null && !string.IsNullOrWhiteSpace(wp.sku)
+                            && string.Equals(rawVariantSku, wp.sku.Trim(), StringComparison.OrdinalIgnoreCase))
+                        {
+                            rawVariantSku = null;
+                        }
                         var variant = new ProductVariant
                         {
                             ProductId = product.Id,
                             WooCommerceVariationId = vv.id,
-                            Sku = string.IsNullOrWhiteSpace(vv.sku) ? null : vv.sku.Trim(),
+                            Sku = rawVariantSku,
                             Price = ParseNullableDecimal(vv.regular_price),
                             SalePrice = ParseNullableDecimal(vv.sale_price),
                             Weight = ParseNullableDecimal(vv.weight),

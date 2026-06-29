@@ -115,6 +115,8 @@ public class UpdatePickingItemReq
     public decimal? TotalPrice { get; set; }
     /// <summary>When set from shop picking UI, persisted as-is. When null, server sets confirmed only if picked/total changed vs DB (legacy clients).</summary>
     public bool? PickingUserConfirmed { get; set; }
+    /// <summary>Per-line note edited during picking. Null = leave existing note untouched; "" clears it. Bug #7.</summary>
+    public string? Notes { get; set; }
 }
 
 /// <summary>Sprint 2: Update order (status, notes, delivery).</summary>

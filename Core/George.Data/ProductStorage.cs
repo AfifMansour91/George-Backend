@@ -301,6 +301,38 @@ namespace George.Data
             }
         }
 
+        /// <summary>
+        /// True when <paramref name="sku"/> is already used by another non-deleted product OR product variant in the
+        /// same account. Used to BLOCK creating/updating a product/variation with a duplicate SKU in the store
+        /// (Woo links by SKU, so duplicates collide on a single Woo product). Excludes the product being edited
+        /// and, for variants, an optional variant id. Empty SKU is never "taken". Bug #17.
+        /// </summary>
+        public async Task<bool> IsSkuTakenAsync(string? sku, int? accountId, int? excludeProductId, int? excludeVariantId, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(sku)) return false;
+            var trimmed = sku.Trim();
+
+            var productQ = _dbContext.Product.AsNoTracking().Where(p => !p.IsDeleted && p.Sku != null);
+            productQ = accountId.HasValue
+                ? productQ.Where(p => p.AccountId == accountId.Value)
+                : productQ.Where(p => p.AccountId == null);
+            if (excludeProductId.HasValue)
+                productQ = productQ.Where(p => p.Id != excludeProductId.Value);
+            if (await productQ.AnyAsync(p => p.Sku!.ToLower() == trimmed.ToLower(), cancelToken))
+                return true;
+
+            var variantQ = _dbContext.ProductVariant.AsNoTracking()
+                .Where(v => !v.IsDeleted && v.Sku != null && !v.Product!.IsDeleted);
+            variantQ = accountId.HasValue
+                ? variantQ.Where(v => v.Product!.AccountId == accountId.Value)
+                : variantQ.Where(v => v.Product!.AccountId == null);
+            if (excludeProductId.HasValue)
+                variantQ = variantQ.Where(v => v.ProductId != excludeProductId.Value);
+            if (excludeVariantId.HasValue)
+                variantQ = variantQ.Where(v => v.Id != excludeVariantId.Value);
+            return await variantQ.AnyAsync(v => v.Sku!.ToLower() == trimmed.ToLower(), cancelToken);
+        }
+
         public async Task<Product> CreateProductAsync(Product product, List<int>? siteIds, List<int>? categoryIds, List<int>? brandIds, List<string>? tags, List<int>? relatedProductIds, List<int>? complementaryProductIds, CancellationToken cancelToken)
         {
             // Normalize empty SKU to NULL to avoid unique constraint violations
@@ -618,6 +650,46 @@ namespace George.Data
 
             await _dbContext.SaveChangesAsync(cancelToken);
             return dbProduct;
+        }
+
+        /// <summary>
+        /// Updates only the product-level relationships (RelatedProduct = up-sells, ComplementaryProduct = cross-sells).
+        /// These are product-wide (not per-site), so a per-site/branch edit must still persist them canonically.
+        /// Null lists leave the existing collection untouched. Bug #6.
+        /// </summary>
+        public async Task<bool> UpdateProductRelationshipsAsync(int productId, List<int>? relatedProductIds, List<int>? complementaryProductIds, CancellationToken cancelToken)
+        {
+            if (relatedProductIds == null && complementaryProductIds == null) return false;
+            var dbProduct = await _dbContext.Product
+                .Include(p => p.RelatedProduct)
+                .Include(p => p.ComplementaryProduct)
+                .FirstOrDefaultAsync(p => p.Id == productId && !p.IsDeleted, cancelToken);
+            if (dbProduct == null) return false;
+
+            if (relatedProductIds != null)
+            {
+                dbProduct.RelatedProduct.Clear();
+                foreach (var id in relatedProductIds.Where(id => id != dbProduct.Id))
+                {
+                    var related = await _dbContext.Product.FindAsync(new object[] { id }, cancelToken);
+                    if (related != null && !related.IsDeleted && related.AccountId == dbProduct.AccountId)
+                        dbProduct.RelatedProduct.Add(related);
+                }
+            }
+
+            if (complementaryProductIds != null)
+            {
+                dbProduct.ComplementaryProduct.Clear();
+                foreach (var id in complementaryProductIds.Where(id => id != dbProduct.Id))
+                {
+                    var comp = await _dbContext.Product.FindAsync(new object[] { id }, cancelToken);
+                    if (comp != null && !comp.IsDeleted && comp.AccountId == dbProduct.AccountId)
+                        dbProduct.ComplementaryProduct.Add(comp);
+                }
+            }
+
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return true;
         }
 
         /// <summary>

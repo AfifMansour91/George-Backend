@@ -250,6 +250,35 @@ namespace George.Services
             return response;
         }
 
+        /// <summary>
+        /// Validates that the product SKU and every variant SKU are unique within the store: no duplicates inside
+        /// the request itself, and none already taken by another product/variation. Returns a user-facing Hebrew
+        /// error message, or null when all SKUs are free. Empty SKUs are ignored. Bug #17.
+        /// </summary>
+        private async Task<string?> ValidateSkusUniqueAsync(string? productSku, IEnumerable<string?>? variantSkus, int? accountId, int? excludeProductId, CancellationToken cancelToken)
+        {
+            var skus = new List<string>();
+            if (!string.IsNullOrWhiteSpace(productSku)) skus.Add(productSku.Trim());
+            if (variantSkus != null)
+                skus.AddRange(variantSkus.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s!.Trim()));
+
+            // Duplicate within the submitted product itself (product vs variant, or two variants).
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in skus)
+            {
+                if (!seen.Add(s))
+                    return $"מק\"ט '{s}' מופיע יותר מפעם אחת במוצר. כל מק\"ט חייב להיות ייחודי.";
+            }
+
+            // Collision with an existing product/variation in the store.
+            foreach (var s in seen)
+            {
+                if (await _productStorage.IsSkuTakenAsync(s, accountId, excludeProductId, excludeVariantId: null, cancelToken))
+                    return $"מק\"ט '{s}' כבר קיים בחנות. בחר מק\"ט אחר.";
+            }
+            return null;
+        }
+
         public async Task<IApiResponse<ProductRes>> CreateProductAsync(CreateProductReq req, CancellationToken cancelToken)
         {
             var response = new ApiResponse<ProductRes>();
@@ -266,10 +295,13 @@ namespace George.Services
             var lookupDto = MapToLookupDto(req);
             await _productStorage.MapLookupsAsync(product, lookupDto, cancelToken);
 
-            // Keep the SKU unique within the account. Two products with the same SKU collide on a single
-            // WooCommerce product (Woo links by SKU), so duplicating one source twice — both get "{sku}-copy" —
-            // would make them overwrite each other on the store. Suffix ("-2", "-3", ...) until unique.
-            product.Sku = await _productStorage.EnsureUniqueSkuAsync(product.Sku, product.AccountId, excludeProductId: null, cancelToken);
+            // Block creating a product/variation with a SKU already used in the store. Bug #17.
+            var skuError = await ValidateSkusUniqueAsync(product.Sku, req.Variants?.Select(v => v.Sku), product.AccountId, excludeProductId: null, cancelToken);
+            if (skuError != null)
+            {
+                response.DisplayMessage = skuError; // surfaced to the user (frontend reads displayMessage)
+                return CreateResponse(response, StatusCode.InvalidRequest, skuError);
+            }
 
             // Create product
             product = await _productStorage.CreateProductAsync(
@@ -394,6 +426,15 @@ namespace George.Services
                     await _overrideStorage.SetSiteImagesAsync(productId, siteId, req.ImageUrls, cancelToken);
                 }
 
+                // Related / complementary products are product-wide relationships, not per-site values, so persist
+                // them canonically even on a per-branch edit — otherwise linking up-sells/cross-sells to a
+                // site-scoped product (e.g. a WooCommerce-imported one) silently did nothing. Bug #6.
+                if (req.RelatedProductIds != null || req.ComplementaryProductIds != null)
+                {
+                    await _productStorage.UpdateProductRelationshipsAsync(
+                        productId, req.RelatedProductIds, req.ComplementaryProductIds, cancelToken);
+                }
+
                 // Product OPTIONS are structural (the variation dimensions + allowed values), not a per-site price/
                 // stock value — they are shared by every site's variant dropdown, exactly like the canonical variants
                 // created below. Persist them canonically here too. Without this, adding variations to a previously
@@ -503,6 +544,15 @@ namespace George.Services
             ClearExpiredTimedLabels(product);
             product.Id = productId;
             product.UpdateUserId = AuthUser.Id;
+
+            // Block updating to a SKU already used by another product/variation in the store. Variants are only
+            // validated when the request actually sends them (partial table edits leave them untouched). Bug #17.
+            var updateSkuError = await ValidateSkusUniqueAsync(product.Sku, req.Variants?.Select(v => v.Sku), product.AccountId, excludeProductId: productId, cancelToken);
+            if (updateSkuError != null)
+            {
+                response.DisplayMessage = updateSkuError; // surfaced to the user (frontend reads displayMessage)
+                return CreateResponse(response, StatusCode.InvalidRequest, updateSkuError);
+            }
 
             // Handle lookups (only overwrites IDs when req has a value; existing IDs are already on product from merge)
             var lookupDto = MapToLookupDto(req);
