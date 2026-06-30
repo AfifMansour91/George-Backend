@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using George.Data;
 using George.DB;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace George.Services;
@@ -36,19 +37,16 @@ public class PromotionWebhookDispatcher
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<PromotionWebhookDispatcher> _logger;
-    private readonly ProductStorage _productStorage;
-    private readonly CategoryStorage _categoryStorage;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public PromotionWebhookDispatcher(
         IHttpClientFactory httpClientFactory,
         ILogger<PromotionWebhookDispatcher> logger,
-        ProductStorage productStorage,
-        CategoryStorage categoryStorage)
+        IServiceScopeFactory scopeFactory)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
-        _productStorage = productStorage;
-        _categoryStorage = categoryStorage;
+        _scopeFactory = scopeFactory;
     }
 
     /// <summary>Convenience wrapper. <paramref name="site"/> may be null — call is then a no-op.</summary>
@@ -179,10 +177,17 @@ public class PromotionWebhookDispatcher
         var categoryIds = new HashSet<int>();
         PromotionPromengWireMapper.CollectGeorgeIdsFromPayload(promotion, productIds, categoryIds);
 
-        var productMap = await _productStorage
+        // Resolve a fresh DI scope: this runs on a fire-and-forget Task.Run after the request
+        // scope (and its GeorgeDBContext) has been disposed, so the request-scoped storages
+        // cannot be reused — doing so throws "Cannot access a disposed context instance".
+        using var scope = _scopeFactory.CreateScope();
+        var productStorage = scope.ServiceProvider.GetRequiredService<ProductStorage>();
+        var categoryStorage = scope.ServiceProvider.GetRequiredService<CategoryStorage>();
+
+        var productMap = await productStorage
             .GetWooCommerceIdMapForProductIdsAsync(productIds.ToList(), CancellationToken.None)
             .ConfigureAwait(false);
-        var categoryMap = await _categoryStorage
+        var categoryMap = await categoryStorage
             .GetWooCommerceIdMapForCategoryIdsAsync(categoryIds.ToList(), CancellationToken.None)
             .ConfigureAwait(false);
 

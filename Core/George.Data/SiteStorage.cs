@@ -177,6 +177,13 @@ namespace George.Data
             if (updated.ConfirmPickingAfterScan.HasValue) dbSite.ConfirmPickingAfterScan = updated.ConfirmPickingAfterScan;
             if (updated.ShowPickingDeviation.HasValue) dbSite.ShowPickingDeviation = updated.ShowPickingDeviation;
             if (updated.ScaleBarcodeEmbedMode != null) dbSite.ScaleBarcodeEmbedMode = updated.ScaleBarcodeEmbedMode;
+            // Promotion settings (Sprint 4). Without these the per-site Webhook URL never persists,
+            // so PromotionWebhookDispatcher.FireAsync no-ops and promotions never sync to WooCommerce.
+            if (updated.PromotionOveragePolicyDefault != null) dbSite.PromotionOveragePolicyDefault = updated.PromotionOveragePolicyDefault;
+            if (updated.PromotionsApplyToPhoneOrders.HasValue) dbSite.PromotionsApplyToPhoneOrders = updated.PromotionsApplyToPhoneOrders;
+            if (updated.PromotionsApplyToDiscountedProducts.HasValue) dbSite.PromotionsApplyToDiscountedProducts = updated.PromotionsApplyToDiscountedProducts;
+            if (updated.PromotionWebhookUrl != null) dbSite.PromotionWebhookUrl = updated.PromotionWebhookUrl;
+            if (updated.PromotionWebhookSecret != null) dbSite.PromotionWebhookSecret = updated.PromotionWebhookSecret;
             if (!string.IsNullOrWhiteSpace(updated.PaymentGatewayProvider))
                 dbSite.PaymentGatewayProvider = updated.PaymentGatewayProvider;
             if (updated.CardcomTerminalNumber.HasValue) dbSite.CardcomTerminalNumber = updated.CardcomTerminalNumber;
