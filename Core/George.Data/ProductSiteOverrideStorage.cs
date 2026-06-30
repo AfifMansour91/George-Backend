@@ -126,21 +126,67 @@ namespace George.Data
             public bool StockOverridden { get; set; }
         }
 
-        /// <summary>For a batch of products: which have a per-site override on price / sku / stock (any of their sites).</summary>
+        /// <summary>
+        /// For a batch of products: whether price / sku / stock actually DIFFER across the branches the product is
+        /// on. Drives the "הצג" affordance. Bug #13: this must reflect a real difference between branches, NOT merely
+        /// "an override row exists" — otherwise setting the same value on every branch (an override that equals the
+        /// canonical) left the badge on. The effective value per site = its override when set, else the canonical
+        /// product value; the flag is true only when more than one distinct effective value exists across the sites.
+        /// </summary>
         public async Task<List<ProductFieldOverrideFlags>> GetFieldOverrideFlagsAsync(IReadOnlyCollection<int> productIds, CancellationToken cancelToken)
         {
             if (productIds == null || productIds.Count == 0) return new List<ProductFieldOverrideFlags>();
-            var rows = await _dbContext.ProductSiteOverride
-                .Where(o => !o.IsDeleted && productIds.Contains(o.ProductId))
-                .Select(o => new { o.ProductId, o.Price, o.Sku, o.StockQuantity })
+
+            var products = await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => !p.IsDeleted && productIds.Contains(p.Id))
+                .Select(p => new
+                {
+                    p.Id,
+                    p.Price,
+                    p.Sku,
+                    p.StockQuantity,
+                    SiteIds = p.Site.Select(s => s.Id).ToList(),
+                })
                 .ToListAsync(cancelToken);
-            return rows.GroupBy(r => r.ProductId).Select(g => new ProductFieldOverrideFlags
+
+            var overrides = await _dbContext.ProductSiteOverride
+                .AsNoTracking()
+                .Where(o => !o.IsDeleted && productIds.Contains(o.ProductId))
+                .Select(o => new { o.ProductId, o.SiteId, o.Price, o.Sku, o.StockQuantity })
+                .ToListAsync(cancelToken);
+            var ovrByKey = overrides
+                .GroupBy(o => (o.ProductId, o.SiteId))
+                .ToDictionary(g => g.Key, g => g.First());
+
+            var result = new List<ProductFieldOverrideFlags>();
+            foreach (var p in products)
             {
-                ProductId = g.Key,
-                PriceOverridden = g.Any(x => x.Price != null),
-                SkuOverridden = g.Any(x => !string.IsNullOrEmpty(x.Sku)),
-                StockOverridden = g.Any(x => x.StockQuantity != null),
-            }).ToList();
+                // A single-branch (or unassigned) product can't differ between branches → no badge.
+                if (p.SiteIds.Count <= 1) continue;
+
+                var priceVals = new HashSet<decimal?>();
+                var skuVals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var stockVals = new HashSet<decimal?>();
+                foreach (var sid in p.SiteIds)
+                {
+                    ovrByKey.TryGetValue((p.Id, sid), out var o);
+                    priceVals.Add(o?.Price ?? p.Price);
+                    skuVals.Add((!string.IsNullOrEmpty(o?.Sku) ? o!.Sku : p.Sku) ?? "");
+                    stockVals.Add(o?.StockQuantity ?? p.StockQuantity);
+                }
+
+                var flags = new ProductFieldOverrideFlags
+                {
+                    ProductId = p.Id,
+                    PriceOverridden = priceVals.Count > 1,
+                    SkuOverridden = skuVals.Count > 1,
+                    StockOverridden = stockVals.Count > 1,
+                };
+                if (flags.PriceOverridden || flags.SkuOverridden || flags.StockOverridden)
+                    result.Add(flags);
+            }
+            return result;
         }
 
         /// <summary>One site's effective price/sku/stock for a product, with flags for which are per-site overrides.</summary>

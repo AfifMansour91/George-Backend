@@ -2246,7 +2246,10 @@ namespace George.Services
                     wooProduct["date_on_sale_from"] = simpleSaleFrom.HasValue ? simpleSaleFrom.Value.ToString("yyyy-MM-ddTHH:mm:ss") : (object?)null;
                     wooProduct["date_on_sale_to"] = simpleSaleTo.HasValue ? simpleSaleTo.Value.ToString("yyyy-MM-ddTHH:mm:ss") : (object?)null;
                     wooProduct["manage_stock"] = simpleManageStock;
-                    wooProduct["stock_quantity"] = simpleStockQty ?? 0;
+                    // WooCommerce DERIVES stock_status from stock_quantity when manage_stock is on, so an explicit
+                    // "out of stock" is ignored while the quantity stays > 0 — the product stayed in stock on the
+                    // site. Force quantity 0 when toggled out of stock so the status actually takes. MultiSite #14.
+                    wooProduct["stock_quantity"] = (simpleManageStock && stockStatus == "outofstock") ? 0 : (simpleStockQty ?? 0);
                     wooProduct["stock_status"] = stockStatus;
                     wooProduct["backorders"] = product.StockStatus?.Name == "on_backorder" ? "yes" : "no";
                 }
@@ -3463,8 +3466,11 @@ namespace George.Services
                 }
             }
 
-            // Orphan cleanup: when all variants were mapped we only loaded one page of Woo ids — fetch full list if needed.
-            if (allVariantsHaveWooId && !needSignatureLookup && variants.Count > VariationsPerPage)
+            // Orphan cleanup: when all variants were mapped we skipped the initial variation fetch, so the store may
+            // still hold DUPLICATE/stale variations from earlier buggy syncs that our DB doesn't track. Always pull
+            // the full Woo list here and reconcile, so those orphans get deleted below (not just for >100 variants).
+            // This clears the variations that piled up on the store (MultiSite #6/#8).
+            if (allVariantsHaveWooId && !needSignatureLookup)
             {
                 var fullWooList = await GetExistingWooCommerceVariationsAsync(baseUrl, wooProductId, httpClient, cancelToken);
                 existingIdsSet = fullWooList.Select(x => x.id).ToHashSet();
@@ -3528,6 +3534,13 @@ namespace George.Services
                 _logger.LogWarning(
                     "WooCommerce variation PUT failed ({Status}) product {ProductId} variation {WooVariationId}: {Error}",
                     (int)updateResponse.StatusCode, productId, wooVariationIdToUse.Value, err);
+
+                // Only recreate when the variation is genuinely GONE (404 / stale id). For any other failure
+                // (e.g. 400 product_invalid_sku from a duplicate SKU, or a transient error) creating a fresh
+                // variation just spawns a DUPLICATE on the store — leave the existing one and report failure.
+                // This was the main driver of variations piling up on re-sync (MultiSite #6/#7/#8).
+                if ((int)updateResponse.StatusCode != 404)
+                    return wooVariationIdToUse;
             }
 
             var createUrl = $"{baseUrl}/products/{wooProductId}/variations";

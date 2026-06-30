@@ -890,12 +890,27 @@ namespace George.Data
         {
             if (orderedProductIds == null || !orderedProductIds.Any()) return new List<(int, int)>();
             var productIdsSet = orderedProductIds.Distinct().ToHashSet();
-            var products = await _dbContext.Product
+            // MultiSite: the same product has a DIFFERENT Woo product id per branch, so menu_order must target the
+            // per-site id (ProductSiteWooId) for THIS site, not the single legacy Product.WooCommerceId column —
+            // otherwise the reorder was pushed to the wrong branch's product ids (only one branch "worked"). MultiSite #3/#4.
+            var onSite = await _dbContext.Product
                 .AsNoTracking()
-                .Where(p => productIdsSet.Contains(p.Id) && p.WooCommerceId != null && p.WooCommerceId > 0 && p.Site.Any(s => s.Id == siteId))
-                .Select(p => new { p.Id, WooId = p.WooCommerceId!.Value })
+                .Where(p => productIdsSet.Contains(p.Id) && p.Site.Any(s => s.Id == siteId))
+                .Select(p => new { p.Id, LegacyWooId = p.WooCommerceId })
                 .ToListAsync(cancelToken);
-            var idToWooId = products.ToDictionary(p => p.Id, p => p.WooId);
+            var perSiteWooId = await _dbContext.ProductSiteWooId
+                .AsNoTracking()
+                .Where(x => x.SiteId == siteId && productIdsSet.Contains(x.ProductId))
+                .ToDictionaryAsync(x => x.ProductId, x => x.WooCommerceProductId, cancelToken);
+            var idToWooId = new Dictionary<int, int>();
+            foreach (var p in onSite)
+            {
+                int wooId = perSiteWooId.TryGetValue(p.Id, out var psw) && psw > 0
+                    ? psw
+                    : (p.LegacyWooId ?? 0);
+                if (wooId > 0)
+                    idToWooId[p.Id] = wooId;
+            }
             var result = new List<(int, int)>();
             for (var i = 0; i < orderedProductIds.Count; i++)
             {
