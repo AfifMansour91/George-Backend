@@ -49,11 +49,29 @@ public class PromotionWebhookDispatcher
         _scopeFactory = scopeFactory;
     }
 
+    /// <summary>Default Promotion Engine path appended to the site's WooCommerce URL when no explicit webhook URL is set.</summary>
+    public const string DefaultPromengPath = "/wp-json/promeng/v1/promotions";
+
+    /// <summary>
+    /// Resolves the promotion webhook target for a site: the explicit <see cref="Site.PromotionWebhookUrl"/>
+    /// when set, otherwise the default Promotion Engine endpoint derived from the site's WooCommerce URL
+    /// (<c>{WooCommerceUrl}{DefaultPromengPath}</c>). Returns null when neither is configured.
+    /// </summary>
+    public static string? ResolveWebhookUrl(Site? site)
+    {
+        if (site is null) return null;
+        if (!string.IsNullOrWhiteSpace(site.PromotionWebhookUrl))
+            return site.PromotionWebhookUrl.Trim();
+        if (!string.IsNullOrWhiteSpace(site.WooCommerceUrl))
+            return site.WooCommerceUrl.Trim().TrimEnd('/') + DefaultPromengPath;
+        return null;
+    }
+
     /// <summary>Convenience wrapper. <paramref name="site"/> may be null — call is then a no-op.</summary>
     public Task FireAsync(string eventName, Promotion promotion, Site? site, CancellationToken cancelToken = default)
     {
         if (site is null) return Task.CompletedTask;
-        return FireAsync(eventName, promotion, site.PromotionWebhookUrl, site.PromotionWebhookSecret, cancelToken);
+        return FireAsync(eventName, promotion, ResolveWebhookUrl(site), site.PromotionWebhookSecret, cancelToken);
     }
 
     public Task FireAsync(string eventName, Promotion promotion, string? url, string? secret, CancellationToken cancelToken = default)
@@ -68,12 +86,12 @@ public class PromotionWebhookDispatcher
     /// <summary>Notify downstream (StoreOS JSON or Promeng DELETE) before a promotion row is removed.</summary>
     public Task FireDeleteAsync(Promotion promotion, Site? site, CancellationToken cancelToken = default)
     {
-        if (site is null || string.IsNullOrWhiteSpace(site.PromotionWebhookUrl))
+        var url = ResolveWebhookUrl(site);
+        if (string.IsNullOrWhiteSpace(url))
             return Task.CompletedTask;
 
-        var url = site.PromotionWebhookUrl.Trim();
-        var secret = site.PromotionWebhookSecret;
-        _ = Task.Run(() => SendDeleteAsync(promotion, url, secret), CancellationToken.None);
+        var secret = site!.PromotionWebhookSecret;
+        _ = Task.Run(() => SendDeleteAsync(promotion, url!.Trim(), secret), CancellationToken.None);
         return Task.CompletedTask;
     }
 
