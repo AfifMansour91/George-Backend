@@ -329,13 +329,22 @@ namespace George.Data
         public async Task<Order?> UpdatePickingAsync(
             int orderId,
             List<(int OrderItemId, decimal? PickedQuantity, decimal? TotalPrice, bool? PickingUserConfirmed, string? Notes)> updates,
-            CancellationToken cancelToken)
+            CancellationToken cancelToken,
+            int? pickerUserId = null,
+            string? pickerName = null)
         {
             if (updates == null || updates.Count == 0) return null;
             var db = await _dbContext.Order
                 .Include(o => o.OrderItem)
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
             if (db == null) return null;
+            // Record who picked (last staff member to save picking).
+            if (pickerUserId.HasValue && pickerUserId.Value > 0)
+            {
+                db.PickerUserId = pickerUserId.Value;
+                if (!string.IsNullOrWhiteSpace(pickerName))
+                    db.PickerName = pickerName;
+            }
             var itemMap = db.OrderItem?.ToDictionary(i => i.Id) ?? new Dictionary<int, OrderItem>();
             foreach (var (orderItemId, pickedQty, totalPrice, confirmFromClient, notes) in updates)
             {

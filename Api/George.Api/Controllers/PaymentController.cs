@@ -88,6 +88,18 @@ public class PaymentController : GeorgeControllerBase, IAuthUserProvider
             _paymentSvc.SendOrderInvoiceSmsAsync(orderId, req?.OverridePhone, cancelToken));
     }
 
+    /// <summary>Re-send the existing credit note (חשבונית מס זיכוי) link to the customer by SMS.</summary>
+    [HttpPost("Order/{orderId:int}/RefundInvoice/SendSms")]
+    [ProducesResponseType(typeof(IApiResponse<OrderInvoiceRes>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> SendRefundInvoiceSmsAsync(
+        [FromRoute] int orderId,
+        [FromBody] SendPaymentSmsReq? req,
+        CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() =>
+            _paymentSvc.SendOrderRefundInvoiceSmsAsync(orderId, req?.OverridePhone, cancelToken));
+    }
+
     [HttpPost("Order/{orderId:int}/Void")]
     [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
     public async Task<IActionResult> VoidPendingAsync([FromRoute] int orderId, CancellationToken cancelToken = default)

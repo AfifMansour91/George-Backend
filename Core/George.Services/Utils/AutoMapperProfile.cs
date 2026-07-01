@@ -195,6 +195,7 @@ namespace George.Services
                 {
                     dest.CreationTime = SpecifyUtc(src.CreationTime);
                     dest.UpdatedDate = src.UpdatedDate.HasValue ? SpecifyUtc(src.UpdatedDate.Value) : null;
+                    dest.RefundedAt = src.RefundedAt.HasValue ? SpecifyUtc(src.RefundedAt.Value) : null;
                     dest.DeliveryDate = ToUnspecifiedCalendarDate(src.DeliveryDate);
                     dest.PickupDate = ToUnspecifiedCalendarDate(src.PickupDate);
                     dest.AccountName = src.Account?.Name;

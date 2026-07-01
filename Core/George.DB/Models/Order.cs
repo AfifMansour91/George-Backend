@@ -23,6 +23,13 @@ public partial class Order
 
     public int? UpdateUserId { get; set; }
 
+    /// <summary>User id of the staff member who picked (לוקט) the order — set when picking is saved.</summary>
+    public int? PickerUserId { get; set; }
+
+    /// <summary>Display name of the picker (denormalized from User.FullName at picking time).</summary>
+    [StringLength(200)]
+    public string? PickerName { get; set; }
+
     public int AccountId { get; set; }
 
     public int SiteId { get; set; }
@@ -218,6 +225,10 @@ public partial class Order
     /// <summary>Cumulative amount refunded (partial or full).</summary>
     [Column(TypeName = "decimal(18, 2)")]
     public decimal? RefundedAmount { get; set; }
+
+    /// <summary>When the (last) refund/credit was performed.</summary>
+    [Precision(0)]
+    public DateTime? RefundedAt { get; set; }
 
     /// <summary>Last payment webhook <c>orderId</c> (WooCommerce / gateway echo).</summary>
     [StringLength(64)]

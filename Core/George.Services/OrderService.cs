@@ -30,6 +30,7 @@ namespace George.Services
         private readonly SiteStorage _siteStorage;
         private readonly AccountStorage _accountStorage;
         private readonly ProductStorage _productStorage;
+        private readonly UserStorage _userStorage;
         private readonly SmsProvider _smsProvider;
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly PrintJobService _printJobService;
@@ -64,6 +65,7 @@ namespace George.Services
             SiteStorage siteStorage,
             AccountStorage accountStorage,
             ProductStorage productStorage,
+            UserStorage userStorage,
             SmsProvider smsProvider,
             IServiceScopeFactory serviceScopeFactory,
             PrintJobService printJobService,
@@ -80,6 +82,7 @@ namespace George.Services
             _siteStorage = siteStorage;
             _accountStorage = accountStorage;
             _productStorage = productStorage;
+            _userStorage = userStorage;
             _smsProvider = smsProvider;
             _serviceScopeFactory = serviceScopeFactory;
             _printJobService = printJobService;
@@ -872,7 +875,12 @@ namespace George.Services
                 .Where(i => i.OrderItemId > 0)
                 .Select(i => (i.OrderItemId, i.PickedQuantity, i.TotalPrice, i.PickingUserConfirmed, i.Notes))
                 .ToList();
-            var updated = await _orderStorage.UpdatePickingAsync(orderId, updates, cancelToken);
+            // Record who picked (לוקט): the staff member saving picking.
+            var pickerUserId = AuthUser.Id.IsValidID() ? AuthUser.Id : (int?)null;
+            var pickerName = pickerUserId.HasValue
+                ? await _userStorage.GetUserNameAsync(pickerUserId.Value, cancelToken).ConfigureAwait(false)
+                : null;
+            var updated = await _orderStorage.UpdatePickingAsync(orderId, updates, cancelToken, pickerUserId, pickerName);
             if (updated == null) return CreateResponse(response, StatusCode.ItemNotFound);
 
             var stockPushProductIds = new List<int>();

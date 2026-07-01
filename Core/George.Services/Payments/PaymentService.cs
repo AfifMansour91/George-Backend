@@ -861,6 +861,53 @@ public class PaymentService : ServiceBase
         return response;
     }
 
+    /// <summary>Re-send the existing credit note (חשבונית מס זיכוי) link to the customer by SMS.</summary>
+    public async Task<IApiResponse<OrderInvoiceRes>> SendOrderRefundInvoiceSmsAsync(
+        int orderId,
+        string? overridePhone = null,
+        CancellationToken cancelToken = default)
+    {
+        var response = new ApiResponse<OrderInvoiceRes>();
+        var order = await _paymentStorage.GetOrderForPaymentAsync(orderId, cancelToken);
+        if (order == null)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+
+        var url = order.CardcomRefundDocumentUrl?.Trim();
+        if (string.IsNullOrWhiteSpace(url))
+            return CreateResponse(response, StatusCode.InvalidRequest,
+                "No credit invoice document to send. Issue a refund first.");
+
+        var phone = (overridePhone ?? order.CustomerPhone ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(phone))
+            return CreateResponse(response, StatusCode.InvalidRequest,
+                "Customer phone is required to send the credit invoice by SMS.");
+
+        if (!SmsProvider.IsInitialized)
+            return CreateResponse(response, StatusCode.InvalidRequest, "SMS provider is not configured.");
+
+        var amount = order.RefundedAmount ?? 0m;
+        var body = await BuildRefundSmsBodyAsync(order, url, amount, cancelToken);
+        if (!body.Contains(url, StringComparison.OrdinalIgnoreCase))
+            body = $"{body.TrimEnd()}\n{url}";
+
+        var sent = await _smsProvider.SendTextAsync(phone, body, cancelToken);
+        if (!sent)
+            return CreateResponse(response, StatusCode.InvalidRequest,
+                "Could not send credit invoice SMS. Check customer phone and SMS provider configuration.");
+
+        await LogEventAsync(order.Id, "RefundSms", "0", MaskPhone(phone), null, null, amount, null, cancelToken);
+
+        response.Data = new OrderInvoiceRes
+        {
+            Success = true,
+            InvoiceNumber = order.RefundInvoiceNumber,
+            DocumentUrl = url,
+            SmsSent = true,
+            MaskedPhone = MaskPhone(phone),
+        };
+        return response;
+    }
+
     private static CardcomCardOwnerContact BuildCardOwnerContactFromOrder(Order order) =>
         new()
         {
@@ -884,7 +931,9 @@ public class PaymentService : ServiceBase
     {
         var items = order.OrderItem?.Where(i => !i.IsDeleted) ?? Enumerable.Empty<OrderItem>();
         var isoCoinId = CardcomDocumentBuilder.MapCurrencyToIsoCoinId(creds.Currency);
-        return CardcomDocumentBuilder.Build(order, items, CardcomDocumentBuilder.RefundDocumentType, false, false, isoCoinId);
+        // Email the credit note (חשבונית מס זיכוי) to the customer at refund time when an email is on file
+        // (the builder no-ops the email flag when CustomerEmail is empty). SMS re-send is available separately.
+        return CardcomDocumentBuilder.Build(order, items, CardcomDocumentBuilder.RefundDocumentType, sendByEmail: true, sendBySms: false, isoCoinId);
     }
 
     private static void ApplyInvoiceFromTransaction(Order order, PaymentTransactionResult tx)
@@ -1015,6 +1064,7 @@ public class PaymentService : ServiceBase
         var previousRefunded = order.RefundedAmount ?? 0m;
         var totalRefunded = previousRefunded + amount;
         order.RefundedAmount = totalRefunded;
+        order.RefundedAt = DateTime.UtcNow;
 
         var isFullRefund = orderTotal <= 0 || totalRefunded >= orderTotal - 0.01m;
         if (isFullRefund)

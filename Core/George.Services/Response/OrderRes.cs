@@ -9,6 +9,10 @@ public class OrderRes
     public DateTime? UpdatedDate { get; set; }
     public int? CreationUserId { get; set; }
     public int? UpdateUserId { get; set; }
+    /// <summary>User id of the staff member who picked the order (לוקט).</summary>
+    public int? PickerUserId { get; set; }
+    /// <summary>Display name of the picker (User.FullName at picking time).</summary>
+    public string? PickerName { get; set; }
     public int AccountId { get; set; }
     public int SiteId { get; set; }
     /// <summary>Account display name (from Account.Name). Used by voucher header when client does not pass an override.</summary>
@@ -39,6 +43,7 @@ public class OrderRes
     public string? OrderCustomerJson { get; set; }
     public string? CustomerName { get; set; }
     public string? CustomerPhone { get; set; }
+    public string? CustomerEmail { get; set; }
     public int? CustomerId { get; set; }
     public string? DeliveryAddress { get; set; }
     public string? DeliveryStreet { get; set; }
@@ -81,6 +86,8 @@ public class OrderRes
     public string? CardcomRefundDocumentUrl { get; set; }
     /// <summary>Cumulative amount refunded (partial or full).</summary>
     public decimal? RefundedAmount { get; set; }
+    /// <summary>When the (last) refund/credit was performed.</summary>
+    public DateTime? RefundedAt { get; set; }
     public DateTime? PaidAt { get; set; }
     /// <summary>Last payment webhook <c>orderId</c>.</summary>
     public string? GatewayPaymentOrderId { get; set; }
