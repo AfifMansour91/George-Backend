@@ -251,11 +251,13 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Validates that the product SKU and every variant SKU are unique within the store: no duplicates inside
-        /// the request itself, and none already taken by another product/variation. Returns a user-facing Hebrew
-        /// error message, or null when all SKUs are free. Empty SKUs are ignored. Bug #17.
+        /// Validates that the product SKU and every variant SKU are unique on the sites the product lives on: no
+        /// duplicates inside the request itself, and none already taken by another product/variation that shares a
+        /// site (SKU collides only within a single WooCommerce store; the same SKU on other sites is fine — see
+        /// IsSkuTakenAsync). Returns a user-facing Hebrew error message, or null when all SKUs are free. Empty SKUs
+        /// are ignored. Bug #17.
         /// </summary>
-        private async Task<string?> ValidateSkusUniqueAsync(string? productSku, IEnumerable<string?>? variantSkus, int? accountId, int? excludeProductId, CancellationToken cancelToken)
+        private async Task<string?> ValidateSkusUniqueAsync(string? productSku, IEnumerable<string?>? variantSkus, IReadOnlyCollection<int>? siteIds, int? excludeProductId, CancellationToken cancelToken)
         {
             var skus = new List<string>();
             if (!string.IsNullOrWhiteSpace(productSku)) skus.Add(productSku.Trim());
@@ -273,7 +275,7 @@ namespace George.Services
             // Collision with an existing product/variation in the store.
             foreach (var s in seen)
             {
-                if (await _productStorage.IsSkuTakenAsync(s, accountId, excludeProductId, excludeVariantId: null, cancelToken))
+                if (await _productStorage.IsSkuTakenAsync(s, siteIds, excludeProductId, excludeVariantId: null, cancelToken))
                     return $"מק\"ט '{s}' כבר קיים בחנות. בחר מק\"ט אחר.";
             }
             return null;
@@ -295,8 +297,15 @@ namespace George.Services
             var lookupDto = MapToLookupDto(req);
             await _productStorage.MapLookupsAsync(product, lookupDto, cancelToken);
 
-            // Block creating a product/variation with a SKU already used in the store. Bug #17.
-            var skuError = await ValidateSkusUniqueAsync(product.Sku, req.Variants?.Select(v => v.Sku), product.AccountId, excludeProductId: null, cancelToken);
+            // Block creating a product/variation with a SKU already used on any of its sites. The SKU only collides
+            // within a single WooCommerce store (one per site), so scope the check to the sites this product will
+            // live on — an empty request site list means "all of the account's sites" (see CreateProductAsync). Bug #17.
+            var createSiteIds = (req.SiteIds != null && req.SiteIds.Any())
+                ? req.SiteIds
+                : (product.AccountId.HasValue
+                    ? await _overrideStorage.GetAccountSiteIdsAsync(product.AccountId.Value, cancelToken)
+                    : new List<int>());
+            var skuError = await ValidateSkusUniqueAsync(product.Sku, req.Variants?.Select(v => v.Sku), createSiteIds, excludeProductId: null, cancelToken);
             if (skuError != null)
             {
                 response.DisplayMessage = skuError; // surfaced to the user (frontend reads displayMessage)
@@ -545,9 +554,15 @@ namespace George.Services
             product.Id = productId;
             product.UpdateUserId = AuthUser.Id;
 
-            // Block updating to a SKU already used by another product/variation in the store. Variants are only
-            // validated when the request actually sends them (partial table edits leave them untouched). Bug #17.
-            var updateSkuError = await ValidateSkusUniqueAsync(product.Sku, req.Variants?.Select(v => v.Sku), product.AccountId, excludeProductId: productId, cancelToken);
+            // Block updating to a SKU already used by another product/variation ON ONE OF THIS PRODUCT'S SITES.
+            // Scope to sites (SKU collides only within a single WooCommerce store); a same-account sibling on
+            // ANOTHER site legitimately shares the SKU (MultiSite per-site rows) and must not block the save — this
+            // was the false positive that broke stock toggles. Variants are only validated when the request actually
+            // sends them (partial table edits leave them untouched). Bug #17.
+            var updateSiteIds = (req.SiteIds != null && req.SiteIds.Any())
+                ? req.SiteIds
+                : (existingProduct.Site?.Select(s => s.Id).ToList() ?? new List<int>());
+            var updateSkuError = await ValidateSkusUniqueAsync(product.Sku, req.Variants?.Select(v => v.Sku), updateSiteIds, excludeProductId: productId, cancelToken);
             if (updateSkuError != null)
             {
                 response.DisplayMessage = updateSkuError; // surfaced to the user (frontend reads displayMessage)

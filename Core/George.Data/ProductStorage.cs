@@ -302,30 +302,33 @@ namespace George.Data
         }
 
         /// <summary>
-        /// True when <paramref name="sku"/> is already used by another non-deleted product OR product variant in the
-        /// same account. Used to BLOCK creating/updating a product/variation with a duplicate SKU in the store
-        /// (Woo links by SKU, so duplicates collide on a single Woo product). Excludes the product being edited
-        /// and, for variants, an optional variant id. Empty SKU is never "taken". Bug #17.
+        /// True when <paramref name="sku"/> is already used by another non-deleted product OR product variant that
+        /// shares at least one SITE with the product being saved. Used to BLOCK creating/updating a product/variation
+        /// with a duplicate SKU on a site: each site is one WooCommerce store and Woo links by SKU, so two products
+        /// with the same SKU on the SAME site collide on a single Woo product. The same SKU on DIFFERENT sites is
+        /// allowed — WooCommerce receives a site-prefixed SKU (S{siteId}_) so cross-site overlap does not collide, and
+        /// the MultiSite model legitimately stores one logical product as separate per-site rows that share a SKU
+        /// (a same-account sibling on another site must NOT be flagged — that was the false positive that blocked
+        /// stock toggles). Excludes the product being edited and, for variants, an optional variant id. Empty SKU or
+        /// no target site is never "taken". Bug #17 (site-scoped).
         /// </summary>
-        public async Task<bool> IsSkuTakenAsync(string? sku, int? accountId, int? excludeProductId, int? excludeVariantId, CancellationToken cancelToken)
+        public async Task<bool> IsSkuTakenAsync(string? sku, IReadOnlyCollection<int>? siteIds, int? excludeProductId, int? excludeVariantId, CancellationToken cancelToken)
         {
             if (string.IsNullOrWhiteSpace(sku)) return false;
+            if (siteIds == null || siteIds.Count == 0) return false; // lives on no site → cannot collide in any store
             var trimmed = sku.Trim();
+            var siteIdList = siteIds.Distinct().ToList();
 
-            var productQ = _dbContext.Product.AsNoTracking().Where(p => !p.IsDeleted && p.Sku != null);
-            productQ = accountId.HasValue
-                ? productQ.Where(p => p.AccountId == accountId.Value)
-                : productQ.Where(p => p.AccountId == null);
+            var productQ = _dbContext.Product.AsNoTracking()
+                .Where(p => !p.IsDeleted && p.Sku != null && p.Site.Any(s => siteIdList.Contains(s.Id)));
             if (excludeProductId.HasValue)
                 productQ = productQ.Where(p => p.Id != excludeProductId.Value);
             if (await productQ.AnyAsync(p => p.Sku!.ToLower() == trimmed.ToLower(), cancelToken))
                 return true;
 
             var variantQ = _dbContext.ProductVariant.AsNoTracking()
-                .Where(v => !v.IsDeleted && v.Sku != null && !v.Product!.IsDeleted);
-            variantQ = accountId.HasValue
-                ? variantQ.Where(v => v.Product!.AccountId == accountId.Value)
-                : variantQ.Where(v => v.Product!.AccountId == null);
+                .Where(v => !v.IsDeleted && v.Sku != null && !v.Product!.IsDeleted
+                            && v.Product!.Site.Any(s => siteIdList.Contains(s.Id)));
             if (excludeProductId.HasValue)
                 variantQ = variantQ.Where(v => v.ProductId != excludeProductId.Value);
             if (excludeVariantId.HasValue)

@@ -501,6 +501,7 @@ namespace George.Services
             var response = new ApiResponse<OrderRes>();
             var beforeUpdate = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
             var previousStatus = beforeUpdate?.Status;
+            var previousDeliveryType = beforeUpdate?.DeliveryType;
             var updated = await _orderStorage.UpdateOrderAsync(orderId, o =>
             {
                 if (req.Status != null) o.Status = req.Status;
@@ -546,6 +547,41 @@ namespace George.Services
                     o.ManualDiscountType = string.IsNullOrWhiteSpace(req.ManualDiscountType) ? null : req.ManualDiscountType.Trim();
                 if (req.ManualDiscountValue.HasValue)
                     o.ManualDiscountValue = req.ManualDiscountValue.Value <= 0m ? null : req.ManualDiscountValue.Value;
+                // When the delivery type actually changes (e.g. איסוף → משלוח), clear the stale metadata of the
+                // previous mode so the order stops looking like the old type. Without this, a pickup→shipping
+                // switch left ShippingLabel="איסוף", ShippingInfoJson type=pickup, PickupDate/Time and the pickup
+                // branch name behind — so vouchers/displays still treated it as pickup.
+                if (req.DeliveryType != null)
+                {
+                    var prevType = (previousDeliveryType ?? "").Trim();
+                    var nowType = (o.DeliveryType ?? "").Trim();
+                    var changed = !string.Equals(prevType, nowType, StringComparison.OrdinalIgnoreCase);
+                    var nowShipping = nowType.Contains("משלוח", StringComparison.Ordinal)
+                        || nowType.Equals("Shipping", StringComparison.OrdinalIgnoreCase)
+                        || nowType.Equals("Express", StringComparison.OrdinalIgnoreCase);
+                    var nowPickup = nowType.Contains("איסוף", StringComparison.Ordinal)
+                        || nowType.Equals("Pickup", StringComparison.OrdinalIgnoreCase);
+                    if (changed && nowShipping)
+                    {
+                        var branch = o.ShippingStoreName?.Trim();
+                        o.PickupDate = null;
+                        o.PickupTime = null;
+                        o.ShippingStoreName = null;
+                        o.WooCommercePickupAffiliateId = null;
+                        o.ShippingInfoJson = null;
+                        o.ShippingLabel = "משלוח";
+                        // Drop the leftover pickup-branch note (kept as delivery note by the form).
+                        if (!string.IsNullOrEmpty(branch) && string.Equals(o.DeliveryNote?.Trim(), branch, StringComparison.Ordinal))
+                            o.DeliveryNote = null;
+                    }
+                    else if (changed && nowPickup)
+                    {
+                        // Pickup has no delivery fee; drop shipping-only leftovers.
+                        o.ShippingCost = 0m;
+                        o.ShippingLabel = "איסוף";
+                        o.ShippingInfoJson = null;
+                    }
+                }
                 if (touchStreetOrCity)
                     RebuildDeliveryAddressFromStreetAndCity(o, clearCombinedLineWhenBothEmpty: true);
                 o.UpdateUserId = AuthUser.Id;

@@ -129,13 +129,25 @@ public partial class OrderService
             }
 
             decimal revenue = 0m;
-            foreach (var line in promo.Lines ?? new List<Request.WooCommerceAppliedPromotionLinePayload>())
+            var lines = promo.Lines;
+            if (lines != null && lines.Count > 0)
             {
-                var target = MatchOrderItemForPromotionLine(items, line);
-                if (target == null) continue;
-                target.PromotionId = promotionId;
-                target.DiscountAmount = (target.DiscountAmount ?? 0m) + Math.Max(0m, line.DiscountAmount);
-                revenue += Math.Max(0m, (target.TotalPrice ?? 0m) - Math.Max(0m, line.DiscountAmount));
+                foreach (var line in lines)
+                {
+                    var target = MatchOrderItemForPromotionLine(items, line);
+                    if (target == null) continue;
+                    target.PromotionId = promotionId;
+                    target.DiscountAmount = (target.DiscountAmount ?? 0m) + Math.Max(0m, line.DiscountAmount);
+                    revenue += Math.Max(0m, (target.TotalPrice ?? 0m) - Math.Max(0m, line.DiscountAmount));
+                }
+            }
+            else if (promo.DiscountAmount > 0m)
+            {
+                // Fallback: the plugin sent the promotion at order level only (spec §1.3 per-line `lines[]`
+                // not yet emitted). Distribute the order-level discount across the order lines proportionally
+                // by line total, so the promotion is still stamped, recorded, and visible in picking. Each
+                // line is capped at its own total; the last eligible line absorbs the rounding remainder.
+                revenue += DistributeOrderLevelPromotionDiscount(items, promotionId, promo.DiscountAmount);
             }
 
             resolved.Add(new ResolvedOrderPromotion
@@ -147,6 +159,41 @@ public partial class OrderService
         }
 
         return resolved;
+    }
+
+    /// <summary>
+    /// Spread an order-level promotion discount (no per-line <c>lines[]</c> from the plugin) across the order
+    /// lines proportionally by line total. Only lines with a positive total are eligible; each line's share is
+    /// capped at its own total and at the remaining discount, and the last eligible line takes the remainder so
+    /// the stamped discounts sum exactly to <paramref name="discountAmount"/> (bounded by the merchandise total).
+    /// Returns the post-discount revenue of the stamped lines (for redemption metrics).
+    /// </summary>
+    private static decimal DistributeOrderLevelPromotionDiscount(
+        List<OrderItem> items,
+        int promotionId,
+        decimal discountAmount)
+    {
+        var eligible = items.Where(i => !i.IsDeleted && (i.TotalPrice ?? 0m) > 0m).ToList();
+        var baseTotal = eligible.Sum(i => i.TotalPrice ?? 0m);
+        if (eligible.Count == 0 || baseTotal <= 0m) return 0m;
+
+        var remaining = Math.Min(Math.Max(0m, discountAmount), baseTotal);
+        decimal revenue = 0m;
+        for (var k = 0; k < eligible.Count; k++)
+        {
+            var it = eligible[k];
+            var lineTotal = it.TotalPrice ?? 0m;
+            var share = k == eligible.Count - 1
+                ? remaining // last eligible line absorbs the rounding remainder
+                : Math.Round(discountAmount * (lineTotal / baseTotal), 2);
+            share = Math.Min(Math.Min(share, lineTotal), remaining);
+            if (share <= 0m) continue;
+            it.PromotionId = promotionId;
+            it.DiscountAmount = (it.DiscountAmount ?? 0m) + share;
+            revenue += Math.Max(0m, lineTotal - share);
+            remaining -= share;
+        }
+        return revenue;
     }
 
     /// <summary>Match a payload promotion line to an order line by WooCommerce product id, then sku, preferring an un-stamped line.</summary>
@@ -265,10 +312,18 @@ public partial class OrderService
     private async Task TryReapplyOrderPromotionsAfterPickingAsync(int orderId, CancellationToken cancelToken)
     {
         var order = await _orderStorage.GetOrderByIdTrackedAsync(orderId, cancelToken).ConfigureAwait(false);
-        if (order == null || !ShouldReapplyPromotionsDuringPicking(order.Source)) return;
+        if (order == null) return;
 
         var items = order.OrderItem?.Where(i => !i.IsDeleted).ToList() ?? new List<OrderItem>();
         if (items.Count == 0) return;
+
+        // Internal orders (phone/kiosk/manual) always re-evaluate promotions during picking. A WEBSITE order
+        // does too — but only once it carries a George-linked promotion (stamped from the Woo
+        // appliedPromotions on ingest). This makes such an order behave like an internal one: products added
+        // during picking join the promotion and the final order is recomputed (spec §2 — George becomes the
+        // source of truth at picking). A website order with no promotion is left untouched (trust Woo).
+        var hasGeorgePromotion = items.Any(i => i.PromotionId is > 0);
+        if (!ShouldReapplyPromotionsDuringPicking(order.Source) && !hasGeorgePromotion) return;
 
         foreach (var it in items)
         {
