@@ -1091,8 +1091,23 @@ namespace George.Data
         public async Task<List<int>> CreateProductVariantsAsync(int productId, List<ProductVariantDto> variants, List<ProductOptionDto>? options, CancellationToken cancelToken)
         {
             var createdIds = new List<int>();
+
+            // WooCommerce echoes the PARENT sku on a variation that has no own sku, and a variant sku == parent sku
+            // makes Woo reject variation updates (duplicate sku) and pile up variations on re-sync. A CSV/file import can
+            // send the parent sku on every variation, so normalize it to null on this write path (mirrors the Woo->George
+            // import guard in WooCommerceService, which was the only place this was handled). Bug #1.
+            var parentSku = await _dbContext.Product
+                .Where(p => p.Id == productId)
+                .Select(p => p.Sku)
+                .FirstOrDefaultAsync(cancelToken);
+
             foreach (var variant in variants)
             {
+                var variantSku = string.IsNullOrWhiteSpace(variant.Sku) ? null : variant.Sku.Trim();
+                if (variantSku != null && !string.IsNullOrWhiteSpace(parentSku)
+                    && string.Equals(variantSku, parentSku.Trim(), StringComparison.OrdinalIgnoreCase))
+                    variantSku = null;
+
                 var productVariant = new ProductVariant
                 {
                     ProductId = productId,
@@ -1100,7 +1115,7 @@ namespace George.Data
                     Price = variant.Price,
                     SalePrice = variant.SalePrice,
                     StockQuantity = variant.StockQuantity,
-                    Sku = string.IsNullOrWhiteSpace(variant.Sku) ? null : variant.Sku,
+                    Sku = variantSku,
                     Weight = variant.Weight,
                     IsDeleted = false
                 };

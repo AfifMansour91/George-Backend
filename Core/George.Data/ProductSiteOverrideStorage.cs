@@ -603,6 +603,19 @@ namespace George.Data
             {
                 var ssId = await ResolveStockStatusIdAsync(stockStatus, cancelToken);
                 if (ssId.HasValue) row.StockStatusId = ssId;
+
+                // Keep the per-site quantity consistent with an explicit status change when the caller didn't send a
+                // quantity of its own (e.g. a status-only toggle from the list). A quantity-managed product derives
+                // its Woo stock_status from quantity, so a stale per-site StockQuantity (e.g. a leftover 0) makes Woo
+                // re-derive "out of stock" right after the site was toggled back in — the per-branch flip that only a
+                // second toggle "fixed". Bug #5.
+                if (!stockQuantity.HasValue)
+                {
+                    if (string.Equals(stockStatus, "out_of_stock", StringComparison.OrdinalIgnoreCase))
+                        row.StockQuantity = 0;
+                    else if (string.Equals(stockStatus, "in_stock", StringComparison.OrdinalIgnoreCase) && (row.StockQuantity ?? 0) <= 0)
+                        row.StockQuantity = null; // drop the stale 0 and inherit the canonical quantity
+                }
             }
             if (stockQuantity.HasValue) row.StockQuantity = stockQuantity;
             if (variationStockByQuantity.HasValue) row.VariationStockByQuantity = variationStockByQuantity;

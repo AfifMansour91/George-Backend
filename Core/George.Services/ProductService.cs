@@ -257,7 +257,7 @@ namespace George.Services
         /// IsSkuTakenAsync). Returns a user-facing Hebrew error message, or null when all SKUs are free. Empty SKUs
         /// are ignored. Bug #17.
         /// </summary>
-        private async Task<string?> ValidateSkusUniqueAsync(string? productSku, IEnumerable<string?>? variantSkus, IReadOnlyCollection<int>? siteIds, int? excludeProductId, CancellationToken cancelToken)
+        private async Task<string?> ValidateSkusUniqueAsync(string? productSku, IEnumerable<string?>? variantSkus, IReadOnlyCollection<int>? siteIds, int? excludeProductId, CancellationToken cancelToken, IReadOnlyCollection<string>? skusExemptFromStoreCheck = null)
         {
             var skus = new List<string>();
             if (!string.IsNullOrWhiteSpace(productSku)) skus.Add(productSku.Trim());
@@ -272,9 +272,18 @@ namespace George.Services
                     return $"מק\"ט '{s}' מופיע יותר מפעם אחת במוצר. כל מק\"ט חייב להיות ייחודי.";
             }
 
+            // SKUs the product already carries are not "newly introduced", so they are exempt from the store-collision
+            // check — re-validating an UNCHANGED sku falsely trips on a duplicate-sku sibling on the same site (e.g.
+            // imported duplicates) and blocks unrelated edits (a stock-only save was silently skipped). Exempt skus
+            // still count in the in-request duplicate check above. Bug #3.
+            var exempt = skusExemptFromStoreCheck == null || skusExemptFromStoreCheck.Count == 0
+                ? null
+                : new HashSet<string>(skusExemptFromStoreCheck, StringComparer.OrdinalIgnoreCase);
+
             // Collision with an existing product/variation in the store.
             foreach (var s in seen)
             {
+                if (exempt != null && exempt.Contains(s)) continue;
                 if (await _productStorage.IsSkuTakenAsync(s, siteIds, excludeProductId, excludeVariantId: null, cancelToken))
                     return $"מק\"ט '{s}' כבר קיים בחנות. בחר מק\"ט אחר.";
             }
@@ -554,15 +563,30 @@ namespace George.Services
             product.Id = productId;
             product.UpdateUserId = AuthUser.Id;
 
+            // Snapshot the canonical stock BEFORE the update, so after the save we can tell whether this all-sites
+            // edit actually changed stock and, if so, clear stale per-site stock overrides (see below). Bug #3.
+            var origStockStatusId = existingProduct.StockStatusId;
+            var origStockQuantity = existingProduct.StockQuantity;
+            var origStockManagementTypeId = existingProduct.StockManagementTypeId;
+            var origVariationStockByQuantity = existingProduct.VariationStockByQuantity;
+
             // Block updating to a SKU already used by another product/variation ON ONE OF THIS PRODUCT'S SITES.
             // Scope to sites (SKU collides only within a single WooCommerce store); a same-account sibling on
             // ANOTHER site legitimately shares the SKU (MultiSite per-site rows) and must not block the save — this
             // was the false positive that broke stock toggles. Variants are only validated when the request actually
-            // sends them (partial table edits leave them untouched). Bug #17.
+            // sends them (partial table edits leave them untouched). The product's OWN current SKUs are exempt from
+            // the store-collision check (an unchanged SKU on a stock-only edit must not re-trip on a dup sibling and
+            // silently skip the product in a bulk edit). Bug #3 / Bug #17.
             var updateSiteIds = (req.SiteIds != null && req.SiteIds.Any())
                 ? req.SiteIds
                 : (existingProduct.Site?.Select(s => s.Id).ToList() ?? new List<int>());
-            var updateSkuError = await ValidateSkusUniqueAsync(product.Sku, req.Variants?.Select(v => v.Sku), updateSiteIds, excludeProductId: productId, cancelToken);
+            var currentProductSkus = new List<string>();
+            if (!string.IsNullOrWhiteSpace(existingProduct.Sku)) currentProductSkus.Add(existingProduct.Sku!.Trim());
+            if (existingProduct.ProductVariant != null)
+                currentProductSkus.AddRange(existingProduct.ProductVariant
+                    .Where(v => !v.IsDeleted && !string.IsNullOrWhiteSpace(v.Sku))
+                    .Select(v => v.Sku!.Trim()));
+            var updateSkuError = await ValidateSkusUniqueAsync(product.Sku, req.Variants?.Select(v => v.Sku), updateSiteIds, excludeProductId: productId, cancelToken, skusExemptFromStoreCheck: currentProductSkus);
             if (updateSkuError != null)
             {
                 response.DisplayMessage = updateSkuError; // surfaced to the user (frontend reads displayMessage)
@@ -572,6 +596,14 @@ namespace George.Services
             // Handle lookups (only overwrites IDs when req has a value; existing IDs are already on product from merge)
             var lookupDto = MapToLookupDto(req);
             await _productStorage.MapLookupsAsync(product, lookupDto, cancelToken);
+
+            // MapLookupsAsync has now applied the request's stock status/type onto product; did the canonical stock
+            // actually change on this all-sites edit? Used below to decide whether to clear per-site stock overrides.
+            var canonicalStockChanged =
+                product.StockStatusId != origStockStatusId
+                || product.StockQuantity != origStockQuantity
+                || product.StockManagementTypeId != origStockManagementTypeId
+                || product.VariationStockByQuantity != origVariationStockByQuantity;
 
             // For partial updates (e.g. table quick-edit), only pass category/tag/related/complementary when provided.
             // When null, storage keeps existing values; when empty list is passed, we would clear them.
@@ -633,6 +665,18 @@ namespace George.Services
                     var assignedSiteIds = (req.SiteIds != null && req.SiteIds.Any())
                         ? req.SiteIds.ToList()
                         : (product.Site?.Select(s => s.Id).ToList() ?? new List<int>());
+
+                    // All-sites stock change: clear any stale per-site STOCK overrides so the new canonical stock
+                    // wins on every site (list/filter aggregate + WooCommerce). Without this a site keeps its old
+                    // per-site stock value — the "in stock on the product page, but out of stock in the filter and on
+                    // the website" mismatch, and a bulk 'set all in stock' that never took on a few products. Only the
+                    // stock fields are reset; exclusion / price / name overrides are left untouched. Bug #3.
+                    if (canonicalStockChanged)
+                    {
+                        foreach (var sid in assignedSiteIds)
+                            await _overrideStorage.ResetOverrideAsync(product.Id, sid, new[] { "stock" }, cancelToken);
+                    }
+
                     if (assignedSiteIds.Count > 0)
                     {
                         var productIdForSync = product.Id;
