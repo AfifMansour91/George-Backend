@@ -492,6 +492,47 @@ namespace George.Data
             await _dbContext.SaveChangesAsync(cancelToken);
         }
 
+        /// <summary>
+        /// variantId -> this site's Woo VARIATION id, for a product's variants in this site's store. The single
+        /// ProductVariant.WooCommerceVariationId column can only hold one site's id, so a multi-site variable
+        /// product must resolve variation ids per (variant, site) from here (see ProductSiteVariantWooId).
+        /// </summary>
+        public async Task<Dictionary<int, int>> GetSiteVariantWooIdMapAsync(int productId, int siteId, CancellationToken cancelToken)
+        {
+            return await _dbContext.ProductSiteVariantWooId
+                .Where(x => x.ProductId == productId && x.SiteId == siteId)
+                .ToDictionaryAsync(x => x.ProductVariantId, x => x.WooCommerceVariationId, cancelToken);
+        }
+
+        /// <summary>Upsert the per-site WooCommerce variation id for a (variant, site).</summary>
+        public async Task SetSiteVariantWooIdAsync(int productVariantId, int siteId, int productId, int wooVariationId, CancellationToken cancelToken)
+        {
+            var row = await _dbContext.ProductSiteVariantWooId
+                .FirstOrDefaultAsync(x => x.ProductVariantId == productVariantId && x.SiteId == siteId, cancelToken);
+            if (row == null)
+            {
+                row = new ProductSiteVariantWooId { ProductVariantId = productVariantId, SiteId = siteId, ProductId = productId, WooCommerceVariationId = wooVariationId };
+                _dbContext.ProductSiteVariantWooId.Add(row);
+            }
+            else
+            {
+                row.WooCommerceVariationId = wooVariationId;
+                row.ProductId = productId;
+            }
+            await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
+        /// <summary>Remove a per-site variation id mapping (used when a variation is deleted as an orphan on a site).</summary>
+        public async Task DeleteSiteVariantWooIdAsync(int siteId, int wooVariationId, CancellationToken cancelToken)
+        {
+            var rows = await _dbContext.ProductSiteVariantWooId
+                .Where(x => x.SiteId == siteId && x.WooCommerceVariationId == wooVariationId)
+                .ToListAsync(cancelToken);
+            if (rows.Count == 0) return;
+            _dbContext.ProductSiteVariantWooId.RemoveRange(rows);
+            await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
         /// <summary>localCategoryId -> this site's WooCommerce category id, for categories already synced to this store.</summary>
         public async Task<Dictionary<int, int>> GetSiteCategoryWooIdMapAsync(int siteId, CancellationToken cancelToken)
         {

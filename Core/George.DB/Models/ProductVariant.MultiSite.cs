@@ -8,4 +8,7 @@ public partial class ProductVariant
 {
     [InverseProperty("ProductVariant")]
     public virtual ICollection<ProductSiteVariantStock> ProductSiteVariantStock { get; set; } = new List<ProductSiteVariantStock>();
+
+    [InverseProperty("ProductVariant")]
+    public virtual ICollection<ProductSiteVariantWooId> ProductSiteVariantWooId { get; set; } = new List<ProductSiteVariantWooId>();
 }

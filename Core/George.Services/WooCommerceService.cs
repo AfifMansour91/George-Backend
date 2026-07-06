@@ -3191,9 +3191,28 @@ namespace George.Services
             var weightFromVariation = product.WeightConfig?.WeightByVariant == true
                 || string.Equals(product.WeightConfig?.UnitWeightMode?.Name, "by_variant", StringComparison.OrdinalIgnoreCase);
 
+            // MultiSite Phase 2: resolve each variant's Woo variation id PER SITE. The single
+            // ProductVariant.WooCommerceVariationId column holds at most one site's id, so on a network-managed
+            // account we use the per-(variant, site) map (ProductSiteVariantWooId) instead — trusting the shared
+            // column on a second site made the PUT 404, recreate, then the orphan-cleanup delete the recreation,
+            // leaving that store with zero variations (a variable product with no variations = out of stock). An
+            // empty map (first sync after this fix) falls through to the signature lookup below, which matches this
+            // store's own live variations. Non-network / single-site accounts keep using the legacy column.
+            var isNetworkManagedForVariants = await IsSiteNetworkManagedCachedAsync(siteId, cancelToken).ConfigureAwait(false);
+            Dictionary<int, int> siteVariantWooIds = new();
+            if (isNetworkManagedForVariants)
+            {
+                try { siteVariantWooIds = await _overrideStorage.GetSiteVariantWooIdMapAsync(product.Id, siteId, cancelToken).ConfigureAwait(false); }
+                catch (Exception vwEx) { _logger.LogWarning(vwEx, "Failed to load per-site variation ids for product {ProductId} site {SiteId}; using signature match", product.Id, siteId); }
+            }
+            int VariantWooIdForSite(ProductVariant v) =>
+                isNetworkManagedForVariants
+                    ? (siteVariantWooIds.TryGetValue(v.Id, out var sid) ? sid : 0)
+                    : (v.WooCommerceVariationId ?? 0);
+
             var allVariantsHaveWooId = variants.Count > 0 &&
-                variants.All(v => v.WooCommerceVariationId is > 0);
-            var needSignatureLookup = variants.Any(v => !v.WooCommerceVariationId.HasValue || v.WooCommerceVariationId <= 0);
+                variants.All(v => VariantWooIdForSite(v) > 0);
+            var needSignatureLookup = variants.Any(v => VariantWooIdForSite(v) <= 0);
 
             List<(int id, string signature)> existingWoo;
             if (allVariantsHaveWooId && !needSignatureLookup)
@@ -3212,7 +3231,7 @@ namespace George.Services
             var existingIdsSet = existingWoo.Count > 0
                 ? existingWoo.Select(x => x.id).ToHashSet()
                 : (allVariantsHaveWooId
-                    ? variants.Select(v => v.WooCommerceVariationId!.Value).ToHashSet()
+                    ? variants.Select(VariantWooIdForSite).ToHashSet()
                     : new HashSet<int>());
             var signatureToIds = existingWoo
                 .GroupBy(x => x.signature ?? "")
@@ -3236,7 +3255,7 @@ namespace George.Services
             // MultiSite Phase 2: per-site variant overrides (price/sale/stock/exclusion) for this site, when present.
             // Skipped for non-network accounts (no overrides possible) so single-site sync is unchanged.
             Dictionary<int, ProductSiteOverrideStorage.VariantSiteOverride> perSiteVariantOverrides = new();
-            if (await IsSiteNetworkManagedCachedAsync(siteId, cancelToken).ConfigureAwait(false))
+            if (isNetworkManagedForVariants)
             {
                 try
                 {
@@ -3299,13 +3318,14 @@ namespace George.Services
 
                     var ourSignature = BuildOurVariationSignature(variantOptionValues, attributeMap);
                     int? wooVariationIdToUse = null;
+                    var storedWooVariationId = VariantWooIdForSite(variant); // per-site id (network) or legacy column
 
-                    // 1) Prefer our stored WooCommerce variation id (trust DB when all variants mapped; else verify against Woo list)
-                    if (variant.WooCommerceVariationId is > 0 &&
-                        (allVariantsHaveWooId || existingIdsSet.Contains(variant.WooCommerceVariationId!.Value)))
+                    // 1) Prefer our stored (per-site) WooCommerce variation id (trust DB when all variants mapped; else verify against Woo list)
+                    if (storedWooVariationId > 0 &&
+                        (allVariantsHaveWooId || existingIdsSet.Contains(storedWooVariationId)))
                     {
-                        wooVariationIdToUse = variant.WooCommerceVariationId!.Value;
-                        usedWooVariationIds.Add(variant.WooCommerceVariationId!.Value);
+                        wooVariationIdToUse = storedWooVariationId;
+                        usedWooVariationIds.Add(storedWooVariationId);
                     }
                     // 2) Else match by attribute signature (same combination = same variation; avoids creating duplicates)
                     else if (!string.IsNullOrEmpty(ourSignature) && signatureToIds.TryGetValue(ourSignature, out var idList) && idList.Count > 0)
@@ -3461,7 +3481,14 @@ namespace George.Services
 
                 foreach (var (variant, wooVariationId) in batchResults)
                 {
-                    if (wooVariationId.HasValue && variant.WooCommerceVariationId != wooVariationId.Value)
+                    if (!wooVariationId.HasValue) continue;
+                    // Track the ACTUAL id Woo returned. A PUT to a stale id may have 404'd and CREATED a new
+                    // variation with a different id; without recording it here the orphan-cleanup below deleted the
+                    // just-created variation (it only knew the old id) — the root cause of "0 variations on the 2nd site".
+                    usedWooVariationIds.Add(wooVariationId.Value);
+                    if (isNetworkManagedForVariants)
+                        await _overrideStorage.SetSiteVariantWooIdAsync(variant.Id, siteId, product.Id, wooVariationId.Value, cancelToken);
+                    else if (variant.WooCommerceVariationId != wooVariationId.Value)
                         await _productStorage.UpdateProductVariantWooCommerceIdAsync(variant.Id, wooVariationId.Value, cancelToken);
                 }
             }
@@ -3487,15 +3514,24 @@ namespace George.Services
                     {
                         var deleteUrl = $"{baseUrl}/products/{wooProductId}/variations/{wooId}?force=true";
                         var deleteResponse = await httpClient.DeleteAsync(deleteUrl, cancelToken);
-                        if (!deleteResponse.IsSuccessStatusCode)
-                            _logger.LogWarning("Failed to delete WooCommerce variation {WooId} for product {ProductId}: {Status}", wooId, product.Id, deleteResponse.StatusCode);
+                        if (deleteResponse.IsSuccessStatusCode)
+                            return (int?)wooId;
+                        _logger.LogWarning("Failed to delete WooCommerce variation {WooId} for product {ProductId}: {Status}", wooId, product.Id, deleteResponse.StatusCode);
+                        return (int?)null;
                     }
                     catch (Exception ex)
                     {
                         _logger.LogWarning(ex, "Error deleting WooCommerce variation {WooId} for product {ProductId}", wooId, product.Id);
+                        return (int?)null;
                     }
                 });
-                await Task.WhenAll(tasks);
+                var deletedIds = await Task.WhenAll(tasks);
+                // Drop the per-site variation-id mapping for anything actually deleted (sequential — DbContext is not
+                // thread-safe, so not inside the parallel delete tasks above).
+                if (isNetworkManagedForVariants)
+                    foreach (var deletedId in deletedIds)
+                        if (deletedId.HasValue)
+                            await _overrideStorage.DeleteSiteVariantWooIdAsync(siteId, deletedId.Value, cancelToken);
             }
         }
 
