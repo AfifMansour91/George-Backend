@@ -173,6 +173,19 @@ namespace George.Api.Controllers
             return new EmptyResult();
         }
 
+        /// <summary>Pull current WooCommerce prices into George for a site with external price management (does not change Woo). The daily job runs this automatically; this endpoint triggers it on demand.</summary>
+        [HttpPost("PullPricesFromWooCommerce")]
+        [ProducesResponseType(typeof(IApiResponse<WooPricePullRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> PullPricesFromWooCommerceAsync(
+            [FromBody] WooCommerceSyncReq request,
+            CancellationToken cancelToken = default)
+        {
+            if (request == null || request.SiteId <= 0)
+                return BadRequest();
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _wooCommerceService.PullPricesFromWooCommerceAsync(request.SiteId, cancelToken));
+        }
+
         /// <summary>One-time: pull WooCommerce menu_order into George DisplayOrder (does not change Woo).</summary>
         [HttpPost("ImportProductOrderFromWooCommerce")]
         [ProducesResponseType(typeof(IApiResponse<WooCommerceProductOrderSyncRes>), (int)HttpStatusCode.OK)]

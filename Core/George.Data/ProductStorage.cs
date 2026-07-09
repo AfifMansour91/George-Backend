@@ -951,6 +951,80 @@ namespace George.Data
             return true;
         }
 
+        /// <summary>wooProductId → productId via the legacy single-store Product.WooCommerceId column, for products assigned to the site.</summary>
+        public async Task<Dictionary<int, int>> GetWooProductIdMapForSiteAsync(int siteId, CancellationToken cancelToken)
+        {
+            var rows = await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => !p.IsDeleted && p.WooCommerceId != null && p.Site.Any(s => s.Id == siteId))
+                .Select(p => new { p.Id, WooId = p.WooCommerceId!.Value })
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+            var map = new Dictionary<int, int>();
+            foreach (var r in rows) map[r.WooId] = r.Id;
+            return map;
+        }
+
+        /// <summary>wooVariationId → variantId for a product's non-deleted variants (legacy single-store column).</summary>
+        public async Task<Dictionary<int, int>> GetVariantWooIdMapForProductAsync(int productId, CancellationToken cancelToken)
+        {
+            var rows = await _dbContext.ProductVariant
+                .AsNoTracking()
+                .Where(v => v.ProductId == productId && !v.IsDeleted && v.WooCommerceVariationId != null)
+                .Select(v => new { v.Id, WooId = v.WooCommerceVariationId!.Value })
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+            var map = new Dictionary<int, int>();
+            foreach (var r in rows) map[r.WooId] = r.Id;
+            return map;
+        }
+
+        /// <summary>
+        /// External price pull (Woo → George): apply the store's current prices to the CANONICAL product and
+        /// variant rows (single-store / non-network sites). Unlike normal edits, sale fields are assigned as
+        /// given — a null clears the sale so a sale removed at the POS also ends here. Regular price is only
+        /// applied when the store returned one (a Woo variable parent has no own regular_price).
+        /// Returns whether the product row changed and how many variant rows changed.
+        /// </summary>
+        public async Task<(bool ProductChanged, int VariantsChanged)> ApplyExternalPricesAsync(
+            int productId,
+            decimal? price,
+            decimal? salePrice,
+            DateTime? salePriceStartDate,
+            DateTime? salePriceEndDate,
+            IReadOnlyCollection<(int VariantId, decimal? Price, decimal? SalePrice)>? variantPrices,
+            CancellationToken cancelToken)
+        {
+            var product = await _dbContext.Product
+                .Include(p => p.ProductVariant)
+                .FirstOrDefaultAsync(p => p.Id == productId && !p.IsDeleted, cancelToken).ConfigureAwait(false);
+            if (product == null) return (false, 0);
+
+            var productChanged = false;
+            if (price.HasValue && product.Price != price) { product.Price = price; productChanged = true; }
+            if (product.SalePrice != salePrice) { product.SalePrice = salePrice; productChanged = true; }
+            if (product.SalePriceStartDate != salePriceStartDate) { product.SalePriceStartDate = salePriceStartDate; productChanged = true; }
+            if (product.SalePriceEndDate != salePriceEndDate) { product.SalePriceEndDate = salePriceEndDate; productChanged = true; }
+            if (productChanged) product.UpdatedDate = DateTime.UtcNow;
+
+            var variantsChanged = 0;
+            if (variantPrices != null && variantPrices.Count > 0)
+            {
+                var byId = product.ProductVariant?.Where(v => !v.IsDeleted).ToDictionary(v => v.Id)
+                    ?? new Dictionary<int, ProductVariant>();
+                foreach (var (variantId, vPrice, vSale) in variantPrices)
+                {
+                    if (!byId.TryGetValue(variantId, out var variant)) continue;
+                    var changed = false;
+                    if (vPrice.HasValue && variant.Price != vPrice) { variant.Price = vPrice; changed = true; }
+                    if (variant.SalePrice != vSale) { variant.SalePrice = vSale; changed = true; }
+                    if (changed) variantsChanged++;
+                }
+            }
+
+            if (productChanged || variantsChanged > 0)
+                await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            return (productChanged, variantsChanged);
+        }
+
         // Helper methods for service layer. Each item has Url and optional MediaId (when linked to account media).
         public async Task CreateProductImagesAsync(int productId, List<(string Url, int? MediaId)> images, CancellationToken cancelToken)
         {

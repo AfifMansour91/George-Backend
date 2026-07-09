@@ -77,6 +77,27 @@ namespace George.Services
             return result;
         }
 
+        // Per-instance cache of "are this site's prices managed externally (POS writes prices straight to Woo)?"
+        // so a batch sync reads the Site row once per site, mirroring _siteNetworkManagedCache.
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<int, bool> _siteExternalPriceCache = new();
+
+        private async Task<bool> IsSitePriceExternallyManagedCachedAsync(int siteId, CancellationToken cancelToken)
+        {
+            if (_siteExternalPriceCache.TryGetValue(siteId, out var cached)) return cached;
+            bool result;
+            try
+            {
+                var site = await _siteStorage.GetSiteAsync(siteId, cancelToken).ConfigureAwait(false);
+                result = site?.ExternalPriceManagement == true;
+            }
+            catch
+            {
+                result = false; // on failure keep normal sync behavior; the sync itself will surface DB errors
+            }
+            _siteExternalPriceCache[siteId] = result;
+            return result;
+        }
+
         public WooCommerceService(
             ILogger<WooCommerceService> logger,
             IMapper mapper,
@@ -1829,6 +1850,10 @@ namespace George.Services
                 // non-network accounts, skip ALL override lookups so behavior + cost are identical to before.
                 var siteIsNetworkManaged = await IsSiteNetworkManagedCachedAsync(siteId, cancelToken).ConfigureAwait(false);
 
+                // External price management: this store's prices come from the POS (Site.ExternalPriceManagement).
+                // George must never overwrite them on Woo UPDATES; creates still seed an initial price.
+                var sitePricesExternallyManaged = await IsSitePriceExternallyManagedCachedAsync(siteId, cancelToken).ConfigureAwait(false);
+
                 // Load this site's per-site override (price/stock/availability). Null when no override (canonical used).
                 SiteOverrideValues? siteOverride = null;
                 if (siteIsNetworkManaged)
@@ -2252,6 +2277,10 @@ namespace George.Services
                 var attributeMap = new Dictionary<string, int?>();   // attribute name -> WooCommerce ID
                 var attributeSlugMap = new Dictionary<string, string>(); // attribute name -> WooCommerce taxonomy slug (e.g. pa_xxx)
 
+                // External price management: price fields held out of the UPDATE payload; kept aside so the
+                // create-fallback below still seeds an initial price on a brand-new Woo product.
+                Dictionary<string, object?>? priceFieldsHeldForCreate = null;
+
                 // For simple products, add pricing and stock and clear attributes (so WooCommerce removes variation attributes when product was variable before)
                 if (product.ProductVariant == null || !product.ProductVariant.Any(v => !v.IsDeleted))
                 {
@@ -2266,11 +2295,18 @@ namespace George.Services
                     var simpleStockQty = siteOverride?.StockQuantity ?? product.StockQuantity;
 
                     wooProduct["attributes"] = new List<object>();
-                    wooProduct["regular_price"] = simpleRegularPrice?.ToString() ?? "0";
-                    // WooCommerce rejects empty string for sale_price and date fields; use null when no value (avoids 400 Bad Request on update)
-                    wooProduct["sale_price"] = simpleSalePrice.HasValue ? simpleSalePrice.Value.ToString() : (object?)null;
-                    wooProduct["date_on_sale_from"] = simpleSaleFrom.HasValue ? simpleSaleFrom.Value.ToString("yyyy-MM-ddTHH:mm:ss") : (object?)null;
-                    wooProduct["date_on_sale_to"] = simpleSaleTo.HasValue ? simpleSaleTo.Value.ToString("yyyy-MM-ddTHH:mm:ss") : (object?)null;
+                    var simplePriceFields = new Dictionary<string, object?>
+                    {
+                        ["regular_price"] = simpleRegularPrice?.ToString() ?? "0",
+                        // WooCommerce rejects empty string for sale_price and date fields; use null when no value (avoids 400 Bad Request on update)
+                        ["sale_price"] = simpleSalePrice.HasValue ? simpleSalePrice.Value.ToString() : (object?)null,
+                        ["date_on_sale_from"] = simpleSaleFrom.HasValue ? simpleSaleFrom.Value.ToString("yyyy-MM-ddTHH:mm:ss") : (object?)null,
+                        ["date_on_sale_to"] = simpleSaleTo.HasValue ? simpleSaleTo.Value.ToString("yyyy-MM-ddTHH:mm:ss") : (object?)null,
+                    };
+                    if (sitePricesExternallyManaged && existingWooId.HasValue)
+                        priceFieldsHeldForCreate = simplePriceFields;
+                    else
+                        foreach (var pf in simplePriceFields) wooProduct[pf.Key] = pf.Value!;
                     wooProduct["manage_stock"] = simpleManageStock;
                     // WooCommerce DERIVES stock_status from stock_quantity when manage_stock is on, so an explicit
                     // "out of stock" is ignored while the quantity stays > 0 — the product stayed in stock on the
@@ -2404,6 +2440,11 @@ namespace George.Services
 
                 if (!wooCommerceId.HasValue)
                 {
+                    // External price management held prices out of the (failed/absent) update payload; a CREATE
+                    // has no external price to preserve, so seed the initial price now.
+                    if (priceFieldsHeldForCreate != null)
+                        foreach (var pf in priceFieldsHeldForCreate) wooProduct[pf.Key] = pf.Value!;
+
                     if (product.DisplayOrder.HasValue)
                         wooProduct["menu_order"] = product.DisplayOrder.Value;
 
@@ -3225,6 +3266,9 @@ namespace George.Services
             // empty map (first sync after this fix) falls through to the signature lookup below, which matches this
             // store's own live variations. Non-network / single-site accounts keep using the legacy column.
             var isNetworkManagedForVariants = await IsSiteNetworkManagedCachedAsync(siteId, cancelToken).ConfigureAwait(false);
+            // External price management: variation prices on this store come from the POS — held out of
+            // UPDATE payloads (creates still seed an initial price).
+            var pricesExternallyManaged = await IsSitePriceExternallyManagedCachedAsync(siteId, cancelToken).ConfigureAwait(false);
             Dictionary<int, int> siteVariantWooIds = new();
             if (isNetworkManagedForVariants)
             {
@@ -3264,7 +3308,7 @@ namespace George.Services
                 .ToDictionary(g => g.Key, g => g.Select(x => x.id).ToList());
 
             var usedWooVariationIds = new HashSet<int>();
-            var variantSyncWork = new List<(ProductVariant variant, int? wooVariationIdToUse, Dictionary<string, object> wooPayload)>();
+            var variantSyncWork = new List<(ProductVariant variant, int? wooVariationIdToUse, Dictionary<string, object> wooPayload, Dictionary<string, object>? priceFieldsOnCreate)>();
             var wpJsonBaseForMedia = GetWordPressRestBaseUrlFromWooV3BaseUrl(baseUrl);
 
             // Per-variation stock in Woo only when George tracks numeric quantity per variation.
@@ -3372,12 +3416,15 @@ namespace George.Services
                     var siteVarOvr = (variant.Id > 0 && perSiteVariantOverrides.TryGetValue(variant.Id, out var ovrRow)) ? ovrRow : null;
                     var wooVariation = new Dictionary<string, object>
                     {
-                        ["regular_price"] = FormatWooPrice(siteVarOvr?.Price ?? variant.Price ?? product.Price),
                         ["sku"] = variantWooSku,
                         ["manage_stock"] = manageVariationStockInWoo,
                         ["stock_status"] = variantStockStatus,
                         ["weight"] = variationWeightForWoo,
                         ["attributes"] = variationAttributesList
+                    };
+                    var variationPriceFields = new Dictionary<string, object>
+                    {
+                        ["regular_price"] = FormatWooPrice(siteVarOvr?.Price ?? variant.Price ?? product.Price)
                     };
                     // Always send sale_price / schedule on PUT so Woo clears stale values when sale is removed or changed per variation.
                     var variationSale = siteVarOvr?.SalePrice ?? variant.SalePrice;
@@ -3390,18 +3437,26 @@ namespace George.Services
 
                     if (variationSale.HasValue && variationSale.Value > 0)
                     {
-                        wooVariation["sale_price"] = FormatWooPrice(variationSale);
+                        variationPriceFields["sale_price"] = FormatWooPrice(variationSale);
                         if (product.SalePriceStartDate.HasValue)
-                            wooVariation["date_on_sale_from"] = product.SalePriceStartDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
+                            variationPriceFields["date_on_sale_from"] = product.SalePriceStartDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
                         if (product.SalePriceEndDate.HasValue)
-                            wooVariation["date_on_sale_to"] = product.SalePriceEndDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
+                            variationPriceFields["date_on_sale_to"] = product.SalePriceEndDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
                     }
                     else
                     {
-                        wooVariation["sale_price"] = "";
-                        wooVariation["date_on_sale_from"] = "";
-                        wooVariation["date_on_sale_to"] = "";
+                        variationPriceFields["sale_price"] = "";
+                        variationPriceFields["date_on_sale_from"] = "";
+                        variationPriceFields["date_on_sale_to"] = "";
                     }
+
+                    // External price management: keep price fields out of the UPDATE payload (the POS owns them).
+                    // Held aside so a create (no id, or PUT 404 → recreate) still seeds the initial price.
+                    Dictionary<string, object>? variationPriceFieldsOnCreate = null;
+                    if (pricesExternallyManaged && wooVariationIdToUse.HasValue)
+                        variationPriceFieldsOnCreate = variationPriceFields;
+                    else
+                        foreach (var pf in variationPriceFields) wooVariation[pf.Key] = pf.Value;
                     if (manageVariationStockInWoo)
                     {
                         // MultiSite Phase 2: prefer this site's per-variant stock when present (else canonical).
@@ -3477,7 +3532,7 @@ namespace George.Services
                         wooVariation["image"] = new { id = 0 };
                     }
 
-                    variantSyncWork.Add((variant, wooVariationIdToUse, wooVariation));
+                    variantSyncWork.Add((variant, wooVariationIdToUse, wooVariation, variationPriceFieldsOnCreate));
                 }
                 catch (Exception ex)
                 {
@@ -3491,11 +3546,11 @@ namespace George.Services
                 var batch = variantSyncWork.Skip(i).Take(variationSyncConcurrency).ToList();
                 var batchResults = await Task.WhenAll(batch.Select(async work =>
                 {
-                    var (variant, wooVariationIdToUse, wooVariation) = work;
+                    var (variant, wooVariationIdToUse, wooVariation, priceFieldsOnCreate) = work;
                     try
                     {
                         var wooVariationId = await PushVariantPayloadToWooCommerceAsync(
-                            baseUrl, wooProductId, product.Id, wooVariationIdToUse, wooVariation, httpClient, cancelToken);
+                            baseUrl, wooProductId, product.Id, wooVariationIdToUse, wooVariation, httpClient, cancelToken, priceFieldsOnCreate);
                         return (variant, wooVariationId);
                     }
                     catch (Exception ex)
@@ -3576,7 +3631,8 @@ namespace George.Services
             int? wooVariationIdToUse,
             Dictionary<string, object> wooVariation,
             HttpClient httpClient,
-            CancellationToken cancelToken)
+            CancellationToken cancelToken,
+            Dictionary<string, object>? priceFieldsOnCreate = null)
         {
             if (wooVariationIdToUse.HasValue)
             {
@@ -3604,6 +3660,11 @@ namespace George.Services
                 if ((int)updateResponse.StatusCode != 404)
                     return wooVariationIdToUse;
             }
+
+            // External price management held prices out of the update payload; a CREATE has no external
+            // price to preserve, so seed the initial price before posting.
+            if (priceFieldsOnCreate != null)
+                foreach (var pf in priceFieldsOnCreate) wooVariation[pf.Key] = pf.Value;
 
             var createUrl = $"{baseUrl}/products/{wooProductId}/variations";
             var createJson = JsonSerializer.Serialize(wooVariation, WooVariationJsonOptions);

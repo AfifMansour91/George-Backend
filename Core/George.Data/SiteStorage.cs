@@ -72,6 +72,20 @@ namespace George.Data
                 .FirstOrDefaultAsync(s => !s.IsDeleted && s.InternalApiKey == apiKey.Trim(), cancelToken);
         }
 
+        /// <summary>Site ids with WooCommerce configured AND external price management enabled (targets of the daily price-pull job).</summary>
+        public async Task<List<int>> GetExternalPriceManagedSiteIdsAsync(CancellationToken cancelToken)
+        {
+            return await _dbContext.Site
+                .AsNoTracking()
+                .Where(s => !s.IsDeleted
+                    && s.ExternalPriceManagement == true
+                    && s.WooCommerceUrl != null && s.WooCommerceUrl != ""
+                    && s.WooCommerceKey != null && s.WooCommerceKey != ""
+                    && s.WooCommerceSecret != null && s.WooCommerceSecret != "")
+                .Select(s => s.Id)
+                .ToListAsync(cancelToken);
+        }
+
         public async Task<List<Site>> GetSitesByAccountAsync(int accountId, CancellationToken cancelToken)
         {
             return await _dbContext.Site
@@ -178,6 +192,7 @@ namespace George.Data
             if (updated.ShowPickingDeviation.HasValue) dbSite.ShowPickingDeviation = updated.ShowPickingDeviation;
             if (updated.ScaleEnabled.HasValue) dbSite.ScaleEnabled = updated.ScaleEnabled;
             if (updated.ScaleBarcodeEmbedMode != null) dbSite.ScaleBarcodeEmbedMode = updated.ScaleBarcodeEmbedMode;
+            if (updated.ExternalPriceManagement.HasValue) dbSite.ExternalPriceManagement = updated.ExternalPriceManagement;
             // Promotion settings (Sprint 4). Without these the per-site Webhook URL never persists,
             // so PromotionWebhookDispatcher.FireAsync no-ops and promotions never sync to WooCommerce.
             if (updated.PromotionOveragePolicyDefault != null) dbSite.PromotionOveragePolicyDefault = updated.PromotionOveragePolicyDefault;

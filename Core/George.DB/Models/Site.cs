@@ -180,6 +180,14 @@ public partial class Site
     [StringLength(16)]
     public string? ScaleBarcodeEmbedMode { get; set; }
 
+    /// <summary>
+    /// When true, product/variation prices on this site's WooCommerce store are managed by an external
+    /// system (e.g. the POS pushes prices directly to Woo). George then never writes price fields on Woo
+    /// UPDATES (creates still seed an initial price) and the daily price-pull job imports Woo prices back
+    /// into George for this site. Off by default (NULL/0).
+    /// </summary>
+    public bool? ExternalPriceManagement { get; set; }
+
     /// <summary>Active payment provider: none | cardcom.</summary>
     [StringLength(32)]
     public string PaymentGatewayProvider { get; set; } = "none";

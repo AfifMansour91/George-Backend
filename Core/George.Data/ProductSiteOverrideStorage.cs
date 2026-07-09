@@ -522,6 +522,135 @@ namespace George.Data
             await _dbContext.SaveChangesAsync(cancelToken);
         }
 
+        /// <summary>All (wooProductId → productId) links for this site from the per-site map (bulk, for the external price pull).</summary>
+        public async Task<Dictionary<int, int>> GetSiteWooProductIdMapForSiteAsync(int siteId, CancellationToken cancelToken)
+        {
+            var rows = await _dbContext.ProductSiteWooId
+                .Where(x => x.SiteId == siteId)
+                .Select(x => new { x.WooCommerceProductId, x.ProductId })
+                .ToListAsync(cancelToken);
+            var map = new Dictionary<int, int>();
+            foreach (var r in rows) map[r.WooCommerceProductId] = r.ProductId;
+            return map;
+        }
+
+        /// <summary>
+        /// External price pull (Woo → George), network-managed site: write the store's current prices into this
+        /// site's per-site override. Unlike <see cref="UpsertOverrideAsync"/> (sparse), sale fields are ASSIGNED
+        /// as given — a sale removed at the POS clears the override's sale (note: a null override sale still
+        /// inherits the canonical sale at sync/display time; that inherit semantics is a known limitation).
+        /// A missing override row is only materialized when the store's price actually differs from canonical,
+        /// so one pull does not mark every product on the site as price-overridden.
+        /// Returns true when anything was written.
+        /// </summary>
+        public async Task<bool> UpsertExternalPricesAsync(
+            int productId,
+            int siteId,
+            int? accountId,
+            decimal? price,
+            decimal? salePrice,
+            DateTime? salePriceStartDate,
+            DateTime? salePriceEndDate,
+            CancellationToken cancelToken)
+        {
+            var row = await GetOverrideAsync(productId, siteId, cancelToken);
+            if (row == null)
+            {
+                // All-null incoming values (e.g. a Woo variable parent reports no own prices) would only
+                // materialize an empty override row that inherits canonical anyway — skip.
+                if (!price.HasValue && !salePrice.HasValue && !salePriceStartDate.HasValue && !salePriceEndDate.HasValue)
+                    return false;
+                var canonical = await _dbContext.Product.AsNoTracking()
+                    .Where(p => p.Id == productId)
+                    .Select(p => new { p.Price, p.SalePrice, p.SalePriceStartDate, p.SalePriceEndDate })
+                    .FirstOrDefaultAsync(cancelToken);
+                if (canonical == null) return false;
+                var differs = (price.HasValue && canonical.Price != price)
+                    || canonical.SalePrice != salePrice
+                    || canonical.SalePriceStartDate != salePriceStartDate
+                    || canonical.SalePriceEndDate != salePriceEndDate;
+                if (!differs) return false;
+                row = new ProductSiteOverride
+                {
+                    ProductId = productId,
+                    SiteId = siteId,
+                    AccountId = accountId,
+                    CreationTime = DateTime.UtcNow,
+                };
+                _dbContext.ProductSiteOverride.Add(row);
+            }
+
+            var changed = row.Id == 0; // freshly added row
+            if (price.HasValue && row.Price != price) { row.Price = price; changed = true; }
+            if (row.SalePrice != salePrice) { row.SalePrice = salePrice; changed = true; }
+            if (row.SalePriceStartDate != salePriceStartDate) { row.SalePriceStartDate = salePriceStartDate; changed = true; }
+            if (row.SalePriceEndDate != salePriceEndDate) { row.SalePriceEndDate = salePriceEndDate; changed = true; }
+            if (!changed) return false;
+
+            row.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return true;
+        }
+
+        /// <summary>
+        /// External price pull (Woo → George), network-managed site: write the store's current variation prices
+        /// into this site's per-variant overrides. Only touches Price/SalePrice (never stock/exclusion). Missing
+        /// rows are only materialized when the store's price differs from the canonical variant. Returns the
+        /// number of variant rows written.
+        /// </summary>
+        public async Task<int> UpsertExternalVariantPricesAsync(
+            int productId,
+            int siteId,
+            IReadOnlyCollection<(int VariantId, decimal? Price, decimal? SalePrice)> items,
+            CancellationToken cancelToken)
+        {
+            if (items == null || items.Count == 0) return 0;
+            var existing = await _dbContext.ProductSiteVariantStock
+                .Where(v => v.SiteId == siteId && v.ProductId == productId)
+                .ToListAsync(cancelToken);
+            var byVariant = new Dictionary<int, ProductSiteVariantStock>();
+            foreach (var r in existing) byVariant[r.ProductVariantId] = r;
+            var canonical = await _dbContext.ProductVariant.AsNoTracking()
+                .Where(v => v.ProductId == productId && !v.IsDeleted)
+                .Select(v => new { v.Id, v.Price, v.SalePrice })
+                .ToDictionaryAsync(v => v.Id, cancelToken);
+
+            var changed = 0;
+            foreach (var (variantId, price, salePrice) in items)
+            {
+                byVariant.TryGetValue(variantId, out var row);
+                if (row == null)
+                {
+                    // Nothing concrete to write — an all-null row just inherits the canonical variant.
+                    if (!price.HasValue && !salePrice.HasValue) continue;
+                    if (!canonical.TryGetValue(variantId, out var can)) continue;
+                    var differs = (price.HasValue && can.Price != price) || can.SalePrice != salePrice;
+                    if (!differs) continue;
+                    row = new ProductSiteVariantStock
+                    {
+                        ProductVariantId = variantId,
+                        SiteId = siteId,
+                        ProductId = productId,
+                        CreationTime = DateTime.UtcNow,
+                    };
+                    _dbContext.ProductSiteVariantStock.Add(row);
+                    byVariant[variantId] = row;
+                }
+
+                var rowChanged = row.Id == 0;
+                if (price.HasValue && row.Price != price) { row.Price = price; rowChanged = true; }
+                if (row.SalePrice != salePrice) { row.SalePrice = salePrice; rowChanged = true; }
+                if (rowChanged)
+                {
+                    row.UpdatedDate = DateTime.UtcNow;
+                    changed++;
+                }
+            }
+
+            if (changed > 0) await _dbContext.SaveChangesAsync(cancelToken);
+            return changed;
+        }
+
         /// <summary>Remove a per-site variation id mapping (used when a variation is deleted as an orphan on a site).</summary>
         public async Task DeleteSiteVariantWooIdAsync(int siteId, int wooVariationId, CancellationToken cancelToken)
         {
