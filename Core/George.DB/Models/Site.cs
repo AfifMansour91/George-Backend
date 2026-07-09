@@ -170,6 +170,9 @@ public partial class Site
     /// <summary>When true (default), show order deviation % and amount in picking footer and archive.</summary>
     public bool? ShowPickingDeviation { get; set; }
 
+    /// <summary>When true, this branch uses a connected RS232 scale (ScaleAgent → live weight in picking). Off by default.</summary>
+    public bool? ScaleEnabled { get; set; }
+
     /// <summary>
     /// How the 5-digit payload on 13-digit scale barcodes (prefix 2) is interpreted when scanning during picking:
     /// auto (detect), weight (÷1000 kg), or price (÷100 currency then ÷ catalog ₪/kg).

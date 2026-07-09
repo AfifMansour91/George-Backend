@@ -9,6 +9,8 @@ namespace George.Services
             public string Environment { get; set; } = null!;
 			/// <summary>SignalR /hubs/orders — new-order push (from SystemConfiguration.OrdersRealtimeEnabled).</summary>
 			public bool OrdersRealtimeEnabled { get; set; }
+			/// <summary>SignalR /hubs/scale — live scale weight push (from SystemConfiguration.ScaleRealtimeEnabled).</summary>
+			public bool ScaleRealtimeEnabled { get; set; }
         }
 
 		public ConfigurationParameters Parameters { get; set; } = new();

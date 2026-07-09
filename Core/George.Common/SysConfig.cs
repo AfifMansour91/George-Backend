@@ -23,6 +23,8 @@ namespace George.Common
 			public const string AWSKeySecret = "AWSKeySecret";
 			/// <summary>When true, push NewOrderCreated via SignalR after order create.</summary>
 			public const string OrdersRealtimeEnabled = "OrdersRealtimeEnabled";
+			/// <summary>When true, relay live scale weight via SignalR (/hubs/scale) from the branch ScaleAgent.</summary>
+			public const string ScaleRealtimeEnabled = "ScaleRealtimeEnabled";
 		}
 
 		public class ParameterValue

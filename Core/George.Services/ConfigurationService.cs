@@ -199,6 +199,11 @@ namespace George.Services
 				(value!.Trim().Equals("true", StringComparison.OrdinalIgnoreCase) ||
 				 value.Trim() == "1");
 
+			dicParameters.TryGetValue(SysConfig.Parameter.ScaleRealtimeEnabled, out value);
+			data.ScaleRealtimeEnabled = value.HasValue() &&
+				(value!.Trim().Equals("true", StringComparison.OrdinalIgnoreCase) ||
+				 value.Trim() == "1");
+
 			res = true;
 			return res;
 		}

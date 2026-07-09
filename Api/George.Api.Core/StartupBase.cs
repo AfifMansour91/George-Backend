@@ -490,7 +490,8 @@ namespace George.Api.Core
 						{
 							var accessToken = context.Request.Query["access_token"];
 							var path = context.HttpContext.Request.Path;
-							if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/orders"))
+							if (!string.IsNullOrEmpty(accessToken) &&
+								(path.StartsWithSegments("/hubs/orders") || path.StartsWithSegments("/hubs/scale")))
 								context.Token = accessToken;
 							return Task.CompletedTask;
 						}

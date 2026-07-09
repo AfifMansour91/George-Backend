@@ -68,6 +68,9 @@ namespace George.Common
 		/// <summary>SignalR new-order push to shop-manager (from SystemConfiguration).</summary>
 		public bool OrdersRealtimeEnabled { get; set; } = false;
 
+		/// <summary>SignalR live-scale-weight push to shop-manager picking (from SystemConfiguration).</summary>
+		public bool ScaleRealtimeEnabled { get; set; } = false;
+
         public int StaticUserId { get; set; } = 999999999;
         public string? StaticUserOtp { get; set; } = "181818";
 

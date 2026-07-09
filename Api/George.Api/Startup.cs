@@ -41,11 +41,13 @@ namespace George.Api
 		{
 			base.AddCustomDependencies(services);
 			services.AddScoped<IOrderRealtimeNotifier, SignalROrderRealtimeNotifier>();
+			services.AddScoped<IScaleRealtimeNotifier, ScaleRealtimeNotifier>();
 		}
 
 		protected override void MapSignalRHubs(IEndpointRouteBuilder endpoints)
 		{
 			endpoints.MapHub<OrdersHub>("/hubs/orders");
+			endpoints.MapHub<ScaleHub>("/hubs/scale");
 		}
 	}
 }

@@ -84,6 +84,9 @@ namespace George.Services.Request
         /// <summary>When true (default), show picking deviation in footer and archive.</summary>
         public bool? ShowPickingDeviation { get; set; }
 
+        /// <summary>When true, this branch uses a connected RS232 scale (live weight in picking). Off by default.</summary>
+        public bool? ScaleEnabled { get; set; }
+
         /// <summary>Scale barcode payload: auto | weight | price.</summary>
         public string? ScaleBarcodeEmbedMode { get; set; }
 
