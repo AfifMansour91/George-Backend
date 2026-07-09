@@ -1202,13 +1202,16 @@ namespace George.Services
                     .Where(v => !string.IsNullOrWhiteSpace(v))
                     .Select(v => v!.Trim())
                     .ToList() ?? new List<string>();
-                return await SyncMappedAttributeTermsOnlyAsync(
+                var mapped = await SyncMappedAttributeTermsOnlyAsync(
                     baseUrl,
                     attribute.WooCommerceId.Value,
                     attribute.Name,
                     requiredTerms,
                     httpClient,
                     cancelToken);
+                if (mapped.id.HasValue)
+                    return mapped;
+                // Stale mapping (id doesn't exist on this store): fall through to find-or-create below.
             }
 
             // If update failed or no WooCommerceId, try to find existing attribute by name/slug
@@ -1292,7 +1295,12 @@ namespace George.Services
             return names;
         }
 
-        private async Task<string?> GetWooCommerceAttributeSlugAsync(
+        /// <summary>
+        /// GETs the mapped attribute from WooCommerce. exists=false only on an explicit 404 (stale DB mapping —
+        /// the attribute id belongs to another store or was deleted); transient errors return exists=true with
+        /// the fallback slug so a hiccup doesn't trigger attribute re-creation.
+        /// </summary>
+        private async Task<(bool exists, string slug)> TryGetWooCommerceAttributeSlugAsync(
             string baseUrl,
             int wooAttrId,
             string fallbackSlug,
@@ -1301,14 +1309,20 @@ namespace George.Services
         {
             var getUrl = $"{baseUrl}/products/attributes/{wooAttrId}";
             var response = await httpClient.GetAsync(getUrl, cancelToken);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                return (false, fallbackSlug);
             if (!response.IsSuccessStatusCode)
-                return fallbackSlug;
+                return (true, fallbackSlug);
             var body = await response.Content.ReadAsStringAsync(cancelToken);
             var attr = TryDeserialize<WooCommerceAttributeResponse>(body);
-            return !string.IsNullOrWhiteSpace(attr?.slug) ? attr.slug : fallbackSlug;
+            return (true, !string.IsNullOrWhiteSpace(attr?.slug) ? attr.slug : fallbackSlug);
         }
 
-        /// <summary>Product save path: attribute already mapped in DB — skip attribute PUT; POST only new term values.</summary>
+        /// <summary>
+        /// Product save path: attribute already mapped in DB — skip attribute PUT; POST only new term values.
+        /// Returns (null, null) when the mapped id doesn't exist on this store (stale mapping) so callers
+        /// fall back to find-or-create instead of syncing terms into a phantom taxonomy.
+        /// </summary>
         private async Task<(int? id, string? slug)> SyncMappedAttributeTermsOnlyAsync(
             string baseUrl,
             int wooAttrId,
@@ -1318,7 +1332,14 @@ namespace George.Services
             CancellationToken cancelToken)
         {
             var fallbackSlug = SlugifyAttributeName(attributeName);
-            var slug = await GetWooCommerceAttributeSlugAsync(baseUrl, wooAttrId, fallbackSlug, httpClient, cancelToken);
+            var (attributeExists, slug) = await TryGetWooCommerceAttributeSlugAsync(baseUrl, wooAttrId, fallbackSlug, httpClient, cancelToken);
+            if (!attributeExists)
+            {
+                _logger.LogWarning(
+                    "WooCommerce sync: mapped attribute {WooAttrId} ({Name}) does not exist on this store (404); stale mapping, falling back to find-or-create",
+                    wooAttrId, attributeName);
+                return (null, null);
+            }
 
             var existingTerms = await GetWooCommerceAttributeTermNamesAsync(baseUrl, wooAttrId, httpClient, cancelToken);
             var missing = requiredTermValues
@@ -1458,13 +1479,18 @@ namespace George.Services
                 // Already linked to Woo: skip full attribute sync; POST only new option values from this product.
                 if (attribute.WooCommerceId is > 0)
                 {
-                    return await SyncMappedAttributeTermsOnlyAsync(
+                    var mapped = await SyncMappedAttributeTermsOnlyAsync(
                         baseUrl,
                         attribute.WooCommerceId.Value,
                         attribute.Name,
                         attributeValues,
                         httpClient,
                         cancelToken);
+                    if (mapped.id.HasValue)
+                        return mapped;
+                    // Stale mapping (id doesn't exist on this store, e.g. copied from another site):
+                    // clear it locally so SyncAttributeAsync takes the find-or-create path, then persist the new id below.
+                    attribute.WooCommerceId = null;
                 }
 
                 // Sync to WooCommerce; get actual (id, slug) from API

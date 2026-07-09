@@ -101,7 +101,7 @@ namespace George.Data
             if (dbAttr == null) return null;
 
             dbAttr.Name = updated.Name;
-            dbAttr.SiteId = updated.SiteId | dbAttr.SiteId;
+            dbAttr.SiteId = updated.SiteId != 0 ? updated.SiteId : dbAttr.SiteId;
             dbAttr.UpdatedDate = DateTime.UtcNow;
             dbAttr.UpdateUserId = updated.UpdateUserId;
 
