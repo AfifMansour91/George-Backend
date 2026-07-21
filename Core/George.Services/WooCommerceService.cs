@@ -1883,33 +1883,38 @@ namespace George.Services
                         : "instock";
                 }
 
+                // MultiSite Phase 2: per-site status/visibility/shipping-class override wins over canonical.
+                var effectiveStatusName = !string.IsNullOrEmpty(siteOverride?.Status) ? siteOverride!.Status : product.Status?.Name;
+                var effectiveVisibilityName = !string.IsNullOrEmpty(siteOverride?.Visibility) ? siteOverride!.Visibility : product.Visibility?.Name;
+                var effectiveShippingClassName = !string.IsNullOrEmpty(siteOverride?.ShippingClass) ? siteOverride!.ShippingClass : product.ShippingClass?.Name;
+
                 // Map visibility
                 var catalogVisibility = "visible";
-                if (product.Visibility?.Name == "hidden" || product.Status?.Name == "hidden")
+                if (effectiveVisibilityName == "hidden" || effectiveStatusName == "hidden")
                     catalogVisibility = "hidden";
-                else if (product.Visibility?.Name == "outOfStock")
+                else if (effectiveVisibilityName == "outOfStock")
                     catalogVisibility = "visible"; // Still visible even if out of stock
 
                 // Map WooCommerce status
                 var wooStatus = "publish";
                 // George "hidden" historically meant "unpublished / draft-like" for many flows; WooCommerce "private" is a different
                 // visibility mode (often shown as "פרטי" in admin). Use "draft" so catalog imports and legacy data are not mis-tagged as private.
-                if (product.Status?.Name == "hidden")
+                if (effectiveStatusName == "hidden")
                     wooStatus = "draft";
-                else if (product.Status?.Name == "outOfStock")
+                else if (effectiveStatusName == "outOfStock")
                     wooStatus = "publish";
-                else if (product.Status?.Name == "active")
+                else if (effectiveStatusName == "active")
                     wooStatus = "publish";
-                else if (product.Status?.Name == "draft")
+                else if (effectiveStatusName == "draft")
                     wooStatus = "draft";
-                else if (product.Status?.Name == "archived")
+                else if (effectiveStatusName == "archived")
                     wooStatus = "private";
 
                 // Map shipping class
                 var shippingClass = "";
-                if (product.ShippingClass?.Name == "heavy")
+                if (effectiveShippingClassName == "heavy")
                     shippingClass = "heavy";
-                else if (product.ShippingClass?.Name == "fragile")
+                else if (effectiveShippingClassName == "fragile")
                     shippingClass = "fragile";
 
                 // Map categories. MultiSite Phase 2: per-site category assignment overrides the canonical for this branch.
@@ -2117,20 +2122,22 @@ namespace George.Services
                     .Cast<object>()
                     .ToList() ?? new List<object>();
 
-                // Build meta data
+                // Build meta data. MultiSite Phase 2: per-site supplier/kosher/cost-price/labels override wins.
                 var metaData = new List<object>();
                 if (!string.IsNullOrEmpty(product.Brand?.Name))
                     metaData.Add(new { key = "_brand", value = product.Brand.Name });
-                if (!string.IsNullOrEmpty(product.Supplier?.Name))
-                    metaData.Add(new { key = "_supplier", value = product.Supplier.Name });
-                metaData.Add(new { key = "_is_kosher", value = product.IsKosher == true ? "yes" : "no" });
+                var effectiveSupplierName = !string.IsNullOrEmpty(siteOverride?.Supplier) ? siteOverride!.Supplier : product.Supplier?.Name;
+                if (!string.IsNullOrEmpty(effectiveSupplierName))
+                    metaData.Add(new { key = "_supplier", value = effectiveSupplierName });
+                metaData.Add(new { key = "_is_kosher", value = (siteOverride?.IsKosher ?? product.IsKosher) == true ? "yes" : "no" });
                 var showAsMl = product.ShowAsMl == true || product.WeightUnit == "ml";
                 // ACF true/false field: value goes in "show_as_ml" (1/0), reference key goes in "_show_as_ml"
                 metaData.Add(new { key = "show_as_ml", value = showAsMl ? "1" : "0" });
                 metaData.Add(new { key = "_show_as_ml", value = "field_699f090751cad" });
-                AppendWooAcfStoreLabelMeta(metaData, product);
-                if (product.CostPrice.HasValue)
-                    metaData.Add(new { key = "_cost_price", value = product.CostPrice.Value.ToString() });
+                AppendWooAcfStoreLabelMeta(metaData, product, siteOverride);
+                var effectiveCostPrice = siteOverride?.CostPrice ?? product.CostPrice;
+                if (effectiveCostPrice.HasValue)
+                    metaData.Add(new { key = "_cost_price", value = effectiveCostPrice.Value.ToString() });
                 if (!string.IsNullOrEmpty(product.SeoTitle))
                     metaData.Add(new { key = "_yoast_wpseo_title", value = product.SeoTitle });
                 if (!string.IsNullOrEmpty(product.SeoDescription))
@@ -2254,8 +2261,9 @@ namespace George.Services
                 // touch sort — George DisplayOrder often diverges from Woo (defaults, stale import) and
                 // pushing on edit reshuffles the live catalog.
 
-                if (!string.IsNullOrWhiteSpace(product.Slug))
-                    wooProduct["slug"] = product.Slug.Trim();
+                var effectiveSlug = !string.IsNullOrWhiteSpace(siteOverride?.Slug) ? siteOverride!.Slug : product.Slug;
+                if (!string.IsNullOrWhiteSpace(effectiveSlug))
+                    wooProduct["slug"] = effectiveSlug.Trim();
 
                 // Linked products (WooCommerce admin: מוצרים משודרגים / מוצרים משלימים) — REST keys are upsell_ids / cross_sell_ids.
                 // Local RelatedProduct = up-sells; ComplementaryProduct = cross-sells.
@@ -2502,7 +2510,7 @@ namespace George.Services
                 {
                     try
                     {
-                        await SyncProductEdAcfStoreLabelsAsync(baseUrl, siteId, wooCommerceId.Value, product, cancelToken);
+                        await SyncProductEdAcfStoreLabelsAsync(baseUrl, siteId, wooCommerceId.Value, product, cancelToken, siteOverride);
                     }
                     catch (Exception ex)
                     {
@@ -2556,7 +2564,8 @@ namespace George.Services
             int siteId,
             int wooProductId,
             Product product,
-            CancellationToken cancelToken)
+            CancellationToken cancelToken,
+            SiteOverrideValues? siteOverride = null)
         {
             var site = await _siteStorage.GetSiteAsync(siteId, cancelToken).ConfigureAwait(false);
             var apiToken = site?.InternalApiKey?.Trim();
@@ -2585,7 +2594,7 @@ namespace George.Services
             var payload = new Dictionary<string, object>
             {
                 ["product_id"] = wooProductId,
-                ["labels"] = BuildEdV1ProductLabels(product)
+                ["labels"] = BuildEdV1ProductLabels(product, siteOverride)
             };
             var json = JsonSerializer.Serialize(payload);
             using var content = new StringContent(json, Encoding.UTF8, "application/json");

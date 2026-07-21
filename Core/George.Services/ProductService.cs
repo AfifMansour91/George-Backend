@@ -102,6 +102,33 @@ namespace George.Services
                 if (ov.LowStockThreshold.HasValue) item.LowStockThreshold = ov.LowStockThreshold;
                 if (!string.IsNullOrEmpty(ov.StockStatus)) item.StockStatus = ov.StockStatus;
                 if (!string.IsNullOrEmpty(ov.StockManagementType)) item.StockManagementType = ov.StockManagementType;
+                // Per-site merchandising overrides (canonical + per-site override, like Price).
+                if (ov.CostPrice.HasValue) item.CostPrice = ov.CostPrice;
+                if (ov.IsKosher.HasValue) item.IsKosher = ov.IsKosher;
+                if (!string.IsNullOrEmpty(ov.Status)) item.Status = ov.Status;
+                if (!string.IsNullOrEmpty(ov.Visibility)) item.Visibility = ov.Visibility;
+                if (!string.IsNullOrEmpty(ov.Slug)) item.Slug = ov.Slug;
+                if (!string.IsNullOrEmpty(ov.ShippingClass)) item.ShippingClass = ov.ShippingClass;
+                if (!string.IsNullOrEmpty(ov.Supplier)) item.Supplier = ov.Supplier;
+                if (ov.LabelFrozen.HasValue) item.LabelFrozen = ov.LabelFrozen.Value;
+                if (ov.LabelGlutenFree.HasValue) item.LabelGlutenFree = ov.LabelGlutenFree.Value;
+                if (ov.LabelNotKosher.HasValue) item.LabelNotKosher = ov.LabelNotKosher.Value;
+                if (ov.LabelKosherForPassover.HasValue)
+                {
+                    item.LabelKosherForPassover = ov.LabelKosherForPassover.Value;
+                    item.LabelKosherForPassoverEndDate = ov.LabelKosherForPassover.Value ? ov.LabelKosherForPassoverEndDate : null;
+                }
+                if (ov.LabelNew.HasValue)
+                {
+                    item.LabelNew = ov.LabelNew.Value;
+                    item.LabelNewEndDate = ov.LabelNew.Value ? ov.LabelNewEndDate : null;
+                }
+                if (ov.LabelBestseller.HasValue) item.LabelBestseller = ov.LabelBestseller.Value;
+                if (ov.LabelLowAvailability.HasValue) item.LabelLowAvailability = ov.LabelLowAvailability.Value;
+                if (ov.LabelReadyToCook.HasValue) item.LabelReadyToCook = ov.LabelReadyToCook.Value;
+                if (ov.LabelNatural.HasValue) item.LabelNatural = ov.LabelNatural.Value;
+                if (ov.LabelSugarFree.HasValue) item.LabelSugarFree = ov.LabelSugarFree.Value;
+                if (ov.LabelLactoseFree.HasValue) item.LabelLactoseFree = ov.LabelLactoseFree.Value;
             }
 
             // Per-site category assignment: when a product has site categories, they replace the canonical ones.
@@ -407,6 +434,24 @@ namespace George.Services
                 if (existingProduct.ManagementMode == "local" && existingProduct.OwnerSiteId.HasValue && existingProduct.OwnerSiteId.Value != siteId)
                     return CreateResponse(response, StatusCode.InvalidRequest, "Product is local to another site and cannot be edited here.");
 
+                // Block a per-site edit from introducing a SKU already used on THIS site (product override SKU +
+                // canonically-written variant SKUs below). Same store-collision rule as the canonical branch
+                // (bug #17), scoped to the edited site only; the product's own current SKUs are exempt.
+                var ownSkus = new List<string>();
+                if (!string.IsNullOrWhiteSpace(existingProduct.Sku)) ownSkus.Add(existingProduct.Sku!.Trim());
+                if (existingProduct.ProductVariant != null)
+                    ownSkus.AddRange(existingProduct.ProductVariant
+                        .Where(v => !v.IsDeleted && !string.IsNullOrWhiteSpace(v.Sku))
+                        .Select(v => v.Sku!.Trim()));
+                var siteSkuError = await ValidateSkusUniqueAsync(
+                    req.Sku, req.Variants?.Select(v => v.Sku), new List<int> { siteId },
+                    excludeProductId: productId, cancelToken, skusExemptFromStoreCheck: ownSkus);
+                if (siteSkuError != null)
+                {
+                    response.DisplayMessage = siteSkuError; // surfaced to the user (frontend reads displayMessage)
+                    return CreateResponse(response, StatusCode.InvalidRequest, siteSkuError);
+                }
+
                 await _overrideStorage.UpsertOverrideAsync(
                     productId, siteId, existingProduct.AccountId,
                     isExcluded: null,
@@ -429,7 +474,32 @@ namespace George.Services
                     weightUnit: req.WeightUnit,
                     sku: req.Sku,
                     seoTitle: req.SeoTitle,
-                    seoDescription: req.SeoDescription);
+                    seoDescription: req.SeoDescription,
+                    // Per-site merchandising overrides: canonical all-sites value + per-site override, like Price.
+                    // Without these, a site-manager user (always locked to a branch) could never change them.
+                    merch: new ProductSiteOverrideStorage.MerchandisingOverrideUpsert
+                    {
+                        CostPrice = req.CostPrice,
+                        IsKosher = req.IsKosher,
+                        Status = req.Status,
+                        Visibility = req.Visibility,
+                        Slug = req.Slug,
+                        ShippingClass = req.ShippingClass,
+                        Supplier = req.Supplier,
+                        LabelFrozen = req.LabelFrozen,
+                        LabelGlutenFree = req.LabelGlutenFree,
+                        LabelNotKosher = req.LabelNotKosher,
+                        LabelKosherForPassover = req.LabelKosherForPassover,
+                        LabelKosherForPassoverEndDate = req.LabelKosherForPassoverEndDate,
+                        LabelNew = req.LabelNew,
+                        LabelNewEndDate = req.LabelNewEndDate,
+                        LabelBestseller = req.LabelBestseller,
+                        LabelLowAvailability = req.LabelLowAvailability,
+                        LabelReadyToCook = req.LabelReadyToCook,
+                        LabelNatural = req.LabelNatural,
+                        LabelSugarFree = req.LabelSugarFree,
+                        LabelLactoseFree = req.LabelLactoseFree,
+                    });
 
                 // Per-site category assignment: when categories are provided, store them for this site only.
                 if (req.CategoryIds != null || req.SubcategoryIds != null)
@@ -453,6 +523,12 @@ namespace George.Services
                         productId, req.RelatedProductIds, req.ComplementaryProductIds, cancelToken);
                 }
 
+                // Brand links + tags are product-wide taxonomy (like related products above) — persist canonically.
+                if (req.BrandIds != null || req.Tags != null)
+                {
+                    await _productStorage.UpdateProductBrandsAndTagsAsync(productId, req.BrandIds, req.Tags, cancelToken);
+                }
+
                 // Product OPTIONS are structural (the variation dimensions + allowed values), not a per-site price/
                 // stock value — they are shared by every site's variant dropdown, exactly like the canonical variants
                 // created below. Persist them canonically here too. Without this, adding variations to a previously
@@ -462,6 +538,17 @@ namespace George.Services
                 {
                     var optionDtos = req.ProductOptions.Select(o => new ProductOptionDto { Name = o.Name, Values = o.Values ?? new List<string>() }).ToList();
                     await _productStorage.UpdateProductOptionsAsync(productId, optionDtos, cancelToken: cancelToken);
+                }
+
+                // Weight SETTINGS (sold-by mode, unit weight, weight-by-size config) are structural, product-wide
+                // data — like ProductOptions above, not a per-site price/stock value. Persist them canonically.
+                // Without this, a site-manager user (always locked to a branch → every save is a selected-site
+                // edit) could never change a product's weight: the fields were silently dropped here.
+                if (req.IsWeighted != null || req.SetupType.HasValue() || req.WeightConfig != null)
+                {
+                    var weightLookups = MapToLookupDto(req);
+                    await _productStorage.UpdateProductWeightSettingsAsync(
+                        productId, req.IsWeighted, weightLookups.SetupType, weightLookups.WeightConfig, cancelToken);
                 }
 
                 // Per-site VARIATIONS: a selected-site edit must NOT mutate the canonical variants of OTHER sites.
@@ -508,9 +595,23 @@ namespace George.Services
                     }
 
                     var variantOverrides = new List<ProductSiteOverrideStorage.VariantSiteOverrideUpsert>();
+                    // A variant's WEIGHT / SKU / IMAGE are physical/identity properties of the item (weight-by-size,
+                    // the cut's photo), shared by all sites — persist them canonically. The per-site override only
+                    // carries price/sale/stock, so without this an existing variant's weight/sku/image change was
+                    // silently dropped on a selected-site edit.
+                    var variantCanonicalFields = new Dictionary<int, ProductStorage.VariantCanonicalFields>();
                     foreach (var v in req.Variants)
                     {
                         if (!v.Id.HasValue) continue; // new variants handled above
+                        if (v.Weight.HasValue || v.Sku != null || v.ImageUrl != null)
+                        {
+                            variantCanonicalFields[v.Id.Value] = new ProductStorage.VariantCanonicalFields
+                            {
+                                Weight = v.Weight,
+                                Sku = v.Sku,
+                                ImageUrl = v.ImageUrl,
+                            };
+                        }
                         variantOverrides.Add(new ProductSiteOverrideStorage.VariantSiteOverrideUpsert
                         {
                             VariantId = v.Id.Value,
@@ -521,6 +622,8 @@ namespace George.Services
                             IsExcluded = v.IsExcluded ?? false,
                         });
                     }
+                    if (variantCanonicalFields.Count > 0)
+                        await _productStorage.UpdateVariantCanonicalFieldsAsync(productId, variantCanonicalFields, cancelToken);
                     // Canonical variants the user removed in THIS branch → hide them here (not deleted canonically).
                     foreach (var cid in canonicalVariantIds.Where(id => !keptIds.Contains(id)))
                     {

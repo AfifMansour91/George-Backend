@@ -75,6 +75,54 @@ public partial class ProductSiteOverride
     /// <summary>Available/unavailable at this site (storefront visibility), independent of stock.</summary>
     public bool? Availability { get; set; }
 
+    // --- Per-site merchandising overrides (canonical value + optional per-site override, like Price) ---
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? CostPrice { get; set; }
+
+    public bool? IsKosher { get; set; }
+
+    /// <summary>ProductStatus lookup id (active/hidden/draft), null = inherit canonical.</summary>
+    public int? StatusId { get; set; }
+
+    /// <summary>Visibility lookup id, null = inherit canonical.</summary>
+    public int? VisibilityId { get; set; }
+
+    [StringLength(200)]
+    public string? Slug { get; set; }
+
+    public int? ShippingClassId { get; set; }
+
+    public int? SupplierId { get; set; }
+
+    // Storefront labels (null = inherit canonical; per-site true/false wins).
+    public bool? LabelFrozen { get; set; }
+
+    public bool? LabelGlutenFree { get; set; }
+
+    public bool? LabelNotKosher { get; set; }
+
+    public bool? LabelKosherForPassover { get; set; }
+
+    [Precision(0)]
+    public DateTime? LabelKosherForPassoverEndDate { get; set; }
+
+    public bool? LabelNew { get; set; }
+
+    [Precision(0)]
+    public DateTime? LabelNewEndDate { get; set; }
+
+    public bool? LabelBestseller { get; set; }
+
+    public bool? LabelLowAvailability { get; set; }
+
+    public bool? LabelReadyToCook { get; set; }
+
+    public bool? LabelNatural { get; set; }
+
+    public bool? LabelSugarFree { get; set; }
+
+    public bool? LabelLactoseFree { get; set; }
+
     // --- Per-site inventory (Phase 2: stock is always per-site) ---
     public int? StockManagementTypeId { get; set; }
 

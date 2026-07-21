@@ -2872,6 +2872,21 @@ public class PaymentService : ServiceBase
     }
 
     /// <summary>
+    /// Payment block whose <c>paymentGateway</c> is only a payment-method label (e.g. "מזומן") —
+    /// no transaction id and not a known gateway. Older Giorgio plugins send these with status
+    /// "failed" for cash orders; they are informational and must not mark the payment as failed.
+    /// </summary>
+    private static bool IsNonGatewayPaymentLabelBlock(WooCommerceOrderPaymentGatewayDetails? payment)
+    {
+        if (payment == null)
+            return false;
+        if (payment.ResolveTransactionId() != null)
+            return false;
+        var gatewayId = payment.ResolvePaymentGatewayId();
+        return gatewayId != null && gatewayId != PaymentGatewayProviderId.Cardcom;
+    }
+
+    /// <summary>
     /// Apply WooCommerce gateway payment (checkout J5 auth or final capture) onto an order — same fields as phone Cardcom flow.
     /// </summary>
     public void ApplyWooCommerceGatewayPaymentFields(
@@ -2891,10 +2906,12 @@ public class PaymentService : ServiceBase
             order.GatewayPaymentSiteId = gatewaySiteId;
         if (!string.IsNullOrWhiteSpace(isFinished))
             order.IsFinished = isFinished.Trim();
-        if (!string.IsNullOrWhiteSpace(gatewayStatus))
+
+        var isNonGatewayLabelBlock = IsNonGatewayPaymentLabelBlock(payment);
+        if (!string.IsNullOrWhiteSpace(gatewayStatus) && !isNonGatewayLabelBlock)
             order.ExternalPaymentStatus = gatewayStatus.Trim();
 
-        if (payment == null)
+        if (payment == null || isNonGatewayLabelBlock)
             return;
 
         var txId = payment.ResolveTransactionId();
@@ -2966,6 +2983,8 @@ public class PaymentService : ServiceBase
         string? isFinished,
         CancellationToken cancelToken = default)
     {
+        if (IsNonGatewayPaymentLabelBlock(payment))
+            return;
         var gatewayFailed = WooCommerceGatewayPaymentInterpreter.IsGatewayFailureStatus(gatewayStatus);
         var gatewaySuccess = WooCommerceGatewayPaymentInterpreter.IsGatewaySuccessStatus(gatewayStatus);
         var hasTx = !string.IsNullOrWhiteSpace(payment?.ResolveTransactionId());

@@ -1348,6 +1348,149 @@ namespace George.Data
             return weightConfig;
         }
 
+        /// <summary>
+        /// MultiSite Phase 2: persists the structural weight settings (IsWeighted / SetupType / WeightConfig) on the
+        /// CANONICAL product. Weight settings define HOW the product is sold (by weight / by unit / weight-by-size) —
+        /// they are shared by every site, exactly like ProductOption — so a selected-site edit persists them here
+        /// rather than on the per-site override (where they were previously dropped and never saved).
+        /// </summary>
+        public async Task UpdateProductWeightSettingsAsync(int productId, bool? isWeighted, string? setupType, WeightConfigDto? weightConfig, CancellationToken cancelToken)
+        {
+            var product = await _dbContext.Product.FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
+            if (product == null) return;
+
+            if (isWeighted.HasValue) product.IsWeighted = isWeighted;
+            if (setupType.HasValue())
+            {
+                var st = await _dbContext.SetupType.FirstOrDefaultAsync(s => s.Name == setupType, cancelToken);
+                product.SetupTypeId = st?.Id;
+            }
+            if (weightConfig != null)
+            {
+                var wc = await CreateOrUpdateWeightConfigAsync(weightConfig, cancelToken);
+                product.WeightConfigId = wc?.Id;
+            }
+            product.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
+        /// <summary>Canonical (product-wide) fields of an existing variant a selected-site edit may change. Null = don't change.</summary>
+        public sealed class VariantCanonicalFields
+        {
+            public decimal? Weight { get; set; }
+            public string? Sku { get; set; }
+            public string? ImageUrl { get; set; }
+        }
+
+        /// <summary>
+        /// Updates the canonical Weight / Sku / ImageUrl of existing variants. These are physical/identity properties
+        /// of the item (weight-by-size, the variant's SKU and photo), not per-site merchandising values, so a
+        /// selected-site edit persists them canonically (per-site price/sale/stock stay on the variant override).
+        /// </summary>
+        public async Task UpdateVariantCanonicalFieldsAsync(int productId, IReadOnlyDictionary<int, VariantCanonicalFields> fieldsByVariantId, CancellationToken cancelToken)
+        {
+            if (fieldsByVariantId == null || fieldsByVariantId.Count == 0) return;
+            var ids = fieldsByVariantId.Keys.ToList();
+            var variants = await _dbContext.ProductVariant
+                .Where(v => v.ProductId == productId && ids.Contains(v.Id) && !v.IsDeleted)
+                .ToListAsync(cancelToken);
+            var changed = false;
+            foreach (var v in variants)
+            {
+                var f = fieldsByVariantId[v.Id];
+                if (f.Weight.HasValue && v.Weight != f.Weight)
+                {
+                    v.Weight = f.Weight;
+                    changed = true;
+                }
+                if (f.Sku != null)
+                {
+                    // Normalize empty SKU to NULL (same as the canonical product update path).
+                    var sku = string.IsNullOrWhiteSpace(f.Sku) ? null : f.Sku.Trim();
+                    if (v.Sku != sku) { v.Sku = sku; changed = true; }
+                }
+                if (f.ImageUrl != null)
+                {
+                    var url = string.IsNullOrWhiteSpace(f.ImageUrl) ? null : f.ImageUrl;
+                    if (v.ImageUrl != url) { v.ImageUrl = url; changed = true; }
+                }
+            }
+            if (changed)
+                await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
+        /// <summary>
+        /// Updates ONLY the product's brand links + tags (canonical). Used by the selected-site edit path, where
+        /// brand/tag taxonomy is product-wide (like ProductOption / related products), not a per-site value.
+        /// Null = leave unchanged; empty list clears. Mirrors the brand/tag handling in UpdateProductAsync.
+        /// </summary>
+        public async Task UpdateProductBrandsAndTagsAsync(int productId, List<int>? brandIds, List<string>? tags, CancellationToken cancelToken)
+        {
+            if (brandIds == null && tags == null) return;
+
+            var dbProduct = await _dbContext.Product
+                .Include(p => p.ProductBrand)
+                .Include(p => p.Tag)
+                .FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
+            if (dbProduct == null) return;
+
+            if (brandIds != null)
+            {
+                dbProduct.ProductBrand.Clear();
+                var ordered = DistinctPositiveIdsPreserveOrder(brandIds);
+                var firstValid = 0;
+                if (ordered.Count > 0)
+                {
+                    var accountId = dbProduct.AccountId;
+                    var valid = await _dbContext.Brand
+                        .Where(b => ordered.Contains(b.Id) && !b.IsDeleted && (!accountId.HasValue || b.AccountId == accountId))
+                        .Select(b => b.Id)
+                        .ToListAsync(cancelToken)
+                        .ConfigureAwait(false);
+                    var validSet = valid.ToHashSet();
+                    var hasPrimary = false;
+                    foreach (var bid in ordered)
+                    {
+                        if (!validSet.Contains(bid)) continue;
+                        dbProduct.ProductBrand.Add(new ProductBrand
+                        {
+                            ProductId = dbProduct.Id,
+                            BrandId = bid,
+                            IsPrimary = !hasPrimary,
+                        });
+                        if (!hasPrimary) firstValid = bid;
+                        hasPrimary = true;
+                    }
+                }
+                // Keep the legacy single-brand FK consistent with the join (same as MapLookupsAsync).
+                dbProduct.BrandId = firstValid > 0 ? firstValid : null;
+            }
+
+            if (tags != null)
+            {
+                dbProduct.Tag.Clear();
+                foreach (var tagName in tags)
+                {
+                    var tag = await _dbContext.Tag
+                        .FirstOrDefaultAsync(t => t.Name == tagName && t.AccountId == dbProduct.AccountId, cancelToken);
+                    if (tag == null)
+                    {
+                        tag = new Tag
+                        {
+                            Name = tagName,
+                            AccountId = dbProduct.AccountId,
+                            CreationTime = DateTime.UtcNow
+                        };
+                        _dbContext.Tag.Add(tag);
+                    }
+                    dbProduct.Tag.Add(tag);
+                }
+            }
+
+            dbProduct.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
         public async Task MapLookupsAsync(Product product, ProductLookupDto req, CancellationToken cancelToken)
         {
             // Map status

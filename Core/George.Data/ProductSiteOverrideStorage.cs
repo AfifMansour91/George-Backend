@@ -27,6 +27,28 @@ namespace George.Data
         public decimal? LowStockThreshold { get; set; }
         public string? StockStatus { get; set; }
         public string? StockManagementType { get; set; }
+
+        // Per-site merchandising overrides (lookup ids resolved to names; null = inherit canonical).
+        public decimal? CostPrice { get; set; }
+        public bool? IsKosher { get; set; }
+        public string? Status { get; set; }
+        public string? Visibility { get; set; }
+        public string? Slug { get; set; }
+        public string? ShippingClass { get; set; }
+        public string? Supplier { get; set; }
+        public bool? LabelFrozen { get; set; }
+        public bool? LabelGlutenFree { get; set; }
+        public bool? LabelNotKosher { get; set; }
+        public bool? LabelKosherForPassover { get; set; }
+        public DateTime? LabelKosherForPassoverEndDate { get; set; }
+        public bool? LabelNew { get; set; }
+        public DateTime? LabelNewEndDate { get; set; }
+        public bool? LabelBestseller { get; set; }
+        public bool? LabelLowAvailability { get; set; }
+        public bool? LabelReadyToCook { get; set; }
+        public bool? LabelNatural { get; set; }
+        public bool? LabelSugarFree { get; set; }
+        public bool? LabelLactoseFree { get; set; }
     }
 
     /// <summary>
@@ -104,6 +126,26 @@ namespace George.Data
                     LowStockThreshold = o.LowStockThreshold,
                     StockStatus = _dbContext.StockStatus.Where(s => s.Id == o.StockStatusId).Select(s => s.Name).FirstOrDefault(),
                     StockManagementType = _dbContext.StockManagementType.Where(s => s.Id == o.StockManagementTypeId).Select(s => s.Name).FirstOrDefault(),
+                    CostPrice = o.CostPrice,
+                    IsKosher = o.IsKosher,
+                    Status = _dbContext.ProductStatus.Where(s => s.Id == o.StatusId).Select(s => s.Name).FirstOrDefault(),
+                    Visibility = _dbContext.Visibility.Where(v => v.Id == o.VisibilityId).Select(v => v.Name).FirstOrDefault(),
+                    Slug = o.Slug,
+                    ShippingClass = _dbContext.ShippingClass.Where(s => s.Id == o.ShippingClassId).Select(s => s.Name).FirstOrDefault(),
+                    Supplier = _dbContext.Supplier.Where(s => s.Id == o.SupplierId).Select(s => s.Name).FirstOrDefault(),
+                    LabelFrozen = o.LabelFrozen,
+                    LabelGlutenFree = o.LabelGlutenFree,
+                    LabelNotKosher = o.LabelNotKosher,
+                    LabelKosherForPassover = o.LabelKosherForPassover,
+                    LabelKosherForPassoverEndDate = o.LabelKosherForPassoverEndDate,
+                    LabelNew = o.LabelNew,
+                    LabelNewEndDate = o.LabelNewEndDate,
+                    LabelBestseller = o.LabelBestseller,
+                    LabelLowAvailability = o.LabelLowAvailability,
+                    LabelReadyToCook = o.LabelReadyToCook,
+                    LabelNatural = o.LabelNatural,
+                    LabelSugarFree = o.LabelSugarFree,
+                    LabelLactoseFree = o.LabelLactoseFree,
                 })
                 .ToListAsync(cancelToken);
         }
@@ -722,6 +764,43 @@ namespace George.Data
         /// Upsert a sparse override. Only non-null inputs are written; nulls keep the current override value.
         /// Stock status/management-type names are resolved to lookup ids.
         /// </summary>
+        /// <summary>
+        /// Per-site merchandising override values for <see cref="UpsertOverrideAsync"/> (null = don't change).
+        /// Status / Visibility / ShippingClass / Supplier are the client-side NAMES; they are resolved to lookup
+        /// ids here (same normalization as ProductStorage.MapLookupsAsync; supplier is find-or-create per account).
+        /// </summary>
+        public sealed class MerchandisingOverrideUpsert
+        {
+            public decimal? CostPrice { get; set; }
+            public bool? IsKosher { get; set; }
+            public string? Status { get; set; }
+            public string? Visibility { get; set; }
+            public string? Slug { get; set; }
+            public string? ShippingClass { get; set; }
+            public string? Supplier { get; set; }
+            public bool? LabelFrozen { get; set; }
+            public bool? LabelGlutenFree { get; set; }
+            public bool? LabelNotKosher { get; set; }
+            public bool? LabelKosherForPassover { get; set; }
+            public DateTime? LabelKosherForPassoverEndDate { get; set; }
+            public bool? LabelNew { get; set; }
+            public DateTime? LabelNewEndDate { get; set; }
+            public bool? LabelBestseller { get; set; }
+            public bool? LabelLowAvailability { get; set; }
+            public bool? LabelReadyToCook { get; set; }
+            public bool? LabelNatural { get; set; }
+            public bool? LabelSugarFree { get; set; }
+            public bool? LabelLactoseFree { get; set; }
+        }
+
+        /// <summary>Same client-name normalization as ProductStorage.MapLookupsAsync (status + visibility).</summary>
+        private static string NormalizeStatusLikeName(string name)
+        {
+            if (name == "public" || name == "published") return "active";
+            if (name == "archived") return "hidden";
+            return name;
+        }
+
         public async Task<ProductSiteOverride> UpsertOverrideAsync(
             int productId,
             int siteId,
@@ -746,7 +825,8 @@ namespace George.Data
             string? weightUnit = null,
             string? sku = null,
             string? seoTitle = null,
-            string? seoDescription = null)
+            string? seoDescription = null,
+            MerchandisingOverrideUpsert? merch = null)
         {
             var row = await GetOrCreateAsync(productId, siteId, accountId, cancelToken);
 
@@ -790,6 +870,82 @@ namespace George.Data
             if (stockQuantity.HasValue) row.StockQuantity = stockQuantity;
             if (variationStockByQuantity.HasValue) row.VariationStockByQuantity = variationStockByQuantity;
             if (lowStockThreshold.HasValue) row.LowStockThreshold = lowStockThreshold.Value <= 0 ? (decimal?)null : lowStockThreshold.Value;
+
+            if (merch != null)
+            {
+                if (merch.CostPrice.HasValue) row.CostPrice = merch.CostPrice;
+                if (merch.IsKosher.HasValue) row.IsKosher = merch.IsKosher;
+                if (merch.Slug != null) row.Slug = string.IsNullOrWhiteSpace(merch.Slug) ? null : merch.Slug.Trim();
+
+                if (merch.Status.HasValue())
+                {
+                    var statusName = NormalizeStatusLikeName(merch.Status!.Trim());
+                    var status = await _dbContext.ProductStatus
+                        .FirstOrDefaultAsync(s => s.Name.ToLower() == statusName.ToLower(), cancelToken);
+                    if (status != null) row.StatusId = status.Id; // don't null out on an unresolvable name
+                }
+                if (merch.Visibility.HasValue())
+                {
+                    var visibilityName = NormalizeStatusLikeName(merch.Visibility!.Trim());
+                    var visibility = await _dbContext.Visibility
+                        .FirstOrDefaultAsync(v => v.Name.ToLower() == visibilityName.ToLower(), cancelToken);
+                    if (visibility != null) row.VisibilityId = visibility.Id;
+                }
+                if (merch.ShippingClass.HasValue())
+                {
+                    var sc = await _dbContext.ShippingClass
+                        .FirstOrDefaultAsync(s => s.Name == merch.ShippingClass, cancelToken);
+                    if (sc != null) row.ShippingClassId = sc.Id;
+                }
+                if (merch.Supplier != null)
+                {
+                    // Empty string clears the per-site supplier back to inheriting; a name is find-or-create per account
+                    // (same as the canonical MapLookupsAsync supplier handling).
+                    var supplierName = merch.Supplier.Trim();
+                    if (supplierName.Length == 0)
+                    {
+                        row.SupplierId = null;
+                    }
+                    else
+                    {
+                        var supplier = await _dbContext.Supplier
+                            .FirstOrDefaultAsync(s => s.Name == supplierName && s.AccountId == accountId && !s.IsDeleted, cancelToken);
+                        if (supplier == null)
+                        {
+                            supplier = new Supplier
+                            {
+                                Name = supplierName,
+                                AccountId = accountId,
+                                IsDeleted = false,
+                                CreationTime = DateTime.UtcNow,
+                            };
+                            _dbContext.Supplier.Add(supplier);
+                            await _dbContext.SaveChangesAsync(cancelToken);
+                        }
+                        row.SupplierId = supplier.Id;
+                    }
+                }
+
+                if (merch.LabelFrozen.HasValue) row.LabelFrozen = merch.LabelFrozen;
+                if (merch.LabelGlutenFree.HasValue) row.LabelGlutenFree = merch.LabelGlutenFree;
+                if (merch.LabelNotKosher.HasValue) row.LabelNotKosher = merch.LabelNotKosher;
+                if (merch.LabelKosherForPassover.HasValue)
+                {
+                    row.LabelKosherForPassover = merch.LabelKosherForPassover;
+                    row.LabelKosherForPassoverEndDate = merch.LabelKosherForPassover.Value ? merch.LabelKosherForPassoverEndDate : null;
+                }
+                if (merch.LabelNew.HasValue)
+                {
+                    row.LabelNew = merch.LabelNew;
+                    row.LabelNewEndDate = merch.LabelNew.Value ? merch.LabelNewEndDate : null;
+                }
+                if (merch.LabelBestseller.HasValue) row.LabelBestseller = merch.LabelBestseller;
+                if (merch.LabelLowAvailability.HasValue) row.LabelLowAvailability = merch.LabelLowAvailability;
+                if (merch.LabelReadyToCook.HasValue) row.LabelReadyToCook = merch.LabelReadyToCook;
+                if (merch.LabelNatural.HasValue) row.LabelNatural = merch.LabelNatural;
+                if (merch.LabelSugarFree.HasValue) row.LabelSugarFree = merch.LabelSugarFree;
+                if (merch.LabelLactoseFree.HasValue) row.LabelLactoseFree = merch.LabelLactoseFree;
+            }
 
             row.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken);
@@ -854,6 +1010,33 @@ namespace George.Data
                     if (row.Sku == null) row.Sku = product.Sku;
                     if (row.SeoTitle == null) row.SeoTitle = product.SeoTitle;
                     if (row.SeoDescription == null) row.SeoDescription = product.SeoDescription;
+                    // Per-site merchandising overrides (canonical + per-site override, like Price).
+                    if (row.CostPrice == null) row.CostPrice = product.CostPrice;
+                    if (row.IsKosher == null) row.IsKosher = product.IsKosher;
+                    if (row.StatusId == null) row.StatusId = product.StatusId;
+                    if (row.VisibilityId == null) row.VisibilityId = product.VisibilityId;
+                    if (row.Slug == null) row.Slug = product.Slug;
+                    if (row.ShippingClassId == null) row.ShippingClassId = product.ShippingClassId;
+                    if (row.SupplierId == null) row.SupplierId = product.SupplierId;
+                    if (row.LabelFrozen == null) row.LabelFrozen = product.LabelFrozen;
+                    if (row.LabelGlutenFree == null) row.LabelGlutenFree = product.LabelGlutenFree;
+                    if (row.LabelNotKosher == null) row.LabelNotKosher = product.LabelNotKosher;
+                    if (row.LabelKosherForPassover == null)
+                    {
+                        row.LabelKosherForPassover = product.LabelKosherForPassover;
+                        row.LabelKosherForPassoverEndDate = product.LabelKosherForPassoverEndDate;
+                    }
+                    if (row.LabelNew == null)
+                    {
+                        row.LabelNew = product.LabelNew;
+                        row.LabelNewEndDate = product.LabelNewEndDate;
+                    }
+                    if (row.LabelBestseller == null) row.LabelBestseller = product.LabelBestseller;
+                    if (row.LabelLowAvailability == null) row.LabelLowAvailability = product.LabelLowAvailability;
+                    if (row.LabelReadyToCook == null) row.LabelReadyToCook = product.LabelReadyToCook;
+                    if (row.LabelNatural == null) row.LabelNatural = product.LabelNatural;
+                    if (row.LabelSugarFree == null) row.LabelSugarFree = product.LabelSugarFree;
+                    if (row.LabelLactoseFree == null) row.LabelLactoseFree = product.LabelLactoseFree;
                 }
             }
             row.UpdatedDate = DateTime.UtcNow;

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using George.Data;
 using George.DB;
 
 namespace George.Services;
@@ -30,28 +31,33 @@ public partial class WooCommerceService
     /// <summary>
     /// Boolean storefront labels for <c>POST /wp-json/ed/v1/product-label</c> (<c>labels</c> object).
     /// Keys must match existing ACF field names on the WooCommerce site.
+    /// MultiSite Phase 2: when a per-site override (<paramref name="siteOverride"/>) sets a label, it wins
+    /// over the canonical product value (null = inherit), including the timed end dates.
     /// </summary>
-    public static Dictionary<string, bool> BuildEdV1ProductLabels(Product product)
+    public static Dictionary<string, bool> BuildEdV1ProductLabels(Product product, SiteOverrideValues? siteOverride = null)
     {
         var now = DateTime.UtcNow;
-        var passoverEffective = product.LabelKosherForPassover &&
-                                (!product.LabelKosherForPassoverEndDate.HasValue ||
-                                 product.LabelKosherForPassoverEndDate.Value > now);
-        var newEffective = product.LabelNew &&
-                           (!product.LabelNewEndDate.HasValue || product.LabelNewEndDate.Value > now);
+        var passoverOn = siteOverride?.LabelKosherForPassover ?? product.LabelKosherForPassover;
+        var passoverEnd = siteOverride?.LabelKosherForPassover != null
+            ? siteOverride.LabelKosherForPassoverEndDate
+            : product.LabelKosherForPassoverEndDate;
+        var passoverEffective = passoverOn && (!passoverEnd.HasValue || passoverEnd.Value > now);
+        var newOn = siteOverride?.LabelNew ?? product.LabelNew;
+        var newEnd = siteOverride?.LabelNew != null ? siteOverride.LabelNewEndDate : product.LabelNewEndDate;
+        var newEffective = newOn && (!newEnd.HasValue || newEnd.Value > now);
 
         return new Dictionary<string, bool>(StringComparer.Ordinal)
         {
-            ["frozen"] = product.LabelFrozen,
-            ["gluten_free"] = product.LabelGlutenFree,
-            ["not_kosher"] = product.LabelNotKosher,
+            ["frozen"] = siteOverride?.LabelFrozen ?? product.LabelFrozen,
+            ["gluten_free"] = siteOverride?.LabelGlutenFree ?? product.LabelGlutenFree,
+            ["not_kosher"] = siteOverride?.LabelNotKosher ?? product.LabelNotKosher,
             ["kosher_for_passover"] = passoverEffective,
-            ["bestseller"] = product.LabelBestseller,
-            ["low_availability"] = product.LabelLowAvailability,
-            ["readytocook"] = product.LabelReadyToCook,
-            ["natural"] = product.LabelNatural,
-            ["sugarfree"] = product.LabelSugarFree,
-            ["lactosefree"] = product.LabelLactoseFree,
+            ["bestseller"] = siteOverride?.LabelBestseller ?? product.LabelBestseller,
+            ["low_availability"] = siteOverride?.LabelLowAvailability ?? product.LabelLowAvailability,
+            ["readytocook"] = siteOverride?.LabelReadyToCook ?? product.LabelReadyToCook,
+            ["natural"] = siteOverride?.LabelNatural ?? product.LabelNatural,
+            ["sugarfree"] = siteOverride?.LabelSugarFree ?? product.LabelSugarFree,
+            ["lactosefree"] = siteOverride?.LabelLactoseFree ?? product.LabelLactoseFree,
             ["new"] = newEffective,
         };
     }
@@ -59,9 +65,9 @@ public partial class WooCommerceService
     /// <summary>
     /// Appends ACF true/false meta pairs (<c>key</c> + <c>_{key}</c> field reference) so WooCommerce REST updates match wp-admin.
     /// </summary>
-    private static void AppendWooAcfStoreLabelMeta(ICollection<object> metaData, Product product)
+    private static void AppendWooAcfStoreLabelMeta(ICollection<object> metaData, Product product, SiteOverrideValues? siteOverride = null)
     {
-        var labels = BuildEdV1ProductLabels(product);
+        var labels = BuildEdV1ProductLabels(product, siteOverride);
 
         void AddTrueFalse(string logicalMetaKey, string fieldRef, bool on)
         {
@@ -80,16 +86,20 @@ public partial class WooCommerceService
         AddTrueFalse("lactosefree", WooAcfStoreLabelFieldRefs["lactosefree"], labels["lactosefree"]);
         AddTrueFalse("not_kosher", WooAcfStoreLabelFieldRefs["not_kosher"], labels["not_kosher"]);
 
-        // Optional end dates (if the site adds ACF date fields with these keys)
-        if (product.LabelKosherForPassoverEndDate.HasValue)
+        // Optional end dates (if the site adds ACF date fields with these keys). Per-site override wins.
+        var passoverEndDate = siteOverride?.LabelKosherForPassover != null
+            ? siteOverride.LabelKosherForPassoverEndDate
+            : product.LabelKosherForPassoverEndDate;
+        if (passoverEndDate.HasValue)
         {
-            var iso = product.LabelKosherForPassoverEndDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
+            var iso = passoverEndDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
             metaData.Add(new { key = "kosher_for_passover_end_date", value = iso });
         }
 
-        if (product.LabelNewEndDate.HasValue)
+        var newEndDate = siteOverride?.LabelNew != null ? siteOverride.LabelNewEndDate : product.LabelNewEndDate;
+        if (newEndDate.HasValue)
         {
-            var iso = product.LabelNewEndDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
+            var iso = newEndDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
             metaData.Add(new { key = "label_new_end_date", value = iso });
             metaData.Add(new { key = "new_end_date", value = iso });
         }
