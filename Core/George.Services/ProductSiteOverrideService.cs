@@ -3,6 +3,7 @@ using George.Common;
 using George.Data;
 using George.Services.Request;
 using George.Services.Response;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace George.Services
@@ -15,17 +16,64 @@ namespace George.Services
     {
         private readonly ProductSiteOverrideStorage _overrideStorage;
         private readonly ProductStorage _productStorage;
+        private readonly IServiceScopeFactory _serviceScopeFactory;
 
         public ProductSiteOverrideService(
             ILogger<ProductSiteOverrideService> logger,
             IMapper mapper,
             CacheManager cache,
             ProductSiteOverrideStorage overrideStorage,
-            ProductStorage productStorage
+            ProductStorage productStorage,
+            IServiceScopeFactory serviceScopeFactory
         ) : base(logger, mapper, cache)
         {
             _overrideStorage = overrideStorage;
             _productStorage = productStorage;
+            _serviceScopeFactory = serviceScopeFactory;
+        }
+
+        /// <summary>
+        /// Fire-and-forget WooCommerce sync of one product to ONE site after a per-site override change.
+        /// Every write in this service (override upsert/reset, variant stock, exclude/include) must push the
+        /// site's new effective values to that site's Woo store — without this, per-branch stock/price edits
+        /// from the "הצג" dialog saved to the DB but the website never updated (until an unrelated edit
+        /// happened to re-sync the product). Resolves its OWN scope: the request scope is disposed by the
+        /// time the task runs (same lesson as the promotion webhook dispatcher).
+        /// </summary>
+        private void QueueSiteSync(int productId, int siteId)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var scope = _serviceScopeFactory.CreateScope();
+                    var siteStorage = scope.ServiceProvider.GetRequiredService<SiteStorage>();
+                    var site = await siteStorage.GetSiteAsync(siteId, CancellationToken.None);
+                    if (site == null || site.WooCommerceEnabled != true)
+                        return;
+
+                    var wooCommerceService = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
+                    var syncReq = new WooCommerceSyncReq
+                    {
+                        SiteId = siteId,
+                        ProductIds = new List<int> { productId }
+                    };
+                    var syncResponse = await wooCommerceService.SyncToWooCommerceAsync(syncReq, CancellationToken.None);
+                    if (syncResponse.Data?.Success == null || !syncResponse.Data.Success.Any())
+                    {
+                        _logger.LogWarning(
+                            "Per-site override change: failed to sync product {ProductId} to WooCommerce for site {SiteId}: {Message}",
+                            productId, siteId, syncResponse.Data?.Message ?? "Unknown error");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Log but never throw — Woo sync failures must not surface into the override save.
+                    _logger.LogError(ex,
+                        "Per-site override change: error syncing product {ProductId} to WooCommerce for site {SiteId}",
+                        productId, siteId);
+                }
+            }, CancellationToken.None);
         }
 
         public async Task<IApiResponse<ProductSiteOverrideRes>> UpsertOverrideAsync(
@@ -68,6 +116,9 @@ namespace George.Services
                 VariationStockByQuantity = row.VariationStockByQuantity,
                 LowStockThreshold = row.LowStockThreshold,
             };
+
+            // Push the branch's new effective values to this site's Woo store.
+            QueueSiteSync(productId, siteId);
             return CreateResponse(response);
         }
 
@@ -80,6 +131,9 @@ namespace George.Services
                 : fieldsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             await _overrideStorage.ResetOverrideAsync(productId, siteId, fields, cancelToken);
             response.Data = true;
+
+            // The site now inherits the canonical values again — push them to its Woo store.
+            QueueSiteSync(productId, siteId);
             return CreateResponse(response);
         }
 
@@ -92,6 +146,9 @@ namespace George.Services
 
             await _overrideStorage.SetExcludedAsync(productId, req.SiteId, product.AccountId, excluded: true, resetFields: false, cancelToken);
             response.Data = true;
+
+            // Push the exclusion to the site's Woo store (the sync handles excluded products for the site).
+            QueueSiteSync(productId, req.SiteId);
             return CreateResponse(response);
         }
 
@@ -104,6 +161,9 @@ namespace George.Services
 
             await _overrideStorage.SetExcludedAsync(productId, req.SiteId, product.AccountId, excluded: false, resetFields: req.ResetFields, cancelToken);
             response.Data = true;
+
+            // The product is back under network management at this site — push its effective values to Woo.
+            QueueSiteSync(productId, req.SiteId);
             return CreateResponse(response);
         }
 
@@ -167,6 +227,9 @@ namespace George.Services
             var items = req.Items.Select(i => (i.VariantId, i.StockQuantity, i.StockStatus));
             await _overrideStorage.UpsertVariantStockAsync(productId, req.SiteId, items, cancelToken);
             response.Data = true;
+
+            // Push the branch's new variant stock to this site's Woo store.
+            QueueSiteSync(productId, req.SiteId);
             return CreateResponse(response);
         }
     }
