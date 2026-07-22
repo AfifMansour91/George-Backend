@@ -122,7 +122,20 @@ public class PrintJobService : ServiceBase
         var payload = j.Payload ?? string.Empty;
         var payloadType = _payloadType;
 
-        if (!string.IsNullOrWhiteSpace(payload) && payloadType != "html")
+        // A4 order printouts (Site.VoucherPrintA4; JobType suffix ":A4"): ALWAYS delivered as an A4 PDF,
+        // regardless of the configured payload type — deployed agents print html payloads at receipt width
+        // (72mm), so an A4 html payload would come out as a narrow strip. PDFs go through Sumatra, which
+        // fits the A4 page onto the printer's paper; no agent update needed.
+        if (!string.IsNullOrWhiteSpace(payload) &&
+            (j.JobType ?? "").EndsWith(":A4", StringComparison.Ordinal))
+        {
+            var a4Bytes = await _htmlRenderService
+                .RenderPdfA4Async(payload, cancelToken)
+                .ConfigureAwait(false);
+            payload = Convert.ToBase64String(a4Bytes);
+            payloadType = "pdf-base64";
+        }
+        else if (!string.IsNullOrWhiteSpace(payload) && payloadType != "html")
         {
             var pngBytes = await _htmlRenderService
                 .RenderPdfAsync(payload, cancelToken)

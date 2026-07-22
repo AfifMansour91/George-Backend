@@ -6,6 +6,8 @@ namespace George.Services.Utils
     public interface IHtmlRenderService
     {
         Task<byte[]> RenderPdfAsync(string html, CancellationToken cancellationToken = default);
+        /// <summary>Renders HTML to a standard A4 PDF (may span multiple pages). Used by A4 order printouts.</summary>
+        Task<byte[]> RenderPdfA4Async(string html, CancellationToken cancellationToken = default);
         Task<byte[]> RenderPngAsync(string html, CancellationToken cancellationToken = default);
     }
 
@@ -13,6 +15,9 @@ namespace George.Services.Utils
     {
         /// <summary>72mm at 96 CSS px/in; viewport must match PDF page width or layout reflows and clips.</summary>
         private static readonly int ReceiptCssWidthPx = (int)Math.Round(72.0 * 96.0 / 25.4);
+
+        /// <summary>A4 width (210mm) at 96 CSS px/in.</summary>
+        private static readonly int A4CssWidthPx = (int)Math.Round(210.0 * 96.0 / 25.4);
 
         private readonly Task<IPlaywright> _playwrightTask;
         private readonly Task<IBrowser> _browserTask;
@@ -91,6 +96,60 @@ namespace George.Services.Utils
                         Bottom = "0mm",
                         Left = "0mm",
                         Right = "0mm"
+                    }
+                });
+            }
+            finally
+            {
+                await page.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// Standard A4 PDF (multi-page allowed) — for A4 order printouts (Site.VoucherPrintA4).
+        /// Unlike the receipt path, no 72mm CSS is injected and the page keeps natural A4 pagination;
+        /// the payload HTML carries its own A4 layout (@page size A4).
+        /// </summary>
+        public async Task<byte[]> RenderPdfA4Async(string html, CancellationToken cancellationToken = default)
+        {
+            var browser = await _browserTask;
+
+            var page = await browser.NewPageAsync(new BrowserNewPageOptions
+            {
+                ViewportSize = new ViewportSize
+                {
+                    Width = A4CssWidthPx,
+                    Height = 1400
+                },
+                DeviceScaleFactor = 2
+            });
+
+            try
+            {
+                await page.SetContentAsync(html, new PageSetContentOptions
+                {
+                    WaitUntil = WaitUntilState.Load
+                });
+
+                await page.EvaluateAsync(
+                    "async () => { try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch (_) { } }")
+                    .ConfigureAwait(false);
+
+                await page.EmulateMediaAsync(new PageEmulateMediaOptions { Media = Media.Print });
+
+                await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+
+                return await page.PdfAsync(new PagePdfOptions
+                {
+                    Format = "A4",
+                    PrintBackground = true,
+                    PreferCSSPageSize = false,
+                    Margin = new Margin
+                    {
+                        Top = "10mm",
+                        Bottom = "10mm",
+                        Left = "10mm",
+                        Right = "10mm"
                     }
                 });
             }

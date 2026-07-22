@@ -2009,7 +2009,11 @@ namespace George.Services
                     orderForPrint = loaded;
             }
 
-            var payload = BuildAutoVoucherHtml(orderForPrint);
+            // A4 mode (Site.VoucherPrintA4): full-page order printout instead of the thermal voucher.
+            // The ":A4" JobType suffix makes PrintJobService deliver the payload as an A4 PDF (existing
+            // agents print PDFs via Sumatra onto the printer's paper — no agent update needed).
+            var useA4 = site.VoucherPrintA4 == true;
+            var payload = useA4 ? BuildAutoVoucherA4Html(orderForPrint) : BuildAutoVoucherHtml(orderForPrint);
             if (string.IsNullOrWhiteSpace(payload))
                 return;
 
@@ -2017,7 +2021,7 @@ namespace George.Services
             {
                 SiteId = order.SiteId,
                 OrderId = order.Id,
-                JobType = "VoucherAuto:NewImmediate",
+                JobType = useA4 ? "VoucherAuto:NewImmediate:A4" : "VoucherAuto:NewImmediate",
                 Trigger = "NewImmediate",
                 ClientSource = "Backend:OrderService",
                 Payload = payload
@@ -2031,6 +2035,167 @@ namespace George.Services
             {
                 _logger.LogError(ex, "Failed to enqueue auto print job for new order {OrderId}.", order.Id);
             }
+        }
+
+        /// <summary>
+        /// A4 order printout (Site.VoucherPrintA4) — full-page layout modeled on the order-confirmation
+        /// email: customer + delivery boxes side by side, ordered-items table (product | qty | price),
+        /// then subtotal / shipping / payment / grand-total rows. Delivered to the agent as an A4 PDF.
+        /// </summary>
+        private string BuildAutoVoucherA4Html(Order order)
+        {
+            var items = order.OrderItem?.OrderBy(i => i.SortOrder).ToList() ?? new List<OrderItem>();
+            var orderNo = order.OrderNumber ?? order.Id.ToString(CultureInfo.InvariantCulture);
+            var created = FormatOrderDateTime(order.CreationTime);
+            var sourceLabel = VoucherSourceLabels.TryGetValue(order.Source ?? "", out var srcLabel) ? srcLabel : (order.Source ?? "");
+            var isShipping = IsVoucherShipping(order);
+            var deliveryDate = isShipping ? order.DeliveryDate : order.PickupDate;
+            var deliveryTime = isShipping ? order.DeliveryTime : order.PickupTime;
+            var deliveryLabel = isShipping ? "משלוח עד הבית" : "איסוף עצמי";
+            var orderNotes = CombineOrderLevelNotes(order);
+            var payLine = VoucherPaymentHeadline(order, !string.Equals(order.Status, "InTreatment", StringComparison.OrdinalIgnoreCase));
+
+            static string Money(decimal v) => "₪" + v.ToString("N2", CultureInfo.InvariantCulture);
+
+            // Customer box
+            var customerBox = new StringBuilder();
+            customerBox.Append("<div style=\"flex:1;min-width:220px;\">");
+            customerBox.Append("<div style=\"font-size:16px;font-weight:800;margin-bottom:8px;\">פרטי לקוח:</div>");
+            customerBox.Append($"<div style=\"line-height:1.7;\"><b>שם:</b> {EscapeHtml(order.CustomerName ?? "—")}</div>");
+            if (!string.IsNullOrWhiteSpace(order.CustomerPhone))
+                customerBox.Append($"<div style=\"line-height:1.7;\"><b>טלפון:</b> <span dir=\"ltr\">{EscapeHtml(order.CustomerPhone!)}</span></div>");
+            if (!string.IsNullOrWhiteSpace(order.CustomerEmail))
+                customerBox.Append($"<div style=\"line-height:1.7;\"><b>אימייל:</b> <span dir=\"ltr\">{EscapeHtml(order.CustomerEmail!)}</span></div>");
+            customerBox.Append("</div>");
+
+            // Delivery / pickup box
+            var deliveryBox = new StringBuilder();
+            deliveryBox.Append("<div style=\"flex:1;min-width:220px;\">");
+            deliveryBox.Append("<div style=\"font-size:16px;font-weight:800;margin-bottom:8px;\">פרטי משלוח / איסוף עצמי</div>");
+            if (deliveryDate.HasValue)
+            {
+                var dateText = FormatVoucherDateWithWeekday(deliveryDate.Value)
+                    + (!string.IsNullOrWhiteSpace(deliveryTime) ? $" · {deliveryTime}" : "");
+                deliveryBox.Append($"<div style=\"line-height:1.7;\"><b>תאריך אספקה:</b> {EscapeHtml(dateText)}</div>");
+            }
+            if (isShipping)
+            {
+                var ship = TryGetShippingAddressPartsForVoucher(order);
+                if (ship != null && !string.IsNullOrEmpty(ship.Main))
+                    deliveryBox.Append($"<div style=\"line-height:1.7;\"><b>כתובת:</b> {EscapeHtml(ship.Main)}</div>");
+                var extras = ship != null ? FormatShippingExtrasCommaLine(ship) : "";
+                if (!string.IsNullOrEmpty(extras))
+                    deliveryBox.Append($"<div style=\"line-height:1.7;\">{EscapeHtml(extras)}</div>");
+            }
+            else
+            {
+                deliveryBox.Append($"<div style=\"line-height:1.7;\"><b>אופן אספקה:</b> {EscapeHtml(deliveryLabel)}</div>");
+            }
+            if (!string.IsNullOrWhiteSpace(orderNotes))
+                deliveryBox.Append($"<div style=\"line-height:1.7;\"><b>הערות הזמנה:</b> {EscapeHtml(orderNotes)}</div>");
+            deliveryBox.Append("</div>");
+
+            // Items table rows
+            var attrOpts = new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true, VoucherPerUnitWeightVariableOnly = true };
+            var rows = new StringBuilder();
+            foreach (var it in items)
+            {
+                var title = EscapeHtml(OrderItemLineDisplay.GetOrderItemProductName(it));
+                var qtyStr = EscapeHtml(OrderItemLineDisplay.FormatOrderItemQuantityBadge(it));
+                var lineAmt = GetVoucherPickedLineAmount(it) ?? OrderedLineGrossForVoucher(it);
+
+                var meta = new StringBuilder();
+                foreach (var seg in OrderItemLineDisplay.GetOrderItemAttributeSegments(it, attrOpts))
+                    meta.Append($"<div style=\"color:#374151;font-size:13px;line-height:1.6;\">{EscapeHtml(seg)}</div>");
+                var legacyHint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(
+                    it, string.Equals(order.Status, "New", StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrWhiteSpace(legacyHint))
+                    meta.Append($"<div style=\"color:#374151;font-size:13px;line-height:1.6;\">{EscapeHtml(legacyHint)}</div>");
+                if (!string.IsNullOrWhiteSpace(it.Notes))
+                    meta.Append($"<div style=\"color:#111827;font-size:13px;font-weight:700;line-height:1.6;\">הערות לקוח אודות ההזמנה: {EscapeHtml(it.Notes!)}</div>");
+
+                rows.Append("<tr style=\"border-bottom:1px solid #E5E7EB;\">");
+                rows.Append($"<td style=\"padding:12px 10px;vertical-align:top;\"><div style=\"font-weight:600;color:#6B7280;\">{title}</div>{meta}</td>");
+                rows.Append($"<td style=\"padding:12px 10px;vertical-align:middle;text-align:center;white-space:nowrap;\">{qtyStr}</td>");
+                rows.Append($"<td style=\"padding:12px 10px;vertical-align:middle;text-align:center;white-space:nowrap;\" dir=\"ltr\">{EscapeHtml(Money(lineAmt))}</td>");
+                rows.Append("</tr>");
+            }
+
+            // Summary rows (full-width, like the email layout)
+            var anyPicked = items.Any(OrderItemLineDisplay.OrderMeaningfulPick);
+            var itemsSum = anyPicked
+                ? items.Sum(i => GetVoucherPickedLineAmount(i) ?? 0m)
+                : items.Sum(OrderedLineGrossForVoucher);
+            var summary = VoucherReceiptLayout.BuildSummary(order, itemsSum);
+
+            var summaryRows = new StringBuilder();
+            void SummaryRow(string labelText, string valueHtml, bool bold = false)
+            {
+                var weight = bold ? "font-weight:800;font-size:16px;" : "";
+                summaryRows.Append("<tr style=\"border-bottom:1px solid #E5E7EB;\">");
+                summaryRows.Append($"<td style=\"padding:10px;{weight}\">{EscapeHtml(labelText)}</td>");
+                summaryRows.Append($"<td style=\"padding:10px;\"></td>");
+                summaryRows.Append($"<td style=\"padding:10px;text-align:center;white-space:nowrap;{weight}\">{valueHtml}</td>");
+                summaryRows.Append("</tr>");
+            }
+
+            SummaryRow("סכום ביניים:", $"<span dir=\"ltr\">{EscapeHtml(Money(summary.MerchandiseGross))}</span>");
+            if (summary.PromotionDiscount > 0)
+                SummaryRow("הנחת מבצע:", $"<span dir=\"ltr\" style=\"color:#DC2626;\">- {EscapeHtml(Money(summary.PromotionDiscount))}</span>");
+            if (summary.ManualDiscount > 0)
+                SummaryRow($"{summary.ManualDiscountLabel}:", $"<span dir=\"ltr\" style=\"color:#DC2626;\">- {EscapeHtml(Money(summary.ManualDiscount))}</span>");
+            SummaryRow("משלוח:", summary.Shipping > 0
+                ? $"<span dir=\"ltr\">{EscapeHtml(Money(summary.Shipping))}</span>"
+                : $"<span style=\"color:#6B7280;\">{EscapeHtml(deliveryLabel)}</span>");
+            if (!string.IsNullOrWhiteSpace(payLine))
+                SummaryRow("אמצעי תשלום:", $"<span style=\"color:#6B7280;\">{EscapeHtml(payLine)}</span>");
+            SummaryRow("סך הכל:", $"<span dir=\"ltr\">{EscapeHtml(Money(summary.GrandTotal))}</span>", bold: true);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("<!DOCTYPE html>");
+            sb.AppendLine("<html dir=\"rtl\" lang=\"he\">");
+            sb.AppendLine("<head>");
+            sb.AppendLine("  <meta charset=\"utf-8\">");
+            sb.AppendLine($"  <title>הזמנה {EscapeHtml(orderNo)}</title>");
+            sb.AppendLine("  <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\" />");
+            sb.AppendLine("  <link href=\"https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap\" rel=\"stylesheet\" />");
+            sb.AppendLine("  <style>");
+            sb.AppendLine("    * { box-sizing: border-box; }");
+            sb.AppendLine("    html, body { margin: 0; padding: 0; background: #fff; color: #111827; font-family: Heebo, Arial, sans-serif; font-size: 14px; }");
+            sb.AppendLine("    table { width: 100%; border-collapse: collapse; border: 1px solid #E5E7EB; }");
+            sb.AppendLine("    thead th { background: #F9FAFB; font-weight: 700; text-align: right; padding: 10px; border-bottom: 1px solid #E5E7EB; }");
+            sb.AppendLine("    @media print { @page { size: A4; margin: 10mm; } }");
+            sb.AppendLine("  </style>");
+            sb.AppendLine("</head>");
+            sb.AppendLine("<body>");
+            sb.AppendLine("<div id=\"voucher-root\" style=\"max-width:190mm;margin:0 auto;\">");
+
+            sb.Append("  <div style=\"display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin-bottom:14px;\">");
+            sb.Append($"<div style=\"font-size:20px;font-weight:800;\">הזמנה #{EscapeHtml(orderNo)}</div>");
+            sb.Append($"<div style=\"color:#6B7280;\">{EscapeHtml(created)}{(string.IsNullOrEmpty(sourceLabel) ? "" : " · " + EscapeHtml(sourceLabel))}</div>");
+            sb.AppendLine("</div>");
+
+            sb.Append("  <div style=\"display:flex;flex-wrap:wrap;gap:24px;border:1px solid #E5E7EB;border-radius:6px;padding:14px 16px;margin-bottom:20px;\">");
+            sb.Append(customerBox);
+            sb.Append(deliveryBox);
+            sb.AppendLine("</div>");
+
+            sb.AppendLine("  <table>");
+            sb.AppendLine("    <thead><tr>");
+            sb.AppendLine("      <th>מוצרים שהוזמנו</th>");
+            sb.AppendLine("      <th style=\"width:120px;text-align:center;\">יח' / ק\"ג</th>");
+            sb.AppendLine("      <th style=\"width:140px;text-align:center;\">מחיר</th>");
+            sb.AppendLine("    </tr></thead>");
+            sb.Append("    <tbody>");
+            sb.Append(rows);
+            sb.Append(summaryRows);
+            sb.AppendLine("</tbody>");
+            sb.AppendLine("  </table>");
+
+            sb.AppendLine("</div>");
+            sb.AppendLine("</body>");
+            sb.AppendLine("</html>");
+            return sb.ToString();
         }
 
         private string BuildAutoVoucherHtml(Order order)

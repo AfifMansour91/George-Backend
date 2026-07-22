@@ -43,6 +43,8 @@ namespace George.Services.Request
         /// <summary>When true, manual/phone order uses searchable Israel city picker (default true).</summary>
         public bool? IsraelCityPickerEnabled { get; set; }
         public bool? AutoPrintEnabled { get; set; }
+        /// <summary>Print order printouts on A4 pages instead of the thermal voucher.</summary>
+        public bool? VoucherPrintA4 { get; set; }
         public bool? PrintNewOrderImmediate { get; set; }
         public bool? PrintMovedToTreatment { get; set; }
         public bool? PrintAfterPicking { get; set; }

@@ -103,6 +103,13 @@ public partial class Site
 
     public bool? AutoPrintEnabled { get; set; }
 
+    /// <summary>
+    /// When true, order printouts (manual + auto) use a full A4 page layout instead of the thermal
+    /// voucher (בון). Auto-print jobs are delivered to the PrintAgent as an A4 PDF; manual prints
+    /// from the browser use the A4 template.
+    /// </summary>
+    public bool? VoucherPrintA4 { get; set; }
+
     public bool? PrintNewOrderImmediate { get; set; }
 
     public bool? PrintMovedToTreatment { get; set; }
