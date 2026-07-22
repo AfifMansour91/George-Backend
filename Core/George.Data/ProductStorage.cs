@@ -798,12 +798,29 @@ namespace George.Data
         public async Task<Dictionary<int, int>> GetWooCommerceIdToProductIdForSiteAsync(int siteId, CancellationToken cancelToken)
         {
             if (siteId <= 0) return new Dictionary<int, int>();
-            var rows = await _dbContext.Product
+            // MultiSite: this store's Woo ids live in ProductSiteWooId; the legacy Product.WooCommerceId column keeps
+            // the FIRST store's id and is never overwritten, so matching on it alone finds nothing on other branches.
+            // Legacy fills the gaps for single-site accounts that predate the per-site table; per-site ids win on conflict.
+            var legacy = await _dbContext.Product
                 .AsNoTracking()
                 .Where(p => !p.IsDeleted && p.WooCommerceId != null && p.WooCommerceId > 0 && p.Site.Any(s => s.Id == siteId))
                 .Select(p => new { p.Id, WooId = p.WooCommerceId!.Value })
                 .ToListAsync(cancelToken);
-            return rows.ToDictionary(r => r.WooId, r => r.Id);
+            var perSite = await _dbContext.ProductSiteWooId
+                .AsNoTracking()
+                .Where(x => x.SiteId == siteId && x.WooCommerceProductId > 0)
+                .Join(
+                    _dbContext.Product.Where(p => !p.IsDeleted),
+                    x => x.ProductId,
+                    p => p.Id,
+                    (x, p) => new { p.Id, WooId = x.WooCommerceProductId })
+                .ToListAsync(cancelToken);
+            var map = new Dictionary<int, int>();
+            foreach (var r in legacy)
+                map[r.WooId] = r.Id;
+            foreach (var r in perSite)
+                map[r.WooId] = r.Id;
+            return map;
         }
 
         /// <summary>Batch-update DisplayOrder by product id. Returns number of rows updated.</summary>

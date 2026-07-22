@@ -83,6 +83,24 @@ namespace George.Services.Response
         public int SkippedCount { get; set; }
     }
 
+    /// <summary>
+    /// Status of the background menu_order push for a site (the push endpoint returns immediately; the UI polls this).
+    /// In-memory only — resets to <c>idle</c> on app restart.
+    /// </summary>
+    public class ProductOrderPushStatusRes
+    {
+        /// <summary><c>idle</c> | <c>running</c> | <c>done</c> | <c>failed</c>.</summary>
+        public string State { get; set; } = "idle";
+        /// <summary>Products queued for the current/last push.</summary>
+        public int TotalCount { get; set; }
+        public int UpdatedCount { get; set; }
+        /// <summary>Products whose Woo id no longer exists on the store (stale/deleted); listed in the server log.</summary>
+        public int SkippedCount { get; set; }
+        public string? Error { get; set; }
+        public DateTime? StartedAtUtc { get; set; }
+        public DateTime? FinishedAtUtc { get; set; }
+    }
+
     /// <summary>Read-only row for comparing product sort order (George vs WooCommerce). No DB writes.</summary>
     public class ProductOrderPreviewItem
     {

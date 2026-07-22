@@ -39,6 +39,12 @@ namespace George.Services
         /// <summary>Semaphore per (siteId, attributeName) so parallel product syncs don't create the same global attribute multiple times.</summary>
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> AttributeEnsureLocks = new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.Ordinal);
 
+        /// <summary>
+        /// Per-site status of the background menu_order push (the push endpoint returns immediately; UI polls GetProductOrderPushStatus).
+        /// Entries are replaced wholesale on each state transition so polling readers never see a half-updated status.
+        /// </summary>
+        private static readonly ConcurrentDictionary<int, ProductOrderPushStatusRes> ProductOrderPushStatuses = new();
+
         /// <summary>Cached result of <c>GET {site}/wp-json/ed/v1/capabilities</c> → <c>product_labels</c>.</summary>
         private static readonly ConcurrentDictionary<string, bool> EdProductLabelsCapabilityCache = new(StringComparer.OrdinalIgnoreCase);
 
@@ -350,9 +356,12 @@ namespace George.Services
                 var updatedCount = await _productStorage.UpdateDisplayOrdersForProductsAsync(updates, cancelToken);
                 response.Data.UpdatedCount = updatedCount;
                 response.Data.SkippedCount = Math.Max(0, wooProducts.Count - matched.Count);
-                response.Data.Message = updatedCount == 0
+                // 0 updates with matches means the order is already aligned — don't report it as "no matches".
+                response.Data.Message = matched.Count == 0
                     ? "No matching products found to update display order."
-                    : $"Updated display order for {updatedCount} product(s) from WooCommerce menu_order.";
+                    : updatedCount == 0
+                        ? $"Display order already matches WooCommerce for all {matched.Count} matched product(s); nothing to update."
+                        : $"Updated display order for {updatedCount} product(s) from WooCommerce menu_order.";
                 _logger.LogInformation(
                     "WooCommerce product order import for site {SiteId}: updated {Updated}, skipped {Skipped} Woo rows without local match",
                     siteId,
@@ -505,11 +514,62 @@ namespace George.Services
                     return response;
                 }
 
-                await SyncMenuOrderOnlyAsync(siteId, orderedProductIds, onlyProductIds: null, cancelToken);
+                // Cloudflare cuts origin requests at ~100s (524); a full-catalog push can exceed that,
+                // so run it in the background with its own scope and return immediately. The UI polls
+                // GetProductOrderPushStatus for completion; the result also lands in the log.
+                var startedStatus = new ProductOrderPushStatusRes
+                {
+                    State = "running",
+                    TotalCount = orderedProductIds.Count,
+                    StartedAtUtc = DateTime.UtcNow,
+                };
+                var alreadyRunning = ProductOrderPushStatuses.TryGetValue(siteId, out var existing) && existing.State == "running";
+                if (alreadyRunning)
+                {
+                    response.Data.Message = "A product order push is already running for this site.";
+                    return response;
+                }
+                ProductOrderPushStatuses[siteId] = startedStatus;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        var wooService = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
+                        var (updated, skipped) = await wooService.SyncMenuOrderOnlyAsync(
+                            siteId, orderedProductIds, onlyProductIds: null, CancellationToken.None);
+                        ProductOrderPushStatuses[siteId] = new ProductOrderPushStatusRes
+                        {
+                            State = "done",
+                            TotalCount = orderedProductIds.Count,
+                            UpdatedCount = updated,
+                            SkippedCount = skipped,
+                            StartedAtUtc = startedStatus.StartedAtUtc,
+                            FinishedAtUtc = DateTime.UtcNow,
+                        };
+                        _logger.LogInformation(
+                            "WooCommerce product order push for site {SiteId} finished: {UpdatedCount} updated, {SkippedCount} skipped",
+                            siteId,
+                            updated,
+                            skipped);
+                    }
+                    catch (Exception ex)
+                    {
+                        ProductOrderPushStatuses[siteId] = new ProductOrderPushStatusRes
+                        {
+                            State = "failed",
+                            TotalCount = orderedProductIds.Count,
+                            Error = ex.Message,
+                            StartedAtUtc = startedStatus.StartedAtUtc,
+                            FinishedAtUtc = DateTime.UtcNow,
+                        };
+                        _logger.LogError(ex, "Background WooCommerce product order push failed for site {SiteId}", siteId);
+                    }
+                }, CancellationToken.None);
                 response.Data.UpdatedCount = orderedProductIds.Count;
-                response.Data.Message = $"Pushed display order for {orderedProductIds.Count} product(s) to WooCommerce menu_order.";
+                response.Data.Message = $"Product order push started for {orderedProductIds.Count} product(s); running in the background.";
                 _logger.LogInformation(
-                    "WooCommerce product order push for site {SiteId}: {Count} products",
+                    "WooCommerce product order push started in background for site {SiteId}: {Count} products",
                     siteId,
                     orderedProductIds.Count);
                 return response;
@@ -519,6 +579,15 @@ namespace George.Services
                 _logger.LogError(ex, "Push product order to WooCommerce failed for site {SiteId}", siteId);
                 return CreateResponse(response, StatusCode.UnknownError, ex.Message);
             }
+        }
+
+        /// <summary>Status of the background menu_order push for the site (in-memory; reads as idle after app restart).</summary>
+        public IApiResponse<ProductOrderPushStatusRes> GetProductOrderPushStatus(int siteId)
+        {
+            return new ApiResponse<ProductOrderPushStatusRes>
+            {
+                Data = ProductOrderPushStatuses.TryGetValue(siteId, out var status) ? status : new ProductOrderPushStatusRes()
+            };
         }
 
         private async Task<IApiResponse<WooCommerceImportFromWooRes>> RunImportFromWooAsync(
@@ -3182,40 +3251,80 @@ namespace George.Services
         /// <summary>
         /// Syncs only menu_order to WooCommerce for the given ordered product IDs (e.g. after reorder).
         /// When <paramref name="onlyProductIds"/> is set, PUTs are sent only for those products (typically ones whose order changed).
+        /// Products whose stored Woo id no longer exists on the store (deleted on Woo / stale per-site id) are skipped, not fatal.
         /// </summary>
-        public async Task SyncMenuOrderOnlyAsync(
+        public async Task<(int Updated, int Skipped)> SyncMenuOrderOnlyAsync(
             int siteId,
             List<int> orderedProductIds,
             IReadOnlySet<int>? onlyProductIds,
             CancellationToken cancelToken)
         {
-            if (orderedProductIds == null || !orderedProductIds.Any()) return;
+            if (orderedProductIds == null || !orderedProductIds.Any()) return (0, 0);
             var site = await _siteStorage.GetSiteAsync(siteId, cancelToken);
             if (site == null || string.IsNullOrEmpty(site.WooCommerceUrl) || string.IsNullOrEmpty(site.WooCommerceKey) || string.IsNullOrEmpty(site.WooCommerceSecret))
-                return;
+                return (0, 0);
             var orders = await _productStorage.GetWooCommerceIdAndDisplayOrderForSiteAsync(orderedProductIds, siteId, cancelToken, onlyProductIds);
-            if (orders.Count == 0) return;
+            if (orders.Count == 0) return (0, 0);
             var baseUrl = $"{site.WooCommerceUrl.TrimEnd('/')}/wp-json/wc/v3";
             var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
             using var httpClient = _httpClientFactory.CreateClient();
-            httpClient.Timeout = TimeSpan.FromMinutes(2);
+            // A 100-item batch update runs Woo product hooks server-side and can be slow on shared hosting.
+            httpClient.Timeout = TimeSpan.FromMinutes(5);
             httpClient.DefaultRequestHeaders.Clear();
             httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
-            const int concurrency = 3;
-            for (var i = 0; i < orders.Count; i += concurrency)
+            var updated = 0;
+            var skippedWooIds = new List<int>();
+            // Woo REST /products/batch caps at 100 items per request; one batch call replaces 100 individual PUTs.
+            const int batchSize = 100;
+            for (var i = 0; i < orders.Count; i += batchSize)
             {
-                var batch = orders.Skip(i).Take(concurrency).ToList();
-                var tasks = batch.Select(o => UpdateWooCommerceProductMenuOrderAsync(baseUrl, o.WooCommerceId, o.DisplayOrder, httpClient, cancelToken));
-                await Task.WhenAll(tasks);
-                if (i + concurrency < orders.Count)
-                    await Task.Delay(150, cancelToken);
+                var chunk = orders.Skip(i).Take(batchSize).ToList();
+                var body = JsonSerializer.Serialize(new
+                {
+                    update = chunk.Select(o => new { id = o.WooCommerceId, menu_order = o.DisplayOrder }).ToList()
+                });
+                using var content = new StringContent(body, Encoding.UTF8, "application/json");
+                var response = await httpClient.PostAsync($"{baseUrl}/products/batch", content, cancelToken);
+                var responseBody = await response.Content.ReadAsStringAsync(cancelToken);
+                if (!response.IsSuccessStatusCode)
+                    throw new InvalidOperationException(
+                        $"WooCommerce menu_order batch update failed ({(int)response.StatusCode}): {TruncateForLog(responseBody, 500)}");
+                using var doc = JsonDocument.Parse(responseBody);
+                if (doc.RootElement.TryGetProperty("update", out var updateArr) && updateArr.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in updateArr.EnumerateArray())
+                    {
+                        // Batch reports per-item failures inline ({id, error:{code,...}}) — e.g. stale/deleted Woo ids
+                        // come back as woocommerce_rest_product_invalid_id without failing the whole request.
+                        if (item.TryGetProperty("error", out var errEl) && errEl.ValueKind == JsonValueKind.Object)
+                            skippedWooIds.Add(item.TryGetProperty("id", out var idEl) && idEl.TryGetInt32(out var idVal) ? idVal : 0);
+                        else
+                            updated++;
+                    }
+                }
+                else
+                {
+                    updated += chunk.Count;
+                }
+                if (i + batchSize < orders.Count)
+                    await Task.Delay(300, cancelToken);
             }
+            if (skippedWooIds.Count > 0)
+            {
+                _logger.LogWarning(
+                    "WooCommerce menu_order sync for site {SiteId}: skipped {SkippedCount} product(s) not updatable on the store (stale Woo id / deleted on Woo): {WooIds}",
+                    siteId,
+                    skippedWooIds.Count,
+                    string.Join(",", skippedWooIds));
+            }
+            return (updated, skippedWooIds.Count);
         }
 
         /// <summary>
-        /// Sends a PUT with only menu_order so WooCommerce persists sort order (main product payload may not include or apply menu_order in all setups).
+        /// Sends a PUT with only menu_order for a single product (used on product create; bulk pushes use /products/batch).
+        /// Returns false when the product id doesn't exist on this store (stale per-site Woo id or deleted on Woo).
         /// </summary>
-        private static async Task UpdateWooCommerceProductMenuOrderAsync(
+        private static async Task<bool> UpdateWooCommerceProductMenuOrderAsync(
             string baseUrl,
             int wooProductId,
             int menuOrder,
@@ -3226,11 +3335,14 @@ namespace George.Services
             var body = JsonSerializer.Serialize(new { menu_order = menuOrder });
             using var content = new StringContent(body, Encoding.UTF8, "application/json");
             var response = await httpClient.PutAsync(updateUrl, content, cancelToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                var err = await response.Content.ReadAsStringAsync(cancelToken);
-                throw new InvalidOperationException($"WooCommerce menu_order update failed ({(int)response.StatusCode}): {err}");
-            }
+            if (response.IsSuccessStatusCode)
+                return true;
+            var err = await response.Content.ReadAsStringAsync(cancelToken);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound ||
+                (response.StatusCode == System.Net.HttpStatusCode.BadRequest &&
+                 err.Contains("woocommerce_rest_product_invalid_id", StringComparison.OrdinalIgnoreCase)))
+                return false;
+            throw new InvalidOperationException($"WooCommerce menu_order update failed ({(int)response.StatusCode}): {err}");
         }
 
         /// <summary>WooCommerce REST requires integer stock_quantity on variations; George may store kg decimals for weighable products.</summary>

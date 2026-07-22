@@ -212,6 +212,19 @@ namespace George.Api.Controllers
                 _wooCommerceService.PushProductOrderToWooCommerceAsync(request.SiteId, cancelToken));
         }
 
+        /// <summary>Status of the background menu_order push for the site (poll after PushProductOrderToWooCommerce until done/failed).</summary>
+        [HttpPost("ProductOrderPushStatus")]
+        [ProducesResponseType(typeof(IApiResponse<ProductOrderPushStatusRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> ProductOrderPushStatusAsync(
+            [FromBody] WooCommerceSyncReq request,
+            CancellationToken cancelToken = default)
+        {
+            if (request == null || request.SiteId <= 0)
+                return BadRequest();
+            return await SafeCallWithErrorCatchingAsync(() =>
+                Task.FromResult(_wooCommerceService.GetProductOrderPushStatus(request.SiteId)));
+        }
+
         /// <summary>Read-only: WooCommerce product list sorted by menu_order (JSON preview for order debugging).</summary>
         [HttpPost("PreviewWooProductOrder")]
         [ProducesResponseType(typeof(IApiResponse<ProductOrderPreviewRes>), (int)HttpStatusCode.OK)]
