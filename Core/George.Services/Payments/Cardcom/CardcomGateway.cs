@@ -241,7 +241,9 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
             ["Document"] = CardcomDocumentPayload.ToDictionary(request.Document),
         };
 
-        var terminal = credentials.TerminalNumber ?? 0;
+        // Documents reference charge transactions (DealNumbers), which live on the charge terminal when a
+        // second (no-CVV) terminal is configured — send the same terminal so the deal lookup matches.
+        var terminal = credentials.EffectiveChargeTerminalNumber ?? 0;
         if (terminal > 0)
             body["TerminalNumber"] = terminal;
 
@@ -417,6 +419,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
             };
         }
 
+        // Inquiry is used for WEBSITE (plugin) transactions, which live on the primary terminal.
         var body = new Dictionary<string, object?>
         {
             ["TerminalNumber"] = credentials.TerminalNumber.Value,
@@ -596,7 +599,14 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         CardcomCardOwnerContact? cardOwner,
         CancellationToken cancelToken)
     {
-        var terminal = credentials.TerminalNumber ?? 0;
+        // Terminal routing with a second (no-CVV) charge terminal configured:
+        // - ONLY the actual charge (J4 capture / direct token charge) and its token-refund go to the charge
+        //   terminal — these are the operations a CVV-requiring terminal rejects for token transactions.
+        // - Authorization holds (J5) stay on the PRIMARY terminal (token creation + hold work there today),
+        //   and voiding a hold must hit the terminal that placed it — also the primary.
+        // The hosted payment page (card entry, with CVV) stays on the primary too — see CreateHostedSessionAsync.
+        var useChargeTerminal = !jValidateHold && !mtiVoid;
+        var terminal = (useChargeTerminal ? credentials.EffectiveChargeTerminalNumber : credentials.TerminalNumber) ?? 0;
         var body = new Dictionary<string, object?>
         {
             ["TerminalNumber"] = terminal,

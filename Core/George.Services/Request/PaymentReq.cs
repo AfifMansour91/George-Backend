@@ -15,6 +15,8 @@ public class UpdateSitePaymentSettingsReq
 {
     public string? PaymentGatewayProvider { get; set; }
     public int? CardcomTerminalNumber { get; set; }
+    /// <summary>Second Cardcom terminal (no CVV) for token charges. 0 clears back to single-terminal.</summary>
+    public int? CardcomChargeTerminalNumber { get; set; }
     public string? CardcomApiName { get; set; }
     public string? CardcomApiPassword { get; set; }
     public bool? CardcomSaveCardEnabled { get; set; }

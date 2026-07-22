@@ -1338,6 +1338,9 @@ public class PaymentService : ServiceBase
             site.PaymentGatewayProvider = req.PaymentGatewayProvider.Trim().ToLowerInvariant();
         if (req.CardcomTerminalNumber.HasValue)
             site.CardcomTerminalNumber = req.CardcomTerminalNumber;
+        // Second (no-CVV) charge terminal: 0 or negative clears back to a single-terminal setup.
+        if (req.CardcomChargeTerminalNumber.HasValue)
+            site.CardcomChargeTerminalNumber = req.CardcomChargeTerminalNumber.Value > 0 ? req.CardcomChargeTerminalNumber : null;
         if (req.CardcomApiName != null)
             site.CardcomApiName = req.CardcomApiName.Trim();
         if (!string.IsNullOrWhiteSpace(req.CardcomApiPassword))
@@ -1992,6 +1995,7 @@ public class PaymentService : ServiceBase
             SiteId = site.Id,
             ProviderId = site.PaymentGatewayProvider,
             TerminalNumber = site.CardcomTerminalNumber,
+            ChargeTerminalNumber = site.CardcomChargeTerminalNumber,
             ApiName = site.CardcomApiName,
             ApiPassword = password,
             ApiPasswordStoredButUnreadable = apiPasswordStoredButUnreadable,
@@ -2826,6 +2830,7 @@ public class PaymentService : ServiceBase
             SiteId = site.Id,
             PaymentGatewayProvider = site.PaymentGatewayProvider,
             CardcomTerminalNumber = site.CardcomTerminalNumber,
+            CardcomChargeTerminalNumber = site.CardcomChargeTerminalNumber,
             CardcomApiName = site.CardcomApiName,
             HasCardcomApiPassword = !string.IsNullOrWhiteSpace(site.CardcomApiPasswordEncrypted),
             CardcomSaveCardEnabled = site.CardcomSaveCardEnabled,

@@ -180,6 +180,17 @@ public sealed class SitePaymentCredentials
     public int SiteId { get; init; }
     public string ProviderId { get; init; } = "none";
     public int? TerminalNumber { get; init; }
+
+    /// <summary>
+    /// Optional second Cardcom terminal (configured WITHOUT a CVV requirement) used ONLY for the actual charge
+    /// (J4 capture / direct token charge) and its refund. Token creation, holds (J5), voids and the hosted
+    /// payment page stay on <see cref="TerminalNumber"/>.
+    /// </summary>
+    public int? ChargeTerminalNumber { get; init; }
+
+    /// <summary>Terminal for the actual charge: the no-CVV charge terminal when configured, else the primary.</summary>
+    public int? EffectiveChargeTerminalNumber => ChargeTerminalNumber is > 0 ? ChargeTerminalNumber : TerminalNumber;
+
     public string? ApiName { get; init; }
     public string? ApiPassword { get; init; }
     public bool ApiPasswordStoredButUnreadable { get; init; }

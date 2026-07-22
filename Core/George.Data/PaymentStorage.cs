@@ -28,6 +28,7 @@ public class PaymentStorage : StorageBase
         if (tracked == null) return;
         tracked.PaymentGatewayProvider = site.PaymentGatewayProvider;
         tracked.CardcomTerminalNumber = site.CardcomTerminalNumber;
+        tracked.CardcomChargeTerminalNumber = site.CardcomChargeTerminalNumber;
         tracked.CardcomApiName = site.CardcomApiName;
         tracked.CardcomApiPasswordEncrypted = site.CardcomApiPasswordEncrypted;
         tracked.CardcomSaveCardEnabled = site.CardcomSaveCardEnabled;

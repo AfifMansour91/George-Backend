@@ -92,6 +92,8 @@ public class SitePaymentSettingsRes
     public int SiteId { get; set; }
     public string PaymentGatewayProvider { get; set; } = "none";
     public int? CardcomTerminalNumber { get; set; }
+    /// <summary>Second Cardcom terminal (no CVV) for token charges; null = single-terminal setup.</summary>
+    public int? CardcomChargeTerminalNumber { get; set; }
     public string? CardcomApiName { get; set; }
     public bool HasCardcomApiPassword { get; set; }
     /// <summary>Encrypted password exists but cannot be decrypted (e.g. after server restart before keys were persisted).</summary>

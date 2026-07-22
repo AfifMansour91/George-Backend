@@ -194,6 +194,14 @@ public partial class Site
 
     public int? CardcomTerminalNumber { get; set; }
 
+    /// <summary>
+    /// Optional SECOND Cardcom terminal — configured at Cardcom WITHOUT a CVV requirement — used ONLY for the
+    /// actual charge (J4 capture / direct token charge) and its refund. Token creation, authorization holds
+    /// (J5) and their voids, and the hosted payment page all stay on the primary
+    /// <see cref="CardcomTerminalNumber"/>. Null/0 = single-terminal setup, everything on the primary.
+    /// </summary>
+    public int? CardcomChargeTerminalNumber { get; set; }
+
     [StringLength(100)]
     public string? CardcomApiName { get; set; }
 
