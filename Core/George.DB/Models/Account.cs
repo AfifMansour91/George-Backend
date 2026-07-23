@@ -96,7 +96,7 @@ public partial class Account
     public virtual ICollection<AccountMedia> AccountMedia { get; set; } = new List<AccountMedia>();
 
     [InverseProperty("Account")]
-    public virtual AccountNotificationSettings? AccountNotificationSettings { get; set; }
+    public virtual ICollection<AccountNotificationSettings> AccountNotificationSettings { get; set; } = new List<AccountNotificationSettings>();
 
     [InverseProperty("Account")]
     public virtual ICollection<AccountWizardStepData> AccountWizardStepData { get; set; } = new List<AccountWizardStepData>();

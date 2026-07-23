@@ -1,5 +1,19 @@
 namespace George.Services.Response;
 
+/// <summary>Effective notification settings for a scope (account default or per-site override).</summary>
+public class SiteNotificationSettingsRes
+{
+    public int AccountId { get; set; }
+
+    /// <summary>The siteId the settings were requested for (null = the account default itself).</summary>
+    public int? SiteId { get; set; }
+
+    /// <summary>True when SiteId has its own full override row; false when it inherits the account default.</summary>
+    public bool IsSiteOverride { get; set; }
+
+    public NotificationSettingsRes? Settings { get; set; }
+}
+
 /// <summary>Sprint 2: Notification settings (התראות). Matches frontend NotificationSettings shape (camelCase in JSON).</summary>
 public class NotificationSettingsRes
 {

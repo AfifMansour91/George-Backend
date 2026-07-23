@@ -58,6 +58,30 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _accountSvc.DeleteAccountAsync(accountId, cancelToken));
         }
 
+        /// <summary>Effective notification settings: with siteId returns the site's override if it exists (IsSiteOverride=true) or the account default; without siteId returns the account default.</summary>
+        [HttpGet("{accountId:int}/notification-settings")]
+        [ProducesResponseType(typeof(IApiResponse<SiteNotificationSettingsRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetNotificationSettingsAsync([FromRoute] int accountId, [FromQuery] int? siteId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _accountSvc.GetNotificationSettingsAsync(accountId, siteId, cancelToken));
+        }
+
+        /// <summary>Save notification settings. Without siteId updates the account default; with siteId creates/updates a FULL per-site override row.</summary>
+        [HttpPut("{accountId:int}/notification-settings")]
+        [ProducesResponseType(typeof(IApiResponse<SiteNotificationSettingsRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> UpsertNotificationSettingsAsync([FromRoute] int accountId, [FromQuery] int? siteId, [FromBody] NotificationSettingsReq req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _accountSvc.UpsertNotificationSettingsAsync(accountId, siteId, req, cancelToken));
+        }
+
+        /// <summary>Remove a site's notification-settings override; the site goes back to inheriting the account default.</summary>
+        [HttpDelete("{accountId:int}/notification-settings")]
+        [ProducesResponseType(typeof(IApiResponse<SiteNotificationSettingsRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> DeleteNotificationSettingsOverrideAsync([FromRoute] int accountId, [FromQuery] int siteId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _accountSvc.DeleteNotificationSettingsOverrideAsync(accountId, siteId, cancelToken));
+        }
+
         [HttpGet("{accountId:int}/wizard-session")]
         [ProducesResponseType(typeof(IApiResponse<WizardSessionRes>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetWizardSessionAsync([FromRoute] int accountId, [FromQuery] string? siteId, CancellationToken cancelToken = default)

@@ -283,8 +283,10 @@ namespace George.Services
 
             if (req.NotificationSettings != null)
             {
+                // Legacy account-update path always writes the account DEFAULT row; per-site
+                // overrides go through Get/Upsert/DeleteNotificationSettingsAsync (siteId-aware).
                 var notifEntity = MapNotificationSettingsReqToEntity(accountId, req.NotificationSettings);
-                await _accountStorage.UpsertNotificationSettingsAsync(accountId, notifEntity, cancelToken);
+                await _accountStorage.UpsertNotificationSettingsAsync(accountId, siteId: null, notifEntity, cancelToken);
             }
 
             // Reload account with includes to get full details
@@ -390,6 +392,54 @@ namespace George.Services
                 "Completed" => 3,
                 _ => 1
             };
+        }
+
+        /// <summary>Effective notification settings for a site (override row if exists, else account default). siteId == null returns the account default itself.</summary>
+        public async Task<IApiResponse<SiteNotificationSettingsRes>> GetNotificationSettingsAsync(int accountId, int? siteId, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<SiteNotificationSettingsRes>();
+            var account = await _accountStorage.GetAccountAsync(accountId, cancelToken);
+            if (account == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
+            if (siteId.HasValue && !await _accountStorage.SiteBelongsToAccountAsync(accountId, siteId.Value, cancelToken))
+                return CreateResponse(response, StatusCode.InvalidRequest, "Site does not belong to account.");
+
+            var effective = NotificationSettingsResolver.Resolve(account, siteId);
+            response.Data = new SiteNotificationSettingsRes
+            {
+                AccountId = accountId,
+                SiteId = siteId,
+                IsSiteOverride = siteId.HasValue && NotificationSettingsResolver.HasSiteOverride(account.AccountNotificationSettings, siteId.Value),
+                Settings = effective != null ? NotificationSettingsMapper.ToRes(effective) : null,
+            };
+            return response;
+        }
+
+        /// <summary>Save notification settings for a scope. siteId == null updates the account default; a siteId creates/updates that site's FULL override row (whole-row copy — the client sends the complete settings object).</summary>
+        public async Task<IApiResponse<SiteNotificationSettingsRes>> UpsertNotificationSettingsAsync(int accountId, int? siteId, NotificationSettingsReq req, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<SiteNotificationSettingsRes>();
+            var account = await _accountStorage.GetAccountAsync(accountId, cancelToken);
+            if (account == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
+            if (siteId.HasValue && !await _accountStorage.SiteBelongsToAccountAsync(accountId, siteId.Value, cancelToken))
+                return CreateResponse(response, StatusCode.InvalidRequest, "Site does not belong to account.");
+
+            var entity = MapNotificationSettingsReqToEntity(accountId, req);
+            await _accountStorage.UpsertNotificationSettingsAsync(accountId, siteId, entity, cancelToken);
+            return await GetNotificationSettingsAsync(accountId, siteId, cancelToken);
+        }
+
+        /// <summary>Delete a site's override row so the site inherits the account default again.</summary>
+        public async Task<IApiResponse<SiteNotificationSettingsRes>> DeleteNotificationSettingsOverrideAsync(int accountId, int siteId, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<SiteNotificationSettingsRes>();
+            var account = await _accountStorage.GetAccountAsync(accountId, cancelToken);
+            if (account == null)
+                return CreateResponse(response, StatusCode.ItemNotFound);
+
+            await _accountStorage.DeleteNotificationSettingsOverrideAsync(accountId, siteId, cancelToken);
+            return await GetNotificationSettingsAsync(accountId, siteId, cancelToken);
         }
 
         private static AccountNotificationSettings MapNotificationSettingsReqToEntity(int accountId, NotificationSettingsReq req)

@@ -444,7 +444,7 @@ public class PaymentService : ServiceBase
             return;
 
         var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken);
-        var settings = account?.AccountNotificationSettings;
+        var settings = NotificationSettingsResolver.Resolve(account, order.SiteId);
         if (settings == null || !settings.NewOrderCustomerSmsOnPhoneOrderEnabled)
             return;
 
@@ -2021,7 +2021,8 @@ public class PaymentService : ServiceBase
             return;
 
         var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken);
-        if (account?.AccountNotificationSettings?.PaymentSendInvoiceSmsAfterCapture == false)
+        var notifSettings = NotificationSettingsResolver.Resolve(account, order.SiteId);
+        if (notifSettings?.PaymentSendInvoiceSmsAfterCapture == false)
             return;
 
         try
@@ -2158,7 +2159,7 @@ public class PaymentService : ServiceBase
 
     private async Task<string> BuildInvoiceSmsBodyAsync(Order order, string documentUrl, CancellationToken cancelToken)
     {
-        var settings = await GetPaymentNotificationSettingsAsync(order.AccountId, cancelToken);
+        var settings = await GetPaymentNotificationSettingsAsync(order.AccountId, order.SiteId, cancelToken);
         var template = string.IsNullOrWhiteSpace(settings?.PaymentCustomerMessageInvoice)
             ? PaymentNotificationDefaults.InvoiceSms
             : settings.PaymentCustomerMessageInvoice!;
@@ -2173,7 +2174,7 @@ public class PaymentService : ServiceBase
         decimal refundAmount,
         CancellationToken cancelToken)
     {
-        var settings = await GetPaymentNotificationSettingsAsync(order.AccountId, cancelToken);
+        var settings = await GetPaymentNotificationSettingsAsync(order.AccountId, order.SiteId, cancelToken);
         var template = string.IsNullOrWhiteSpace(settings?.PaymentCustomerMessageRefund)
             ? PaymentNotificationDefaults.RefundSms
             : settings.PaymentCustomerMessageRefund!;
@@ -2187,7 +2188,7 @@ public class PaymentService : ServiceBase
         string paymentUrl,
         CancellationToken cancelToken)
     {
-        var settings = await GetPaymentNotificationSettingsAsync(order.AccountId, cancelToken);
+        var settings = await GetPaymentNotificationSettingsAsync(order.AccountId, order.SiteId, cancelToken);
         var template = string.IsNullOrWhiteSpace(settings?.PaymentCustomerMessagePaymentLink)
             ? PaymentNotificationDefaults.PaymentLinkSms
             : settings.PaymentCustomerMessagePaymentLink!;
@@ -2253,10 +2254,11 @@ public class PaymentService : ServiceBase
 
     private async Task<AccountNotificationSettings?> GetPaymentNotificationSettingsAsync(
         int accountId,
+        int siteId,
         CancellationToken cancelToken)
     {
         var account = await _accountStorage.GetAccountAsync(accountId, cancelToken);
-        return account?.AccountNotificationSettings;
+        return NotificationSettingsResolver.Resolve(account, siteId);
     }
 
     private async Task<string> ResolveStoreNameAsync(Order order, CancellationToken cancelToken)

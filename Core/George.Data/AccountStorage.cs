@@ -215,10 +215,11 @@ namespace George.Data
             }
         }
 
-        public async Task UpsertNotificationSettingsAsync(int accountId, George.DB.AccountNotificationSettings settings, CancellationToken cancelToken)
+        /// <summary>Upsert one notification-settings row: siteId == null targets the account default, otherwise the site's full override row.</summary>
+        public async Task UpsertNotificationSettingsAsync(int accountId, int? siteId, George.DB.AccountNotificationSettings settings, CancellationToken cancelToken)
         {
             var existing = await _dbContext.AccountNotificationSettings
-                .FirstOrDefaultAsync(s => s.AccountId == accountId, cancelToken);
+                .FirstOrDefaultAsync(s => s.AccountId == accountId && s.SiteId == siteId, cancelToken);
             if (existing != null)
             {
                 existing.NewOrderManagerSoundEnabled = settings.NewOrderManagerSoundEnabled;
@@ -263,10 +264,26 @@ namespace George.Data
             }
             else
             {
+                settings.SiteId = siteId;
                 settings.CreationTime = DateTime.UtcNow;
                 _dbContext.AccountNotificationSettings.Add(settings);
             }
             await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
+        public Task<bool> SiteBelongsToAccountAsync(int accountId, int siteId, CancellationToken cancelToken) =>
+            _dbContext.Site.AnyAsync(s => s.Id == siteId && s.AccountId == accountId && !s.IsDeleted, cancelToken);
+
+        /// <summary>Remove a site's notification-settings override so it inherits the account default again. Hard delete — the unique (AccountId, SiteId) index must stay free for a future override.</summary>
+        public async Task<bool> DeleteNotificationSettingsOverrideAsync(int accountId, int siteId, CancellationToken cancelToken)
+        {
+            var existing = await _dbContext.AccountNotificationSettings
+                .FirstOrDefaultAsync(s => s.AccountId == accountId && s.SiteId == siteId, cancelToken);
+            if (existing == null)
+                return false;
+            _dbContext.AccountNotificationSettings.Remove(existing);
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return true;
         }
 
         public async Task<Account?> DeleteAccountAsync(int id, CancellationToken cancelToken = default)

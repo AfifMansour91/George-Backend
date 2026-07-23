@@ -6,13 +6,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-[Index("AccountId", Name = "UQ_AccountNotificationSettings_AccountId", IsUnique = true)]
+[Index("AccountId", "SiteId", Name = "UQ_AccountNotificationSettings_AccountId_SiteId", IsUnique = true)]
 public partial class AccountNotificationSettings
 {
     [Key]
     public int Id { get; set; }
 
     public int AccountId { get; set; }
+
+    /// <summary>NULL = account-level default; set = full per-site override row (whole-row copy, no field-level fallback).</summary>
+    public int? SiteId { get; set; }
 
     public bool IsDeleted { get; set; }
 
@@ -152,4 +155,7 @@ public partial class AccountNotificationSettings
     [ForeignKey("AccountId")]
     [InverseProperty("AccountNotificationSettings")]
     public virtual Account Account { get; set; } = null!;
+
+    [ForeignKey("SiteId")]
+    public virtual Site? Site { get; set; }
 }

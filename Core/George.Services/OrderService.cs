@@ -292,7 +292,7 @@ namespace George.Services
             if (string.IsNullOrWhiteSpace(order.CustomerPhone))
                 return;
             var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken).ConfigureAwait(false);
-            var settings = account?.AccountNotificationSettings;
+            var settings = NotificationSettingsResolver.Resolve(account, order.SiteId);
             if (settings == null)
                 return;
 
@@ -349,7 +349,7 @@ namespace George.Services
         private async Task TrySendNewOrderManagerSmsAsync(Order order, CancellationToken cancelToken)
         {
             var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken).ConfigureAwait(false);
-            var settings = account?.AccountNotificationSettings;
+            var settings = NotificationSettingsResolver.Resolve(account, order.SiteId);
             if (settings == null)
                 return;
             if (!NotificationSmsHelper.IsSmsChannel(settings.NewOrderManagerMessageChannel))
@@ -403,7 +403,7 @@ namespace George.Services
             if (string.IsNullOrWhiteSpace(order.CustomerPhone))
                 return;
             var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken).ConfigureAwait(false);
-            var settings = account?.AccountNotificationSettings;
+            var settings = NotificationSettingsResolver.Resolve(account, order.SiteId);
             if (settings == null)
                 return;
             if (!string.Equals(settings.OrderReadyCustomerChannel, "sms", StringComparison.OrdinalIgnoreCase))
@@ -464,7 +464,7 @@ namespace George.Services
             if (string.IsNullOrWhiteSpace(order.CustomerPhone))
                 return CreateResponse(response, StatusCode.InvalidRequest, "Order has no customer phone.");
             var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken).ConfigureAwait(false);
-            var settings = account?.AccountNotificationSettings;
+            var settings = NotificationSettingsResolver.Resolve(account, order.SiteId);
             // Manual "send reminder" is an explicit user action — it always sends an SMS regardless of the
             // auto-reminder channel setting (which only governs automatic Ready-order notifications). Bug #10.
             var template = settings != null ? ResolveOrderReadyCustomerMessageTemplate(settings, order) : null;

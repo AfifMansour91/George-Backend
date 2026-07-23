@@ -200,7 +200,11 @@ public partial class GeorgeDBContextBase : DbContext
             entity.Property(e => e.NewOrderManagerSoundTriggerWebsite).HasDefaultValue(true);
             entity.Property(e => e.OrderNotPickedUpMinutesAfterScheduledPickup).HasDefaultValue(30);
 
-            entity.HasOne(d => d.Account).WithOne(p => p.AccountNotificationSettings).HasConstraintName("FK_AccountNotificationSettings_Account");
+            entity.HasOne(d => d.Account).WithMany(p => p.AccountNotificationSettings).HasConstraintName("FK_AccountNotificationSettings_Account");
+
+            entity.HasOne(d => d.Site).WithMany()
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_AccountNotificationSettings_Site");
         });
 
         modelBuilder.Entity<AccountWizardStepData>(entity =>
