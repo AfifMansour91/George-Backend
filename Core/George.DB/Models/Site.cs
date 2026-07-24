@@ -180,6 +180,9 @@ public partial class Site
     /// <summary>When true (default), show order deviation % and amount in picking footer and archive.</summary>
     public bool? ShowPickingDeviation { get; set; }
 
+    /// <summary>When true, show the product SKU (מק"ט) on picking-screen lines. Off by default.</summary>
+    public bool? ShowSkuInPicking { get; set; }
+
     /// <summary>When true, this branch uses a connected RS232 scale (ScaleAgent → live weight in picking). Off by default.</summary>
     public bool? ScaleEnabled { get; set; }
 

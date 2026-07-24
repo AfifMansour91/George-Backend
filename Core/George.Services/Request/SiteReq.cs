@@ -88,6 +88,9 @@ namespace George.Services.Request
         /// <summary>When true (default), show picking deviation in footer and archive.</summary>
         public bool? ShowPickingDeviation { get; set; }
 
+        /// <summary>When true, show the product SKU (מק"ט) on picking-screen lines. Off by default.</summary>
+        public bool? ShowSkuInPicking { get; set; }
+
         /// <summary>When true, this branch uses a connected RS232 scale (live weight in picking). Off by default.</summary>
         public bool? ScaleEnabled { get; set; }
 
