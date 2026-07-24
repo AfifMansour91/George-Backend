@@ -123,6 +123,7 @@ namespace George.Services
             // Print settings: apply explicitly from request (bool? must persist false, not skip)
             if (req.AutoPrintEnabled.HasValue) model.AutoPrintEnabled = req.AutoPrintEnabled;
             if (req.VoucherPrintA4.HasValue) model.VoucherPrintA4 = req.VoucherPrintA4;
+            if (req.VoucherHideDeliveryTime.HasValue) model.VoucherHideDeliveryTime = req.VoucherHideDeliveryTime;
             if (req.PrintNewOrderImmediate.HasValue) model.PrintNewOrderImmediate = req.PrintNewOrderImmediate;
             if (req.PrintMovedToTreatment.HasValue) model.PrintMovedToTreatment = req.PrintMovedToTreatment;
             if (req.PrintAfterPicking.HasValue) model.PrintAfterPicking = req.PrintAfterPicking;

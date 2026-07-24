@@ -62,20 +62,21 @@ namespace George.Data
             if (filter?.PaymentStatus.HasValue() == true)
                 query = query.Where(o => o.PaymentStatus == filter.PaymentStatus!.Trim());
 
+            // Date range: scheduled delivery/pickup date, falling back to CreationTime for orders
+            // without one — otherwise such orders are silently excluded from every bounded range
+            // (archive "היום"/"השבוע" never showed orders handled today with no scheduled date).
             if (filter?.DeliveryDateFrom.HasValue == true)
             {
                 var fromDate = filter.DeliveryDateFrom!.Value.Date;
                 query = query.Where(o =>
-                    (o.DeliveryDate ?? o.PickupDate) != null &&
-                    ((o.DeliveryDate ?? o.PickupDate)!.Value.Date >= fromDate));
+                    (o.DeliveryDate ?? o.PickupDate ?? o.CreationTime).Date >= fromDate);
             }
 
             if (filter?.DeliveryDateTo.HasValue == true)
             {
                 var toDate = filter.DeliveryDateTo!.Value.Date;
                 query = query.Where(o =>
-                    (o.DeliveryDate ?? o.PickupDate) != null &&
-                    ((o.DeliveryDate ?? o.PickupDate)!.Value.Date <= toDate));
+                    (o.DeliveryDate ?? o.PickupDate ?? o.CreationTime).Date <= toDate);
             }
 
             if (filter?.Search?.SearchTerm.HasValue() == true)

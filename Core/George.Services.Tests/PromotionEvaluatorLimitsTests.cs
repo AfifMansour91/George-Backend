@@ -51,6 +51,35 @@ public class PromotionEvaluatorLimitsTests
     }
 
     [Fact]
+    public void BuyXPayY_productIds_counts_quantity_across_products()
+    {
+        var promo = Promo(6, "buy_x_pay_y", """
+            {
+              "condition": { "scope": "product", "productId": 10, "productIds": [10, 11], "quantity": 3 },
+              "pricing": { "fixedPrice": 25 }
+            }
+            """);
+
+        var req = new EvaluatePromotionsReq
+        {
+            SiteId = 1,
+            Cart =
+            [
+                new EvaluateCartLine { ProductId = "10", Quantity = 2, PricePerUnit = 10m },
+                new EvaluateCartLine { ProductId = "11", Quantity = 1, PricePerUnit = 10m },
+                new EvaluateCartLine { ProductId = "12", Quantity = 5, PricePerUnit = 10m },
+            ],
+            CartTotal = 80m,
+        };
+
+        var result = PromotionEvaluator.Evaluate([promo], req, Defaults, DateTime.UtcNow);
+
+        // 2+1 units across the two configured products form one bundle: 30 → 25.
+        Assert.Single(result.PromotionsApplied);
+        Assert.Equal(5m, result.PromotionsApplied[0].DiscountAmount);
+    }
+
+    [Fact]
     public void BuyXGetY_perOrder_caps_reward_discount()
     {
         var promo = Promo(2, "buy_x_get_y", """

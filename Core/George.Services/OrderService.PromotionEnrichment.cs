@@ -100,9 +100,17 @@ public partial class OrderService
     /// Stamp order lines from the promotions WooCommerce actually applied (Spec §1.2), instead of
     /// re-running George's evaluator on a web order. Lines are matched by WooCommerce product id / sku
     /// for per-line display; the returned tuples carry the authoritative per-promotion discount for
-    /// idempotent metric recording. Only promotions that map to an existing George promotion
-    /// (<c>external_id = george-{id}</c>) for this site are stamped — locally-authored WooCommerce
-    /// promotions (no external id) are skipped.
+    /// idempotent metric recording (George-linked promotions only). Locally-authored WooCommerce
+    /// promotions (no <c>george-{id}</c> external id — e.g. a registered/guest-targeted discount
+    /// configured in the WP admin) are stamped too, with <c>PromotionId = null</c>, so the discount
+    /// shows on the order and survives picking recalculation; they are not recorded as redemptions.
+    ///
+    /// Gross/net semantics: everywhere in George a line's net = <c>TotalPrice − DiscountAmount</c>
+    /// (voucher grand total, header recalc after picking, frontend picking display). The plugin sends
+    /// per-line discounts (promeng lowers the unit price) already baked into the payload's
+    /// <c>lineTotal</c>, while whole-cart discounts arrive as a negative Woo fee (lines stay gross,
+    /// only <c>orderTotal</c> drops). So a stamped discount that is already inside the line total must
+    /// gross the line back up, otherwise it is subtracted twice downstream.
     /// </summary>
     private async Task<IReadOnlyList<ResolvedOrderPromotion>> StampPromotionsFromPayloadAsync(
         int siteId,
@@ -114,51 +122,103 @@ public partial class OrderService
         var applied = payload.AppliedPromotions;
         if (applied == null || applied.Count == 0 || items.Count == 0) return resolved;
 
+        // Discount Woo took off the order total but NOT off the item lineTotals (whole-cart promeng
+        // promotions are negative fees). A promotion covered by this pool is stamped as-is; anything
+        // beyond it is baked into the lines and must be grossed up when stamped.
+        var offLinePool = ComputeWooPayloadOffLineDiscount(items, payload);
+
         foreach (var promo in applied)
         {
-            if (!PromotionPromengWireMapper.TryParseExternalId(promo.ExternalId, out var promotionId))
-                continue; // local WooCommerce promotion — not a George promotion, can't link.
-
-            var georgePromo = await _promotionStorage.GetPromotionAsync(promotionId, cancelToken).ConfigureAwait(false);
-            if (georgePromo == null || georgePromo.IsDeleted || georgePromo.SiteId != siteId)
+            int? linkedPromotionId = null;
+            if (PromotionPromengWireMapper.TryParseExternalId(promo.ExternalId, out var promotionId))
             {
-                _logger.LogWarning(
-                    "Applied promotion {ExternalId} (george id {PromotionId}) not found for site {SiteId}; skipping stamp.",
-                    promo.ExternalId, promotionId, siteId);
-                continue;
+                var georgePromo = await _promotionStorage.GetPromotionAsync(promotionId, cancelToken).ConfigureAwait(false);
+                if (georgePromo == null || georgePromo.IsDeleted || georgePromo.SiteId != siteId)
+                {
+                    // Unknown/foreign George id — keep the money right by stamping unlinked (like a local promo).
+                    _logger.LogWarning(
+                        "Applied promotion {ExternalId} (george id {PromotionId}) not found for site {SiteId}; stamping unlinked.",
+                        promo.ExternalId, promotionId, siteId);
+                }
+                else
+                {
+                    linkedPromotionId = promotionId;
+                }
             }
 
             decimal revenue = 0m;
             var lines = promo.Lines;
             if (lines != null && lines.Count > 0)
             {
+                // lines[] discounts are derived by the plugin from subtotal − total, i.e. they are
+                // already inside the payload lineTotal → gross the line up when stamping.
                 foreach (var line in lines)
                 {
+                    var lineDiscount = Math.Max(0m, line.DiscountAmount);
+                    if (lineDiscount <= 0m) continue;
                     var target = MatchOrderItemForPromotionLine(items, line);
                     if (target == null) continue;
-                    target.PromotionId = promotionId;
-                    target.DiscountAmount = (target.DiscountAmount ?? 0m) + Math.Max(0m, line.DiscountAmount);
-                    revenue += Math.Max(0m, (target.TotalPrice ?? 0m) - Math.Max(0m, line.DiscountAmount));
+                    if (linkedPromotionId.HasValue) target.PromotionId = linkedPromotionId.Value;
+                    GrossUpOrderLineForStampedDiscount(target, lineDiscount);
+                    target.DiscountAmount = (target.DiscountAmount ?? 0m) + lineDiscount;
+                    revenue += Math.Max(0m, (target.TotalPrice ?? 0m) - lineDiscount);
                 }
             }
             else if (promo.DiscountAmount > 0m)
             {
-                // Fallback: the plugin sent the promotion at order level only (spec §1.3 per-line `lines[]`
-                // not yet emitted). Distribute the order-level discount across the order lines proportionally
-                // by line total, so the promotion is still stamped, recorded, and visible in picking. Each
-                // line is capped at its own total; the last eligible line absorbs the rounding remainder.
-                revenue += DistributeOrderLevelPromotionDiscount(items, promotionId, promo.DiscountAmount);
+                // Order-level only (plugin sends lines[] just for single-promotion orders). Split the
+                // discount into the part Woo already took off the order total (fee — lines are gross,
+                // stamp as-is) and the part baked into the line totals (gross up while distributing).
+                var feePortion = Math.Min(offLinePool, promo.DiscountAmount);
+                offLinePool -= feePortion;
+                var bakedPortion = promo.DiscountAmount - feePortion;
+                if (feePortion > 0m)
+                    revenue += DistributeOrderLevelPromotionDiscount(items, linkedPromotionId, feePortion, grossUpLineTotals: false);
+                if (bakedPortion > 0m)
+                    revenue += DistributeOrderLevelPromotionDiscount(items, linkedPromotionId, bakedPortion, grossUpLineTotals: true);
             }
 
-            resolved.Add(new ResolvedOrderPromotion
+            if (linkedPromotionId.HasValue)
             {
-                PromotionId = promotionId,
-                DiscountAmount = Math.Max(0m, promo.DiscountAmount),
-                RevenueNis = revenue,
-            });
+                resolved.Add(new ResolvedOrderPromotion
+                {
+                    PromotionId = linkedPromotionId.Value,
+                    DiscountAmount = Math.Max(0m, promo.DiscountAmount),
+                    RevenueNis = revenue,
+                });
+            }
         }
 
         return resolved;
+    }
+
+    /// <summary>
+    /// Portion of the Woo payload's discount that is NOT reflected in the item lineTotals:
+    /// <c>sum(lineTotal) − (orderTotal − shipping)</c>. Whole-cart promeng discounts arrive as a
+    /// negative Woo fee, so they only reduce <c>orderTotal</c>. Zero when totals reconcile.
+    /// </summary>
+    private static decimal ComputeWooPayloadOffLineDiscount(List<OrderItem> items, WooCommerceOrderPayload payload)
+    {
+        if (payload.OrderTotal is not > 0m) return 0m;
+        var itemsSum = items.Where(i => !i.IsDeleted).Sum(i => i.TotalPrice ?? 0m);
+        var expectedFromLines = payload.OrderTotal.Value - (payload.ShippingTotal ?? 0m);
+        var delta = itemsSum - expectedFromLines;
+        return delta > 0.01m ? Math.Round(delta, 2) : 0m;
+    }
+
+    /// <summary>
+    /// Raise a line's <c>TotalPrice</c> (and scale <c>PricePerUnit</c>) by a stamped discount that Woo
+    /// had already subtracted from the payload line total, so net (<c>TotalPrice − DiscountAmount</c>)
+    /// stays exactly what the customer was charged.
+    /// </summary>
+    private static void GrossUpOrderLineForStampedDiscount(OrderItem item, decimal discount)
+    {
+        if (discount <= 0m) return;
+        var oldTotal = item.TotalPrice ?? 0m;
+        var newTotal = oldTotal + discount;
+        item.TotalPrice = newTotal;
+        if (oldTotal > 0m && item.PricePerUnit is > 0m)
+            item.PricePerUnit = Math.Round(item.PricePerUnit.Value * (newTotal / oldTotal), 4);
     }
 
     /// <summary>
@@ -166,12 +226,16 @@ public partial class OrderService
     /// lines proportionally by line total. Only lines with a positive total are eligible; each line's share is
     /// capped at its own total and at the remaining discount, and the last eligible line takes the remainder so
     /// the stamped discounts sum exactly to <paramref name="discountAmount"/> (bounded by the merchandise total).
+    /// <paramref name="promotionId"/> is null for locally-authored Woo promotions (stamp without a link).
+    /// <paramref name="grossUpLineTotals"/> — set when the discount is already baked into the payload line
+    /// totals: each line is grossed back up by its share so net stays what Woo charged.
     /// Returns the post-discount revenue of the stamped lines (for redemption metrics).
     /// </summary>
     private static decimal DistributeOrderLevelPromotionDiscount(
         List<OrderItem> items,
-        int promotionId,
-        decimal discountAmount)
+        int? promotionId,
+        decimal discountAmount,
+        bool grossUpLineTotals = false)
     {
         var eligible = items.Where(i => !i.IsDeleted && (i.TotalPrice ?? 0m) > 0m).ToList();
         var baseTotal = eligible.Sum(i => i.TotalPrice ?? 0m);
@@ -188,9 +252,10 @@ public partial class OrderService
                 : Math.Round(discountAmount * (lineTotal / baseTotal), 2);
             share = Math.Min(Math.Min(share, lineTotal), remaining);
             if (share <= 0m) continue;
-            it.PromotionId = promotionId;
+            if (promotionId is > 0) it.PromotionId = promotionId.Value;
+            if (grossUpLineTotals) GrossUpOrderLineForStampedDiscount(it, share);
             it.DiscountAmount = (it.DiscountAmount ?? 0m) + share;
-            revenue += Math.Max(0m, lineTotal - share);
+            revenue += grossUpLineTotals ? lineTotal : Math.Max(0m, lineTotal - share);
             remaining -= share;
         }
         return revenue;
@@ -327,8 +392,14 @@ public partial class OrderService
 
         foreach (var it in items)
         {
-            it.PromotionId = null;
-            it.DiscountAmount = null;
+            // Only George-linked stamps are re-derived by the evaluator below. An unlinked discount
+            // (PromotionId == null, e.g. a locally-authored Woo promotion stamped on ingest) has no
+            // evaluator to restore it — keep it, or picking would silently overcharge the customer.
+            if (it.PromotionId is > 0)
+            {
+                it.PromotionId = null;
+                it.DiscountAmount = null;
+            }
         }
 
         var productCache = new Dictionary<int, Product?>();

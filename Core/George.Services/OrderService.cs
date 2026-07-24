@@ -2013,7 +2013,8 @@ namespace George.Services
             // The ":A4" JobType suffix makes PrintJobService deliver the payload as an A4 PDF (existing
             // agents print PDFs via Sumatra onto the printer's paper — no agent update needed).
             var useA4 = site.VoucherPrintA4 == true;
-            var payload = useA4 ? BuildAutoVoucherA4Html(orderForPrint) : BuildAutoVoucherHtml(orderForPrint);
+            var hideDeliveryTime = site.VoucherHideDeliveryTime == true;
+            var payload = useA4 ? BuildAutoVoucherA4Html(orderForPrint, hideDeliveryTime) : BuildAutoVoucherHtml(orderForPrint, hideDeliveryTime);
             if (string.IsNullOrWhiteSpace(payload))
                 return;
 
@@ -2042,7 +2043,7 @@ namespace George.Services
         /// email: customer + delivery boxes side by side, ordered-items table (product | qty | price),
         /// then subtotal / shipping / payment / grand-total rows. Delivered to the agent as an A4 PDF.
         /// </summary>
-        private string BuildAutoVoucherA4Html(Order order)
+        private string BuildAutoVoucherA4Html(Order order, bool hideDeliveryTime = false)
         {
             var items = order.OrderItem?.OrderBy(i => i.SortOrder).ToList() ?? new List<OrderItem>();
             var orderNo = order.OrderNumber ?? order.Id.ToString(CultureInfo.InvariantCulture);
@@ -2050,7 +2051,8 @@ namespace George.Services
             var sourceLabel = VoucherSourceLabels.TryGetValue(order.Source ?? "", out var srcLabel) ? srcLabel : (order.Source ?? "");
             var isShipping = IsVoucherShipping(order);
             var deliveryDate = isShipping ? order.DeliveryDate : order.PickupDate;
-            var deliveryTime = isShipping ? order.DeliveryTime : order.PickupTime;
+            // Site.VoucherHideDeliveryTime: print the delivery date without the time slot.
+            var deliveryTime = hideDeliveryTime ? null : (isShipping ? order.DeliveryTime : order.PickupTime);
             var deliveryLabel = isShipping ? "משלוח עד הבית" : "איסוף עצמי";
             var orderNotes = CombineOrderLevelNotes(order);
             var payLine = VoucherPaymentHeadline(order, !string.Equals(order.Status, "InTreatment", StringComparison.OrdinalIgnoreCase));
@@ -2198,7 +2200,7 @@ namespace George.Services
             return sb.ToString();
         }
 
-        private string BuildAutoVoucherHtml(Order order)
+        private string BuildAutoVoucherHtml(Order order, bool hideDeliveryTime = false)
         {
             var sb = new StringBuilder();
             var items = order.OrderItem?.OrderBy(i => i.SortOrder).ToList() ?? new List<OrderItem>();
@@ -2212,9 +2214,10 @@ namespace George.Services
             var deliveryDate = isShipping
                 ? order.DeliveryDate
                 : order.PickupDate;
-            var deliveryTime = isShipping
-                ? order.DeliveryTime
-                : order.PickupTime;
+            // Site.VoucherHideDeliveryTime: print the delivery date without the time slot.
+            var deliveryTime = hideDeliveryTime
+                ? null
+                : (isShipping ? order.DeliveryTime : order.PickupTime);
             var newVoucher = string.Equals(order.Status, "New", StringComparison.OrdinalIgnoreCase);
             var pickingVoucher = string.Equals(order.Status, "InTreatment", StringComparison.OrdinalIgnoreCase);
             var showTopQr = newVoucher || pickingVoucher;
@@ -2310,14 +2313,19 @@ namespace George.Services
             {
                 sb.Append("  <div style=\"margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #000;\">");
                 sb.Append("<div style=\"display:flex;justify-content:space-between;font-size:13px;line-height:18px;margin-bottom:4px;\">");
-                sb.Append($"<span>{EscapeHtml(dateLabel)}</span><span>{EscapeHtml(timeLabel)}</span></div>");
+                sb.Append(hideDeliveryTime
+                    ? $"<span>{EscapeHtml(dateLabel)}</span></div>"
+                    : $"<span>{EscapeHtml(dateLabel)}</span><span>{EscapeHtml(timeLabel)}</span></div>");
                 sb.Append("<div style=\"display:flex;justify-content:space-between;align-items:center;gap:8px;\">");
                 sb.Append(deliveryDate.HasValue
                     ? $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\">{EscapeHtml(FormatVoucherDateWithWeekday(deliveryDate.Value))}</span>"
                     : $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\">—</span>");
-                sb.Append(!string.IsNullOrWhiteSpace(deliveryTime)
-                    ? $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\" dir=\"ltr\">{EscapeHtml(deliveryTime!)}</span>"
-                    : $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\">—</span>");
+                if (!hideDeliveryTime)
+                {
+                    sb.Append(!string.IsNullOrWhiteSpace(deliveryTime)
+                        ? $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\" dir=\"ltr\">{EscapeHtml(deliveryTime!)}</span>"
+                        : $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\">—</span>");
+                }
                 sb.AppendLine("</div></div>");
             }
 
@@ -2605,6 +2613,9 @@ namespace George.Services
             if (string.IsNullOrEmpty(m)) return settled ? "שולם" : "לתשלום";
             if (string.Equals(m, "Cash", StringComparison.OrdinalIgnoreCase) || m == "מזומן")
                 return settled ? "שולם במזומן" : "תשלום במזומן";
+            // External terminal — keep in sync with frontend voucherFigmaLayout.voucherPaymentHeadline.
+            if (string.Equals(m, "ExternalCredit", StringComparison.OrdinalIgnoreCase))
+                return settled ? "שולם באשראי חיצוני" : "תשלום באשראי חיצוני";
             var lower = m.ToLowerInvariant();
             if (lower.Contains("card", StringComparison.Ordinal) || lower.Contains("credit", StringComparison.Ordinal) ||
                 string.Equals(m, "SavedCard", StringComparison.OrdinalIgnoreCase) ||
@@ -3237,8 +3248,12 @@ namespace George.Services
             decimal discountAmount)
         {
             if (discountAmount <= 0m) return;
-            var match = items.FirstOrDefault(it =>
-                (it.ProductId ?? 0).ToString() == productId && it.PromotionId == null);
+            // Prefer a line with no unlinked (locally-authored Woo) discount, so a later stamp wipe
+            // of this George link doesn't also drop the local discount sharing the line.
+            var match = items
+                .Where(it => (it.ProductId ?? 0).ToString() == productId && it.PromotionId == null)
+                .OrderBy(it => (it.DiscountAmount ?? 0m) > 0m ? 1 : 0)
+                .FirstOrDefault();
             if (match == null) return;
             match.PromotionId = promotionId;
             match.DiscountAmount = (match.DiscountAmount ?? 0m) + discountAmount;

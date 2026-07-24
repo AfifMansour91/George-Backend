@@ -110,6 +110,9 @@ public partial class Site
     /// </summary>
     public bool? VoucherPrintA4 { get; set; }
 
+    /// <summary>When true, order printouts (thermal voucher + A4, manual + auto) omit the delivery/pickup time — only the date is printed.</summary>
+    public bool? VoucherHideDeliveryTime { get; set; }
+
     public bool? PrintNewOrderImmediate { get; set; }
 
     public bool? PrintMovedToTreatment { get; set; }

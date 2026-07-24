@@ -115,15 +115,18 @@ public static class PromotionPromengWireMapper
             return new Dictionary<string, object>();
 
         var scope = (ReadString(cond, "scope") ?? "product").ToLowerInvariant();
+        // Payloads carry both the legacy single productId and productIds[] — dedupe before mapping.
         var productIds = new List<int>();
         var pid = ReadInt(cond, "productId");
         if (pid is > 0) productIds.Add(pid.Value);
         productIds.AddRange(ReadIntList(cond, "productIds"));
+        productIds = productIds.Distinct().ToList();
 
         var categoryIds = new List<int>();
         var cid = ReadInt(cond, "categoryId");
         if (cid is > 0) categoryIds.Add(cid.Value);
         categoryIds.AddRange(ReadIntList(cond, "categoryIds"));
+        categoryIds = categoryIds.Distinct().ToList();
 
         return new Dictionary<string, object>
         {

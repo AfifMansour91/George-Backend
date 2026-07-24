@@ -2229,13 +2229,14 @@ public class PaymentService : ServiceBase
         return response;
     }
 
-    /// <summary>When staff switches order to cash, release Cardcom hold and clear credit state.</summary>
+    /// <summary>When staff switches order to cash (or external-terminal credit), release Cardcom hold and clear credit state.</summary>
     public async Task ClearCardcomOnCashPaymentAsync(Order order, CancellationToken cancelToken = default)
     {
         if (order == null) return;
         var method = (order.PaymentMethod ?? "").Trim();
         if (!method.Equals("Cash", StringComparison.OrdinalIgnoreCase) &&
-            !method.Contains("cod", StringComparison.OrdinalIgnoreCase))
+            !method.Contains("cod", StringComparison.OrdinalIgnoreCase) &&
+            !method.Equals("ExternalCredit", StringComparison.OrdinalIgnoreCase))
             return;
 
         if (string.Equals(order.PaymentSettleStatus, PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase))

@@ -413,13 +413,16 @@ public static class PromotionEvaluator
         var eligibleLines = new List<EvaluateCartLine>();
         if (scope == "product")
         {
+            // Legacy single productId merged with productIds[] — quantity counts across all of them.
+            var pids = ReadIntSet(cond, "productIds");
             var pid = ReadInt(cond, "productId");
-            if (pid is null) return EvalOutcome.None;
+            if (pid is > 0) pids.Add(pid.Value);
+            if (pids.Count == 0) return EvalOutcome.None;
             foreach (var line in req.Cart)
             {
                 if (IsPromotionGiftLine(line)) continue;
                 if (!defaults.ApplyOnDiscountedProducts && IsLineCatalogDiscounted(line)) continue;
-                if (TryGetIntId(line.ProductId, out var lid) && lid == pid) eligibleLines.Add(line);
+                if (TryGetIntId(line.ProductId, out var lid) && pids.Contains(lid)) eligibleLines.Add(line);
             }
         }
         else if (scope == "category")

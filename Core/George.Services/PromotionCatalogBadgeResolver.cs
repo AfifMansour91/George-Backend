@@ -174,6 +174,7 @@ public static class PromotionCatalogBadgeResolver
         {
             var pid = ReadInt(cond, "productId");
             if (pid is > 0) rule.ProductIds.Add(pid.Value);
+            AddIntSet(rule.ProductIds, cond, "productIds");
         }
         else if (productScope == "category")
         {

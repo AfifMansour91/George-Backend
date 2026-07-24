@@ -85,7 +85,7 @@ public static class PromotionPayloadValidator
     /// Spec-aligned shape (camelCase wire format from `Sprint4/מבצעים.md`):
     /// {
     ///   "version": 1,
-    ///   "condition": { "scope": "product"|"category", "productId"?, "categoryId"?, "quantity": int>0, "excludedProductIds": [int] },
+    ///   "condition": { "scope": "product"|"category", "productId"?, "productIds"?: [int], "categoryId"?, "quantity": int>0, "excludedProductIds": [int] },
     ///   "pricing":   { "fixedPrice": number>0 },
     ///   "overagePolicy"?: "same_price"|"full_price",
     ///   "limits"?:    { "perOrder"?, "perCustomer"? },
@@ -105,9 +105,13 @@ public static class PromotionPayloadValidator
 
         if (scope == "product")
         {
-            if (!cond.TryGetProperty("productId", out var pid) || pid.ValueKind != JsonValueKind.Number
-                || !pid.TryGetInt32(out var pidInt) || pidInt <= 0)
-                return Fail("buy_x_pay_y: condition.productId is required when scope=\"product\".", out errorMessage);
+            // Either the legacy single productId or a non-empty productIds array (mix & match).
+            var hasSingle = cond.TryGetProperty("productId", out var pid) && pid.ValueKind == JsonValueKind.Number
+                && pid.TryGetInt32(out var pidInt) && pidInt > 0;
+            var hasArray = cond.TryGetProperty("productIds", out var pids) && pids.ValueKind == JsonValueKind.Array
+                && pids.GetArrayLength() > 0;
+            if (!hasSingle && !hasArray)
+                return Fail("buy_x_pay_y: condition.productId or condition.productIds is required when scope=\"product\".", out errorMessage);
         }
         else
         {
