@@ -6871,7 +6871,8 @@ DECLARE @InsertedNoPhone INT = @@ROWCOUNT;
 
 COMMIT;
 
-PRINT CONCAT(N'Staged rows: ', (SELECT COUNT(*) FROM #Import));
+DECLARE @StagedCount INT = (SELECT COUNT(*) FROM #Import);
+PRINT CONCAT(N'Staged rows: ', @StagedCount);
 PRINT CONCAT(N'Existing customers enriched (by phone): ', @UpdatedByPhone);
 PRINT CONCAT(N'Existing customers enriched (by email): ', @UpdatedByEmail);
 PRINT CONCAT(N'New customers inserted (with phone): ', @InsertedWithPhone);
