@@ -2893,6 +2893,8 @@ namespace George.Services
                     payment.Status,
                     payment.IsFinished,
                     cancelToken).ConfigureAwait(false);
+                // Checkout-paid website order: send the invoice SMS like a StoreOS capture (no-op unless Paid+Captured; deduped).
+                await _paymentService.TrySendInvoiceSmsForWooCapturedOrderAsync(loaded, cancelToken).ConfigureAwait(false);
                 loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken).ConfigureAwait(false);
             }
             response.Data = _mapper.Map<OrderRes>(loaded!);

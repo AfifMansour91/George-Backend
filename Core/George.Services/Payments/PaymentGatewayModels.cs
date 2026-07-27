@@ -173,6 +173,9 @@ public sealed class CardcomTransactionInfoResult
     public string? RawJson { get; init; }
     public bool IsFinalCharge { get; init; }
     public bool IsAuthorizationHold { get; init; }
+    /// <summary>Invoice document created with the transaction (e.g. by the Woo checkout) — used to send the invoice SMS for website orders.</summary>
+    public string? DocumentNumber { get; init; }
+    public string? DocumentUrl { get; init; }
 }
 
 public sealed class SitePaymentCredentials

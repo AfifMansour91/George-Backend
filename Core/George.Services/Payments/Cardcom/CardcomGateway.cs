@@ -452,6 +452,28 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         var amount = TryGetDecimal(json, "Amount");
         var txId = GetString(json, "TranzactionId") ?? GetString(json, "TransactionId");
 
+        // Invoice document created with the transaction (same top-level/DocumentInfo shape as ParseTransactionResult).
+        var docNum = NormalizeDocumentNumber(GetString(json, "DocumentNumber"));
+        var docUrl = GetString(json, "DocumentUrl");
+        if (string.IsNullOrWhiteSpace(docNum) || string.IsNullOrWhiteSpace(docUrl))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                if (root.ValueKind == JsonValueKind.Object
+                    && TryGetObjectProperty(root, "DocumentInfo", out var di))
+                {
+                    docNum ??= NormalizeDocumentNumber(GetStringProperty(di, "DocumentNumber"));
+                    docUrl ??= GetStringProperty(di, "DocumentUrl");
+                }
+            }
+            catch (JsonException)
+            {
+                // document info is best-effort; the inquiry result is still useful without it
+            }
+        }
+
         return new CardcomTransactionInfoResult
         {
             Success = responseCode == 0 || isFinalCharge || isHold,
@@ -464,6 +486,8 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
             RawJson = json,
             IsFinalCharge = isFinalCharge,
             IsAuthorizationHold = isHold,
+            DocumentNumber = docNum,
+            DocumentUrl = docUrl,
         };
     }
 

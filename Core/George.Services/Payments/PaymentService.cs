@@ -2052,6 +2052,89 @@ public class PaymentService : ServiceBase
         }
     }
 
+    /// <summary>
+    /// Website/Woo order captured on the Woo checkout (Cardcom plugin): send the invoice SMS exactly like a
+    /// StoreOS capture. The plugin payload carries the invoice number but NOT the document URL, so when the
+    /// URL is missing it is fetched from Cardcom via GetTransactionInfoById (no document is created — the
+    /// checkout already issued it). Deduped via the InvoiceSms payment event, since the plugin can post the
+    /// payment more than once (embedded in the order payload + the OrderPayment webhook).
+    /// </summary>
+    public async Task TrySendInvoiceSmsForWooCapturedOrderAsync(Order order, CancellationToken cancelToken)
+    {
+        try
+        {
+            if (!string.Equals(order.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (!string.Equals(order.PaymentSettleStatus?.Trim(), PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase))
+                return;
+            // Only gateway-paid orders — cash/label-block website orders never set PaymentGateway.
+            if (!string.Equals(order.PaymentGateway, PaymentGatewayProviderId.Cardcom, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
+            if (creds == null || creds.ProviderId != PaymentGatewayProviderId.Cardcom)
+                return;
+            if (!creds.SendInvoiceSmsAfterCapture)
+                return;
+
+            var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken);
+            var notifSettings = NotificationSettingsResolver.Resolve(account, order.SiteId);
+            if (notifSettings?.PaymentSendInvoiceSmsAfterCapture == false)
+                return;
+
+            var events = await _paymentStorage.GetPaymentEventsAsync(order.Id, cancelToken);
+            if (events.Any(e => string.Equals(e.EventType, "InvoiceSms", StringComparison.OrdinalIgnoreCase)
+                                && e.StatusCode == "0"))
+                return;
+
+            if (string.IsNullOrWhiteSpace(order.CardcomDocumentUrl))
+                await TryFetchWooInvoiceDocumentUrlAsync(order, creds, cancelToken);
+
+            var (sent, masked) = await TrySendInvoiceSmsAsync(order, overridePhone: null, cancelToken);
+            if (sent)
+            {
+                await LogEventAsync(order.Id, "InvoiceSms", "0", $"auto-woo:{masked}", null, null, order.Total, null,
+                    cancelToken);
+                return;
+            }
+
+            var reason = DescribeInvoiceSmsSkipReason(order);
+            await LogEventAsync(order.Id, "InvoiceSms", "Skipped", reason, null, null, order.Total, null,
+                cancelToken);
+            _logger.LogInformation(
+                "Invoice SMS for Woo-captured order {OrderId} skipped: {Reason}",
+                order.Id,
+                reason);
+        }
+        catch (Exception ex)
+        {
+            // Must never fail the order/payment intake.
+            _logger.LogWarning(ex, "Invoice SMS for Woo-captured order {OrderId} failed", order.Id);
+        }
+    }
+
+    /// <summary>Fetch the checkout-issued invoice document URL from Cardcom by the stored deal number.</summary>
+    private async Task TryFetchWooInvoiceDocumentUrlAsync(
+        Order order,
+        SitePaymentCredentials creds,
+        CancellationToken cancelToken)
+    {
+        if (string.IsNullOrWhiteSpace(creds.ApiPassword))
+            return;
+        var txRaw = CoalesceNonEmpty(order.GatewayPaymentTransactionId, order.PaymentReference);
+        if (string.IsNullOrWhiteSpace(txRaw) || !long.TryParse(txRaw.Trim(), out var dealNumber) || dealNumber <= 0)
+            return;
+
+        var info = await _cardcom.GetTransactionInfoByIdAsync(creds, dealNumber, cancelToken);
+        if (string.IsNullOrWhiteSpace(info.DocumentUrl))
+            return;
+
+        order.CardcomDocumentUrl = info.DocumentUrl.Trim();
+        if (string.IsNullOrWhiteSpace(order.InvoiceNumber) && !string.IsNullOrWhiteSpace(info.DocumentNumber))
+            order.InvoiceNumber = info.DocumentNumber;
+        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+    }
+
     private async Task TryEnsureInvoiceDocumentUrlAsync(
         Order order,
         SitePaymentCredentials creds,
@@ -3038,6 +3121,8 @@ public class PaymentService : ServiceBase
             gatewaySiteId: null);
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
         await LogWooCommerceGatewayPaymentEventAsync(order.Id, payment, gatewayStatus, isFinished, cancelToken);
+        // Checkout-paid website order: send the invoice SMS like a StoreOS capture (no-op unless Paid+Captured).
+        await TrySendInvoiceSmsForWooCapturedOrderAsync(order, cancelToken);
     }
 
     /// <summary>Persist payment columns after WooCommerce gateway update.</summary>
