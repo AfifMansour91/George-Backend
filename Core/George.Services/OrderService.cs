@@ -2080,6 +2080,8 @@ namespace George.Services
                     + (!string.IsNullOrWhiteSpace(deliveryTime) ? $" · {deliveryTime}" : "");
                 deliveryBox.Append($"<div style=\"line-height:1.7;\"><b>תאריך אספקה:</b> {EscapeHtml(dateText)}</div>");
             }
+            // אופן אספקה is shown for every order type — "משלוח עד הבית" for deliveries, like pickup.
+            deliveryBox.Append($"<div style=\"line-height:1.7;\"><b>אופן אספקה:</b> {EscapeHtml(deliveryLabel)}</div>");
             if (isShipping)
             {
                 var ship = TryGetShippingAddressPartsForVoucher(order);
@@ -2088,10 +2090,6 @@ namespace George.Services
                 var extras = ship != null ? FormatShippingExtrasCommaLine(ship) : "";
                 if (!string.IsNullOrEmpty(extras))
                     deliveryBox.Append($"<div style=\"line-height:1.7;\">{EscapeHtml(extras)}</div>");
-            }
-            else
-            {
-                deliveryBox.Append($"<div style=\"line-height:1.7;\"><b>אופן אספקה:</b> {EscapeHtml(deliveryLabel)}</div>");
             }
             if (!string.IsNullOrWhiteSpace(orderNotes))
                 deliveryBox.Append($"<div style=\"line-height:1.7;\"><b>הערות הזמנה:</b> {EscapeHtml(orderNotes)}</div>");
@@ -2477,9 +2475,28 @@ namespace George.Services
             {
                 if (string.IsNullOrEmpty(mainLine) && string.IsNullOrEmpty(apt) && string.IsNullOrEmpty(fl) && string.IsNullOrEmpty(code))
                     return null;
+                // When street/city are empty, mainLine falls back to the raw legacy string which may
+                // already embed "…, דירה, קומה, קוד" — strip trailing segments that duplicate the
+                // structured fields so they only appear on the labeled line.
+                var main = mainLine;
+                if (!string.IsNullOrEmpty(main)
+                    && string.IsNullOrWhiteSpace(order.DeliveryStreet)
+                    && string.IsNullOrWhiteSpace(order.DeliveryCity))
+                {
+                    var segs = main.Split(new[] { ", " }, StringSplitOptions.None)
+                        .Select(p => p.Trim())
+                        .Where(p => p.Length > 0)
+                        .ToList();
+                    foreach (var extra in new[] { code, fl, apt })
+                    {
+                        if (!string.IsNullOrEmpty(extra) && segs.Count > 1 && string.Equals(segs[segs.Count - 1], extra, StringComparison.Ordinal))
+                            segs.RemoveAt(segs.Count - 1);
+                    }
+                    main = string.Join(", ", segs);
+                }
                 return new ShippingVoucherParts
                 {
-                    Main = string.IsNullOrEmpty(mainLine) ? null : mainLine,
+                    Main = string.IsNullOrEmpty(main) ? null : main,
                     Apartment = string.IsNullOrEmpty(apt) ? null : apt,
                     Floor = string.IsNullOrEmpty(fl) ? null : fl,
                     EntranceCode = string.IsNullOrEmpty(code) ? null : code,
