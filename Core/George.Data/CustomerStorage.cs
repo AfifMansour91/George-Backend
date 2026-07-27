@@ -528,6 +528,256 @@ public class CustomerStorage : StorageBase
             cancelToken: cancelToken).ConfigureAwait(false);
     }
 
+    /// <summary>Canonicalize a spreadsheet phone: digits only, +972 → 0, restore the leading 0 Excel strips from 8/9-digit numbers. Empty string when no digits.</summary>
+    internal static string CanonicalizeImportPhone(string? raw)
+    {
+        var d = NormalizePhone(raw);
+        if (d.Length == 0) return d;
+        if ((d.Length == 11 || d.Length == 12) && d.StartsWith("972")) return "0" + d.Substring(3);
+        if ((d.Length == 8 || d.Length == 9) && !d.StartsWith("0")) return "0" + d;
+        return d;
+    }
+
+    public class ImportRow
+    {
+        public string Name { get; set; } = "";
+        public string? Phone { get; set; }
+        public string? Email { get; set; }
+        public string? City { get; set; }
+        public string? DeliveryStreet { get; set; }
+        public string? DeliveryApartment { get; set; }
+        public string? DeliveryFloor { get; set; }
+        public string? DeliveryEntranceCode { get; set; }
+        public string? Notes { get; set; }
+        public bool MarketingApproval { get; set; }
+    }
+
+    public class ImportRowIssue
+    {
+        public string Name { get; set; } = "";
+        public string? Phone { get; set; }
+        public string? Email { get; set; }
+        public string Status { get; set; } = "";  // "skipped" | "failed"
+        public string? Reason { get; set; }
+    }
+
+    public class ImportResult
+    {
+        public int Total { get; set; }
+        public int Created { get; set; }
+        public int Updated { get; set; }
+        public int Skipped { get; set; }
+        public int Failed { get; set; }
+        public List<ImportRowIssue> Issues { get; set; } = new();
+    }
+
+    /// <summary>Bulk import spreadsheet rows. Rows with a phone (≥4 digits after canonicalization) are matched by (SiteId, NormalizedPhone); phone-less rows are matched by email. Existing customers are ENRICHED only — empty fields filled, marketing consent OR-ed in — never overwritten. Soft-deleted matches are skipped (import must not resurrect deleted customers). Returns null when the site does not exist.</summary>
+    public async Task<ImportResult?> ImportCustomersAsync(
+        int siteId,
+        IReadOnlyList<ImportRow> rows,
+        Action<Customer>? onCreated = null,
+        CancellationToken cancelToken = default)
+    {
+        var accountId = await _dbContext.Set<Site>()
+            .AsNoTracking()
+            .Where(s => s.Id == siteId)
+            .Select(s => (int?)s.AccountId)
+            .FirstOrDefaultAsync(cancelToken)
+            .ConfigureAwait(false);
+        if (accountId == null) return null;
+
+        var result = new ImportResult { Total = rows.Count };
+        var seenPhones = new HashSet<string>();
+        var seenEmails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        const int batchSize = 200;
+        for (var offset = 0; offset < rows.Count; offset += batchSize)
+        {
+            var batch = rows.Skip(offset).Take(batchSize).ToList();
+
+            var batchPhones = batch
+                .Select(r => CanonicalizeImportPhone(r.Phone))
+                .Where(p => p.Length >= 4)
+                .Distinct()
+                .ToList();
+            var batchEmails = batch
+                .Where(r => CanonicalizeImportPhone(r.Phone).Length < 4 && !string.IsNullOrWhiteSpace(r.Email))
+                .Select(r => r.Email!.Trim().ToLower())
+                .Distinct()
+                .ToList();
+
+            // Load matches tracked (including soft-deleted) so enrichment saves with the batch.
+            var byPhone = (await _dbContext.Set<Customer>()
+                    .Where(c => c.SiteId == siteId && batchPhones.Contains(c.NormalizedPhone))
+                    .ToListAsync(cancelToken).ConfigureAwait(false))
+                .ToDictionary(c => c.NormalizedPhone);
+            var byEmail = (await _dbContext.Set<Customer>()
+                    .Where(c => c.SiteId == siteId && !c.IsDeleted && c.Email != null && batchEmails.Contains(c.Email.ToLower()))
+                    .ToListAsync(cancelToken).ConfigureAwait(false))
+                .GroupBy(c => c.Email!.ToLower())
+                .ToDictionary(g => g.Key, g => g.First());
+
+            var createdInBatch = new List<Customer>();
+            foreach (var row in batch)
+            {
+                var norm = CanonicalizeImportPhone(row.Phone);
+                var email = string.IsNullOrWhiteSpace(row.Email) ? null : row.Email.Trim();
+                var hasPhone = norm.Length >= 4;
+
+                if (!hasPhone && email == null)
+                {
+                    result.Skipped++;
+                    result.Issues.Add(new ImportRowIssue { Name = row.Name, Phone = row.Phone, Email = row.Email, Status = "skipped", Reason = "אין טלפון ואין אימייל" });
+                    continue;
+                }
+                if (hasPhone ? !seenPhones.Add(norm) : !seenEmails.Add(email!))
+                {
+                    result.Skipped++;
+                    result.Issues.Add(new ImportRowIssue { Name = row.Name, Phone = row.Phone, Email = row.Email, Status = "skipped", Reason = "שורה כפולה בקובץ" });
+                    continue;
+                }
+
+                Customer? existing = hasPhone
+                    ? byPhone.GetValueOrDefault(norm)
+                    : byEmail.GetValueOrDefault(email!.ToLower());
+
+                if (existing != null)
+                {
+                    if (existing.IsDeleted)
+                    {
+                        result.Skipped++;
+                        result.Issues.Add(new ImportRowIssue { Name = row.Name, Phone = row.Phone, Email = row.Email, Status = "skipped", Reason = "לקוח עם הטלפון הזה נמחק מהמערכת" });
+                        continue;
+                    }
+                    EnrichCustomerFromImport(existing, row, email);
+                    result.Updated++;
+                    continue;
+                }
+
+                var street = Capped(row.DeliveryStreet, 400);
+                var city = Capped(row.City, 200);
+                var created = new Customer
+                {
+                    AccountId = accountId.Value,
+                    SiteId = siteId,
+                    NormalizedPhone = hasPhone ? norm : string.Empty,
+                    Name = Capped(row.Name, 200) ?? "",
+                    Phone = hasPhone ? norm : null,
+                    Email = Capped(email, 200),
+                    City = city,
+                    DeliveryStreet = street,
+                    DeliveryApartment = Capped(row.DeliveryApartment, 64),
+                    DeliveryFloor = Capped(row.DeliveryFloor, 32),
+                    DeliveryEntranceCode = Capped(row.DeliveryEntranceCode, 64),
+                    DefaultAddress = Capped(street != null && city != null ? $"{street}, {city}" : street, 500),
+                    Notes = Capped(row.Notes, 2000),
+                    MarketingApproval = row.MarketingApproval,
+                    MarketingEmail = row.MarketingApproval,
+                    MarketingSms = row.MarketingApproval,
+                    IsDeleted = false,
+                    CreationTime = DateTime.UtcNow
+                };
+                _dbContext.Set<Customer>().Add(created);
+                createdInBatch.Add(created);
+                // Track the row so a same-phone/email row later in the file counts as duplicate,
+                // and add to the match maps so later rows enrich instead of double-inserting.
+                if (hasPhone) byPhone[norm] = created;
+                else byEmail[email!.ToLower()] = created;
+            }
+
+            try
+            {
+                await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+                result.Created += createdInBatch.Count;
+                if (onCreated != null)
+                    foreach (var c in createdInBatch) onCreated(c);
+            }
+            catch (DbUpdateException)
+            {
+                // Batch failed — isolate. First persist the enrichments alone (detach all creates);
+                // if even that fails, drop the enriched changes too so they can't poison the per-row saves.
+                foreach (var c in createdInBatch)
+                    _dbContext.Entry(c).State = EntityState.Detached;
+                try
+                {
+                    await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+                }
+                catch (DbUpdateException ex)
+                {
+                    foreach (var entry in _dbContext.ChangeTracker.Entries<Customer>().Where(e => e.State == EntityState.Modified).ToList())
+                    {
+                        result.Updated--;
+                        result.Failed++;
+                        result.Issues.Add(new ImportRowIssue { Name = entry.Entity.Name, Phone = entry.Entity.Phone, Email = entry.Entity.Email, Status = "failed", Reason = ex.InnerException?.Message ?? ex.Message });
+                        entry.State = EntityState.Detached;
+                    }
+                }
+                foreach (var c in createdInBatch)
+                {
+                    _dbContext.Entry(c).State = EntityState.Added;
+                    try
+                    {
+                        await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+                        result.Created++;
+                        onCreated?.Invoke(c);
+                    }
+                    catch (DbUpdateException ex)
+                    {
+                        _dbContext.Entry(c).State = EntityState.Detached;
+                        result.Failed++;
+                        result.Issues.Add(new ImportRowIssue { Name = c.Name, Phone = c.Phone, Email = c.Email, Status = "failed", Reason = ex.InnerException?.Message ?? ex.Message });
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static string? Trimmed(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    /// <summary>Trim + cap to the column's max length — spreadsheet cells often carry free text longer than the schema allows (e.g. a note typed into the "floor" column), which would fail the whole batch with a truncation error.</summary>
+    private static string? Capped(string? s, int max)
+    {
+        var t = Trimmed(s);
+        if (t == null) return null;
+        return t.Length <= max ? t : t.Substring(0, max);
+    }
+
+    /// <summary>Fill-empty enrichment for import: never overwrites data the shop already has; marketing consent only turns ON. Incoming values are capped to column lengths.</summary>
+    private static void EnrichCustomerFromImport(Customer existing, ImportRow row, string? email)
+    {
+        var updated = false;
+        void Fill(string? current, string? incoming, int max, Action<string> set)
+        {
+            var capped = Capped(incoming, max);
+            if (string.IsNullOrWhiteSpace(current) && capped != null) { set(capped); updated = true; }
+        }
+        Fill(existing.Name, row.Name, 200, v => existing.Name = v);
+        Fill(existing.Email, email, 200, v => existing.Email = v);
+        Fill(existing.City, row.City, 200, v => existing.City = v);
+        Fill(existing.DeliveryStreet, row.DeliveryStreet, 400, v => existing.DeliveryStreet = v);
+        Fill(existing.DeliveryApartment, row.DeliveryApartment, 64, v => existing.DeliveryApartment = v);
+        Fill(existing.DeliveryFloor, row.DeliveryFloor, 32, v => existing.DeliveryFloor = v);
+        Fill(existing.DeliveryEntranceCode, row.DeliveryEntranceCode, 64, v => existing.DeliveryEntranceCode = v);
+        var street = Trimmed(row.DeliveryStreet);
+        var city = Trimmed(row.City);
+        Fill(existing.DefaultAddress, street != null && city != null ? $"{street}, {city}" : street, 500, v => existing.DefaultAddress = v);
+        var notes = Trimmed(row.Notes);
+        if (notes != null && (existing.Notes == null || !existing.Notes.Contains(notes)))
+        {
+            existing.Notes = Capped(string.IsNullOrWhiteSpace(existing.Notes) ? notes : $"{existing.Notes} | {notes}", 2000);
+            updated = true;
+        }
+        if (row.MarketingApproval)
+        {
+            if (!existing.MarketingApproval) { existing.MarketingApproval = true; updated = true; }
+            if (!existing.MarketingEmail) { existing.MarketingEmail = true; updated = true; }
+            if (!existing.MarketingSms) { existing.MarketingSms = true; updated = true; }
+        }
+        if (updated) existing.UpdatedDate = DateTime.UtcNow;
+    }
+
     public async Task<Order?> GetLastOrderByCustomerIdAsync(int customerId, int? siteId, CancellationToken cancelToken)
     {
         // Scope to the customer's OWN branch (a Customer row is per-site, so this is the branch the customer

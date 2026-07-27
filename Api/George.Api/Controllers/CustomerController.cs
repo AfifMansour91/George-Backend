@@ -55,6 +55,14 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _customerSvc.CreateCustomerAsync(siteId, req ?? new CustomerCreateReq(), cancelToken));
         }
 
+        /// <summary>Bulk import customers from a parsed spreadsheet (customers screen import button). Send rows in batches; each call returns counts + per-row issues.</summary>
+        [HttpPost("Import")]
+        [ProducesResponseType(typeof(IApiResponse<CustomerImportRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> ImportCustomersAsync([FromBody] CustomerImportReq? req, [FromQuery] int? siteId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _customerSvc.ImportCustomersAsync(siteId, req ?? new CustomerImportReq(), cancelToken));
+        }
+
         [HttpGet("Stats")]
         [ProducesResponseType(typeof(IApiResponse<CustomerStatsRes>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetStatsAsync([FromQuery] int? siteId, CancellationToken cancelToken = default)

@@ -229,6 +229,57 @@ public class CustomerService : ServiceBase
         return await GetCustomerAsync(created.Id, sid, cancelToken).ConfigureAwait(false);
     }
 
+    public async Task<IApiResponse<CustomerImportRes>> ImportCustomersAsync(int? siteId, CustomerImportReq req, CancellationToken cancelToken = default)
+    {
+        var response = new ApiResponse<CustomerImportRes>();
+        if (siteId is not int sid || sid <= 0)
+            return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required");
+        if (req == null || req.Rows.Count == 0)
+            return CreateResponse(response, StatusCode.InvalidRequest, "No rows to import");
+
+        var actorId = AuthUser.Id;
+        var rows = req.Rows.Select(r => new CustomerStorage.ImportRow
+        {
+            Name = r.Name?.Trim() ?? "",
+            Phone = r.Phone,
+            Email = r.Email,
+            City = r.City,
+            DeliveryStreet = r.DeliveryStreet,
+            DeliveryApartment = r.DeliveryApartment,
+            DeliveryFloor = r.DeliveryFloor,
+            DeliveryEntranceCode = r.DeliveryEntranceCode,
+            Notes = r.Notes,
+            MarketingApproval = r.MarketingApproval
+        }).ToList();
+
+        var result = await _customerStorage.ImportCustomersAsync(
+            sid,
+            rows,
+            onCreated: c => _integrationLogQueue.TryEnqueue(
+                CustomerActivityLog.Build(sid, c.Id, CustomerActivityLog.OpCreated, "הלקוח נוצר", "יובא מקובץ לקוחות", actorId)),
+            cancelToken: cancelToken).ConfigureAwait(false);
+        if (result == null)
+            return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
+
+        response.Data = new CustomerImportRes
+        {
+            Total = result.Total,
+            Created = result.Created,
+            Updated = result.Updated,
+            Skipped = result.Skipped,
+            Failed = result.Failed,
+            Issues = result.Issues.Select(i => new CustomerImportRowIssueRes
+            {
+                Name = i.Name,
+                Phone = i.Phone,
+                Email = i.Email,
+                Status = i.Status,
+                Reason = i.Reason
+            }).ToList()
+        };
+        return response;
+    }
+
     public async Task<IApiResponse<CustomerDetailRes>> GetCustomerAsync(int id, int? siteId, CancellationToken cancelToken = default)
     {
         var response = new ApiResponse<CustomerDetailRes>();
