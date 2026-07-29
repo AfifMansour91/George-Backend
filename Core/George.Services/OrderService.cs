@@ -1445,15 +1445,13 @@ namespace George.Services
                 oi.OrderLineQuantityMode = "units";
         }
 
-        /// <summary>Resolves WooCommerce order item to our Product.Id: parent <see cref="Product.WooCommerceId"/>, then variation <see cref="ProductVariant.WooCommerceVariationId"/> (WC often sends variation id as product_id), then SKU. Returns null if not found (caller may keep payload ProductId as fallback).</summary>
+        /// <summary>Resolves WooCommerce order item to our Product.Id: parent Woo product id (per-site map, then legacy <see cref="Product.WooCommerceId"/>), then explicit variation id, then SKU, and only last the guess that WC sent a variation id as product_id — legacy ids from another store can collide, so id-guessing must not preempt an exact SKU match. Returns null if not found (the line then stays unlinked; the raw Woo id lives in OrderItem.WooCommerceProductId).</summary>
         private async Task<int?> ResolveWooCommerceItemProductIdAsync(int siteId, int accountId, int? wooCommerceProductId, string? sku, int? wooCommerceVariationId, CancellationToken cancelToken)
         {
             if (wooCommerceProductId.HasValue && wooCommerceProductId.Value > 0)
             {
                 var byWooId = await _productStorage.GetProductIdByWooCommerceIdAndSiteAsync(siteId, wooCommerceProductId.Value, cancelToken).ConfigureAwait(false);
                 if (byWooId.HasValue) return byWooId.Value;
-                var byPidAsVariation = await _productStorage.GetProductIdByWooCommerceVariationIdAndSiteAsync(siteId, wooCommerceProductId.Value, cancelToken).ConfigureAwait(false);
-                if (byPidAsVariation.HasValue) return byPidAsVariation.Value;
             }
             if (wooCommerceVariationId.HasValue && wooCommerceVariationId.Value > 0)
             {
@@ -1464,6 +1462,11 @@ namespace George.Services
             {
                 var bySku = await _productStorage.GetProductBySkuAndSitesAsync(sku.Trim(), accountId, new List<int> { siteId }, false, cancelToken).ConfigureAwait(false);
                 if (bySku != null) return bySku.Id;
+            }
+            if (wooCommerceProductId.HasValue && wooCommerceProductId.Value > 0)
+            {
+                var byPidAsVariation = await _productStorage.GetProductIdByWooCommerceVariationIdAndSiteAsync(siteId, wooCommerceProductId.Value, cancelToken).ConfigureAwait(false);
+                if (byPidAsVariation.HasValue) return byPidAsVariation.Value;
             }
             return null;
         }
@@ -1507,18 +1510,30 @@ namespace George.Services
             return null;
         }
 
-        /// <summary>Resolve WooCommerce order item to our ProductVariant for this product (site product already resolved). First by variationId (WooCommerceVariationId), then by variant names joined with " | ". Used only when processing WooCommerce orders.</summary>
-        private static ProductVariant? GetVariantFromPayloadItem(WooCommerceOrderItemPayload it, Product? product)
+        /// <summary>Resolve WooCommerce order item to our ProductVariant for this product (site product already resolved). First by variationId — the ordering site's per-site map (ProductSiteVariantWooId), then the legacy WooCommerceVariationId column — then by variant names joined with " | ". Used only when processing WooCommerce orders.</summary>
+        private static ProductVariant? GetVariantFromPayloadItem(WooCommerceOrderItemPayload it, Product? product, IReadOnlyDictionary<int, int>? siteVariantWooIds = null)
         {
             if (product?.ProductVariant == null || !product.ProductVariant.Any(v => !v.IsDeleted))
                 return null;
 
-            // 1) Match by WooCommerce variation ID when sent (item level or inside variation object)
+            // 1) Match by WooCommerce variation ID when sent (item level or inside variation object).
+            // The legacy column holds one store's ids, so on another branch it can point at the wrong sibling
+            // variant; the ordering site's map wins, and a variant the map assigns a DIFFERENT id is skipped.
             var effectiveVariationId = GetEffectiveVariationId(it);
             if (effectiveVariationId.HasValue)
             {
+                if (siteVariantWooIds != null && siteVariantWooIds.Count > 0)
+                {
+                    var bySiteId = product.ProductVariant
+                        .FirstOrDefault(v => !v.IsDeleted
+                            && siteVariantWooIds.TryGetValue(v.Id, out var wooId)
+                            && wooId == effectiveVariationId.Value);
+                    if (bySiteId != null) return bySiteId;
+                }
                 var byId = product.ProductVariant
-                    .FirstOrDefault(v => !v.IsDeleted && v.WooCommerceVariationId == effectiveVariationId.Value);
+                    .FirstOrDefault(v => !v.IsDeleted
+                        && v.WooCommerceVariationId == effectiveVariationId.Value
+                        && (siteVariantWooIds == null || !siteVariantWooIds.ContainsKey(v.Id)));
                 if (byId != null) return byId;
             }
 
@@ -1747,12 +1762,18 @@ namespace George.Services
                                 wooUpdateProductCache[ourProductId.Value] = product;
                             }
                         }
-                        var matchedVariant = GetVariantFromPayloadItem(it, product);
+                        var updateSiteVariantWooIds = product != null
+                            ? await _productStorage.GetSiteVariantWooIdMapForProductAsync(product.Id, siteId, cancelToken).ConfigureAwait(false)
+                            : null;
+                        var matchedVariant = GetVariantFromPayloadItem(it, product, updateSiteVariantWooIds);
                         var (qty, unitWeightGrams, variantTitle) = GetWooCommerceItemQuantityAndUnitWeight(it, product);
+                        // Unresolved lines keep ProductId null — the raw Woo id is NOT a local Product.Id, and
+                        // storing it links the line to whatever product happens to own that id (wrong image/price
+                        // on the order screen, stock deducted from the wrong product). Raw id stays in WooCommerceProductId.
                         var oi = new OrderItem
                         {
                             OrderId = existing.Id,
-                            ProductId = ourProductId ?? it.ProductId,
+                            ProductId = ourProductId,
                             ProductVariantId = matchedVariant?.Id,
                             Title = it.Name,
                             VariantTitle = GetVariantTitleFromPayload(it) ?? variantTitle,
@@ -1770,7 +1791,7 @@ namespace George.Services
                         PopulateWooCommerceOrderItemPayloadColumns(oi, it);
                         var mergeReq = new CreateOrderItemReq
                         {
-                            ProductId = ourProductId ?? it.ProductId,
+                            ProductId = ourProductId,
                             ProductVariantId = matchedVariant?.Id,
                             Quantity = qty,
                             UnitWeightGrams = unitWeightGrams,
@@ -1834,11 +1855,15 @@ namespace George.Services
                     var it = payload.Items[i];
                     var ourProductId = await ResolveWooCommerceItemProductIdAsync(siteId, site.AccountId, it.ProductId, it.Sku, GetEffectiveVariationId(it), cancelToken).ConfigureAwait(false);
                     Product? product = ourProductId.HasValue ? await _productStorage.GetProductAsync(ourProductId.Value, cancelToken).ConfigureAwait(false) : null;
-                    var matchedVariant = GetVariantFromPayloadItem(it, product);
+                    var createSiteVariantWooIds = product != null
+                        ? await _productStorage.GetSiteVariantWooIdMapForProductAsync(product.Id, siteId, cancelToken).ConfigureAwait(false)
+                        : null;
+                    var matchedVariant = GetVariantFromPayloadItem(it, product, createSiteVariantWooIds);
                     var (qty, unitWeightGrams, variantTitle) = GetWooCommerceItemQuantityAndUnitWeight(it, product);
+                    // Unresolved lines keep ProductId null (see the update path above) — never the raw Woo id.
                     createItems.Add(new CreateOrderItemReq
                     {
-                        ProductId = ourProductId ?? it.ProductId,
+                        ProductId = ourProductId,
                         ProductVariantId = matchedVariant?.Id,
                         Title = it.Name,
                         VariantTitle = GetVariantTitleFromPayload(it) ?? variantTitle,

@@ -877,12 +877,28 @@ namespace George.Data
         public async Task<int?> GetProductIdByWooCommerceIdAndSiteAsync(int siteId, int wooCommerceProductId, CancellationToken cancelToken = default)
         {
             if (siteId <= 0) return null;
-            var product = await _dbContext.Product
+            // MultiSite: this store's Woo ids live in ProductSiteWooId; the legacy Product.WooCommerceId column
+            // keeps the FIRST store's id, so on another branch it can collide with a DIFFERENT product whose
+            // first-store id happens to equal this store's id. Per-site map wins; a legacy match only counts when
+            // no per-site row for (product, site) claims a different Woo id.
+            var bySiteMap = await _dbContext.ProductSiteWooId
+                .AsNoTracking()
+                .Where(x => x.SiteId == siteId && x.WooCommerceProductId == wooCommerceProductId)
+                .Join(
+                    _dbContext.Product.Where(p => !p.IsDeleted),
+                    x => x.ProductId,
+                    p => p.Id,
+                    (x, p) => (int?)p.Id)
+                .FirstOrDefaultAsync(cancelToken);
+            if (bySiteMap.HasValue) return bySiteMap;
+
+            return await _dbContext.Product
                 .AsNoTracking()
                 .Where(p => !p.IsDeleted && p.WooCommerceId == wooCommerceProductId && p.Site.Any(s => s.Id == siteId))
-                .Select(p => new { p.Id })
+                .Where(p => !_dbContext.ProductSiteWooId.Any(x =>
+                    x.ProductId == p.Id && x.SiteId == siteId && x.WooCommerceProductId != wooCommerceProductId))
+                .Select(p => (int?)p.Id)
                 .FirstOrDefaultAsync(cancelToken);
-            return product?.Id;
         }
 
         /// <summary>
@@ -892,13 +908,36 @@ namespace George.Data
         public async Task<int?> GetProductIdByWooCommerceVariationIdAndSiteAsync(int siteId, int wooVariationId, CancellationToken cancelToken = default)
         {
             if (siteId <= 0 || wooVariationId <= 0) return null;
-            var productId = await _dbContext.ProductVariant
+            // MultiSite: this store's variation ids live in ProductSiteVariantWooId; the legacy
+            // ProductVariant.WooCommerceVariationId column holds one store's id, so on another branch it can
+            // collide with a different product's variant. Per-site map wins; a legacy match only counts when
+            // no per-site row for (variant, site) claims a different variation id.
+            var bySiteMap = await _dbContext.ProductSiteVariantWooId
+                .AsNoTracking()
+                .Where(x => x.SiteId == siteId && x.WooCommerceVariationId == wooVariationId)
+                .Where(x => !x.ProductVariant.IsDeleted && !x.ProductVariant.Product.IsDeleted)
+                .Select(x => (int?)x.ProductId)
+                .FirstOrDefaultAsync(cancelToken);
+            if (bySiteMap.HasValue) return bySiteMap;
+
+            return await _dbContext.ProductVariant
                 .AsNoTracking()
                 .Where(v => !v.IsDeleted && v.WooCommerceVariationId == wooVariationId)
                 .Where(v => !v.Product.IsDeleted && v.Product.Site.Any(s => s.Id == siteId))
+                .Where(v => !_dbContext.ProductSiteVariantWooId.Any(x =>
+                    x.ProductVariantId == v.Id && x.SiteId == siteId && x.WooCommerceVariationId != wooVariationId))
                 .Select(v => (int?)v.ProductId)
                 .FirstOrDefaultAsync(cancelToken);
-            return productId;
+        }
+
+        /// <summary>variantId → this site's Woo VARIATION id for the product's variants (ProductSiteVariantWooId). Used when receiving orders so variant matching uses the ordering store's ids, not the legacy single-column ids.</summary>
+        public async Task<Dictionary<int, int>> GetSiteVariantWooIdMapForProductAsync(int productId, int siteId, CancellationToken cancelToken)
+        {
+            if (productId <= 0 || siteId <= 0) return new Dictionary<int, int>();
+            return await _dbContext.ProductSiteVariantWooId
+                .AsNoTracking()
+                .Where(x => x.ProductId == productId && x.SiteId == siteId)
+                .ToDictionaryAsync(x => x.ProductVariantId, x => x.WooCommerceVariationId, cancelToken);
         }
 
         /// <summary>Returns (WooCommerceId, DisplayOrder) for products in orderedProductIds that belong to the site and have a WooCommerceId. DisplayOrder = index in orderedProductIds. Used for menu-order-only sync.</summary>
