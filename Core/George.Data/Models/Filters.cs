@@ -178,6 +178,8 @@ namespace George.Common
         public string? Source { get; set; }       // Website | Kiosk | Phone
         public string? DeliveryType { get; set; } // Shipping | Pickup
         public string? PaymentStatus { get; set; } // Unpaid | Paid | Captured
+        /// <summary>Payment method kind: "cash" (cash/COD) or "credit" (card/Cardcom, incl. ExternalCredit).</summary>
+        public string? PaymentMethod { get; set; }
         public DateTime? DeliveryDateFrom { get; set; }
         public DateTime? DeliveryDateTo { get; set; }
         public SearchFilter? Search { get; set; }

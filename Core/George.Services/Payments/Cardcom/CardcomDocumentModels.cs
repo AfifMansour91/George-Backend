@@ -9,6 +9,11 @@ public sealed class CardcomTransactionDocument
     public string? Email { get; init; }
     public string? Phone { get; init; }
     public string? Mobile { get; init; }
+    /// <summary>Street + house number (Cardcom max 50 chars).</summary>
+    public string? AddressLine1 { get; init; }
+    /// <summary>Labeled address extras, e.g. "קומה 2, דירה 5, קוד כניסה 1234" (Cardcom max 50 chars).</summary>
+    public string? AddressLine2 { get; init; }
+    public string? City { get; init; }
     public bool SendByEmail { get; init; }
     public bool SendBySms { get; init; }
     public string? Comments { get; init; }

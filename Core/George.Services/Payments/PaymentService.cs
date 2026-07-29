@@ -927,13 +927,17 @@ public class PaymentService : ServiceBase
         return CardcomDocumentBuilder.Build(order, items, creds.DocumentTypeToCreate, sendByEmail, sendBySms, isoCoinId);
     }
 
-    private static CardcomTransactionDocument BuildRefundDocumentForOrder(Order order, SitePaymentCredentials creds)
+    private static CardcomTransactionDocument BuildRefundDocumentForOrder(
+        Order order,
+        SitePaymentCredentials creds,
+        decimal? refundAmountOverride = null)
     {
         var items = order.OrderItem?.Where(i => !i.IsDeleted) ?? Enumerable.Empty<OrderItem>();
         var isoCoinId = CardcomDocumentBuilder.MapCurrencyToIsoCoinId(creds.Currency);
         // Email the credit note (חשבונית מס זיכוי) to the customer at refund time when an email is on file
         // (the builder no-ops the email flag when CustomerEmail is empty). SMS re-send is available separately.
-        return CardcomDocumentBuilder.Build(order, items, CardcomDocumentBuilder.RefundDocumentType, sendByEmail: true, sendBySms: false, isoCoinId);
+        return CardcomDocumentBuilder.Build(order, items, CardcomDocumentBuilder.RefundDocumentType,
+            sendByEmail: true, sendBySms: false, isoCoinId, amountOverride: refundAmountOverride);
     }
 
     private static void ApplyInvoiceFromTransaction(Order order, PaymentTransactionResult tx)
@@ -1082,7 +1086,7 @@ public class PaymentService : ServiceBase
         {
             try
             {
-                var refundDoc = await TryCreateRefundDocumentAsync(order, creds, tx.TranzactionId, cancelToken);
+                var refundDoc = await TryCreateRefundDocumentAsync(order, creds, tx.TranzactionId, amount, cancelToken);
                 if (refundDoc?.Success == true)
                     ApplyRefundInvoiceFromTransaction(order, refundDoc);
             }
@@ -2221,12 +2225,18 @@ public class PaymentService : ServiceBase
         Order order,
         SitePaymentCredentials creds,
         string? refundTransactionId,
+        decimal refundAmount,
         CancellationToken cancelToken)
     {
         if (string.IsNullOrWhiteSpace(refundTransactionId) || string.IsNullOrWhiteSpace(creds.ApiPassword))
             return null;
 
-        var document = BuildRefundDocumentForOrder(order, creds);
+        // Cardcom validates document total == linked refund transaction amount. Itemize only when
+        // this refund covers the full order total in one transaction; any partial refund (including
+        // the closing refund after an earlier partial one) gets a single line for its own amount.
+        var isSingleFullRefund = order.Total is > 0 && Math.Abs(refundAmount - order.Total.Value) < 0.01m;
+        var document = BuildRefundDocumentForOrder(order, creds,
+            refundAmountOverride: isSingleFullRefund ? null : refundAmount);
         var result = await _cardcom.CreateDocumentAsync(creds, new CreateCardcomDocumentRequest
         {
             Document = document,

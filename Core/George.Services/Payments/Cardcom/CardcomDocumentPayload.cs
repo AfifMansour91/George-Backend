@@ -39,6 +39,12 @@ internal static class CardcomDocumentPayload
             body["Phone"] = doc.Phone;
         if (!string.IsNullOrWhiteSpace(doc.Mobile))
             body["Mobile"] = doc.Mobile;
+        if (!string.IsNullOrWhiteSpace(doc.AddressLine1))
+            body["AddressLine1"] = doc.AddressLine1;
+        if (!string.IsNullOrWhiteSpace(doc.AddressLine2))
+            body["AddressLine2"] = doc.AddressLine2;
+        if (!string.IsNullOrWhiteSpace(doc.City))
+            body["City"] = doc.City;
         if (doc.SendBySms)
             body["IsSendSMS"] = true;
         if (!string.IsNullOrWhiteSpace(doc.Comments))

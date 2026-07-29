@@ -62,6 +62,45 @@ namespace George.Data
             if (filter?.PaymentStatus.HasValue() == true)
                 query = query.Where(o => o.PaymentStatus == filter.PaymentStatus!.Trim());
 
+            // Payment-method kind: "cash" vs "credit". PaymentMethod values are heterogeneous —
+            // internal codes (Cash, SavedCard, CreditPhone, ExternalCredit) for manual orders,
+            // mapped/free-text Woo gateway titles (possibly Hebrew) for website orders — so match
+            // cash markers first and treat Cardcom/credit markers as credit. ExternalCredit
+            // (external physical terminal) counts as credit here: money-wise it's a card charge.
+            if (filter?.PaymentMethod.HasValue() == true)
+            {
+                var kind = filter.PaymentMethod!.Trim().ToLowerInvariant();
+                if (kind == "cash")
+                {
+                    query = query.Where(o =>
+                        (o.PaymentMethod != null &&
+                            (o.PaymentMethod.ToLower() == "cash" ||
+                             o.PaymentMethod.ToLower() == "cod" ||
+                             o.PaymentMethod.Contains("מזומן"))) ||
+                        (o.PaymentMethod == null &&
+                            ((o.GatewayPaymentMethodCode != null && o.GatewayPaymentMethodCode.ToLower() == "cod") ||
+                             (o.PaymentLabel != null && o.PaymentLabel.Contains("מזומן")))));
+                }
+                else if (kind == "credit")
+                {
+                    query = query.Where(o =>
+                        // not cash-marked…
+                        !(o.PaymentMethod != null &&
+                            (o.PaymentMethod.ToLower() == "cash" ||
+                             o.PaymentMethod.ToLower() == "cod" ||
+                             o.PaymentMethod.Contains("מזומן"))) &&
+                        !(o.GatewayPaymentMethodCode != null && o.GatewayPaymentMethodCode.ToLower() == "cod") &&
+                        !(o.PaymentLabel != null && o.PaymentLabel.Contains("מזומן")) &&
+                        // …and has a credit/card marker
+                        ((o.PaymentMethod != null &&
+                            (o.PaymentMethod.ToLower().Contains("credit") ||
+                             o.PaymentMethod.ToLower() == "savedcard" ||
+                             o.PaymentMethod.Contains("אשראי"))) ||
+                         (o.PaymentGateway != null && o.PaymentGateway.ToLower() == "cardcom") ||
+                         o.CardcomLowProfileId != null));
+                }
+            }
+
             // Date range: scheduled delivery/pickup date, falling back to CreationTime for orders
             // without one — otherwise such orders are silently excluded from every bounded range
             // (archive "היום"/"השבוע" never showed orders handled today with no scheduled date).
