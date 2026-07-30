@@ -94,7 +94,29 @@ public class PrintJobService : ServiceBase
 
         foreach (var job in jobs)
         {
-            var mapped = await MapToResAsync(job, cancelToken).ConfigureAwait(false);
+            PrintJobRes mapped;
+            try
+            {
+                mapped = await MapToResAsync(job, cancelToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // One unrenderable job (e.g. ":A4" PDF render when Playwright browsers are
+                // missing on the server) must not fail the whole Pending response — the agent
+                // then sees an error envelope as "no jobs" and EVERY job for the site is
+                // starved, plain vouchers included. Fail the poisoned job explicitly and keep
+                // serving the rest.
+                _logger.LogError(ex,
+                    "PrintJob {JobId} (SiteId={SiteId}, JobType={JobType}) payload render failed; marking Failed.",
+                    job.Id, job.SiteId, job.JobType);
+                var reason = $"Server render failed: {ex.Message}";
+                if (reason.Length > 500)
+                    reason = reason[..500];
+                await _printJobStorage
+                    .UpdateStatusAsync(job.Id, "Failed", agentId: null, errorMessage: reason, cancelToken)
+                    .ConfigureAwait(false);
+                continue;
+            }
             result.Add(mapped);
         }
 
