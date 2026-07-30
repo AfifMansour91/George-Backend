@@ -91,6 +91,12 @@ namespace George.Services.Request
         /// <summary>When true, show the product SKU (מק"ט) on picking-screen lines. Off by default.</summary>
         public bool? ShowSkuInPicking { get; set; }
 
+        /// <summary>When true, fast-scan picking: no confirm dialog on scan + auto-finish when all items picked. Off by default.</summary>
+        public bool? FastPickingScan { get; set; }
+
+        /// <summary>When true (default), show the deviation (חריגה) popup when a scan exceeds tolerance.</summary>
+        public bool? ShowPickingExceptionsPopup { get; set; }
+
         /// <summary>When true, this branch uses a connected RS232 scale (live weight in picking). Off by default.</summary>
         public bool? ScaleEnabled { get; set; }
 

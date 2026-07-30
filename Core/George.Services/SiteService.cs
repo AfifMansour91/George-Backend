@@ -65,6 +65,8 @@ namespace George.Services
                 model.ScaleBarcodeEmbedMode = "auto";
             if (!model.ShowPickingDeviation.HasValue)
                 model.ShowPickingDeviation = true;
+            if (!model.ShowPickingExceptionsPopup.HasValue)
+                model.ShowPickingExceptionsPopup = true;
 
             CardcomTestTerminalDefaults.ApplyToNewSiteIfUnset(model, _paymentTokenProtector);
 

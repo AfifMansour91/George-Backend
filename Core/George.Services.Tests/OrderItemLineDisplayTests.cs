@@ -75,6 +75,34 @@ public class OrderItemLineDisplayTests
     }
 
     [Fact]
+    public void Variable_weight_choice_detected_by_line_fields_when_title_lacks_phrase()
+    {
+        // by_unit+variable snapshot: per-unit label, units mode, no UnitWeightGrams.
+        var variableByFields = new OrderItem
+        {
+            Title = "סלמון שלם",
+            Quantity = 2,
+            OrderLineQuantityMode = "units",
+            OrderLinePerUnitWeightLabel = "500 גרם ליח'",
+        };
+        Assert.True(OrderItemLineDisplay.IsOrderItemVariableWeightPerUnitChoice(variableByFields));
+        var hint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(variableByFields, newVoucher: true);
+        Assert.NotNull(hint);
+        Assert.Contains("500 גרם ליח'", hint, StringComparison.Ordinal);
+
+        // Fixed/by-variant lines carry UnitWeightGrams alongside the label — must stay excluded.
+        var fixedWeight = new OrderItem
+        {
+            Title = "מארז קציצות",
+            Quantity = 1,
+            OrderLineQuantityMode = "units",
+            OrderLinePerUnitWeightLabel = "800 גרם ליח'",
+            UnitWeightGrams = 800,
+        };
+        Assert.False(OrderItemLineDisplay.IsOrderItemVariableWeightPerUnitChoice(fixedWeight));
+    }
+
+    [Fact]
     public void Voucher_picked_display_uses_kg_when_unit_weight_present()
     {
         var item = new OrderItem

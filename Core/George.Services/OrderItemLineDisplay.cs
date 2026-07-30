@@ -547,6 +547,15 @@ public static class OrderItemLineDisplay
         var title = item.Title ?? "";
         if (Regex.IsMatch(title, @"בחירת\s*משקל\s*ליחידה", RegexOptions.IgnoreCase)) return true;
         if (Regex.IsMatch(title, @"בחר\s*משקל\s*יח", RegexOptions.IgnoreCase)) return true;
+        // Line-field signature: only the by_unit+variable snapshot builder writes a per-unit weight
+        // label WITHOUT UnitWeightGrams (fixed/by_variant/by_unit_and_weight all carry grams), so a
+        // units-mode line matching it is a "בחר משקל ליח'" choice even when the title lacks the phrase.
+        if (string.Equals(item.OrderLineQuantityMode?.Trim(), "units", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(item.OrderLinePerUnitWeightLabel)
+            && !(item.UnitWeightGrams is > 0))
+        {
+            return true;
+        }
         return false;
     }
 

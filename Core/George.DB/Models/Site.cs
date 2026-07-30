@@ -183,6 +183,19 @@ public partial class Site
     /// <summary>When true, show the product SKU (מק"ט) on picking-screen lines. Off by default.</summary>
     public bool? ShowSkuInPicking { get; set; }
 
+    /// <summary>
+    /// When true, "fast scan" picking mode: scans apply immediately without a confirmation dialog
+    /// (overrides ConfirmPickingAfterScan), and when the last item is picked the order finishes
+    /// (moves to Ready) automatically. Off by default.
+    /// </summary>
+    public bool? FastPickingScan { get; set; }
+
+    /// <summary>
+    /// When true (default), the deviation ("חריגה") popup is shown when a scanned quantity/weight
+    /// exceeds tolerance. When false, over-tolerance scans are applied silently with no popup.
+    /// </summary>
+    public bool? ShowPickingExceptionsPopup { get; set; }
+
     /// <summary>When true, this branch uses a connected RS232 scale (ScaleAgent → live weight in picking). Off by default.</summary>
     public bool? ScaleEnabled { get; set; }
 
