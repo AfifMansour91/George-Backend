@@ -276,6 +276,176 @@ public class QuantityConcentrationReportServiceTests
         Assert.Empty(unchanged);
     }
 
+    /// <summary>GDBEEF: catalog options NAMED as weights ("500 גרם", "1 ק"ג") must still show as variant rows.</summary>
+    [Fact]
+    public void ApplyDetailLineDisplayRules_WeightedProduct_KeepsWeightNamedVariantLines()
+    {
+        var lines = new List<QuantityConcentrationLineDto>
+        {
+            new() { LineLabel = "750 גרם", VariantId = 15566, QuantityKg = 1.5m, QuantityUnits = 2m },
+            new() { LineLabel = "1 ק\"ג", VariantId = 15564, QuantityKg = 1m, QuantityUnits = 1m },
+        };
+        var p = new Product
+        {
+            Id = 7243,
+            Name = "אנטריקוט על עצם",
+            IsWeighted = true,
+            ProductVariant = new List<ProductVariant>
+            {
+                new()
+                {
+                    Id = 15566,
+                    IsDeleted = false,
+                    ProductVariantOptionValue = new List<ProductVariantOptionValue>
+                    {
+                        new() { OptionName = "צורת חיתוך", OptionValue = "750 גרם" },
+                    },
+                },
+                new()
+                {
+                    Id = 15564,
+                    IsDeleted = false,
+                    ProductVariantOptionValue = new List<ProductVariantOptionValue>
+                    {
+                        new() { OptionName = "צורת חיתוך", OptionValue = "1 ק\"ג" },
+                    },
+                },
+            },
+        };
+        var result = QuantityConcentrationReportService.ApplyDetailLineDisplayRules(lines, p);
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, r => r.LineLabel == "750 גרם" && r.LineDisplayKind == "variant");
+        Assert.Contains(result, r => r.LineLabel == "1 ק\"ג" && r.LineDisplayKind == "variant");
+    }
+
+    /// <summary>Single weight-named variant line must survive the single-synthetic-line collapse.</summary>
+    [Fact]
+    public void CollapseIfSingleSyntheticLine_KeepsSingleWeightNamedVariantLine()
+    {
+        var lines = new List<QuantityConcentrationLineDto>
+        {
+            new() { LineLabel = "500 גרם", VariantId = 15565, QuantityKg = 0.5m },
+        };
+        var result = QuantityConcentrationReportService.CollapseIfSingleSyntheticLine(lines, "אנטריקוט על עצם");
+        Assert.Single(result);
+    }
+
+    [Fact]
+    public void FindVariantForOrderLine_MatchesWeightNamedOptionByRawVariantTitle()
+    {
+        var p = new Product
+        {
+            Id = 7243,
+            Name = "אנטריקוט על עצם",
+            IsWeighted = true,
+            ProductVariant = new List<ProductVariant>
+            {
+                new()
+                {
+                    Id = 15565,
+                    IsDeleted = false,
+                    ProductVariantOptionValue = new List<ProductVariantOptionValue>
+                    {
+                        new() { OptionName = "צורת חיתוך", OptionValue = "500 גרם" },
+                    },
+                },
+            },
+        };
+        // No ProductVariantId / Woo id on the line — only the weight-looking title.
+        var line = new OrderItem { VariantTitle = "500 גרם", OrderLineSizeLabel = "(כ 500 גרם)" };
+        var v = ProductCatalogVariantResolution.FindVariantForOrderLine(p, line);
+        Assert.NotNull(v);
+        Assert.Equal(15565, v!.Id);
+    }
+
+    /// <summary>Stale ProductVariantId (variants re-created since the order) must fall through to Woo-id matching.</summary>
+    [Fact]
+    public void FindVariantForOrderLine_StaleProductVariantId_FallsBackToWooVariationId()
+    {
+        var p = new Product
+        {
+            Id = 7243,
+            Name = "אנטריקוט על עצם",
+            IsWeighted = true,
+            ProductVariant = new List<ProductVariant>
+            {
+                new()
+                {
+                    Id = 15566,
+                    IsDeleted = false,
+                    WooCommerceVariationId = 16135,
+                    ProductVariantOptionValue = new List<ProductVariantOptionValue>
+                    {
+                        new() { OptionName = "צורת חיתוך", OptionValue = "750 גרם" },
+                    },
+                },
+            },
+        };
+        var line = new OrderItem
+        {
+            ProductVariantId = 7009,
+            WooCommerceVariationId = 16135,
+            VariantTitle = "750 גרם",
+        };
+        var v = ProductCatalogVariantResolution.FindVariantForOrderLine(p, line);
+        Assert.NotNull(v);
+        Assert.Equal(15566, v!.Id);
+    }
+
+    /// <summary>צלעות טלה: weighted no-variation product — parent row shows per-unit weight from order lines.</summary>
+    [Fact]
+    public void ResolveNoVariationParentUnitWeightKg_UsesLineWeightWhenConsistent()
+    {
+        var p = new Product { Id = 1, Name = "צלעות טלה", IsWeighted = true };
+        var w = QuantityConcentrationReportService.ResolveNoVariationParentUnitWeightKg(
+            p, new decimal?[] { 0.4m, 0.4m, null });
+        Assert.Equal(0.4m, w);
+    }
+
+    [Fact]
+    public void ResolveNoVariationParentUnitWeightKg_MixedLineWeights_ReturnsNull()
+    {
+        var p = new Product { Id = 1, Name = "צלעות טלה", IsWeighted = true };
+        var w = QuantityConcentrationReportService.ResolveNoVariationParentUnitWeightKg(
+            p, new decimal?[] { 0.4m, 0.6m });
+        Assert.Null(w);
+    }
+
+    [Fact]
+    public void ResolveNoVariationParentUnitWeightKg_NoLineWeights_FallsBackToCatalogConfig()
+    {
+        var p = new Product
+        {
+            Id = 1,
+            Name = "צלעות טלה",
+            IsWeighted = true,
+            SetupType = new SetupType { Name = "by_unit" },
+            WeightConfig = new WeightConfig
+            {
+                UnitWeight = "400",
+                Unit = new Unit { Name = "g" },
+            },
+        };
+        var w = QuantityConcentrationReportService.ResolveNoVariationParentUnitWeightKg(
+            p, new decimal?[] { null });
+        Assert.Equal(0.4m, w);
+    }
+
+    [Fact]
+    public void ResolveNoVariationParentUnitWeightKg_ProductWithVariants_ReturnsNull()
+    {
+        var p = new Product
+        {
+            Id = 1,
+            Name = "אנטריקוט על עצם",
+            IsWeighted = true,
+            ProductVariant = new List<ProductVariant> { new() { Id = 5, IsDeleted = false } },
+        };
+        var w = QuantityConcentrationReportService.ResolveNoVariationParentUnitWeightKg(
+            p, new decimal?[] { 0.75m });
+        Assert.Null(w);
+    }
+
     [Fact]
     public void EnrichDetailLinesWithVariationStock_WeightedProduct_UsesStockKg()
     {

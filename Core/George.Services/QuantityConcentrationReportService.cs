@@ -136,18 +136,26 @@ namespace George.Services
                     if (kg <= 0m && units <= 0m) continue;
 
                     var note = (line.Notes ?? "").Trim();
-                    var cutKey = BuildCutBucketKey(line, p.Name);
+                    var variant = FindVariant(p, line);
+                    var optionLabel = OrderItemReportLineLabel.ResolveOptionDisplayLabel(line, p.Name);
+                    // Weight-named catalog options ("500 גרם", "1 ק\"ג") read as quantity text and resolve
+                    // to null — when the line still maps to a catalog variant, its catalog label is the
+                    // real option name and must get its own detail bucket.
+                    if (string.IsNullOrEmpty(optionLabel) && variant != null)
+                    {
+                        var catalogLabel = FormatVariantLabel(variant);
+                        if (!catalogLabel.StartsWith("#", StringComparison.Ordinal))
+                            optionLabel = catalogLabel;
+                    }
+
+                    var cutKey = !string.IsNullOrEmpty(optionLabel) ? AttrDedupeKey(optionLabel) : NoStructuredOptionKey;
                     var key = (line.ProductId.Value, cutKey, note);
                     if (!buckets.TryGetValue(key, out var b))
                     {
-                        b = new LineBucket
-                        {
-                            LineLabel = OrderItemReportLineLabel.ResolveOptionDisplayLabel(line, p.Name) ?? "",
-                        };
+                        b = new LineBucket { LineLabel = optionLabel ?? "" };
                         buckets[key] = b;
                     }
 
-                    var variant = FindVariant(p, line);
                     if (variant != null)
                         b.VariantIds.Add(variant.Id);
 
@@ -214,6 +222,8 @@ namespace George.Services
                 var showUnitsInTotal = ShowUnitsInTotalQuantityForTotalQtyColumn(p, sumUnits);
                 var totalUnitsOut = sumUnits > 0m ? Round2(sumUnits) : (decimal?)null;
                 var lineStockUnitLabel = StockUnitLabelForProduct(p, variantQtyStock);
+                var parentUnitWeightKg = ResolveNoVariationParentUnitWeightKg(
+                    p, g.Select(kv => kv.Value.UnitWeightKg));
 
                 groups.Add(new QuantityConcentrationProductGroupDto
                 {
@@ -223,9 +233,10 @@ namespace George.Services
                     TotalQuantityKg = sumKg > 0m ? Round2(sumKg) : null,
                     TotalQuantityUnits = totalUnitsOut,
                     ShowUnitsInTotalQuantity = showUnitsInTotal,
-                    ShowWeightPerUnitColumn = lines.Any(l =>
+                    ShowWeightPerUnitColumn = parentUnitWeightKg is > 0m || lines.Any(l =>
                         string.Equals(l.LineDisplayKind, "variant", StringComparison.Ordinal)
                         && l.WeightPerUnitKg is > 0m),
+                    WeightPerUnitKg = parentUnitWeightKg is > 0m ? Round2(parentUnitWeightKg.Value) : null,
                     StockKg = stockKg,
                     StockUnits = stockUnits,
                     StockDisplayMode = stockDisplayMode,
@@ -277,19 +288,48 @@ namespace George.Services
         /// <summary>
         /// Bucket key — real catalog option only; otherwise one bucket per product (units/kg on parent row).
         /// </summary>
-        private static string BuildCutBucketKey(OrderItem line, string? productName)
-        {
-            var label = OrderItemReportLineLabel.ResolveOptionDisplayLabel(line, productName);
-            if (!string.IsNullOrEmpty(label))
-                return AttrDedupeKey(label);
-            return "\u001eno_structured_option";
-        }
+        private const string NoStructuredOptionKey = "\u001eno_structured_option";
 
         /// <summary>
         /// מוצר עם וריאציות בקטלוג (חיתוכים/אפשרויות) — בלי קשר לסוג ניהול המלאי (כמות/סטטוס/וריאציה).
         /// </summary>
         private static bool ProductHasCatalogVariationOptions(Product p) =>
             ProductCatalogStockClassification.ActiveVariants(p).Count > 0;
+
+        /// <summary>
+        /// משקל ליחידה (ק&quot;ג) לשורת האב של מוצר שקיל בלי וריאציות (למשל צלעות טלה):
+        /// מהשורות בהזמנות כשכולן באותו משקל, אחרת מהגדרת המשקל בקטלוג. מוצר עם וריאציות — null
+        /// (המשקל מוצג פר וריאציה בשורות הפירוט).
+        /// </summary>
+        public static decimal? ResolveNoVariationParentUnitWeightKg(
+            Product p,
+            IEnumerable<decimal?> bucketUnitWeightsKg)
+        {
+            if (ProductHasCatalogVariationOptions(p)) return null;
+
+            var weights = bucketUnitWeightsKg
+                .Where(w => w is > 0m)
+                .Select(w => Math.Round(w!.Value, 3))
+                .Distinct()
+                .ToList();
+            if (weights.Count == 1) return weights[0];
+            if (weights.Count > 1) return null;
+            return CatalogUnitWeightKg(p);
+        }
+
+        /// <summary>Fixed/average per-unit weight (kg) from catalog config for weighted by-unit products.</summary>
+        private static decimal? CatalogUnitWeightKg(Product p)
+        {
+            if (p.IsWeighted != true) return null;
+            var setup = (p.SetupType?.Name ?? "").Trim().ToLowerInvariant();
+            if (setup != "by_unit" && setup != "by_unit_and_weight") return null;
+            var wc = p.WeightConfig;
+            if (wc == null || wc.WeightByVariant == true) return null;
+            if (!decimal.TryParse((wc.UnitWeight ?? "").Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out var w) || w <= 0m)
+                return null;
+            var unit = (wc.Unit?.Name ?? "kg").Trim().ToLowerInvariant();
+            return unit == "g" ? w / 1000m : w;
+        }
 
         private static List<QuantityConcentrationLineDto> FilterAndMergeDetailLines(
             List<QuantityConcentrationLineDto> lines,
@@ -336,7 +376,11 @@ namespace George.Services
             {
                 if (!string.IsNullOrEmpty(l.Note)) return true;
                 if (IsSyntheticLineLabel(l.LineLabel, pn)) return false;
-                if (p.IsWeighted == true && OrderItemReportLineLabel.IsNonOptionDisplayLabel(l.LineLabel))
+                // Variant-linked lines keep weight-looking labels — catalog options may be NAMED as
+                // weights ("500 גרם") and must still show as real option rows.
+                if (p.IsWeighted == true
+                    && l.VariantId is not > 0
+                    && OrderItemReportLineLabel.IsNonOptionDisplayLabel(l.LineLabel))
                     return false;
                 return true;
             }).ToList();
@@ -582,7 +626,7 @@ namespace George.Services
             var L = lines[0];
             if (!string.IsNullOrEmpty(L.Note)) return lines;
             if (IsSyntheticLineLabel(L.LineLabel, productName)) return new List<QuantityConcentrationLineDto>();
-            if (OrderItemReportLineLabel.IsNonOptionDisplayLabel(L.LineLabel))
+            if (OrderItemReportLineLabel.IsNonOptionDisplayLabel(L.LineLabel) && L.VariantId is not > 0)
                 return new List<QuantityConcentrationLineDto>();
             return lines;
         }

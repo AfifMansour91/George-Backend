@@ -564,7 +564,17 @@ namespace George.Services
                     var merch = LineMerchandise(line);
                     if (merch <= 0m) continue;
 
+                    var variant = ProductCatalogVariantResolution.FindVariantForOrderLine(p, line);
                     var cutLabel = ResolveProductsReportCutLabel(line, p.Name);
+                    // Weight-named catalog options ("500 גרם") resolve to null above (they read as
+                    // quantity text) — the matched catalog variant's label is the real option name.
+                    if (string.IsNullOrEmpty(cutLabel) && variant != null)
+                    {
+                        var catalogLabel = ProductCatalogVariantResolution.FormatVariantDisplayLabel(variant);
+                        if (!catalogLabel.StartsWith("#", StringComparison.Ordinal))
+                            cutLabel = catalogLabel;
+                    }
+
                     if (cutLabelFilter != null)
                     {
                         if (cutLabel == null ||
@@ -586,7 +596,6 @@ namespace George.Services
                         c.revenue += merch;
                         c.kg += kgLine;
                         c.units += unitLine;
-                        var variant = ProductCatalogVariantResolution.FindVariantForOrderLine(p, line);
                         if (variant != null)
                             c.VariantIds.Add(variant.Id);
                         a.byCut[cutLabel] = c;

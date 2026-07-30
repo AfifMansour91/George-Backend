@@ -45,6 +45,8 @@ namespace George.Services.Response
         public bool ShowUnitsInTotalQuantity { get; set; } = true;
         /// <summary>When true, SPA shows optional unit-weight column for this product group.</summary>
         public bool ShowWeightPerUnitColumn { get; set; }
+        /// <summary>Parent-row unit weight (kg) for weighted no-variation products (e.g. צלעות טלה) — from order lines, else catalog config.</summary>
+        public decimal? WeightPerUnitKg { get; set; }
         public decimal? StockKg { get; set; }
         public decimal? StockUnits { get; set; }
         /// <summary><c>quantity</c> = numeric on-hand; <c>status</c> = in/out only (no shortage numbers).</summary>
