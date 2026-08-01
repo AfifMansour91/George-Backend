@@ -15,8 +15,7 @@ public partial class OrderService
         CancellationToken cancelToken)
     {
         var sourceItems = order.OrderItem?.Where(i => !i.IsDeleted).ToList() ?? new List<OrderItem>();
-        var promoTotal = OrderDiscountTotals.SumLinePromotionDiscount(
-            sourceItems.Select(i => (i.DiscountAmount, i.IsDeleted)));
+        var promoTotal = SumStampedPromotionDiscount(sourceItems);
         res.PromotionDiscountTotal = promoTotal > 0m ? promoTotal : null;
 
         var promoIds = sourceItems
@@ -70,8 +69,7 @@ public partial class OrderService
         {
             if (!orderById.TryGetValue(res.Id, out var order)) continue;
             var sourceItems = order.OrderItem?.Where(i => !i.IsDeleted).ToList() ?? new List<OrderItem>();
-            var promoTotal = OrderDiscountTotals.SumLinePromotionDiscount(
-                sourceItems.Select(i => (i.DiscountAmount, i.IsDeleted)));
+            var promoTotal = SumStampedPromotionDiscount(sourceItems);
             res.PromotionDiscountTotal = promoTotal > 0m ? promoTotal : null;
             foreach (var itemRes in res.Items)
             {

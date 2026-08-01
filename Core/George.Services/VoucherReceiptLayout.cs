@@ -33,6 +33,7 @@ public static class VoucherReceiptLayout
     {
         var gross = lineGross is > 0m ? lineGross.Value : OrderedLineGross(item);
         if (gross <= 0m) return null;
+        // DiscountAmount is kept paired with the line gross (picking save rescales it in OrderStorage).
         var discount = item.DiscountAmount is > 0m ? item.DiscountAmount.Value : 0m;
         if (discount <= 0m)
             return new LinePricing { Gross = gross, Discount = 0m, Net = gross, DiscountLabel = "" };
@@ -71,8 +72,19 @@ public static class VoucherReceiptLayout
     public static Summary BuildSummary(Order order, decimal merchandiseGross)
     {
         var items = order.OrderItem ?? new List<OrderItem>();
-        var promo = OrderDiscountTotals.SumLinePromotionDiscount(
-            items.Where(i => !i.IsDeleted).Select(i => (i.DiscountAmount, i.IsDeleted)));
+        // Same rule as OrderService.SumStampedPromotionDiscount: once picking started, only
+        // meaningfully-picked lines contribute their discount — the discount follows its merchandise
+        // (DiscountAmount is kept paired with the line gross by the picking save).
+        var activeItems = items.Where(i => !i.IsDeleted).ToList();
+        var anyPicked = activeItems.Any(OrderItemLineDisplay.OrderMeaningfulPick);
+        var promo = activeItems.Sum(i =>
+        {
+            if (i.DiscountAmount is not > 0m) return 0m;
+            if (!anyPicked) return i.DiscountAmount.Value;
+            return OrderItemLineDisplay.OrderMeaningfulPick(i) && i.PickedQuantity is > 0m
+                ? i.DiscountAmount.Value
+                : 0m;
+        });
         var manual = order.ManualDiscountAmount is > 0m ? order.ManualDiscountAmount.Value : 0m;
         var shipping = order.ShippingCost ?? 0m;
         var grand = OrderDiscountTotals.ComputeGrandTotal(merchandiseGross, shipping, promo, manual);

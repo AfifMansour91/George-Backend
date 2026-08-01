@@ -2743,6 +2743,25 @@ namespace George.Services
             public string? EntranceCode { get; init; }
         }
 
+        /// <summary>
+        /// Promotion discount total for the order's current state. DiscountAmount is kept paired with the
+        /// line gross by the picking save (see OrderStorage.UpdatePickingAsync), so amounts are summed as-is.
+        /// Once picking started, a discount follows its merchandise: only meaningfully-picked lines
+        /// contribute; an unpicked/zero-picked line adds neither gross nor discount. With no picking at
+        /// all, the ordered stamps are summed as-is.
+        /// </summary>
+        private static decimal SumStampedPromotionDiscount(IEnumerable<OrderItem> items)
+        {
+            var active = items.Where(i => !i.IsDeleted).ToList();
+            var anyPicked = active.Any(OrderItemLineDisplay.OrderMeaningfulPick);
+            return active.Sum(i =>
+            {
+                if (i.DiscountAmount is not > 0m) return 0m;
+                if (!anyPicked) return i.DiscountAmount.Value;
+                return GetVoucherPickedLineAmount(i) is > 0m ? i.DiscountAmount.Value : 0m;
+            });
+        }
+
         /// <summary>Match shop-manager <c>getVoucherPickedLineAmount</c>: line total after pick (TotalPrice or picked × PricePerUnit).</summary>
         private static decimal? GetVoucherPickedLineAmount(OrderItem item)
         {
@@ -2756,8 +2775,7 @@ namespace George.Services
         {
             var items = order.OrderItem ?? new List<OrderItem>();
             var shipping = order.ShippingCost ?? 0m;
-            var promoDisc = OrderDiscountTotals.SumLinePromotionDiscount(
-                items.Where(i => !i.IsDeleted).Select(i => (i.DiscountAmount, i.IsDeleted)));
+            var promoDisc = SumStampedPromotionDiscount(items);
             var manualDisc = order.ManualDiscountAmount is > 0m ? order.ManualDiscountAmount.Value : 0m;
             var newVoucher = string.Equals(order.Status, "New", StringComparison.OrdinalIgnoreCase);
             var anyPicked = items.Any(OrderItemLineDisplay.OrderMeaningfulPick);
@@ -2965,6 +2983,14 @@ namespace George.Services
                     continue;
                 if (!prev.PickedQuantity.HasValue || prev.PickedQuantity.Value <= 0m)
                     continue;
+                // Keep an unlinked promo stamp paired with the carried-over picked gross: the rebuilt line
+                // was just re-stamped against its ordered TotalPrice, so rescale to the picked one.
+                if (line.DiscountAmount is > 0m && line.PromotionId is not > 0
+                    && line.TotalPrice is > 0m && prev.TotalPrice is > 0m)
+                {
+                    line.DiscountAmount = OrderDiscountTotals.ScaleStampedLineDiscount(
+                        line.DiscountAmount, line.PromotionId, line.TotalPrice.Value, prev.TotalPrice.Value);
+                }
                 line.PickedQuantity = prev.PickedQuantity;
                 line.TotalPrice = prev.TotalPrice;
                 line.PickingUserConfirmed = prev.PickingUserConfirmed;

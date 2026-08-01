@@ -392,6 +392,21 @@ namespace George.Data
                 var prevPicked = item.PickedQuantity;
                 var prevTotal = item.TotalPrice;
 
+                // Unlinked (WP-local) promotion stamp: keep it paired with the line gross. DiscountAmount
+                // always corresponds to the current TotalPrice (at intake TotalPrice = ordered gross), so
+                // when picking changes the gross we scale the stamp by the same ratio and persist. This is
+                // deliberately ratio-based — deriving "ordered gross" from Quantity/PricePerUnit is unreliable
+                // (weight-per-unit lines store a per-kg price with Quantity counting units). Linked stamps
+                // (PromotionId > 0) are excluded — the promotion evaluator re-derives them after every save.
+                if (item.DiscountAmount is > 0m && item.PromotionId is not > 0)
+                {
+                    var prevGross = prevTotal ?? ((prevPicked ?? item.Quantity) * (item.PricePerUnit ?? 0m));
+                    var newGross = totalPrice ?? ((pickedQty ?? 0m) * (item.PricePerUnit ?? 0m));
+                    if (prevGross > 0m && newGross > 0m)
+                        item.DiscountAmount = OrderDiscountTotals.ScaleStampedLineDiscount(
+                            item.DiscountAmount, item.PromotionId, prevGross, newGross);
+                }
+
                 item.PickedQuantity = pickedQty;
                 item.TotalPrice = totalPrice;
 
@@ -462,8 +477,12 @@ namespace George.Data
                 !active.Any(i => i.PickedQuantity is 0m && !i.TotalPrice.HasValue))
                 return;
             var sum = active.Sum(SumOrderLineMerchandise);
-            var promo = OrderDiscountTotals.SumLinePromotionDiscount(
-                active.Select(i => (i.DiscountAmount, i.IsDeleted)));
+            // A discount follows its merchandise: only lines counted in `sum` contribute their discount
+            // (DiscountAmount is kept paired with the line gross by UpdatePickingAsync). A not-yet-picked
+            // or zero-picked line adds neither gross nor discount — otherwise finishing with an unpicked
+            // line would under-charge by that line's stamp.
+            var promo = active.Sum(i =>
+                SumOrderLineMerchandise(i) > 0m && i.DiscountAmount is > 0m ? i.DiscountAmount.Value : 0m);
             var manual = order.ManualDiscountAmount is > 0m ? order.ManualDiscountAmount.Value : 0m;
             order.SubTotal = sum;
             order.Total = OrderDiscountTotals.ComputeGrandTotal(sum, order.ShippingCost ?? 0m, promo, manual);
