@@ -54,7 +54,7 @@ namespace George.Services
         private const string VoucherItemsTitle = "מוצרים בהזמנה";
         private const string VoucherNotesLabel = "הערות:";
         private const string VoucherVatIncludedLabel = "כולל מע״מ";
-        private const string VoucherBrandFooter = "StoreOS";
+        private const string VoucherBrandFooter = "giorgio";
 
         public OrderService(
             ILogger<OrderService> logger,
