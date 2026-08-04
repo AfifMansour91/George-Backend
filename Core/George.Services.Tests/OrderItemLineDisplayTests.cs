@@ -362,6 +362,32 @@ public class OrderItemLineDisplayTests
     }
 
     [Fact]
+    public void Woo_line_without_cutting_label_renders_like_phone_line()
+    {
+        // Zano order #35 (Woo): no orderLineCuttingLabel; variantTitle = "size | cutting".
+        // Must render size-with-approx + cutting-only (phone parity), not per-unit + raw variantTitle.
+        var item = new OrderItem
+        {
+            Title = "דג סלמון שלם טרי",
+            VariantTitle = "בין 5-6 ק״ג | פילה פרוס בלי עור",
+            OrderLineQuantityMode = "units",
+            Quantity = 3,
+            UnitWeightGrams = 5500,
+            OrderLinePerUnitWeightLabel = "5.5 ק\"ג ליח'",
+            OrderLineSizeLabel = "בין 5-6 ק״ג (כ 5.5 ק\"ג)",
+            OrderLineCuttingLabel = null,
+        };
+        var line = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(
+            item,
+            new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true });
+        Assert.NotNull(line);
+        Assert.Contains("בין 5-6 ק״ג (כ 5.5 ק\"ג)", line, StringComparison.Ordinal);
+        Assert.Contains("פילה פרוס בלי עור", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("ליח'", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("|  בין", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void HideWeightDetails_keeps_customer_chosen_variable_weight()
     {
         // "בחירת משקל ליחידה": the weight IS the ordered spec — never hidden.

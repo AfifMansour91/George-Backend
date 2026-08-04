@@ -30,7 +30,13 @@ public static class OrderLineDisplayFieldsBuilder
         var variableKg = InferVariableWeightKg(product, purchaseAsKgLine, req);
         var variantWeightKg = GetVariantWeightKg(product, variantIndex, req);
 
-        var snap = Build(product, purchaseAsKgLine, req.Quantity, variantIndex, variantWeightKg, req.OrderLineCuttingLabel, variableKg);
+        // Woo lines never send OrderLineCuttingLabel — derive it from the resolved variant's cutting
+        // option so prints/reports render like phone orders (size label + cutting, not the raw variantTitle).
+        var cuttingValue = string.IsNullOrWhiteSpace(req.OrderLineCuttingLabel)
+            ? GetVariantCuttingValue(product, variantIndex)
+            : req.OrderLineCuttingLabel;
+
+        var snap = Build(product, purchaseAsKgLine, req.Quantity, variantIndex, variantWeightKg, cuttingValue, variableKg);
 
         if (string.IsNullOrWhiteSpace(req.OrderLineQuantityMode) && !string.IsNullOrWhiteSpace(snap.OrderLineQuantityMode))
             item.OrderLineQuantityMode = snap.OrderLineQuantityMode;
@@ -142,6 +148,20 @@ public static class OrderLineDisplayFieldsBuilder
 
         var v = GetOrderedVariants(product).ElementAtOrDefault(variantIndex);
         return v?.Weight;
+    }
+
+    /// <summary>Cutting-like option value ("צורת חיתוך") from the resolved variant row, if any.</summary>
+    private static string? GetVariantCuttingValue(Product product, int variantIndex)
+    {
+        var v = GetOrderedVariants(product).ElementAtOrDefault(variantIndex);
+        var ov = v?.ProductVariantOptionValue;
+        if (ov == null) return null;
+        foreach (var kv in ov)
+        {
+            if (!string.IsNullOrWhiteSpace(kv.OptionValue) && CuttingKeyHint.IsMatch(kv.OptionName ?? ""))
+                return kv.OptionValue.Trim();
+        }
+        return null;
     }
 
     public static int GetVariantIndex(Product product, int? productVariantId)

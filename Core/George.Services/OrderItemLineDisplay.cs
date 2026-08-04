@@ -488,6 +488,20 @@ public static class OrderItemLineDisplay
                     uw >= 1000;
                 if (looksSoldByTotalWeight) cut = vtRaw;
             }
+
+            // Woo variantTitle = "size | cutting": when the size label exists separately, keep only the non-size parts.
+            if (!string.IsNullOrEmpty(cut) && !string.IsNullOrEmpty(sizeRaw) && cut.Contains('|'))
+            {
+                var sizeName = Regex.Replace(sizeRaw, @"\s*\(כ[^)]*\)\s*$", "").Trim();
+                if (sizeName.Length > 0)
+                {
+                    var pieces = cut.Split('|').Select(p => p.Trim()).Where(p => p.Length > 0).ToList();
+                    var sizeKey = OrderItemAttrDedupeKey(sizeName);
+                    var rest = pieces.Where(p => OrderItemAttrDedupeKey(p) != sizeKey).ToList();
+                    if (rest.Count > 0 && rest.Count < pieces.Count)
+                        cut = string.Join(" | ", rest);
+                }
+            }
         }
 
         var size = sizeRaw;
