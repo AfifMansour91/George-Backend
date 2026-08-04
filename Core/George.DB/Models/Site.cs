@@ -101,6 +101,9 @@ public partial class Site
     /// <summary>When true, manual/phone order shipping address uses searchable Israel city list. Default true for new sites.</summary>
     public bool? IsraelCityPickerEnabled { get; set; }
 
+    /// <summary>When true, selecting home delivery on a manual/phone order opens a confirmation popup showing the delivery city and an editable delivery fee for that order. Off by default.</summary>
+    public bool? ConfirmDeliveryFeePopup { get; set; }
+
     public bool? AutoPrintEnabled { get; set; }
 
     /// <summary>

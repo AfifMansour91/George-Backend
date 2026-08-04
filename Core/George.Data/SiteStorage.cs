@@ -174,6 +174,7 @@ namespace George.Data
             if (updated.ShippingCost.HasValue) dbSite.ShippingCost = updated.ShippingCost;
             if (updated.FreeShippingAbove.HasValue) dbSite.FreeShippingAbove = updated.FreeShippingAbove;
             if (updated.IsraelCityPickerEnabled.HasValue) dbSite.IsraelCityPickerEnabled = updated.IsraelCityPickerEnabled;
+            if (updated.ConfirmDeliveryFeePopup.HasValue) dbSite.ConfirmDeliveryFeePopup = updated.ConfirmDeliveryFeePopup;
             if (updated.AutoPrintEnabled.HasValue) dbSite.AutoPrintEnabled = updated.AutoPrintEnabled;
             if (updated.VoucherPrintA4.HasValue) dbSite.VoucherPrintA4 = updated.VoucherPrintA4;
             if (updated.PrintNewOrderImmediate.HasValue) dbSite.PrintNewOrderImmediate = updated.PrintNewOrderImmediate;

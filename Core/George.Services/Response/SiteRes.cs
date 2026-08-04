@@ -40,6 +40,8 @@ namespace George.Services.Response
         public decimal? FreeShippingAbove { get; set; }
         /// <summary>When true, manual/phone order uses searchable Israel city picker (default true).</summary>
         public bool? IsraelCityPickerEnabled { get; set; }
+        /// <summary>Manual-order delivery: open a confirm popup (city + editable fee) when choosing home delivery (default off).</summary>
+        public bool? ConfirmDeliveryFeePopup { get; set; }
         public bool? AutoPrintEnabled { get; set; }
         /// <summary>Print order printouts on A4 pages instead of the thermal voucher.</summary>
         public bool? VoucherPrintA4 { get; set; }
