@@ -177,6 +177,7 @@ namespace George.Data
             if (updated.ConfirmDeliveryFeePopup.HasValue) dbSite.ConfirmDeliveryFeePopup = updated.ConfirmDeliveryFeePopup;
             if (updated.AutoPrintEnabled.HasValue) dbSite.AutoPrintEnabled = updated.AutoPrintEnabled;
             if (updated.VoucherPrintA4.HasValue) dbSite.VoucherPrintA4 = updated.VoucherPrintA4;
+            if (updated.CustomerLabelWideFormat.HasValue) dbSite.CustomerLabelWideFormat = updated.CustomerLabelWideFormat;
             if (updated.PrintNewOrderImmediate.HasValue) dbSite.PrintNewOrderImmediate = updated.PrintNewOrderImmediate;
             if (updated.PrintMovedToTreatment.HasValue) dbSite.PrintMovedToTreatment = updated.PrintMovedToTreatment;
             if (updated.PrintAfterPicking.HasValue) dbSite.PrintAfterPicking = updated.PrintAfterPicking;

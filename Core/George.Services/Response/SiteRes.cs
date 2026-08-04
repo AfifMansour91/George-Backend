@@ -47,6 +47,8 @@ namespace George.Services.Response
         public bool? VoucherPrintA4 { get; set; }
         /// <summary>Omit the delivery/pickup time from order printouts (date only).</summary>
         public bool? VoucherHideDeliveryTime { get; set; }
+        /// <summary>Customer sticker uses the wide 120mm pre-printed branded label layout (default off).</summary>
+        public bool? CustomerLabelWideFormat { get; set; }
         public bool? PrintNewOrderImmediate { get; set; }
         public bool? PrintMovedToTreatment { get; set; }
         public bool? PrintAfterPicking { get; set; }

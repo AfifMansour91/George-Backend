@@ -116,6 +116,9 @@ public partial class Site
     /// <summary>When true, order printouts (thermal voucher + A4, manual + auto) omit the delivery/pickup time — only the date is printed.</summary>
     public bool? VoucherHideDeliveryTime { get; set; }
 
+    /// <summary>When true, the manual customer sticker (LabelCustomer) uses the wide 120mm pre-printed branded label layout (order info beside the branding column) instead of the default 58x40mm sticker. Off by default.</summary>
+    public bool? CustomerLabelWideFormat { get; set; }
+
     public bool? PrintNewOrderImmediate { get; set; }
 
     public bool? PrintMovedToTreatment { get; set; }
