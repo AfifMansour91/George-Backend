@@ -197,6 +197,13 @@ public partial class Site
     public bool? ShowCustomerProfileNoteInPrints { get; set; }
 
     /// <summary>
+    /// Feature flag: render order-line attributes from the typed <see cref="OrderItem.LineDisplayJson"/>
+    /// snapshot (no Hebrew-label parsing) on lines that have one; lines without it always use the legacy
+    /// heuristics. NULL/0 = legacy rendering everywhere (default).
+    /// </summary>
+    public bool? UseStructuredOrderLineDisplay { get; set; }
+
+    /// <summary>
     /// When true, "fast scan" picking mode: scans apply immediately without a confirmation dialog
     /// (overrides ConfirmPickingAfterScan), and when the last item is picked the order finishes
     /// (moves to Ready) automatically. Off by default.

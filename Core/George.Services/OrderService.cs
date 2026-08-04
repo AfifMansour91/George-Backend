@@ -2041,6 +2041,7 @@ namespace George.Services
             var useA4 = site.VoucherPrintA4 == true;
             var hideDeliveryTime = site.VoucherHideDeliveryTime == true;
             var hideUnitWeight = site.HideUnitWeightInOrders == true;
+            var useStructuredLines = site.UseStructuredOrderLineDisplay == true;
             // Site.ShowCustomerProfileNoteInPrints (opt-in): include הערה קבועה מכרטיס הלקוח in the printed order notes.
             string? customerProfileNote = null;
             if (site.ShowCustomerProfileNoteInPrints == true && orderForPrint.CustomerId is > 0)
@@ -2051,8 +2052,8 @@ namespace George.Services
                 notesMap.TryGetValue(orderForPrint.CustomerId.Value, out customerProfileNote);
             }
             var payload = useA4
-                ? BuildAutoVoucherA4Html(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote)
-                : BuildAutoVoucherHtml(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote);
+                ? BuildAutoVoucherA4Html(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines)
+                : BuildAutoVoucherHtml(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines);
             if (string.IsNullOrWhiteSpace(payload))
                 return;
 
@@ -2085,7 +2086,7 @@ namespace George.Services
         /// email: customer + delivery boxes side by side, ordered-items table (product | qty | price),
         /// then subtotal / shipping / payment / grand-total rows. Delivered to the agent as an A4 PDF.
         /// </summary>
-        private string BuildAutoVoucherA4Html(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null)
+        private string BuildAutoVoucherA4Html(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false)
         {
             var items = order.OrderItem?.OrderBy(i => i.SortOrder).ToList() ?? new List<OrderItem>();
             var orderNo = order.OrderNumber ?? order.Id.ToString(CultureInfo.InvariantCulture);
@@ -2138,7 +2139,7 @@ namespace George.Services
             deliveryBox.Append("</div>");
 
             // Items table rows
-            var attrOpts = new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true, HideWeightDetails = hideUnitWeight };
+            var attrOpts = new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true, HideWeightDetails = hideUnitWeight, UseStructuredLineDisplay = useStructuredLines };
             var rows = new StringBuilder();
             foreach (var it in items)
             {
@@ -2240,7 +2241,7 @@ namespace George.Services
             return sb.ToString();
         }
 
-        private string BuildAutoVoucherHtml(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null)
+        private string BuildAutoVoucherHtml(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false)
         {
             var sb = new StringBuilder();
             var items = order.OrderItem?.OrderBy(i => i.SortOrder).ToList() ?? new List<OrderItem>();
@@ -2383,7 +2384,7 @@ namespace George.Services
             sb.AppendLine($"    <span style=\"font-size:20px;font-weight:800;line-height:24px;\">{VoucherItemsTitle} ({itemCount})</span>");
             sb.AppendLine("  </div>");
 
-            var attrOpts = new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true, HideWeightDetails = hideUnitWeight };
+            var attrOpts = new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true, HideWeightDetails = hideUnitWeight, UseStructuredLineDisplay = useStructuredLines };
             foreach (var it in items)
             {
                 var title = EscapeHtml(OrderItemLineDisplay.GetOrderItemProductName(it));

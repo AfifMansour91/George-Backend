@@ -107,6 +107,14 @@ public partial class OrderItem
     [StringLength(200)]
     public string? OrderLineCuttingLabel { get; set; }
 
+    /// <summary>
+    /// Typed display snapshot (JSON) written once at line creation by <c>OrderLineDisplayFieldsBuilder</c>:
+    /// sale kind + clean size/cutting names + numeric weights. Surfaces render from this when
+    /// <c>Site.UseStructuredOrderLineDisplay</c> is on; NULL (legacy lines) falls back to the label heuristics.
+    /// </summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? LineDisplayJson { get; set; }
+
     [Column(TypeName = "decimal(18, 4)")]
     public decimal? PickedQuantity { get; set; }
 

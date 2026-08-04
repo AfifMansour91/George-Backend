@@ -194,6 +194,7 @@ namespace George.Data
             if (updated.ShowSkuInPicking.HasValue) dbSite.ShowSkuInPicking = updated.ShowSkuInPicking;
             if (updated.HideUnitWeightInOrders.HasValue) dbSite.HideUnitWeightInOrders = updated.HideUnitWeightInOrders;
             if (updated.ShowCustomerProfileNoteInPrints.HasValue) dbSite.ShowCustomerProfileNoteInPrints = updated.ShowCustomerProfileNoteInPrints;
+            if (updated.UseStructuredOrderLineDisplay.HasValue) dbSite.UseStructuredOrderLineDisplay = updated.UseStructuredOrderLineDisplay;
             if (updated.FastPickingScan.HasValue) dbSite.FastPickingScan = updated.FastPickingScan;
             if (updated.ShowPickingExceptionsPopup.HasValue) dbSite.ShowPickingExceptionsPopup = updated.ShowPickingExceptionsPopup;
             if (updated.ScaleEnabled.HasValue) dbSite.ScaleEnabled = updated.ScaleEnabled;

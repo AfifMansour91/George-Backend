@@ -38,6 +38,9 @@ public class OrderItemRes
     public string? OrderLineSizeLabel { get; set; }
     public string? OrderLineCuttingLabel { get; set; }
 
+    /// <summary>Typed display snapshot (JSON) — see <c>OrderLineDisplaySnapshot</c>; null on legacy lines.</summary>
+    public string? LineDisplayJson { get; set; }
+
     // Sprint 4: promotion linkage
     public int? PromotionId { get; set; }
     public decimal? DiscountAmount { get; set; }

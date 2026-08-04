@@ -388,6 +388,71 @@ public class OrderItemLineDisplayTests
     }
 
     [Fact]
+    public void Structured_snapshot_renders_average_line()
+    {
+        // Order #34 line 2 equivalent (מכירה לפי יחידה): per-unit weight + cutting, no size.
+        var item = new OrderItem
+        {
+            Title = "דניס (כ 600 עד 800 גרם)",
+            LineDisplayJson = "{\"v\":1,\"kind\":\"by_unit_average\",\"approxUnitWeightGrams\":700,\"cuttingName\":\"פילה ללא עור\",\"unitCount\":2,\"totalWeightGrams\":1400}",
+        };
+        var line = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(
+            item,
+            new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true, UseStructuredLineDisplay = true });
+        Assert.Equal("700 גרם ליח' | פילה ללא עור", line);
+    }
+
+    [Fact]
+    public void Structured_snapshot_renders_by_variant_line_without_duplication()
+    {
+        // Order #34/#35 salmon equivalent: size carries the approx weight — no redundant per-unit segment.
+        var item = new OrderItem
+        {
+            Title = "דג סלמון שלם טרי",
+            LineDisplayJson = "{\"v\":1,\"kind\":\"by_unit_by_variant\",\"sizeName\":\"בין 5-6 ק״ג\",\"approxUnitWeightGrams\":5500,\"cuttingName\":\"שלם נקי\",\"unitCount\":3,\"totalWeightGrams\":16500}",
+        };
+        var line = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(
+            item,
+            new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true, UseStructuredLineDisplay = true });
+        Assert.Equal("בין 5-6 ק״ג (כ 5.5 ק\"ג) | שלם נקי", line);
+    }
+
+    [Fact]
+    public void Structured_snapshot_variable_weight_always_shown_even_when_hidden()
+    {
+        var item = new OrderItem
+        {
+            Title = "פילה סלמון",
+            LineDisplayJson = "{\"v\":1,\"kind\":\"by_unit_variable\",\"chosenUnitWeightGrams\":500,\"unitCount\":2,\"totalWeightGrams\":1000}",
+        };
+        var line = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(
+            item,
+            new OrderItemAttributeDisplayOptions { UseStructuredLineDisplay = true, HideWeightDetails = true });
+        Assert.Equal("500 גרם ליח'", line);
+    }
+
+    [Fact]
+    public void Structured_flag_without_snapshot_falls_back_to_legacy()
+    {
+        var item = new OrderItem
+        {
+            Title = "Product",
+            OrderLineQuantityMode = "units",
+            Quantity = 2,
+            UnitWeightGrams = 700,
+            OrderLinePerUnitWeightLabel = "700 גרם ליח'",
+            OrderLineCuttingLabel = "פרוס",
+            LineDisplayJson = null,
+        };
+        var line = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(
+            item,
+            new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true, UseStructuredLineDisplay = true });
+        Assert.NotNull(line);
+        Assert.Contains("700 גרם ליח'", line, StringComparison.Ordinal);
+        Assert.Contains("פרוס", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void HideWeightDetails_keeps_customer_chosen_variable_weight()
     {
         // "בחירת משקל ליחידה": the weight IS the ordered spec — never hidden.

@@ -23,6 +23,12 @@ public readonly record struct OrderItemAttributeDisplayOptions
     /// spec) and strips the "(כ X ק"ג)" suffix from the size label.
     /// </summary>
     public bool HideWeightDetails { get; init; }
+
+    /// <summary>
+    /// Site.UseStructuredOrderLineDisplay: render from the typed <c>LineDisplayJson</c> snapshot when the
+    /// line has one (no Hebrew-label parsing); lines without a snapshot always fall back to the legacy heuristics.
+    /// </summary>
+    public bool UseStructuredLineDisplay { get; init; }
 }
 
 /// <summary>
@@ -447,6 +453,12 @@ public static class OrderItemLineDisplay
         OrderItem item,
         OrderItemAttributeDisplayOptions options = default)
     {
+        if (options.UseStructuredLineDisplay)
+        {
+            var structuredSegs = TryGetStructuredAttributeSegments(item.LineDisplayJson, options.HideWeightDetails);
+            if (structuredSegs != null) return structuredSegs;
+        }
+
         var sizeRaw = item.OrderLineSizeLabel?.Trim();
         if (options.HideWeightDetails && !string.IsNullOrEmpty(sizeRaw))
         {
@@ -539,6 +551,55 @@ public static class OrderItemLineDisplay
         if (!string.IsNullOrEmpty(vtRaw) && vtRaw != title && !IsGenericVariantTitle(vtRaw))
             return new[] { vtRaw };
         return Array.Empty<string>();
+    }
+
+    /// <summary>
+    /// Structured rendering from the typed snapshot — pure formatting, no text heuristics.
+    /// Rules: size (+approx unless hidden), per-unit weight (chosen weight ALWAYS; informational only when
+    /// no size carries it and not hidden), cutting. Null when the line has no valid snapshot → legacy path.
+    /// </summary>
+    public static IReadOnlyList<string>? TryGetStructuredAttributeSegments(string? lineDisplayJson, bool hideWeightDetails)
+    {
+        var snap = OrderLineDisplaySnapshot.TryParse(lineDisplayJson);
+        if (snap == null) return null;
+
+        var showWeights = !hideWeightDetails;
+        var segments = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(snap.SizeName))
+        {
+            var size = snap.SizeName.Trim();
+            if (showWeights && snap.ApproxUnitWeightGrams is > 0)
+                size = $"{size} (כ {FormatApproxGramsHebrew(snap.ApproxUnitWeightGrams.Value)})";
+            segments.Add(size);
+        }
+
+        if (snap.Kind == OrderLineDisplayKinds.ByUnitVariable && snap.ChosenUnitWeightGrams is > 0)
+        {
+            // Customer-chosen weight is the ordered spec — always shown, even when weights are hidden.
+            segments.Add(FormatPerUnitHebrewFromGrams(snap.ChosenUnitWeightGrams.Value));
+        }
+        else if (showWeights && snap.ApproxUnitWeightGrams is > 0 && string.IsNullOrWhiteSpace(snap.SizeName)
+                 && snap.Kind is OrderLineDisplayKinds.ByUnitAverage or OrderLineDisplayKinds.ByUnitByVariant or OrderLineDisplayKinds.ByUnitAndWeight)
+        {
+            segments.Add(FormatPerUnitHebrewFromGrams(snap.ApproxUnitWeightGrams.Value));
+        }
+
+        if (!string.IsNullOrWhiteSpace(snap.CuttingName))
+            segments.Add(snap.CuttingName.Trim());
+
+        return segments;
+    }
+
+    /// <summary>"600 גרם" / "5.5 ק"ג" from grams (approx-weight phrasing).</summary>
+    private static string FormatApproxGramsHebrew(int grams)
+    {
+        if (grams < 1000) return $"{grams} גרם";
+        var kg = grams / 1000.0;
+        var s = Math.Abs(kg - Math.Round(kg)) < 0.001
+            ? Math.Round(kg).ToString(CultureInfo.InvariantCulture)
+            : Math.Round(kg, 2, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture);
+        return $"{s} ק\"ג";
     }
 
     /// <summary>

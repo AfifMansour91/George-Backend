@@ -85,6 +85,9 @@ namespace George.Services.Response
         /// <summary>When true, printouts include the permanent customer note (הערה קבועה). Off by default.</summary>
         public bool? ShowCustomerProfileNoteInPrints { get; set; }
 
+        /// <summary>Feature flag: render order lines from the typed LineDisplayJson snapshot when present. Off by default.</summary>
+        public bool? UseStructuredOrderLineDisplay { get; set; }
+
         /// <summary>When true, fast-scan picking: no confirm dialog on scan + auto-finish when all items picked. Off by default.</summary>
         public bool? FastPickingScan { get; set; }
 

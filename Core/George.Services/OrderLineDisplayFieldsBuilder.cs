@@ -62,6 +62,128 @@ public static class OrderLineDisplayFieldsBuilder
         if (snap.ClearSaleTotalWeight && string.IsNullOrWhiteSpace(req.SaleTotalWeight)
             && string.IsNullOrWhiteSpace(req.OrderLineQuantityMode))
             item.SaleTotalWeight = null;
+
+        // Typed display snapshot (LineDisplayJson) — written unconditionally for catalog lines so
+        // structured rendering (Site.UseStructuredOrderLineDisplay) can take over without re-parsing labels.
+        item.LineDisplayJson = BuildLineDisplaySnapshot(product, req, purchaseAsKgLine, variantIndex, variantWeightKg, cuttingValue, variableKg)?.ToJson();
+    }
+
+    /// <summary>Typed snapshot from catalog + request — numbers and clean names only (writer-side normalization).</summary>
+    private static OrderLineDisplaySnapshot? BuildLineDisplaySnapshot(
+        Product product,
+        CreateOrderItemReq req,
+        bool purchaseAsKgLine,
+        int variantIndex,
+        decimal? variantWeightKg,
+        string? cuttingValue,
+        decimal? variableKg)
+    {
+        var state = GetPricingState(product);
+
+        var kind = OrderLineDisplayKinds.Standard;
+        if (state.IsWeighted)
+        {
+            if (string.Equals(state.SetupType, "by_weight", StringComparison.OrdinalIgnoreCase))
+                kind = OrderLineDisplayKinds.ByWeight;
+            else if (string.Equals(state.SetupType, "by_unit_and_weight", StringComparison.OrdinalIgnoreCase))
+                kind = OrderLineDisplayKinds.ByUnitAndWeight;
+            else if (string.Equals(state.SetupType, "by_unit", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.Equals(state.UnitWeightMode, "variable", StringComparison.OrdinalIgnoreCase))
+                    kind = OrderLineDisplayKinds.ByUnitVariable;
+                else if (string.Equals(state.UnitWeightMode, "by_variant", StringComparison.OrdinalIgnoreCase) || state.WeightByVariant)
+                    kind = OrderLineDisplayKinds.ByUnitByVariant;
+                else
+                    kind = OrderLineDisplayKinds.ByUnitAverage;
+            }
+        }
+
+        int? approxGrams = null;
+        if (kind == OrderLineDisplayKinds.ByUnitByVariant)
+        {
+            var v = GetOrderedVariants(product).ElementAtOrDefault(variantIndex);
+            var wKg = variantWeightKg is > 0 ? variantWeightKg.Value : (v?.Weight ?? (decimal)state.UnitWeight);
+            var g = ToGramsFromConfigWeight(wKg, state.UnitRaw);
+            if (g > 0) approxGrams = decimal.ToInt32(g);
+        }
+        else if (kind is OrderLineDisplayKinds.ByUnitAverage or OrderLineDisplayKinds.ByUnitAndWeight)
+        {
+            var g = ToGramsFromConfigWeight(state.UnitWeight, state.UnitRaw);
+            if (g > 0) approxGrams = decimal.ToInt32(g);
+        }
+
+        int? chosenGrams = null;
+        if (kind == OrderLineDisplayKinds.ByUnitVariable)
+        {
+            if (variableKg is > 0)
+            {
+                var g = ToGramsFromConfigWeight(variableKg.Value, "kg");
+                if (g > 0) chosenGrams = decimal.ToInt32(g);
+            }
+            else
+            {
+                // The chosen weight arrives differently per channel — normalize it to grams HERE
+                // (single writer) so renderers never parse text: manual/kiosk send a Hebrew label,
+                // Woo sends unitWeight grams (1000 = by-kg sentinel, not a portion) or a bare-kg saleTotalWeight.
+                var g = OrderItemLineDisplay.ParseGramsFromHebrewWeightLabel(req.OrderLinePerUnitWeightLabel);
+                if (g <= 0 && req.UnitWeightGrams is > 0 && req.UnitWeightGrams != 1000m)
+                    g = decimal.ToInt32(decimal.Round(req.UnitWeightGrams.Value, 0, MidpointRounding.AwayFromZero));
+                if (g <= 0)
+                {
+                    var kgFromSale = TryParseLeadingDecimalKg(req.SaleTotalWeight);
+                    if (kgFromSale is > 0 and < 500)
+                        g = decimal.ToInt32(decimal.Round(kgFromSale.Value * 1000m, 0, MidpointRounding.AwayFromZero));
+                }
+                if (g > 0) chosenGrams = g;
+            }
+        }
+
+        var sizeName = GetVariantSizeName(product, variantIndex);
+
+        decimal? unitCount = null;
+        int? totalGrams = null;
+        if (purchaseAsKgLine || kind == OrderLineDisplayKinds.ByWeight)
+        {
+            var totalKg = req.Quantity;
+            if (totalKg > 0) totalGrams = decimal.ToInt32(decimal.Round(totalKg * 1000m, 0, MidpointRounding.AwayFromZero));
+        }
+        else
+        {
+            unitCount = req.Quantity;
+            var perUnit = chosenGrams ?? approxGrams;
+            if (perUnit is > 0 && req.Quantity > 0)
+                totalGrams = decimal.ToInt32(decimal.Round(perUnit.Value * req.Quantity, 0, MidpointRounding.AwayFromZero));
+        }
+
+        return new OrderLineDisplaySnapshot
+        {
+            Kind = kind,
+            SizeName = string.IsNullOrWhiteSpace(sizeName) ? null : sizeName,
+            ApproxUnitWeightGrams = approxGrams,
+            ChosenUnitWeightGrams = chosenGrams,
+            CuttingName = string.IsNullOrWhiteSpace(cuttingValue) ? null : cuttingValue.Trim(),
+            UnitCount = unitCount,
+            TotalWeightGrams = totalGrams,
+        };
+    }
+
+    /// <summary>Clean size name from the resolved variant (non-cutting option; prefers "גודל"/"size").</summary>
+    private static string? GetVariantSizeName(Product product, int variantIndex)
+    {
+        var v = GetOrderedVariants(product).ElementAtOrDefault(variantIndex);
+        var ov = v?.ProductVariantOptionValue;
+        if (ov == null) return null;
+        string? firstNonCutting = null;
+        foreach (var kv in ov)
+        {
+            if (string.IsNullOrWhiteSpace(kv.OptionValue)) continue;
+            var name = kv.OptionName ?? "";
+            if (name == "גודל" || string.Equals(name, "size", StringComparison.OrdinalIgnoreCase))
+                return kv.OptionValue.Trim();
+            if (firstNonCutting == null && !CuttingKeyHint.IsMatch(name))
+                firstNonCutting = kv.OptionValue.Trim();
+        }
+        return firstNonCutting;
     }
 
     /// <summary>
@@ -175,7 +297,7 @@ public static class OrderLineDisplayFieldsBuilder
     private static List<ProductVariant> GetOrderedVariants(Product product) =>
         product.ProductVariant?.Where(v => !v.IsDeleted).OrderBy(v => v.Id).ToList() ?? new List<ProductVariant>();
 
-    private static OrderLineDisplaySnapshot Build(
+    private static DisplayFieldsSnapshot Build(
         Product product,
         bool purchaseAsKgLine,
         decimal quantity,
@@ -188,7 +310,7 @@ public static class OrderLineDisplayFieldsBuilder
         var state = GetPricingState(product);
 
         if (!state.IsWeighted)
-            return AsUnits(new OrderLineDisplaySnapshot(), cutting);
+            return AsUnits(new DisplayFieldsSnapshot(), cutting);
 
         if (purchaseAsKgLine)
         {
@@ -202,7 +324,7 @@ public static class OrderLineDisplayFieldsBuilder
             }
 
             var saleTotalWeight = FormatSaleTotalWeightFromTotalKg(quantity);
-            return new OrderLineDisplaySnapshot
+            return new DisplayFieldsSnapshot
             {
                 OrderLineQuantityMode = "weight",
                 OrderLineCuttingLabel = cutting,
@@ -212,7 +334,7 @@ public static class OrderLineDisplayFieldsBuilder
         }
 
         if (string.Equals(state.SetupType, "standard", StringComparison.OrdinalIgnoreCase))
-            return AsUnits(new OrderLineDisplaySnapshot(), cutting);
+            return AsUnits(new DisplayFieldsSnapshot(), cutting);
 
         var baseSnap = GetPortionStyleWeightSnapshots(state, quantity, variantIndex, variantWeightKg, product);
 
@@ -223,7 +345,7 @@ public static class OrderLineDisplayFieldsBuilder
                 return AsUnits(baseSnap, cutting);
             var totalKg = gramsPerPortion * quantity / 1000m;
             var saleTotalWeight = FormatSaleTotalWeightFromTotalKg(totalKg);
-            return new OrderLineDisplaySnapshot
+            return new DisplayFieldsSnapshot
             {
                 OrderLineQuantityMode = "weight",
                 OrderLineCuttingLabel = cutting,
@@ -270,8 +392,8 @@ public static class OrderLineDisplayFieldsBuilder
         return AsUnits(baseSnap, cutting);
     }
 
-    private static OrderLineDisplaySnapshot AsUnits(
-        OrderLineDisplaySnapshot baseSnap,
+    private static DisplayFieldsSnapshot AsUnits(
+        DisplayFieldsSnapshot baseSnap,
         string? cutting,
         string? perUnit = null,
         string? size = null) =>
@@ -288,30 +410,30 @@ public static class OrderLineDisplayFieldsBuilder
         };
 
     /// <summary>Woo-style <c>unitWeightGrams</c> / <c>saleUnits</c> / per-portion <c>saleTotalWeight</c> for unit-mode lines (not total-kg lines).</summary>
-    private static OrderLineDisplaySnapshot GetPortionStyleWeightSnapshots(
+    private static DisplayFieldsSnapshot GetPortionStyleWeightSnapshots(
         ProductPricingState state,
         decimal quantity,
         int variantIndex,
         decimal? variantWeightKg,
         Product product)
     {
-        if (!state.IsWeighted) return new OrderLineDisplaySnapshot();
+        if (!state.IsWeighted) return new DisplayFieldsSnapshot();
 
         if (string.Equals(state.SetupType, "standard", StringComparison.OrdinalIgnoreCase))
-            return new OrderLineDisplaySnapshot();
+            return new DisplayFieldsSnapshot();
 
         if (string.Equals(state.SetupType, "by_unit", StringComparison.OrdinalIgnoreCase))
         {
             if (string.Equals(state.UnitWeightMode, "variable", StringComparison.OrdinalIgnoreCase))
-                return new OrderLineDisplaySnapshot();
+                return new DisplayFieldsSnapshot();
 
             if (string.Equals(state.UnitWeightMode, "by_variant", StringComparison.OrdinalIgnoreCase) || state.WeightByVariant)
             {
                 var v = GetOrderedVariants(product).ElementAtOrDefault(variantIndex);
                 var wKg = variantWeightKg is > 0 ? variantWeightKg.Value : (v?.Weight ?? (decimal)state.UnitWeight);
                 var gramsPerUnit = ToGramsFromConfigWeight(wKg, state.UnitRaw);
-                if (gramsPerUnit <= 0) return new OrderLineDisplaySnapshot();
-                return new OrderLineDisplaySnapshot
+                if (gramsPerUnit <= 0) return new DisplayFieldsSnapshot();
+                return new DisplayFieldsSnapshot
                 {
                     UnitWeightGrams = gramsPerUnit,
                     SaleUnits = FormatSaleUnitsHebrew(quantity),
@@ -320,8 +442,8 @@ public static class OrderLineDisplayFieldsBuilder
             }
 
             var grams = ToGramsFromConfigWeight(state.UnitWeight, state.UnitRaw);
-            if (grams <= 0) return new OrderLineDisplaySnapshot();
-            return new OrderLineDisplaySnapshot
+            if (grams <= 0) return new DisplayFieldsSnapshot();
+            return new DisplayFieldsSnapshot
             {
                 UnitWeightGrams = grams,
                 SaleUnits = FormatSaleUnitsHebrew(quantity),
@@ -332,8 +454,8 @@ public static class OrderLineDisplayFieldsBuilder
         if (string.Equals(state.SetupType, "by_unit_and_weight", StringComparison.OrdinalIgnoreCase))
         {
             var gramsPerUnit = ToGramsFromConfigWeight(state.UnitWeight, state.UnitRaw);
-            if (gramsPerUnit <= 0) return new OrderLineDisplaySnapshot();
-            return new OrderLineDisplaySnapshot
+            if (gramsPerUnit <= 0) return new DisplayFieldsSnapshot();
+            return new DisplayFieldsSnapshot
             {
                 UnitWeightGrams = gramsPerUnit,
                 SaleUnits = FormatSaleUnitsHebrew(quantity),
@@ -344,8 +466,8 @@ public static class OrderLineDisplayFieldsBuilder
         if (string.Equals(state.SetupType, "by_weight", StringComparison.OrdinalIgnoreCase))
         {
             var gramsPerUnit = ToGramsFromConfigWeight(state.StartWeight, state.UnitRaw);
-            if (gramsPerUnit <= 0) return new OrderLineDisplaySnapshot();
-            return new OrderLineDisplaySnapshot
+            if (gramsPerUnit <= 0) return new DisplayFieldsSnapshot();
+            return new DisplayFieldsSnapshot
             {
                 UnitWeightGrams = gramsPerUnit,
                 SaleUnits = FormatSaleUnitsHebrew(quantity),
@@ -353,10 +475,10 @@ public static class OrderLineDisplayFieldsBuilder
             };
         }
 
-        return new OrderLineDisplaySnapshot();
+        return new DisplayFieldsSnapshot();
     }
 
-    private sealed class OrderLineDisplaySnapshot
+    private sealed class DisplayFieldsSnapshot
     {
         public string? OrderLineQuantityMode { get; init; }
         public string? OrderLinePerUnitWeightLabel { get; init; }
