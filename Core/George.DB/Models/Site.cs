@@ -256,6 +256,13 @@ public partial class Site
 
     public bool CardcomSaveCardEnabled { get; set; } = true;
 
+    /// <summary>
+    /// Max installments (תשלומים) offered on the Cardcom hosted payment page for IMMEDIATE charges only.
+    /// 1 = single payment, selector hidden (default). J5 authorization holds and direct token charges
+    /// (picking-time charge, retries, refunds) always stay single-payment regardless of this value.
+    /// </summary>
+    public int CardcomMaxInstallments { get; set; } = 1;
+
     public int PaymentAuthBufferPercent { get; set; } = 25;
 
     [Column(TypeName = "decimal(18, 2)")]

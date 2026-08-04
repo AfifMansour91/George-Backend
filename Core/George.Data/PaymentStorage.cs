@@ -32,6 +32,7 @@ public class PaymentStorage : StorageBase
         tracked.CardcomApiName = site.CardcomApiName;
         tracked.CardcomApiPasswordEncrypted = site.CardcomApiPasswordEncrypted;
         tracked.CardcomSaveCardEnabled = site.CardcomSaveCardEnabled;
+        tracked.CardcomMaxInstallments = site.CardcomMaxInstallments;
         tracked.PaymentAuthBufferPercent = site.PaymentAuthBufferPercent;
         tracked.PaymentMaxAuthAmount = site.PaymentMaxAuthAmount;
         tracked.PaymentAllowCaptureAboveAuth = site.PaymentAllowCaptureAboveAuth;
@@ -292,6 +293,7 @@ public class PaymentStorage : StorageBase
         tracked.CardcomApprovalNumber = order.CardcomApprovalNumber;
         tracked.CardcomTokenLast4 = order.CardcomTokenLast4;
         tracked.CardcomCardBrand = order.CardcomCardBrand;
+        tracked.CardcomSelectedInstallments = order.CardcomSelectedInstallments;
         tracked.CustomerPaymentMethodId = order.CustomerPaymentMethodId;
         tracked.CardcomPaymentJson = order.CardcomPaymentJson;
         if (order.CustomerId is int customerId)

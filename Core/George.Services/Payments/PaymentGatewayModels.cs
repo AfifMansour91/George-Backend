@@ -21,6 +21,8 @@ public sealed class CreateHostedSessionRequest
     public string? ProductName { get; init; }
     public string Language { get; init; } = "he";
     public bool SaveCard { get; init; }
+    /// <summary>Max installments offered on the hosted page. Only honored for immediate charges — holds force 1.</summary>
+    public int MaxInstallments { get; init; } = 1;
     public bool UseAuthorizationHold { get; init; } = true;
     /// <summary>Manager MOTO: Cardcom Virtual Terminal iframe (card entry by staff).</summary>
     public bool UseVirtualTerminal { get; init; }
@@ -80,6 +82,8 @@ public sealed class ValidateCallbackResult
     public string? DocumentNumber { get; init; }
     public string? DocumentUrl { get; init; }
     public decimal? Amount { get; init; }
+    /// <summary>Installments the customer selected on the hosted page (TranzactionInfo). Null/1 = single payment.</summary>
+    public int? NumOfPayments { get; init; }
     public string? RawJson { get; init; }
 }
 
@@ -99,6 +103,8 @@ public sealed class CaptureAuthorizationRequest
     public string? ApprovalNumber { get; init; }
     public string ExternalUniqTranId { get; init; } = Guid.NewGuid().ToString("N");
     public bool CreateDocument { get; init; } = true;
+    /// <summary>Installments for the charge (customer's hosted-page selection). 1 = single payment.</summary>
+    public int NumOfPayments { get; init; } = 1;
     public CardcomCardOwnerContact? CardOwner { get; init; }
     public CardcomTransactionDocument? Document { get; init; }
 }
@@ -120,6 +126,8 @@ public sealed class ChargeTokenRequest
     public string? ApprovalNumber { get; init; }
     public string ExternalUniqTranId { get; init; } = Guid.NewGuid().ToString("N");
     public bool CreateDocument { get; init; } = true;
+    /// <summary>Installments for the charge (customer's hosted-page selection). 1 = single payment.</summary>
+    public int NumOfPayments { get; init; } = 1;
     public CardcomCardOwnerContact? CardOwner { get; init; }
     public CardcomTransactionDocument? Document { get; init; }
 }
@@ -198,6 +206,8 @@ public sealed class SitePaymentCredentials
     public string? ApiPassword { get; init; }
     public bool ApiPasswordStoredButUnreadable { get; init; }
     public bool SaveCardEnabled { get; init; } = true;
+    /// <summary>Max installments on the hosted payment page for immediate charges. 1 = selector hidden.</summary>
+    public int MaxInstallments { get; init; } = 1;
     public int AuthBufferPercent { get; init; } = 25;
     public decimal? MaxAuthAmount { get; init; }
     public bool AllowCaptureAboveAuth { get; init; }

@@ -771,6 +771,7 @@ public partial class GeorgeDBContextBase : DbContext
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.PaymentGatewayProvider).HasDefaultValue("none");
             entity.Property(e => e.CardcomSaveCardEnabled).HasDefaultValue(true);
+            entity.Property(e => e.CardcomMaxInstallments).HasDefaultValue(1);
             entity.Property(e => e.PaymentAuthBufferPercent).HasDefaultValue(25);
             entity.Property(e => e.PaymentAllowCaptureAboveAuth).HasDefaultValue(false);
 

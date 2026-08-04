@@ -99,6 +99,8 @@ public class SitePaymentSettingsRes
     /// <summary>Encrypted password exists but cannot be decrypted (e.g. after server restart before keys were persisted).</summary>
     public bool CardcomApiPasswordNeedsResave { get; set; }
     public bool CardcomSaveCardEnabled { get; set; }
+    /// <summary>Max installments on the hosted payment page for immediate charges. 1 = selector hidden.</summary>
+    public int CardcomMaxInstallments { get; set; } = 1;
     public int PaymentAuthBufferPercent { get; set; }
     public decimal? PaymentMaxAuthAmount { get; set; }
     public bool PaymentAllowCaptureAboveAuth { get; set; }

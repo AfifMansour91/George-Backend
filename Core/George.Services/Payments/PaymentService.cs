@@ -167,6 +167,7 @@ public class PaymentService : ServiceBase
             ProductName = $"הזמנה {order.OrderNumber}",
             Language = "he",
             SaveCard = true,
+            MaxInstallments = creds.MaxInstallments,
             UseAuthorizationHold = !chargeNow,
             UseVirtualTerminal = isMoto,
             SuccessRedirectUrl = $"{appBase}/customer/pay/{order.Id}/return?status=success",
@@ -205,6 +206,10 @@ public class PaymentService : ServiceBase
         return s.Equals("Unpaid", StringComparison.OrdinalIgnoreCase)
             || s.Equals("Pending", StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>Installments the customer selected on the hosted page at order creation; 1 when none.</summary>
+    private static int ResolveSelectedInstallments(Order order) =>
+        order.CardcomSelectedInstallments is int n and > 1 and <= 36 ? n : 1;
 
     /// <summary>Ready orders awaiting payment should charge immediately (not J5 hold).</summary>
     private static bool OrderNeedsImmediateCharge(Order order)
@@ -603,6 +608,7 @@ public class PaymentService : ServiceBase
                 Amount = finalAmount,
                 ApprovalNumber = approval,
                 ExternalUniqTranId = $"capture-{order.Id}-{DateTime.UtcNow:yyyyMMddHHmmss}",
+                NumOfPayments = ResolveSelectedInstallments(order),
                 CardOwner = cardOwner,
                 Document = invoiceDocument,
             }, cancelToken);
@@ -667,6 +673,7 @@ public class PaymentService : ServiceBase
             CardExpirationMMYY = cardExp,
             ApprovalNumber = null,
             ExternalUniqTranId = $"charge-{order.Id}-{DateTime.UtcNow:yyyyMMddHHmmss}",
+            NumOfPayments = ResolveSelectedInstallments(order),
             CardOwner = cardOwner,
             Document = invoiceDocument,
         }, cancelToken);
@@ -1351,6 +1358,8 @@ public class PaymentService : ServiceBase
             site.CardcomApiPasswordEncrypted = _tokenProtector.Protect(req.CardcomApiPassword.Trim());
         if (req.CardcomSaveCardEnabled.HasValue)
             site.CardcomSaveCardEnabled = req.CardcomSaveCardEnabled.Value;
+        if (req.CardcomMaxInstallments.HasValue)
+            site.CardcomMaxInstallments = Math.Clamp(req.CardcomMaxInstallments.Value, 1, 36);
         if (req.PaymentAuthBufferPercent.HasValue)
             site.PaymentAuthBufferPercent = Math.Clamp(req.PaymentAuthBufferPercent.Value, 0, 100);
         if (req.PaymentMaxAuthAmount.HasValue)
@@ -1421,6 +1430,8 @@ public class PaymentService : ServiceBase
         var callbackDisplay = _cardcom.ExtractCardDisplayFields(payload.RawJson ?? callbackJson);
         order.CardcomTokenLast4 = CoalesceNonEmpty(payload.Last4Digits, callbackDisplay.Last4Digits);
         order.CardcomCardBrand = CoalesceNonEmpty(payload.CardBrand, callbackDisplay.CardBrand);
+        if (payload.NumOfPayments is > 1 and <= 36)
+            order.CardcomSelectedInstallments = payload.NumOfPayments;
         if (!string.IsNullOrWhiteSpace(payload.DocumentNumber))
             order.InvoiceNumber = payload.DocumentNumber;
         if (!string.IsNullOrWhiteSpace(payload.DocumentUrl))
@@ -1589,6 +1600,7 @@ public class PaymentService : ServiceBase
             DocumentNumber = source.DocumentNumber,
             DocumentUrl = source.DocumentUrl,
             Amount = source.Amount,
+            NumOfPayments = source.NumOfPayments,
             RawJson = source.RawJson,
         };
 
@@ -2004,6 +2016,7 @@ public class PaymentService : ServiceBase
             ApiPassword = password,
             ApiPasswordStoredButUnreadable = apiPasswordStoredButUnreadable,
             SaveCardEnabled = site.CardcomSaveCardEnabled,
+            MaxInstallments = Math.Clamp(site.CardcomMaxInstallments, 1, 36),
             AuthBufferPercent = site.PaymentAuthBufferPercent,
             MaxAuthAmount = site.PaymentMaxAuthAmount,
             AllowCaptureAboveAuth = site.PaymentAllowCaptureAboveAuth,
@@ -2930,6 +2943,7 @@ public class PaymentService : ServiceBase
             CardcomApiName = site.CardcomApiName,
             HasCardcomApiPassword = !string.IsNullOrWhiteSpace(site.CardcomApiPasswordEncrypted),
             CardcomSaveCardEnabled = site.CardcomSaveCardEnabled,
+            CardcomMaxInstallments = site.CardcomMaxInstallments,
             PaymentAuthBufferPercent = site.PaymentAuthBufferPercent,
             PaymentMaxAuthAmount = site.PaymentMaxAuthAmount,
             PaymentAllowCaptureAboveAuth = site.PaymentAllowCaptureAboveAuth,

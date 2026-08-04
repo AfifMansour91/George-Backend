@@ -20,6 +20,8 @@ public class UpdateSitePaymentSettingsReq
     public string? CardcomApiName { get; set; }
     public string? CardcomApiPassword { get; set; }
     public bool? CardcomSaveCardEnabled { get; set; }
+    /// <summary>Max installments on the hosted payment page for immediate charges (1-36). 1 hides the selector.</summary>
+    public int? CardcomMaxInstallments { get; set; }
     public int? PaymentAuthBufferPercent { get; set; }
     public decimal? PaymentMaxAuthAmount { get; set; }
     public bool? PaymentAllowCaptureAboveAuth { get; set; }

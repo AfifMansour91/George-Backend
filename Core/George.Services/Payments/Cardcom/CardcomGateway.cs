@@ -192,7 +192,8 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         CancellationToken cancelToken = default)
         => await DoTransactionAsync(credentials, request.Amount, request.Token, request.CardExpirationMMYY,
             request.ApprovalNumber, isRefund: false, mtiVoid: false, jValidateHold: false, request.ExternalUniqTranId,
-            request.CreateDocument ? request.Document : null, request.CardOwner, cancelToken)
+            request.CreateDocument ? request.Document : null, request.CardOwner, cancelToken,
+            numOfPayments: request.NumOfPayments)
             .ConfigureAwait(false);
 
     public async Task<PaymentTransactionResult> PlaceTokenAuthorizationHoldAsync(
@@ -210,7 +211,8 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         CancellationToken cancelToken = default)
         => await DoTransactionAsync(credentials, request.Amount, request.Token, request.CardExpirationMMYY,
             request.ApprovalNumber, isRefund: false, mtiVoid: false, jValidateHold: false, request.ExternalUniqTranId,
-            request.CreateDocument ? request.Document : null, request.CardOwner, cancelToken)
+            request.CreateDocument ? request.Document : null, request.CardOwner, cancelToken,
+            numOfPayments: request.NumOfPayments)
             .ConfigureAwait(false);
 
     public async Task<PaymentTransactionResult> CreateDocumentAsync(
@@ -621,7 +623,8 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         string externalUniqTranId,
         CardcomTransactionDocument? document,
         CardcomCardOwnerContact? cardOwner,
-        CancellationToken cancelToken)
+        CancellationToken cancelToken,
+        int numOfPayments = 1)
     {
         // Terminal routing with a second (no-CVV) charge terminal configured:
         // - ONLY the actual charge (J4 capture / direct token charge) and its token-refund go to the charge
@@ -631,6 +634,8 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         // The hosted payment page (card entry, with CVV) stays on the primary too — see CreateHostedSessionAsync.
         var useChargeTerminal = !jValidateHold && !mtiVoid;
         var terminal = (useChargeTerminal ? credentials.EffectiveChargeTerminalNumber : credentials.TerminalNumber) ?? 0;
+        // Installments apply ONLY to the actual charge; holds, voids and refunds are always single-payment.
+        var effectivePayments = (!isRefund && !mtiVoid && !jValidateHold) ? Math.Clamp(numOfPayments, 1, 36) : 1;
         var body = new Dictionary<string, object?>
         {
             ["TerminalNumber"] = terminal,
@@ -639,7 +644,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
             ["ISOCoinId"] = MapCurrency(credentials.Currency),
             ["ExternalUniqTranId"] = externalUniqTranId,
             ["ExternalUniqTranIdResponse"] = false,
-            ["NumOfPayments"] = 1,
+            ["NumOfPayments"] = effectivePayments,
         };
 
         if (!string.IsNullOrWhiteSpace(token))
@@ -679,7 +684,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         _logger.LogInformation(
             "Cardcom Transactions/Transaction: externalId={ExternalUniqTranId}, amount={Amount}, terminal={Terminal}, " +
             "tokenShape={TokenShape}, tokenMask={TokenMask}, cardExp={CardExp}, hasApproval={HasApproval}, " +
-            "isRefund={IsRefund}, mtiVoid={MtiVoid}, jValidateHold={JValidateHold}, hasDocument={HasDocument}, hasCardOwner={HasCardOwner}",
+            "isRefund={IsRefund}, mtiVoid={MtiVoid}, jValidateHold={JValidateHold}, hasDocument={HasDocument}, hasCardOwner={HasCardOwner}, numOfPayments={NumOfPayments}",
             externalUniqTranId,
             amount,
             terminal,
@@ -691,7 +696,8 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
             mtiVoid,
             jValidateHold,
             document != null,
-            cardOwner != null);
+            cardOwner != null,
+            effectivePayments);
 
         var json = await PostJsonAsync("Transactions/Transaction", body, cancelToken).ConfigureAwait(false);
         if (json == null)
@@ -847,8 +853,14 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
 
             string? brand = null;
             string? tiApproval = null;
+            int? numOfPayments = null;
             if (TryGetObjectProperty(root, "TranzactionInfo", out var ti))
             {
+                var payments = GetInt32Property(ti, "NumberOfPayments");
+                if (payments <= 0)
+                    payments = GetInt32Property(ti, "NumOfPayments");
+                if (payments > 0)
+                    numOfPayments = payments;
                 token = FirstNonEmpty(token, GetStringProperty(ti, "Token"));
                 tiApproval = FirstNonEmpty(
                     GetStringProperty(ti, "ApprovalNumber"),
@@ -921,6 +933,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
                 DocumentNumber = NormalizeDocumentNumber(docNum),
                 DocumentUrl = docUrl,
                 Amount = amount,
+                NumOfPayments = numOfPayments,
                 RawJson = json,
             };
         }
@@ -986,9 +999,11 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         if (request.UseAuthorizationHold)
             adv["JValidateType"] = 5;
 
-        // Single payment only — hides installments selector on credit form (API param, not CSS).
+        // Immediate charge: the customer's selection settles on the page itself.
+        // J5 hold: the selection is read back from the callback (TranzactionInfo.NumOfPayments), stored on
+        // the order, and honored by the post-picking token charge — see FinalizePickingPayment.
         adv["MinNumOfPayments"] = 1;
-        adv["MaxNumOfPayments"] = 1;
+        adv["MaxNumOfPayments"] = Math.Clamp(request.MaxInstallments, 1, 36);
         adv["SelectedNumOfPayments"] = 1;
 
         if (request.UseVirtualTerminal)

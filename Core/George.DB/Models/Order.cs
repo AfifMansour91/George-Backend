@@ -291,6 +291,12 @@ public partial class Order
     [StringLength(32)]
     public string? CardcomCardBrand { get; set; }
 
+    /// <summary>
+    /// Installments (תשלומים) the customer selected on the Cardcom hosted page at order creation (J5 hold).
+    /// Honored by the post-picking token charge. Null/1 = single payment.
+    /// </summary>
+    public int? CardcomSelectedInstallments { get; set; }
+
     public int? CustomerPaymentMethodId { get; set; }
 
     /// <summary>Public Wolt tracking page URL after dispatch.</summary>
