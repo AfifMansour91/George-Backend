@@ -2019,7 +2019,8 @@ namespace George.Services
             // Future (scheduled) orders use their own immediate-print toggle (PrintFutureImmediate);
             // same-day orders use PrintNewOrderImmediate. Without this split a future order printed
             // immediately whenever the same-day toggle was on, ignoring the future-order setting.
-            var immediatePrintEnabled = IsFutureScheduledOrder(order)
+            var isFutureOrder = IsFutureScheduledOrder(order);
+            var immediatePrintEnabled = isFutureOrder
                 ? site.PrintFutureImmediate == true
                 : site.PrintNewOrderImmediate == true;
             if (!immediatePrintEnabled)
@@ -2039,16 +2040,32 @@ namespace George.Services
             // agents print PDFs via Sumatra onto the printer's paper — no agent update needed).
             var useA4 = site.VoucherPrintA4 == true;
             var hideDeliveryTime = site.VoucherHideDeliveryTime == true;
-            var payload = useA4 ? BuildAutoVoucherA4Html(orderForPrint, hideDeliveryTime) : BuildAutoVoucherHtml(orderForPrint, hideDeliveryTime);
+            var hideUnitWeight = site.HideUnitWeightInOrders == true;
+            // Site.ShowCustomerProfileNoteInPrints (opt-in): include הערה קבועה מכרטיס הלקוח in the printed order notes.
+            string? customerProfileNote = null;
+            if (site.ShowCustomerProfileNoteInPrints == true && orderForPrint.CustomerId is > 0)
+            {
+                var notesMap = await _customerStorage
+                    .GetNotesByCustomerIdsAsync(new[] { orderForPrint.CustomerId.Value }, cancelToken)
+                    .ConfigureAwait(false);
+                notesMap.TryGetValue(orderForPrint.CustomerId.Value, out customerProfileNote);
+            }
+            var payload = useA4
+                ? BuildAutoVoucherA4Html(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote)
+                : BuildAutoVoucherHtml(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote);
             if (string.IsNullOrWhiteSpace(payload))
                 return;
 
+            // Future orders share the kanban's job key ("VoucherAuto:FutureImmediate") so the backend
+            // enqueue and the open-kanban frontend enqueue dedupe to ONE job via the (siteId, orderId,
+            // jobType) idempotency — with distinct keys a future Woo order printed twice.
+            var baseJobType = isFutureOrder ? "VoucherAuto:FutureImmediate" : "VoucherAuto:NewImmediate";
             var req = new CreatePrintJobReq
             {
                 SiteId = order.SiteId,
                 OrderId = order.Id,
-                JobType = useA4 ? "VoucherAuto:NewImmediate:A4" : "VoucherAuto:NewImmediate",
-                Trigger = "NewImmediate",
+                JobType = useA4 ? baseJobType + ":A4" : baseJobType,
+                Trigger = isFutureOrder ? "FutureImmediate" : "NewImmediate",
                 ClientSource = "Backend:OrderService",
                 Payload = payload
             };
@@ -2068,7 +2085,7 @@ namespace George.Services
         /// email: customer + delivery boxes side by side, ordered-items table (product | qty | price),
         /// then subtotal / shipping / payment / grand-total rows. Delivered to the agent as an A4 PDF.
         /// </summary>
-        private string BuildAutoVoucherA4Html(Order order, bool hideDeliveryTime = false)
+        private string BuildAutoVoucherA4Html(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null)
         {
             var items = order.OrderItem?.OrderBy(i => i.SortOrder).ToList() ?? new List<OrderItem>();
             var orderNo = order.OrderNumber ?? order.Id.ToString(CultureInfo.InvariantCulture);
@@ -2079,7 +2096,7 @@ namespace George.Services
             // Site.VoucherHideDeliveryTime: print the delivery date without the time slot.
             var deliveryTime = hideDeliveryTime ? null : (isShipping ? order.DeliveryTime : order.PickupTime);
             var deliveryLabel = isShipping ? "משלוח עד הבית" : "איסוף עצמי";
-            var orderNotes = CombineOrderLevelNotes(order);
+            var orderNotes = CombineOrderLevelNotes(order, customerProfileNote);
             var payLine = VoucherPaymentHeadline(order, !string.Equals(order.Status, "InTreatment", StringComparison.OrdinalIgnoreCase));
 
             static string Money(decimal v) => "₪" + v.ToString("N2", CultureInfo.InvariantCulture);
@@ -2098,7 +2115,7 @@ namespace George.Services
             // Delivery / pickup box
             var deliveryBox = new StringBuilder();
             deliveryBox.Append("<div style=\"flex:1;min-width:220px;\">");
-            deliveryBox.Append("<div style=\"font-size:16px;font-weight:800;margin-bottom:8px;\">פרטי משלוח / איסוף עצמי</div>");
+            deliveryBox.Append("<div style=\"font-size:16px;font-weight:800;margin-bottom:8px;\">אופן אספקה</div>");
             if (deliveryDate.HasValue)
             {
                 var dateText = FormatVoucherDateWithWeekday(deliveryDate.Value)
@@ -2121,7 +2138,7 @@ namespace George.Services
             deliveryBox.Append("</div>");
 
             // Items table rows
-            var attrOpts = new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true, VoucherPerUnitWeightVariableOnly = true };
+            var attrOpts = new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true, HideWeightDetails = hideUnitWeight };
             var rows = new StringBuilder();
             foreach (var it in items)
             {
@@ -2223,7 +2240,7 @@ namespace George.Services
             return sb.ToString();
         }
 
-        private string BuildAutoVoucherHtml(Order order, bool hideDeliveryTime = false)
+        private string BuildAutoVoucherHtml(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null)
         {
             var sb = new StringBuilder();
             var items = order.OrderItem?.OrderBy(i => i.SortOrder).ToList() ?? new List<OrderItem>();
@@ -2245,7 +2262,7 @@ namespace George.Services
             var pickingVoucher = string.Equals(order.Status, "InTreatment", StringComparison.OrdinalIgnoreCase);
             var showTopQr = newVoucher || pickingVoucher;
             var showBottomQr = !showTopQr;
-            var orderNotes = CombineOrderLevelNotes(order);
+            var orderNotes = CombineOrderLevelNotes(order, customerProfileNote);
             var grandTotal = ComputeVoucherGrandTotal(order);
             var qrDataUrl = GenerateVoucherQrDataUrl(order, _publicAppBaseUrl);
             var pa = "-webkit-print-color-adjust:exact;print-color-adjust:exact;";
@@ -2366,7 +2383,7 @@ namespace George.Services
             sb.AppendLine($"    <span style=\"font-size:20px;font-weight:800;line-height:24px;\">{VoucherItemsTitle} ({itemCount})</span>");
             sb.AppendLine("  </div>");
 
-            var attrOpts = new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true, VoucherPerUnitWeightVariableOnly = true };
+            var attrOpts = new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true, HideWeightDetails = hideUnitWeight };
             foreach (var it in items)
             {
                 var title = EscapeHtml(OrderItemLineDisplay.GetOrderItemProductName(it));
@@ -2460,11 +2477,13 @@ namespace George.Services
         private const string VoucherDeliveryDatetimeValueStyle =
             "font-size:20px;font-weight:700;line-height:24px;white-space:nowrap;word-break:normal;overflow-wrap:normal;";
 
-        private static string CombineOrderLevelNotes(Order order)
+        private static string CombineOrderLevelNotes(Order order, string? customerProfileNote = null)
         {
-            var parts = new[] { order.ManagerNote, order.DeliveryNote, order.CustomerNote }
+            // customerProfileNote = הערה קבועה מכרטיס הלקוח; Distinct so a note saved on both never prints twice.
+            var parts = new[] { order.ManagerNote, customerProfileNote, order.DeliveryNote, order.CustomerNote }
                 .Where(s => !string.IsNullOrWhiteSpace(s))
-                .Select(s => s!.Trim());
+                .Select(s => s!.Trim())
+                .Distinct();
             return string.Join(" · ", parts);
         }
 

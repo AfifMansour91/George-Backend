@@ -79,6 +79,12 @@ namespace George.Services.Response
         /// <summary>When true, show the product SKU (מק"ט) on picking-screen lines. Off by default.</summary>
         public bool? ShowSkuInPicking { get; set; }
 
+        /// <summary>When true, hide per-unit / size approximate weight on printouts, order cards and picking. Off by default.</summary>
+        public bool? HideUnitWeightInOrders { get; set; }
+
+        /// <summary>When true, printouts include the permanent customer note (הערה קבועה). Off by default.</summary>
+        public bool? ShowCustomerProfileNoteInPrints { get; set; }
+
         /// <summary>When true, fast-scan picking: no confirm dialog on scan + auto-finish when all items picked. Off by default.</summary>
         public bool? FastPickingScan { get; set; }
 

@@ -211,22 +211,192 @@ public class OrderItemLineDisplayTests
     }
 
     [Fact]
-    public void Attribute_line_omits_size_when_OmitOrderLineSizeLabel()
+    public void Attribute_line_keeps_size_with_cutting_when_OmitOrderLineSizeLabel()
     {
+        // Zano: משקל לפי גודל with explicit cutting — the cutting label occupies the variantTitle-fallback
+        // slot, so omitting size here erased it from the voucher entirely. Size must stay.
         var item = new OrderItem
         {
             Title = "Product",
-            OrderLineSizeLabel = "גדול",
+            OrderLineSizeLabel = "2-3 קילו (כ 3 ק\"ג)",
             OrderLineCuttingLabel = "פרוס",
             OrderLineQuantityMode = "units",
             Quantity = 2,
-            UnitWeightGrams = 800,
+            UnitWeightGrams = 3000,
         };
         var line = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(
             item,
             new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true });
         Assert.NotNull(line);
-        Assert.DoesNotContain("גדול", line, StringComparison.Ordinal);
+        Assert.Contains("2-3 קילו", line, StringComparison.Ordinal);
         Assert.Contains("פרוס", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HideWeightDetails_strips_approx_weight_and_per_unit_label()
+    {
+        // Site.HideUnitWeightInOrders: size name stays, "(כ X ק"ג)" suffix and per-unit weight go.
+        var item = new OrderItem
+        {
+            Title = "Product",
+            OrderLineSizeLabel = "2-3 קילו (כ 3 ק\"ג)",
+            OrderLinePerUnitWeightLabel = "3 ק\"ג ליח'",
+            OrderLineCuttingLabel = "פרוס",
+            OrderLineQuantityMode = "units",
+            Quantity = 2,
+            UnitWeightGrams = 3000,
+        };
+        var line = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(
+            item,
+            new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true, HideWeightDetails = true });
+        Assert.NotNull(line);
+        Assert.Contains("2-3 קילו", line, StringComparison.Ordinal);
+        Assert.Contains("פרוס", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("(כ 3", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("ליח'", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Variable_choice_detected_without_persisted_label_via_saleTotalWeight()
+    {
+        // Woo variable line: no orderLinePerUnitWeightLabel, no unitWeightGrams — per-unit weight
+        // derivable from saleTotalWeight. Must count as variable-choice so prints keep the weight.
+        var item = new OrderItem
+        {
+            Title = "פילה סלמון",
+            OrderLineQuantityMode = "units",
+            Quantity = 2,
+            SaleTotalWeight = "500 גרם",
+            PricePerUnit = 50m,
+            TotalPrice = 100m,
+        };
+        Assert.True(OrderItemLineDisplay.IsOrderItemVariableWeightPerUnitChoice(item));
+        var line = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(
+            item,
+            new OrderItemAttributeDisplayOptions { VoucherPerUnitWeightVariableOnly = true });
+        Assert.NotNull(line);
+        Assert.Contains("גרם ליח'", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Variable_choice_not_detected_for_average_line_with_grams()
+    {
+        // by_unit average line always carries unitWeightGrams — not a variable choice; voucher hides its weight.
+        var item = new OrderItem
+        {
+            Title = "מוצר לפי יחידה",
+            OrderLineQuantityMode = "units",
+            Quantity = 2,
+            UnitWeightGrams = 700,
+            OrderLinePerUnitWeightLabel = "700 גרם ליח'",
+        };
+        Assert.False(OrderItemLineDisplay.IsOrderItemVariableWeightPerUnitChoice(item));
+    }
+
+    [Fact]
+    public void Voucher_shows_per_unit_weight_for_average_line()
+    {
+        // Zano order #33: מכירה-לפי-יחידה line (label + grams). Prints now show the weight by default
+        // (card parity) — the old variable-only voucher rule hid it.
+        var item = new OrderItem
+        {
+            Title = "דניס (כ 600 עד 800 גרם)",
+            OrderLineQuantityMode = "units",
+            Quantity = 2,
+            UnitWeightGrams = 700,
+            OrderLinePerUnitWeightLabel = "700 גרם ליח'",
+            OrderLineCuttingLabel = "פילה ללא עור",
+        };
+        var line = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(
+            item,
+            new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true });
+        Assert.NotNull(line);
+        Assert.Contains("700 גרם ליח'", line, StringComparison.Ordinal);
+        Assert.Contains("פילה ללא עור", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Per_unit_weight_dropped_when_size_segment_shows_same_weight()
+    {
+        // משקל לפי גודל: size "(כ 3 ק"ג)" already carries the weight — matching per-unit label is redundant.
+        var item = new OrderItem
+        {
+            Title = "Product",
+            OrderLineQuantityMode = "units",
+            Quantity = 2,
+            UnitWeightGrams = 3000,
+            OrderLinePerUnitWeightLabel = "3 ק\"ג ליח'",
+            OrderLineSizeLabel = "2-3 קילו (כ 3 ק\"ג)",
+            OrderLineCuttingLabel = "פרוס",
+        };
+        var line = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(
+            item,
+            new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true });
+        Assert.NotNull(line);
+        Assert.Contains("2-3 קילו", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("ליח'", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Per_unit_weight_dropped_when_size_name_contains_other_kg_number()
+    {
+        // Zano order #34: size name "בין 5-6 ק״ג" first-match parses to 6kg — the redundancy check must
+        // compare against the "(כ 5.5 ק"ג)" approx suffix, not the size name, so per is still dropped.
+        var item = new OrderItem
+        {
+            Title = "דג סלמון שלם טרי",
+            OrderLineQuantityMode = "units",
+            Quantity = 3,
+            UnitWeightGrams = 5500,
+            OrderLinePerUnitWeightLabel = "5.5 ק\"ג ליח'",
+            OrderLineSizeLabel = "בין 5-6 ק״ג (כ 5.5 ק\"ג)",
+            OrderLineCuttingLabel = "שלם נקי",
+        };
+        var line = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(
+            item,
+            new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true });
+        Assert.NotNull(line);
+        Assert.Contains("בין 5-6 ק״ג", line, StringComparison.Ordinal);
+        Assert.Contains("שלם נקי", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("ליח'", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HideWeightDetails_keeps_customer_chosen_variable_weight()
+    {
+        // "בחירת משקל ליחידה": the weight IS the ordered spec — never hidden.
+        var item = new OrderItem
+        {
+            Title = "מוצר בחירת משקל ליחידה",
+            OrderLinePerUnitWeightLabel = "500 גרם ליח'",
+            OrderLineQuantityMode = "units",
+            Quantity = 2,
+        };
+        var line = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(
+            item,
+            new OrderItemAttributeDisplayOptions { HideWeightDetails = true });
+        Assert.NotNull(line);
+        Assert.Contains("500 גרם ליח'", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Attribute_line_omits_size_when_variant_title_already_carries_it()
+    {
+        // Size-only line: no cutting label, variantTitle fallback shows the size — the size label would duplicate it.
+        var item = new OrderItem
+        {
+            Title = "Product",
+            VariantTitle = "2-3 קילו",
+            OrderLineSizeLabel = "2-3 קילו (כ 3 ק\"ג)",
+            OrderLineQuantityMode = "units",
+            Quantity = 2,
+            UnitWeightGrams = 3000,
+        };
+        var line = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(
+            item,
+            new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true });
+        Assert.NotNull(line);
+        Assert.DoesNotContain("(כ 3", line, StringComparison.Ordinal);
+        Assert.Contains("2-3 קילו", line, StringComparison.Ordinal);
     }
 }

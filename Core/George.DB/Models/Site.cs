@@ -184,6 +184,19 @@ public partial class Site
     public bool? ShowSkuInPicking { get; set; }
 
     /// <summary>
+    /// When true, hide the per-unit / size approximate weight (e.g. "(כ 3 ק"ג)", "700 גרם ליח'") on
+    /// printouts, order cards and picking lines. Customer-chosen weights (בחירת משקל ליחידה) always show.
+    /// NULL/0 = show (current behavior).
+    /// </summary>
+    public bool? HideUnitWeightInOrders { get; set; }
+
+    /// <summary>
+    /// When true, order printouts (voucher/A4) include the permanent customer note (הערה קבועה,
+    /// Customer.Notes) in the order-notes line. NULL/0 = not printed (default).
+    /// </summary>
+    public bool? ShowCustomerProfileNoteInPrints { get; set; }
+
+    /// <summary>
     /// When true, "fast scan" picking mode: scans apply immediately without a confirmation dialog
     /// (overrides ConfirmPickingAfterScan), and when the last item is picked the order finishes
     /// (moves to Ready) automatically. Off by default.

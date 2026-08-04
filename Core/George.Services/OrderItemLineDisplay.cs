@@ -8,11 +8,21 @@ namespace George.Services;
 /// <summary>Optional display tweaks; keep in sync with TS <c>OrderItemAttributeDisplayOptions</c>.</summary>
 public readonly record struct OrderItemAttributeDisplayOptions
 {
-    /// <summary>Omit <see cref="OrderItem.OrderLineSizeLabel"/> from attribute segments (voucher / compact surfaces).</summary>
+    /// <summary>
+    /// Compact surfaces (voucher / A4): drop <see cref="OrderItem.OrderLineSizeLabel"/> only when another segment
+    /// already carries the size (e.g. variantTitle fallback) — an explicit cutting label must not erase the size.
+    /// </summary>
     public bool OmitOrderLineSizeLabel { get; init; }
 
     /// <summary>Voucher: show per-unit weight only for "בחירת משקל ליחידה" lines.</summary>
     public bool VoucherPerUnitWeightVariableOnly { get; init; }
+
+    /// <summary>
+    /// Site.HideUnitWeightInOrders: hide the informational per-unit / size approximate weight —
+    /// drops the per-unit weight segment (except "בחירת משקל ליחידה", where the weight is the ordered
+    /// spec) and strips the "(כ X ק"ג)" suffix from the size label.
+    /// </summary>
+    public bool HideWeightDetails { get; init; }
 }
 
 /// <summary>
@@ -437,11 +447,20 @@ public static class OrderItemLineDisplay
         OrderItem item,
         OrderItemAttributeDisplayOptions options = default)
     {
-        var size = options.OmitOrderLineSizeLabel ? null : item.OrderLineSizeLabel?.Trim();
+        var sizeRaw = item.OrderLineSizeLabel?.Trim();
+        if (options.HideWeightDetails && !string.IsNullOrEmpty(sizeRaw))
+        {
+            // Strip the "(כ X ק"ג)" approx-weight suffix; the size name itself stays.
+            sizeRaw = Regex.Replace(sizeRaw, @"\s*\(כ[^)]*\)\s*$", "").Trim();
+            if (sizeRaw.Length == 0) sizeRaw = null;
+        }
         var perRaw = item.OrderLinePerUnitWeightLabel?.Trim() ?? InferredPerUnitWeightLabel(item);
         var per = !string.IsNullOrEmpty(perRaw) ? SanitizePerUnitWeightLabelIfGramsShownAsKg(item, perRaw) : null;
-        if (options.VoucherPerUnitWeightVariableOnly && !string.IsNullOrEmpty(per) && !IsOrderItemVariableWeightPerUnitChoice(item))
+        if ((options.VoucherPerUnitWeightVariableOnly || options.HideWeightDetails) &&
+            !string.IsNullOrEmpty(per) && !IsOrderItemVariableWeightPerUnitChoice(item))
+        {
             per = null;
+        }
         var cut = item.OrderLineCuttingLabel?.Trim();
         var title = item.Title?.Trim() ?? "";
         var vtRaw = item.VariantTitle?.Trim();
@@ -471,6 +490,31 @@ public static class OrderItemLineDisplay
             }
         }
 
+        var size = sizeRaw;
+        if (options.OmitOrderLineSizeLabel && !string.IsNullOrEmpty(size))
+        {
+            // Size name without the "(כ X ק"ג)" approx suffix — the form other segments would carry.
+            var sizeName = Regex.Replace(size, @"\s*\(כ[^)]*\)\s*$", "").Trim();
+            if (sizeName.Length == 0) sizeName = size;
+            var key = OrderItemAttrDedupeKey(sizeName);
+            var covered =
+                (!string.IsNullOrEmpty(per) && OrderItemAttrDedupeKey(per).Contains(key, StringComparison.Ordinal)) ||
+                (!string.IsNullOrEmpty(cut) && OrderItemAttrDedupeKey(cut).Contains(key, StringComparison.Ordinal));
+            if (covered) size = null;
+        }
+
+        // משקל לפי גודל: when a displayed segment already shows the same weight ("(כ 3 ק"ג)"), a matching per-unit label adds nothing.
+        if (!string.IsNullOrEmpty(per))
+        {
+            var perG = ParseGramsFromHebrewWeightLabel(per);
+            if (perG > 0 &&
+                ((!string.IsNullOrEmpty(size) && SegmentCarriedApproxGrams(size) == perG) ||
+                 (!string.IsNullOrEmpty(cut) && SegmentCarriedApproxGrams(cut) == perG)))
+            {
+                per = null;
+            }
+        }
+
         var parts = new List<string>();
         if (!string.IsNullOrEmpty(size)) parts.Add(size);
         if (!string.IsNullOrEmpty(per)) parts.Add(per);
@@ -481,6 +525,16 @@ public static class OrderItemLineDisplay
         if (!string.IsNullOrEmpty(vtRaw) && vtRaw != title && !IsGenericVariantTitle(vtRaw))
             return new[] { vtRaw };
         return Array.Empty<string>();
+    }
+
+    /// <summary>
+    /// Weight (grams) a display segment carries: the "(כ X ק"ג)" approx suffix when present — size names
+    /// like "בין 5-6 ק״ג" would otherwise first-match parse to the wrong value — else the whole string.
+    /// </summary>
+    private static int SegmentCarriedApproxGrams(string s)
+    {
+        var m = Regex.Match(s, @"\(כ\s*([^)]+)\)\s*$");
+        return ParseGramsFromHebrewWeightLabel(m.Success ? m.Groups[1].Value : s);
     }
 
     public static string GetOrderItemProductName(OrderItem item)
@@ -547,12 +601,13 @@ public static class OrderItemLineDisplay
         var title = item.Title ?? "";
         if (Regex.IsMatch(title, @"בחירת\s*משקל\s*ליחידה", RegexOptions.IgnoreCase)) return true;
         if (Regex.IsMatch(title, @"בחר\s*משקל\s*יח", RegexOptions.IgnoreCase)) return true;
-        // Line-field signature: only the by_unit+variable snapshot builder writes a per-unit weight
-        // label WITHOUT UnitWeightGrams (fixed/by_variant/by_unit_and_weight all carry grams), so a
-        // units-mode line matching it is a "בחר משקל ליח'" choice even when the title lacks the phrase.
+        // Line-field signature: only by_unit+variable lines carry a derivable per-unit weight (explicit label,
+        // or Woo saleTotalWeight/line economics) WITHOUT UnitWeightGrams — fixed/by_variant/by_unit_and_weight
+        // all carry grams. So a units-mode line matching it is a "בחר משקל ליח'" choice even when the title
+        // lacks the phrase and the label was never persisted (website orders).
         if (string.Equals(item.OrderLineQuantityMode?.Trim(), "units", StringComparison.OrdinalIgnoreCase)
-            && !string.IsNullOrWhiteSpace(item.OrderLinePerUnitWeightLabel)
-            && !(item.UnitWeightGrams is > 0))
+            && !(item.UnitWeightGrams is > 0)
+            && (!string.IsNullOrWhiteSpace(item.OrderLinePerUnitWeightLabel) || GramsPerUnitFromOrderItem(item) > 0))
         {
             return true;
         }
