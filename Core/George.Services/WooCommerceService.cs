@@ -2571,7 +2571,7 @@ namespace George.Services
                 // Sync variations for variable products
                 if (wooCommerceId.HasValue && product.ProductVariant != null && product.ProductVariant.Any(v => !v.IsDeleted))
                 {
-                    await SyncProductVariantsAsync(baseUrl, siteId, wooCommerceId.Value, product, attributeMap, attributeSlugMap, httpClient, cancelToken);
+                    await SyncProductVariantsAsync(baseUrl, siteId, wooCommerceId.Value, product, attributeMap, attributeSlugMap, httpClient, cancelToken, siteOverride);
                 }
 
                 // Store label ACF flags via custom REST namespace ed/v1 (no WooCommerce Basic auth per site plugin).
@@ -2650,14 +2650,14 @@ namespace George.Services
             var siteRoot = idx > 0 ? wcV3BaseUrl.Substring(0, idx).TrimEnd('/') : wcV3BaseUrl.TrimEnd('/');
 
             using var http = _httpClientFactory.CreateClient();
-            http.Timeout = EdCapabilitiesProbeTimeout;
+            // Timeout cannot be changed after the first request on an HttpClient; the shorter
+            // capabilities-probe deadline is applied per-request inside the probe instead.
+            http.Timeout = TimeSpan.FromSeconds(60);
             http.DefaultRequestHeaders.Clear();
+            http.DefaultRequestHeaders.Add("X-Api-Key", apiToken);
 
             if (!await SiteSupportsEdProductLabelsAsync(siteRoot, http, cancelToken).ConfigureAwait(false))
                 return;
-
-            http.Timeout = TimeSpan.FromSeconds(60);
-            http.DefaultRequestHeaders.Add("X-Api-Key", apiToken);
 
             var url = $"{siteRoot}/wp-json/ed/v1/product-label";
             var payload = new Dictionary<string, object>
@@ -2850,7 +2850,9 @@ namespace George.Services
             var url = $"{siteRoot}/wp-json/ed/v1/capabilities";
             try
             {
-                using var resp = await http.GetAsync(url, cancelToken).ConfigureAwait(false);
+                using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(cancelToken);
+                probeCts.CancelAfter(EdCapabilitiesProbeTimeout);
+                using var resp = await http.GetAsync(url, probeCts.Token).ConfigureAwait(false);
                 if (!resp.IsSuccessStatusCode)
                 {
                     _logger.LogInformation(
@@ -2859,7 +2861,7 @@ namespace George.Services
                     return false;
                 }
 
-                var body = await resp.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+                var body = await resp.Content.ReadAsStringAsync(probeCts.Token).ConfigureAwait(false);
                 using var doc = JsonDocument.Parse(body);
                 if (doc.RootElement.TryGetProperty("product_labels", out var productLabelsEl) &&
                     (productLabelsEl.ValueKind == JsonValueKind.True || productLabelsEl.ValueKind == JsonValueKind.False))
@@ -3369,7 +3371,8 @@ namespace George.Services
             Dictionary<string, int?> attributeMap,
             Dictionary<string, string> attributeSlugMap,
             HttpClient httpClient,
-            CancellationToken cancelToken)
+            CancellationToken cancelToken,
+            SiteOverrideValues? siteOverride = null)
         {
             var variants = product.ProductVariant?.Where(v => !v.IsDeleted).ToList() ?? new List<ProductVariant>();
             // Weighable products normally omit WC native weight (OCWSU meta). Exception: "משקל לפי וריאציה" — OCWSU reads _ocwsu_get_weight_from_variation from each variation's weight field.
@@ -3429,6 +3432,7 @@ namespace George.Services
                 .ToDictionary(g => g.Key, g => g.Select(x => x.id).ToList());
 
             var usedWooVariationIds = new HashSet<int>();
+            var skippedNoAttributeVariations = 0;
             var variantSyncWork = new List<(ProductVariant variant, int? wooVariationIdToUse, Dictionary<string, object> wooPayload, Dictionary<string, object>? priceFieldsOnCreate)>();
             var wpJsonBaseForMedia = GetWordPressRestBaseUrlFromWooV3BaseUrl(baseUrl);
 
@@ -3442,6 +3446,15 @@ namespace George.Services
                 productStockStatus = "outofstock";
             else if (product.StockStatus?.Name == "on_backorder")
                 productStockStatus = "onbackorder";
+            // Per-site stock-status override must reach the variations too: Woo derives a variable
+            // product's availability from its variations, so parent-only outofstock (which the main
+            // payload already applies) leaves the product purchasable on that site.
+            if (!string.IsNullOrEmpty(siteOverride?.StockStatus))
+            {
+                productStockStatus = siteOverride!.StockStatus == "out_of_stock" ? "outofstock"
+                    : siteOverride.StockStatus == "on_backorder" ? "onbackorder"
+                    : "instock";
+            }
 
             // MultiSite Phase 2: per-site variant overrides (price/sale/stock/exclusion) for this site, when present.
             // Skipped for non-network accounts (no overrides possible) so single-site sync is unchanged.
@@ -3480,6 +3493,13 @@ namespace George.Services
                         variantStockStatus = variant.StockQuantity.Value > 0 ? "instock" : "outofstock";
                     else
                         variantStockStatus = productStockStatus;
+                    // An explicit product-level (or per-site override) "out of stock" must win over
+                    // per-variation quantities: Woo derives a variable product's availability from its
+                    // variations, so leaving them instock keeps the product purchasable on the site
+                    // while George shows it as out of stock.
+                    var productForcedOutOfStock = productStockStatus == "outofstock";
+                    if (productForcedOutOfStock)
+                        variantStockStatus = "outofstock";
 
                     var variantOptionValues = variant.ProductVariantOptionValue?
                         .Where(x => !string.IsNullOrWhiteSpace(x.OptionName))
@@ -3504,6 +3524,7 @@ namespace George.Services
                     if (variationAttributesList.Count == 0)
                     {
                         _logger.LogWarning("Variation {VariantId} for product {ProductId} has no matching attributes (attributeMap or ProductVariantOptionValues). Skipping this variation.", variant.Id, product.Id);
+                        skippedNoAttributeVariations++;
                         continue;
                     }
 
@@ -3585,7 +3606,12 @@ namespace George.Services
                         var effVariantStock = (siteVarOvr?.StockQuantity).HasValue
                             ? siteVarOvr!.StockQuantity
                             : variant.StockQuantity;
-                        wooVariation["stock_quantity"] = ToWooVariationStockQuantity(effVariantStock, variationTrackQuantity);
+                        // Woo re-derives a managed variation's stock_status from stock_quantity, so a forced
+                        // outofstock with a positive quantity would flip back to instock (same as simple-product
+                        // MultiSite #14). Push 0; George owns the real quantity and restores it on return to stock.
+                        wooVariation["stock_quantity"] = productForcedOutOfStock
+                            ? 0
+                            : ToWooVariationStockQuantity(effVariantStock, variationTrackQuantity);
                     }
                     if (!string.IsNullOrEmpty(variant.ImageUrl))
                     {
@@ -3693,6 +3719,18 @@ namespace George.Services
                     else if (variant.WooCommerceVariationId != wooVariationId.Value)
                         await _productStorage.UpdateProductVariantWooCommerceIdAsync(variant.Id, wooVariationId.Value, cancelToken);
                 }
+            }
+
+            // Variations skipped for missing attribute data never enter usedWooVariationIds, so the orphan
+            // cleanup below would DELETE their live Woo variations (e.g. a product whose ProductOption rows are
+            // missing/soft-deleted would lose ALL its store variations). Broken George data must not destroy
+            // store data — skip reconciliation entirely for this product until the data is fixed.
+            if (skippedNoAttributeVariations > 0)
+            {
+                _logger.LogWarning(
+                    "Skipping orphan variation cleanup for product {ProductId} (Woo id {WooProductId}): {SkippedCount} variation(s) were skipped due to missing attribute data, so the Woo variation list cannot be reconciled safely.",
+                    product.Id, wooProductId, skippedNoAttributeVariations);
+                return;
             }
 
             // Orphan cleanup: when all variants were mapped we skipped the initial variation fetch, so the store may
