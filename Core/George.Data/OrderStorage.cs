@@ -530,11 +530,13 @@ namespace George.Data
             if (normalized.Length < 4)
                 return result;
 
+            // Narrow projection: full Order rows carry multi-KB JSON columns and this runs per kanban card.
             var siteOrders = await _dbContext.Order
                 .AsNoTracking()
                 .Where(o => !o.IsDeleted && o.SiteId == siteId && o.CustomerPhone != null)
                 .OrderByDescending(o => o.CreationTime)
                 .Take(1000)
+                .Select(o => new { o.CustomerPhone, o.CustomerName, o.Total, o.DeliveryDate, o.PickupDate })
                 .ToListAsync(cancelToken).ConfigureAwait(false);
 
             var orders = siteOrders.Where(o => NormalizePhone(o.CustomerPhone) == normalized).ToList();
@@ -569,6 +571,7 @@ namespace George.Data
                 .Where(o => !o.IsDeleted && o.SiteId == siteId && o.CustomerPhone != null)
                 .OrderByDescending(o => o.CreationTime)
                 .Take(500)
+                .Select(o => new { o.Id, o.CustomerPhone })
                 .ToListAsync(cancelToken).ConfigureAwait(false);
 
             var lastOrderId = siteOrders.FirstOrDefault(o => NormalizePhone(o.CustomerPhone) == normalized)?.Id;

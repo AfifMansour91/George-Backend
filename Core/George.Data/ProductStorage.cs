@@ -78,6 +78,7 @@ namespace George.Data
                     .ThenInclude(pi => pi.Media)
                 .Include(p => p.ProductVariant)
                     .ThenInclude(pv => pv.ProductVariantOptionValue)
+                .AsSplitQuery() // 8 collection includes in single-query mode explode into a cartesian product (hundreds of MB scanned per page load)
                 .AsNoTracking()
                 .Where(p => !p.IsDeleted);
 
@@ -215,6 +216,7 @@ namespace George.Data
                     .ThenInclude(pi => pi.Media)
                 .Include(p => p.ProductVariant)
                     .ThenInclude(pv => pv.ProductVariantOptionValue)
+                .AsSplitQuery()
                 .AsNoTracking()
                 .Where(p => !p.IsDeleted && p.Site.Any(s => s.Id == siteId) && productIds.Contains(p.Id));
 
@@ -260,6 +262,7 @@ namespace George.Data
                     .ThenInclude(pv => pv.ProductVariantOptionValue)
                 .Include(p => p.RelatedProduct)
                 .Include(p => p.ComplementaryProduct)
+                .AsSplitQuery()
                 .AsNoTracking()
                 .FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
         }

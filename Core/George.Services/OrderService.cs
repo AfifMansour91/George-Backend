@@ -2116,15 +2116,15 @@ namespace George.Services
             // Delivery / pickup box
             var deliveryBox = new StringBuilder();
             deliveryBox.Append("<div style=\"flex:1;min-width:220px;\">");
-            deliveryBox.Append("<div style=\"font-size:16px;font-weight:800;margin-bottom:8px;\">אופן אספקה</div>");
+            // Box title states the delivery method directly — "משלוח עד הבית"/"איסוף עצמי" — instead
+            // of the generic "אופן אספקה" (Zano request 06/08); the old labeled row became redundant.
+            deliveryBox.Append($"<div style=\"font-size:16px;font-weight:800;margin-bottom:8px;\">{EscapeHtml(deliveryLabel)}</div>");
             if (deliveryDate.HasValue)
             {
                 var dateText = FormatVoucherDateWithWeekday(deliveryDate.Value)
                     + (!string.IsNullOrWhiteSpace(deliveryTime) ? $" · {deliveryTime}" : "");
                 deliveryBox.Append($"<div style=\"line-height:1.7;\"><b>תאריך אספקה:</b> {EscapeHtml(dateText)}</div>");
             }
-            // אופן אספקה is shown for every order type — "משלוח עד הבית" for deliveries, like pickup.
-            deliveryBox.Append($"<div style=\"line-height:1.7;\"><b>אופן אספקה:</b> {EscapeHtml(deliveryLabel)}</div>");
             if (isShipping)
             {
                 var ship = TryGetShippingAddressPartsForVoucher(order);
