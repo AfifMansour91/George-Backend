@@ -306,6 +306,9 @@ public class PaymentStorage : StorageBase
         tracked.RefundInvoiceNumber = order.RefundInvoiceNumber;
         tracked.CardcomRefundDocumentUrl = order.CardcomRefundDocumentUrl;
         tracked.PaidAt = order.PaidAt;
+        tracked.GatewayVerifiedAmount = order.GatewayVerifiedAmount;
+        tracked.GatewayVerifiedAt = order.GatewayVerifiedAt;
+        tracked.GatewayAmountMismatch = order.GatewayAmountMismatch;
         tracked.ExternalPaymentStatus = TruncateExternalPaymentStatus(order.ExternalPaymentStatus);
         tracked.UpdatedDate = DateTime.UtcNow;
         await _dbContext.SaveChangesAsync(cancelToken);

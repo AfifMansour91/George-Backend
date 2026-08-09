@@ -89,6 +89,12 @@ public class OrderRes
     /// <summary>When the (last) refund/credit was performed.</summary>
     public DateTime? RefundedAt { get; set; }
     public DateTime? PaidAt { get; set; }
+    /// <summary>Charge amount Cardcom actually reports for the website transaction (verification inquiry).</summary>
+    public decimal? GatewayVerifiedAmount { get; set; }
+    /// <summary>When the Cardcom verification inquiry last produced a verdict.</summary>
+    public DateTime? GatewayVerifiedAt { get; set; }
+    /// <summary>True when Cardcom's charged amount diverges from the order total. Null = not verified.</summary>
+    public bool? GatewayAmountMismatch { get; set; }
     /// <summary>Last payment webhook <c>orderId</c>.</summary>
     public string? GatewayPaymentOrderId { get; set; }
     /// <summary>Last payment webhook <c>externalOrderId</c>.</summary>

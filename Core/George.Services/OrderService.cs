@@ -2978,6 +2978,8 @@ namespace George.Services
                     cancelToken).ConfigureAwait(false);
                 // Checkout-paid website order: send the invoice SMS like a StoreOS capture (no-op unless Paid+Captured; deduped).
                 await _paymentService.TrySendInvoiceSmsForWooCapturedOrderAsync(loaded, cancelToken).ConfigureAwait(false);
+                // Verify the reported charge directly against Cardcom (amount + final/hold/refund) — best-effort.
+                await _paymentService.TryVerifyWooGatewayChargeAsync(loaded, cancelToken).ConfigureAwait(false);
                 loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken).ConfigureAwait(false);
             }
             response.Data = _mapper.Map<OrderRes>(loaded!);

@@ -257,6 +257,17 @@ public partial class Order
     [Precision(0)]
     public DateTime? PaidAt { get; set; }
 
+    /// <summary>Charge amount Cardcom actually reports for the website transaction (verification inquiry).</summary>
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? GatewayVerifiedAmount { get; set; }
+
+    /// <summary>When the Cardcom verification inquiry last produced a verdict.</summary>
+    [Precision(0)]
+    public DateTime? GatewayVerifiedAt { get; set; }
+
+    /// <summary>True when Cardcom's charged amount diverges from the order's expected net (Total − RefundedAmount). Null = not verified.</summary>
+    public bool? GatewayAmountMismatch { get; set; }
+
     /// <summary>When true, one-time catalog stock deduction for lines without saved picking has already run when the order reached Completed.</summary>
     public bool CompletionInventoryApplied { get; set; }
 

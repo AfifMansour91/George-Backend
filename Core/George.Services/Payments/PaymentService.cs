@@ -3147,6 +3147,83 @@ public class PaymentService : ServiceBase
         await LogWooCommerceGatewayPaymentEventAsync(order.Id, payment, gatewayStatus, isFinished, cancelToken);
         // Checkout-paid website order: send the invoice SMS like a StoreOS capture (no-op unless Paid+Captured).
         await TrySendInvoiceSmsForWooCapturedOrderAsync(order, cancelToken);
+        await TryVerifyWooGatewayChargeAsync(order, cancelToken);
+    }
+
+    /// <summary>
+    /// Verify a website order's Cardcom charge directly against Cardcom, instead of trusting the plugin's
+    /// echo alone. Best-effort — never throws, never blocks payment intake. Runs only for orders whose
+    /// payment arrived from the website gateway (<see cref="Order.GatewayPaymentTransactionId"/>) on a
+    /// Cardcom site with API credentials. A hold-only transaction leaves the verification state untouched
+    /// (the final charge is verified when its own webhook arrives); a final charge is compared against
+    /// <see cref="Order.Total"/> and the verdict persisted for the order card. A mismatch is surfaced
+    /// (flag + payment event + warning log), never auto-corrected.
+    /// </summary>
+    public async Task TryVerifyWooGatewayChargeAsync(Order order, CancellationToken cancelToken = default)
+    {
+        try
+        {
+            var txRaw = CoalesceNonEmpty(order.GatewayPaymentTransactionId, order.PaymentReference);
+            if (string.IsNullOrWhiteSpace(order.GatewayPaymentTransactionId))
+                return; // payment didn't come through the website gateway — George's own records are authoritative.
+            if (string.IsNullOrWhiteSpace(txRaw) || !long.TryParse(txRaw.Trim(), out var dealNumber) || dealNumber <= 0)
+                return;
+
+            var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
+            if (creds == null || creds.ProviderId != PaymentGatewayProviderId.Cardcom)
+                return;
+            if (creds.ApiPasswordStoredButUnreadable || string.IsNullOrWhiteSpace(creds.ApiPassword))
+                return;
+
+            var info = await _cardcom.GetTransactionInfoByIdAsync(creds, dealNumber, cancelToken);
+            await ApplyGatewayVerificationVerdictAsync(order, info, cancelToken);
+        }
+        catch (Exception ex)
+        {
+            // Verification must never fail the order/payment intake.
+            _logger.LogWarning(ex, "TryVerifyWooGatewayChargeAsync failed orderId={OrderId}", order.Id);
+        }
+    }
+
+    /// <summary>Persist the verdict of a Cardcom inquiry on the order (shared by auto-verify and the manual sync button).</summary>
+    private async Task ApplyGatewayVerificationVerdictAsync(
+        Order order,
+        CardcomTransactionInfoResult info,
+        CancellationToken cancelToken)
+    {
+        var outcome = GatewayChargeVerification.Evaluate(info, order.Total, order.RefundedAmount);
+        if (outcome is GatewayVerifyOutcome.Inconclusive or GatewayVerifyOutcome.HoldOnly)
+        {
+            _logger.LogInformation(
+                "Gateway verify inconclusive orderId={OrderId} outcome={Outcome} responseCode={ResponseCode} dealType={DealType}",
+                order.Id, outcome, info.ResponseCode, info.DealType);
+            return;
+        }
+
+        var mismatch = outcome == GatewayVerifyOutcome.Mismatch;
+        order.GatewayVerifiedAmount = info.Amount;
+        order.GatewayVerifiedAt = DateTime.UtcNow;
+        order.GatewayAmountMismatch = mismatch;
+        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+
+        var description = mismatch
+            ? $"Cardcom: {info.Amount:0.##} ₪, expected {order.Total:0.##} ₪" + (info.IsRefund == true ? " (refunded at Cardcom)" : "")
+            : $"Cardcom amount verified ({info.Amount:0.##} ₪)";
+        await LogEventAsync(
+            order.Id,
+            "GatewayVerify",
+            mismatch ? "1" : "0",
+            description,
+            info.TranzactionId ?? order.GatewayPaymentTransactionId,
+            null,
+            info.Amount,
+            info.RawJson,
+            cancelToken);
+
+        if (mismatch)
+            _logger.LogWarning(
+                "Gateway amount mismatch orderId={OrderId} cardcomAmount={CardcomAmount} orderTotal={OrderTotal} isRefund={IsRefund}",
+                order.Id, info.Amount, order.Total, info.IsRefund);
     }
 
     /// <summary>Persist payment columns after WooCommerce gateway update.</summary>
@@ -3175,14 +3252,26 @@ public class PaymentService : ServiceBase
         }
 
         var settle = (order.PaymentSettleStatus ?? "").Trim();
-        if (string.Equals(order.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(settle, PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase))
+        var alreadyCaptured = string.Equals(order.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(settle, PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase);
+        // A refunded order was charged first — it can still be verified, but must NEVER fall through
+        // to the mark-paid path below, which would overwrite the refunded state back to Paid/Captured.
+        var refundedState = string.Equals(settle, PaymentSettleStatus.Refunded, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(settle, PaymentSettleStatus.PartiallyRefunded, StringComparison.OrdinalIgnoreCase);
+        if (alreadyCaptured || refundedState)
         {
+            // Nothing to rescue, but still verify the charge against Cardcom (amount /
+            // refunded-at-gateway) so an on-demand check works for settled orders too.
+            await TryVerifyWooGatewayChargeAsync(order, cancelToken).ConfigureAwait(false);
+            var verifiedMismatch = order.GatewayAmountMismatch == true;
             response.Data = new SyncGatewayPaymentRes
             {
                 Outcome = "AlreadyPaid",
-                Message = "Order is already marked as paid.",
+                Message = verifiedMismatch
+                    ? $"Order is marked paid, but Cardcom reports {order.GatewayVerifiedAmount:0.##} ₪ (order total {order.Total:0.##} ₪)."
+                    : "Order is already marked as paid.",
                 TransactionId = order.GatewayPaymentTransactionId ?? order.PaymentReference,
+                Amount = order.GatewayVerifiedAmount,
                 PaymentStatus = order.PaymentStatus,
                 PaymentSettleStatus = order.PaymentSettleStatus,
             };
@@ -3251,6 +3340,9 @@ public class PaymentService : ServiceBase
         _logger.LogInformation(
             "SyncWooGatewayPaymentFromCardcom orderId={OrderId} tx={TransactionId} responseCode={ResponseCode} dealType={DealType} isFinalCharge={IsFinalCharge} isHold={IsHold}",
             order.Id, txRaw, info.ResponseCode, info.DealType, info.IsFinalCharge, info.IsAuthorizationHold);
+
+        // The manual sync shares its inquiry with the verification layer: record the amount verdict too.
+        await ApplyGatewayVerificationVerdictAsync(order, info, cancelToken).ConfigureAwait(false);
 
         if (info.IsRefund == true)
         {
