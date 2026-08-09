@@ -122,6 +122,26 @@ namespace George.Services
             return response;
         }
 
+        /// <summary>Archive KPI summary over the whole filtered period (not paged) — order counts, credited totals and city options.</summary>
+        public async Task<IApiResponse<OrderArchiveSummaryRes>> GetOrderArchiveSummaryAsync(
+            OrderFilter filter,
+            CancellationToken cancelToken = default)
+        {
+            var response = new ApiResponse<OrderArchiveSummaryRes>();
+            var summary = await _orderStorage.GetOrderArchiveSummaryAsync(filter, cancelToken).ConfigureAwait(false);
+            response.Data = new OrderArchiveSummaryRes
+            {
+                Total = summary.Total,
+                Completed = summary.Completed,
+                Cancelled = summary.Cancelled,
+                Credited = summary.Credited,
+                CreditedSum = summary.CreditedSum,
+                Cities = summary.Cities,
+                HasCityNone = summary.HasCityNone,
+            };
+            return response;
+        }
+
         public async Task<IApiResponse<OrderRes>> GetOrderAsync(int orderId, CancellationToken cancelToken = default)
         {
             var response = new ApiResponse<OrderRes>();

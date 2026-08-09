@@ -3009,13 +3009,23 @@ namespace George.Services
                 row["note"] = line.Notes;
                 row["productNote"] = line.Notes;
                 row["unitPrice"] = line.PricePerUnit;
-                row["lineTotal"] = afterPicking
+                // lineTotal must be NET (gross minus the line's promotion stamp). The store rebuilds its
+                // order lines from lineTotal and recalculates the order total from them (payload orderTotal
+                // is reconciliation-only), and the Cardcom capture charges that recalculated total — a gross
+                // lineTotal here overcharges the customer by the discount. Unlinked stamps (a WP-local
+                // promotion, PromotionId == null) carry a DiscountAmount too, so net applies to every line.
+                var grossLineTotal = afterPicking
                     ? OrderItemLineDisplay.GetOcStoreosBillableLineTotal(line)
                     : line.TotalPrice;
+                var lineDiscount = line.DiscountAmount is > 0m ? line.DiscountAmount.Value : 0m;
+                row["lineTotal"] = grossLineTotal.HasValue && lineDiscount > 0m
+                    ? Math.Max(0m, grossLineTotal.Value - lineDiscount)
+                    : grossLineTotal;
                 if (line.PromotionId is > 0)
                 {
                     row["promotionExternalId"] = $"george-{line.PromotionId.Value}";
-                    row["discountAmount"] = line.DiscountAmount ?? 0m;
+                    // Informational (the store does not subtract this — lineTotal above is already net).
+                    row["discountAmount"] = lineDiscount;
                 }
                 row["saleUnits"] = line.SaleUnits;
                 row["saleTotalWeight"] = line.SaleTotalWeight;
@@ -3026,10 +3036,15 @@ namespace George.Services
             decimal? syncOrderTotal;
             if (afterPicking)
             {
-                var itemsSum = activeLines
-                    .Where(OrderItemLineDisplay.IsOcStoreosBillableLine)
-                    .Sum(line => OrderItemLineDisplay.GetOcStoreosBillableLineTotal(line) ?? 0m);
-                syncOrderTotal = itemsSum + (order.ShippingCost ?? 0m);
+                // Same formula as the order-header recalc (OrderStorage): billable gross − line promotion
+                // stamps − manual discount + shipping. Summing gross alone reported an inflated total that
+                // happened to match the (previously gross) line totals, so the store-side reconciliation
+                // passed while the customer was overcharged by the discount.
+                var billable = activeLines.Where(OrderItemLineDisplay.IsOcStoreosBillableLine).ToList();
+                var itemsSum = billable.Sum(line => OrderItemLineDisplay.GetOcStoreosBillableLineTotal(line) ?? 0m);
+                var promoDiscount = billable.Sum(line => line.DiscountAmount is > 0m ? line.DiscountAmount.Value : 0m);
+                var manualDiscount = order.ManualDiscountAmount is > 0m ? order.ManualDiscountAmount.Value : 0m;
+                syncOrderTotal = OrderDiscountTotals.ComputeGrandTotal(itemsSum, order.ShippingCost ?? 0m, promoDiscount, manualDiscount);
             }
             else
             {

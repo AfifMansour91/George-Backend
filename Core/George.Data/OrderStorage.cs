@@ -1,6 +1,7 @@
 using System.Linq;
 using George.Common;
 using George.Common.Payment;
+using George.Data.Models;
 using George.DB;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -20,13 +21,30 @@ namespace George.Data
             CancellationToken cancelToken)
         {
             var res = new DataListResult<Order>();
-            var query = _dbContext.Order
-                .Where(o => !o.IsDeleted)
-                .Include(o => o.Site)
-                .Include(o => o.Account)
-                .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
-                .AsNoTracking();
+            var query = ApplyOrderListFilter(
+                _dbContext.Order
+                    .Where(o => !o.IsDeleted)
+                    .Include(o => o.Site)
+                    .Include(o => o.Account)
+                    .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
+                    .AsNoTracking(),
+                filter);
 
+            if (paging.IncludeTotal)
+                res.Total = await query.CountAsync(cancelToken).ConfigureAwait(false);
+
+            query = query.OrderByDescending(o => o.CreationTime);
+
+            res.Items = await query
+                .Skip(paging.Skip)
+                .Take(paging.Take)
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+
+            return res;
+        }
+
+        private static IQueryable<Order> ApplyOrderListFilter(IQueryable<Order> query, OrderFilter? filter)
+        {
             if (filter?.SiteId.HasValue == true)
                 query = query.Where(o => o.SiteId == filter.SiteId!.Value);
             else if (filter?.AccountId.HasValue == true)
@@ -118,6 +136,21 @@ namespace George.Data
                     (o.DeliveryDate ?? o.PickupDate ?? o.CreationTime).Date <= toDate);
             }
 
+            if (filter?.City != null && filter.City.Count > 0)
+            {
+                var cities = filter.City
+                    .Where(c => c.HasValue() && c.Trim() != CityNoneKey)
+                    .Select(c => c.Trim())
+                    .ToList();
+                var includeNoCity = filter.City.Any(c => c?.Trim() == CityNoneKey);
+                query = query.Where(o =>
+                    (o.DeliveryCity != null && cities.Contains(o.DeliveryCity.Trim())) ||
+                    (includeNoCity && (o.DeliveryCity == null || o.DeliveryCity.Trim() == "")));
+            }
+
+            if (filter?.Credited == true)
+                query = ApplyCreditedOrdersFilter(query);
+
             if (filter?.Search?.SearchTerm.HasValue() == true)
             {
                 var term = filter.Search.SearchTerm!.Trim();
@@ -126,18 +159,100 @@ namespace George.Data
                     (o.ExternalOrderId != null && o.ExternalOrderId.Contains(term)) ||
                     (o.CustomerName != null && o.CustomerName.Contains(term)) ||
                     (o.CustomerPhone != null && o.CustomerPhone.Contains(term)) ||
-                    (o.CustomerNote != null && o.CustomerNote.Contains(term)));
+                    (o.CustomerNote != null && o.CustomerNote.Contains(term)) ||
+                    o.OrderItem.Any(i => i.Title != null && i.Title.Contains(term)));
             }
 
-            if (paging.IncludeTotal)
-                res.Total = await query.CountAsync(cancelToken).ConfigureAwait(false);
+            return query;
+        }
 
-            query = query.OrderByDescending(o => o.CreationTime);
+        /// <summary>City-filter sentinel for "orders without a delivery city" (matches the UI multi-select key).</summary>
+        public const string CityNoneKey = "__none__";
 
-            res.Items = await query
-                .Skip(paging.Skip)
-                .Take(paging.Take)
+        /// <summary>
+        /// Orders a credit was issued for — full or partial. SQL mirror of the UI's
+        /// isPartialRefund/isPaymentRefunded (orderPaymentDisplay.ts): settle status marked
+        /// refunded, payment status refunded, a positive refunded amount, or a credit
+        /// document on a paid order.
+        /// </summary>
+        private static IQueryable<Order> ApplyCreditedOrdersFilter(IQueryable<Order> query)
+        {
+            return query.Where(o =>
+                o.PaymentSettleStatus == "Refunded" ||
+                o.PaymentSettleStatus == "PartiallyRefunded" ||
+                o.PaymentStatus == "Refunded" ||
+                (o.RefundedAmount != null && o.RefundedAmount > 0) ||
+                (((o.RefundInvoiceNumber != null && o.RefundInvoiceNumber != "") ||
+                  (o.CardcomRefundDocumentUrl != null && o.CardcomRefundDocumentUrl != "")) &&
+                 o.PaymentStatus == "Paid"));
+        }
+
+        /// <summary>
+        /// Archive KPI summary over the whole filtered period (not paged): status counts,
+        /// credited count + credited sum, and the distinct delivery cities (for the city filter).
+        /// </summary>
+        public async Task<OrderArchiveSummaryDto> GetOrderArchiveSummaryAsync(
+            OrderFilter filter,
+            CancellationToken cancelToken)
+        {
+            var query = ApplyOrderListFilter(
+                _dbContext.Order.Where(o => !o.IsDeleted).AsNoTracking(),
+                filter);
+
+            var statusCounts = await query
+                .GroupBy(o => o.Status)
+                .Select(g => new { Status = g.Key, Count = g.Count() })
                 .ToListAsync(cancelToken).ConfigureAwait(false);
+
+            // Credited orders are a small subset — project them and compute the credited
+            // amount in memory with the exact UI semantics (partial → RefundedAmount;
+            // full → RefundedAmount when positive, else Total).
+            var creditedRows = await ApplyCreditedOrdersFilter(query)
+                .Select(o => new
+                {
+                    o.PaymentStatus,
+                    o.PaymentSettleStatus,
+                    o.RefundedAmount,
+                    o.Total,
+                    o.RefundInvoiceNumber,
+                    o.CardcomRefundDocumentUrl,
+                })
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+
+            var cities = await query
+                .Select(o => o.DeliveryCity)
+                .Distinct()
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+
+            var res = new OrderArchiveSummaryDto
+            {
+                Total = statusCounts.Sum(s => s.Count),
+                Completed = statusCounts.Where(s => s.Status == "Completed").Sum(s => s.Count),
+                Cancelled = statusCounts.Where(s => s.Status == "Cancelled").Sum(s => s.Count),
+                Credited = creditedRows.Count,
+                HasCityNone = cities.Any(c => string.IsNullOrWhiteSpace(c)),
+                Cities = cities
+                    .Where(c => !string.IsNullOrWhiteSpace(c))
+                    .Select(c => c!.Trim())
+                    .Distinct()
+                    .OrderBy(c => c)
+                    .ToList(),
+            };
+
+            foreach (var row in creditedRows)
+            {
+                var settle = (row.PaymentSettleStatus ?? "").Trim().ToLowerInvariant();
+                var partial =
+                    settle == "partiallyrefunded" ||
+                    (row.RefundedAmount is > 0 && row.Total is > 0
+                        ? row.RefundedAmount.Value + 0.01m < row.Total.Value
+                        : (row.RefundInvoiceNumber.HasValue() || row.CardcomRefundDocumentUrl.HasValue()) &&
+                          (row.PaymentStatus ?? "").Trim().ToLowerInvariant() == "paid" &&
+                          settle != "refunded");
+                res.CreditedSum += partial
+                    ? row.RefundedAmount ?? 0
+                    : (row.RefundedAmount is > 0 ? row.RefundedAmount.Value : row.Total ?? 0);
+            }
 
             return res;
         }

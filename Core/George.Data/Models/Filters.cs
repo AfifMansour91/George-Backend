@@ -182,6 +182,10 @@ namespace George.Common
         public string? PaymentMethod { get; set; }
         public DateTime? DeliveryDateFrom { get; set; }
         public DateTime? DeliveryDateTo { get; set; }
+        /// <summary>Delivery cities; bound from repeated query params (Filter.City=חיפה&amp;Filter.City=…). The sentinel <c>__none__</c> matches orders without a city.</summary>
+        public List<string>? City { get; set; }
+        /// <summary>When true, only orders a credit/refund (full or partial) was issued for.</summary>
+        public bool? Credited { get; set; }
         public SearchFilter? Search { get; set; }
     }
 

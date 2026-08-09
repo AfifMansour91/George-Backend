@@ -33,6 +33,16 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _orderSvc.GetOrdersAsync(request, cancelToken));
         }
 
+        /// <summary>Archive KPI summary over the whole filtered period (not paged). Same Filter.* params as the list. Literal route before {orderId}.</summary>
+        [HttpGet("ArchiveSummary")]
+        [ProducesResponseType(typeof(IApiResponse<OrderArchiveSummaryRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetArchiveSummaryAsync(
+            [FromQuery] ApiListReq<OrderFilter> request,
+            CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _orderSvc.GetOrderArchiveSummaryAsync(request.Filter, cancelToken));
+        }
+
         /// <summary>Aggregated handling medians for a site and date range (dashboard). Literal route before {orderId}.</summary>
         [HttpGet("HandlingMetrics")]
         [ProducesResponseType(typeof(IApiResponse<OrderHandlingMetricsRes>), (int)HttpStatusCode.OK)]
