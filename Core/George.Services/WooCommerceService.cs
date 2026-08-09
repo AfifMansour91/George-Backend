@@ -2106,13 +2106,29 @@ namespace George.Services
                     }
 
                     // Same as media library "download to our storage": persist JPEG to our bucket/disk and point Media + ProductImage at the public URL, then WooCommerce sideloads that URL like any normal product image.
-                    if (pi.MediaId.HasValue && await ImageRequiresJpegMediaUploadForWooAsync(url, friendlyName, cancelToken).ConfigureAwait(false))
+                    if (pi.MediaId.HasValue)
                     {
-                        var mirroredUrl = await TryMirrorProductImageToOurStorageForWooAsync(pi.MediaId.Value, url, cancelToken).ConfigureAwait(false);
-                        if (!string.IsNullOrEmpty(mirroredUrl))
+                        var mirroredFileName = $"woo-sync-{pi.MediaId.Value}.jpg";
+                        if (url.Contains(mirroredFileName, StringComparison.OrdinalIgnoreCase))
                         {
-                            url = mirroredUrl;
-                            _logger.LogInformation("Woo sync: mirrored product image to our storage for product {ProductId}, media {MediaId}", product.Id, pi.MediaId.Value);
+                            // Already mirrored on a previous sync; Media.Name still carries the original
+                            // modern-format hint, so adopt the JPEG name instead of re-mirroring.
+                            friendlyName = mirroredFileName;
+                        }
+                        else if (await ImageRequiresJpegMediaUploadForWooAsync(url, friendlyName, cancelToken).ConfigureAwait(false))
+                        {
+                            var mirroredUrl = await TryMirrorProductImageToOurStorageForWooAsync(pi.MediaId.Value, url, cancelToken).ConfigureAwait(false);
+                            if (!string.IsNullOrEmpty(mirroredUrl))
+                            {
+                                url = mirroredUrl;
+                                // The mirrored file is a JPEG we host, but Media.Name keeps the original modern-format
+                                // name (e.g. "pic.webp") — left as-is it re-triggers the requires-upload check below on
+                                // the NAME hint, falling into wp/v2/media which is 401 on stores whose WordPress blocks
+                                // media create for WooCommerce keys, and the image gets skipped. Use the mirrored JPEG
+                                // filename so the normal URL-sideload path runs.
+                                friendlyName = mirroredFileName;
+                                _logger.LogInformation("Woo sync: mirrored product image to our storage for product {ProductId}, media {MediaId}", product.Id, pi.MediaId.Value);
+                            }
                         }
                     }
 
