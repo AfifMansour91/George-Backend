@@ -3191,9 +3191,16 @@ public class PaymentService : ServiceBase
         CardcomTransactionInfoResult info,
         CancellationToken cancelToken)
     {
+        // Website invoice copy: the same inquiry response carries the checkout-issued Cardcom document.
+        // Persist it so the archive shows צפייה בחשבונית for website orders too — previously only phone
+        // orders (charged by George, which creates the document itself) ever got CardcomDocumentUrl.
+        var invoiceBackfilled = ApplyInvoiceDocumentFromInquiry(order, info);
+
         var outcome = GatewayChargeVerification.Evaluate(info, order.Total, order.RefundedAmount);
         if (outcome is GatewayVerifyOutcome.Inconclusive or GatewayVerifyOutcome.HoldOnly)
         {
+            if (invoiceBackfilled)
+                await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
             _logger.LogInformation(
                 "Gateway verify inconclusive orderId={OrderId} outcome={Outcome} responseCode={ResponseCode} dealType={DealType}",
                 order.Id, outcome, info.ResponseCode, info.DealType);
@@ -3224,6 +3231,26 @@ public class PaymentService : ServiceBase
             _logger.LogWarning(
                 "Gateway amount mismatch orderId={OrderId} cardcomAmount={CardcomAmount} orderTotal={OrderTotal} isRefund={IsRefund}",
                 order.Id, info.Amount, order.Total, info.IsRefund);
+    }
+
+    /// <summary>
+    /// Fill InvoiceNumber / CardcomDocumentUrl from a Cardcom inquiry response when missing on the order.
+    /// Never overwrites existing values (a George-issued document stays authoritative).
+    /// </summary>
+    private static bool ApplyInvoiceDocumentFromInquiry(Order order, CardcomTransactionInfoResult info)
+    {
+        var changed = false;
+        if (string.IsNullOrWhiteSpace(order.CardcomDocumentUrl) && !string.IsNullOrWhiteSpace(info.DocumentUrl))
+        {
+            order.CardcomDocumentUrl = info.DocumentUrl.Trim();
+            changed = true;
+        }
+        if (string.IsNullOrWhiteSpace(order.InvoiceNumber) && !string.IsNullOrWhiteSpace(info.DocumentNumber))
+        {
+            order.InvoiceNumber = info.DocumentNumber.Trim();
+            changed = true;
+        }
+        return changed;
     }
 
     /// <summary>Persist payment columns after WooCommerce gateway update.</summary>
