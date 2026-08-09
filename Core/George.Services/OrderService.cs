@@ -166,6 +166,17 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.InvalidRequest, "CustomerName is required.");
             if (string.IsNullOrWhiteSpace(req.CustomerPhone))
                 return CreateResponse(response, StatusCode.InvalidRequest, "CustomerPhone is required.");
+            // Manual (phone) orders must carry an explicitly chosen supply date (Zano 10/08: the UI used
+            // to default silently and orders landed on the wrong day). Only Phone-source — kiosk and
+            // website ingest have their own date semantics.
+            if (string.Equals(req.Source?.Trim(), "Phone", StringComparison.OrdinalIgnoreCase))
+            {
+                var isPickup = string.Equals(req.DeliveryType?.Trim(), "Pickup", StringComparison.OrdinalIgnoreCase);
+                if (isPickup && !req.PickupDate.HasValue)
+                    return CreateResponse(response, StatusCode.InvalidRequest, "יש לבחור תאריך איסוף להזמנה.");
+                if (!isPickup && !req.DeliveryDate.HasValue)
+                    return CreateResponse(response, StatusCode.InvalidRequest, "יש לבחור תאריך אספקה להזמנה.");
+            }
 
             if (req.AccountId <= 0)
             {
@@ -2152,6 +2163,10 @@ namespace George.Services
                 customerBox.Append($"<div style=\"line-height:1.7;\"><b>טלפון:</b> <span dir=\"ltr\">{EscapeHtml(order.CustomerPhone!)}</span></div>");
             if (!string.IsNullOrWhiteSpace(order.CustomerEmail))
                 customerBox.Append($"<div style=\"line-height:1.7;\"><b>אימייל:</b> <span dir=\"ltr\">{EscapeHtml(order.CustomerEmail!)}</span></div>");
+            // Zano request 10/08: order-level notes moved from the delivery box (left) to the customer box
+            // (right), rendered as large + bold as the box titles so staff can't miss them.
+            if (!string.IsNullOrWhiteSpace(orderNotes))
+                customerBox.Append($"<div style=\"margin-top:10px;font-size:16px;font-weight:800;line-height:1.5;\">הערות הזמנה: {EscapeHtml(orderNotes)}</div>");
             customerBox.Append("</div>");
 
             // Delivery / pickup box
@@ -2175,8 +2190,6 @@ namespace George.Services
                 if (!string.IsNullOrEmpty(extras))
                     deliveryBox.Append($"<div style=\"line-height:1.7;\">{EscapeHtml(extras)}</div>");
             }
-            if (!string.IsNullOrWhiteSpace(orderNotes))
-                deliveryBox.Append($"<div style=\"line-height:1.7;\"><b>הערות הזמנה:</b> {EscapeHtml(orderNotes)}</div>");
             deliveryBox.Append("</div>");
 
             // Items table rows
@@ -2196,7 +2209,7 @@ namespace George.Services
                 if (!string.IsNullOrWhiteSpace(legacyHint))
                     meta.Append($"<div style=\"color:#374151;font-size:13px;line-height:1.6;\">{EscapeHtml(legacyHint)}</div>");
                 if (!string.IsNullOrWhiteSpace(it.Notes))
-                    meta.Append($"<div style=\"color:#111827;font-size:13px;font-weight:700;line-height:1.6;\">הערות לקוח אודות ההזמנה: {EscapeHtml(it.Notes!)}</div>");
+                    meta.Append($"<div style=\"color:#111827;font-size:16px;font-weight:800;line-height:1.5;\">הערות למוצר: {EscapeHtml(it.Notes!)}</div>");
 
                 rows.Append("<tr style=\"border-bottom:1px solid #E5E7EB;\">");
                 rows.Append($"<td style=\"padding:12px 10px;vertical-align:top;\"><div style=\"font-weight:600;color:#6B7280;\">{title}</div>{meta}</td>");
