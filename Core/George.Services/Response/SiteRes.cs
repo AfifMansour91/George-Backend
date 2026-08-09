@@ -89,6 +89,9 @@ namespace George.Services.Response
         /// <summary>When true, printouts include the permanent customer note (הערה קבועה). Off by default.</summary>
         public bool? ShowCustomerProfileNoteInPrints { get; set; }
 
+        /// <summary>When true, show the handler name (מטפל) under the order source on cards and printouts. Off by default.</summary>
+        public bool? ShowOrderHandler { get; set; }
+
         /// <summary>Feature flag: render order lines from the typed LineDisplayJson snapshot when present. Off by default.</summary>
         public bool? UseStructuredOrderLineDisplay { get; set; }
 

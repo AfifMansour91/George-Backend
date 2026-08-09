@@ -499,6 +499,13 @@ namespace George.Data
                 db.PickerUserId = pickerUserId.Value;
                 if (!string.IsNullOrWhiteSpace(pickerName))
                     db.PickerName = pickerName;
+                // Backfill המטפל for orders that skipped the start-treatment stamping.
+                if (db.HandlerUserId == null)
+                {
+                    db.HandlerUserId = pickerUserId.Value;
+                    if (!string.IsNullOrWhiteSpace(pickerName))
+                        db.HandlerName = pickerName;
+                }
             }
             var itemMap = db.OrderItem?.ToDictionary(i => i.Id) ?? new Dictionary<int, OrderItem>();
             foreach (var (orderItemId, pickedQty, totalPrice, confirmFromClient, notes) in updates)

@@ -205,6 +205,12 @@ namespace George.Services
             await _paymentService.PrepareOrderPaymentOnCreateAsync(order, cancelToken).ConfigureAwait(false);
             order.CreationTime = DateTime.UtcNow;
             order.CreationUserId = AuthUser.Id;
+            // המטפל: the staff member entering the manual/phone order.
+            if (AuthUser.Id.IsValidID())
+            {
+                order.HandlerUserId = AuthUser.Id;
+                order.HandlerName = await _userStorage.GetUserNameAsync(AuthUser.Id, cancelToken).ConfigureAwait(false);
+            }
             order.IsDeleted = false;
             NormalizeOrderDeliveryAndPickupDates(order);
             var items = new List<OrderItem>();
@@ -522,9 +528,22 @@ namespace George.Services
             var beforeUpdate = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
             var previousStatus = beforeUpdate?.Status;
             var previousDeliveryType = beforeUpdate?.DeliveryType;
+            // המטפל: the first user to take the order into treatment (fills website orders, which have
+            // no creating user). Never overwrites a handler stamped at manual-order creation.
+            var stampHandler = string.Equals(req.Status, "InTreatment", StringComparison.OrdinalIgnoreCase)
+                && beforeUpdate is { HandlerUserId: null }
+                && AuthUser.Id.IsValidID();
+            var handlerNameForTreatment = stampHandler
+                ? await _userStorage.GetUserNameAsync(AuthUser.Id, cancelToken).ConfigureAwait(false)
+                : null;
             var updated = await _orderStorage.UpdateOrderAsync(orderId, o =>
             {
                 if (req.Status != null) o.Status = req.Status;
+                if (stampHandler && o.HandlerUserId == null)
+                {
+                    o.HandlerUserId = AuthUser.Id;
+                    o.HandlerName = handlerNameForTreatment;
+                }
                 if (req.ManagerNote != null) o.ManagerNote = req.ManagerNote;
                 if (req.CustomerNote != null) o.CustomerNote = req.CustomerNote;
                 if (req.DeliveryNote != null) o.DeliveryNote = req.DeliveryNote;
@@ -2072,8 +2091,8 @@ namespace George.Services
                 notesMap.TryGetValue(orderForPrint.CustomerId.Value, out customerProfileNote);
             }
             var payload = useA4
-                ? BuildAutoVoucherA4Html(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines)
-                : BuildAutoVoucherHtml(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines);
+                ? BuildAutoVoucherA4Html(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines, site.ShowOrderHandler == true)
+                : BuildAutoVoucherHtml(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines, site.ShowOrderHandler == true);
             if (string.IsNullOrWhiteSpace(payload))
                 return;
 
@@ -2106,12 +2125,14 @@ namespace George.Services
         /// email: customer + delivery boxes side by side, ordered-items table (product | qty | price),
         /// then subtotal / shipping / payment / grand-total rows. Delivered to the agent as an A4 PDF.
         /// </summary>
-        private string BuildAutoVoucherA4Html(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false)
+        private string BuildAutoVoucherA4Html(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false, bool showHandler = false)
         {
             var items = order.OrderItem?.OrderBy(i => i.SortOrder).ToList() ?? new List<OrderItem>();
             var orderNo = order.OrderNumber ?? order.Id.ToString(CultureInfo.InvariantCulture);
             var created = FormatOrderDateTime(order.CreationTime);
             var sourceLabel = VoucherSourceLabels.TryGetValue(order.Source ?? "", out var srcLabel) ? srcLabel : (order.Source ?? "");
+            // Site.ShowOrderHandler: append the handler name (מטפל) next to the order source.
+            var handlerLabel = showHandler && !string.IsNullOrWhiteSpace(order.HandlerName) ? "מטפל: " + order.HandlerName!.Trim() : "";
             var isShipping = IsVoucherShipping(order);
             var deliveryDate = isShipping ? order.DeliveryDate : order.PickupDate;
             // Site.VoucherHideDeliveryTime: print the delivery date without the time slot.
@@ -2235,7 +2256,7 @@ namespace George.Services
 
             sb.Append("  <div style=\"display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin-bottom:14px;\">");
             sb.Append($"<div style=\"font-size:20px;font-weight:800;\">הזמנה #{EscapeHtml(orderNo)}</div>");
-            sb.Append($"<div style=\"color:#6B7280;\">{EscapeHtml(created)}{(string.IsNullOrEmpty(sourceLabel) ? "" : " · " + EscapeHtml(sourceLabel))}</div>");
+            sb.Append($"<div style=\"color:#6B7280;\">{EscapeHtml(created)}{(string.IsNullOrEmpty(sourceLabel) ? "" : " · " + EscapeHtml(sourceLabel))}{(string.IsNullOrEmpty(handlerLabel) ? "" : " · " + EscapeHtml(handlerLabel))}</div>");
             sb.AppendLine("</div>");
 
             sb.Append("  <div style=\"display:flex;flex-wrap:wrap;gap:24px;border:1px solid #E5E7EB;border-radius:6px;padding:14px 16px;margin-bottom:20px;\">");
@@ -2261,7 +2282,7 @@ namespace George.Services
             return sb.ToString();
         }
 
-        private string BuildAutoVoucherHtml(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false)
+        private string BuildAutoVoucherHtml(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false, bool showHandler = false)
         {
             var sb = new StringBuilder();
             var items = order.OrderItem?.OrderBy(i => i.SortOrder).ToList() ?? new List<OrderItem>();
@@ -2271,6 +2292,8 @@ namespace George.Services
             var created = FormatOrderDateTime(order.CreationTime);
             var sourceLabel = VoucherSourceLabels.TryGetValue(order.Source ?? "", out var label) ? label : (order.Source ?? "");
             var sourceTop = string.IsNullOrWhiteSpace(sourceLabel) ? "" : $"מקור: {sourceLabel}";
+            // Site.ShowOrderHandler: handler name (מטפל) printed under the order source.
+            var handlerTop = showHandler && !string.IsNullOrWhiteSpace(order.HandlerName) ? $"מטפל: {order.HandlerName!.Trim()}" : "";
             var isShipping = IsVoucherShipping(order);
             var deliveryDate = isShipping
                 ? order.DeliveryDate
@@ -2339,6 +2362,8 @@ namespace George.Services
             sb.Append($"<span style=\"font-weight:400;white-space:nowrap;word-break:normal;overflow-wrap:normal;\">{EscapeHtml(created)}</span>");
             sb.Append($"<span style=\"font-weight:700;\">{EscapeHtml(sourceTop)}</span>");
             sb.Append("</div>");
+            if (!string.IsNullOrEmpty(handlerTop))
+                sb.Append($"<div style=\"margin-top:2px;text-align:left;font-size:12px;line-height:13px;\">{EscapeHtml(handlerTop)}</div>");
             var voucherStatus = VoucherOrderStatusLabel(order);
             if (!string.IsNullOrEmpty(voucherStatus))
             {

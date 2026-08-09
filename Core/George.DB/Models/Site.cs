@@ -203,6 +203,12 @@ public partial class Site
     public bool? ShowCustomerProfileNoteInPrints { get; set; }
 
     /// <summary>
+    /// When true, the handler name (מטפל — Order.HandlerName) shows under the order source on the
+    /// order card and on printouts (voucher/A4). NULL/0 = hidden (default).
+    /// </summary>
+    public bool? ShowOrderHandler { get; set; }
+
+    /// <summary>
     /// Feature flag: render order-line attributes from the typed <see cref="OrderItem.LineDisplayJson"/>
     /// snapshot (no Hebrew-label parsing) on lines that have one; lines without it always use the legacy
     /// heuristics. NULL/0 = legacy rendering everywhere (default).

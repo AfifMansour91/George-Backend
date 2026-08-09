@@ -13,6 +13,10 @@ public class OrderRes
     public int? PickerUserId { get; set; }
     /// <summary>Display name of the picker (User.FullName at picking time).</summary>
     public string? PickerName { get; set; }
+    /// <summary>המטפל: user who created the manual order / first took the order into treatment.</summary>
+    public int? HandlerUserId { get; set; }
+    /// <summary>Display name of the handler (shown under the order source when Site.ShowOrderHandler).</summary>
+    public string? HandlerName { get; set; }
     public int AccountId { get; set; }
     public int SiteId { get; set; }
     /// <summary>Account display name (from Account.Name). Used by voucher header when client does not pass an override.</summary>

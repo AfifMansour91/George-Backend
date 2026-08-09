@@ -30,6 +30,16 @@ public partial class Order
     [StringLength(200)]
     public string? PickerName { get; set; }
 
+    /// <summary>
+    /// המטפל: staff member handling the order — the user who created a manual/phone order, or the
+    /// first user to take a website order into treatment (also backfilled at picking when still empty).
+    /// </summary>
+    public int? HandlerUserId { get; set; }
+
+    /// <summary>Display name of the handler (denormalized from User.FullName when stamped).</summary>
+    [StringLength(200)]
+    public string? HandlerName { get; set; }
+
     public int AccountId { get; set; }
 
     public int SiteId { get; set; }
