@@ -532,7 +532,31 @@ public class PaymentService : ServiceBase
         return response;
     }
 
+    /// <summary>
+    /// Per-order gate so concurrent finalize calls serialize instead of double-charging (Zano order 4757,
+    /// 10/08: five successful captures — parallel finish/auto-finalize calls plus a later retry all charged
+    /// because nothing checked the settle state). Single-process only; the settled-state guard inside the
+    /// core covers non-concurrent repeats across restarts/instances.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, SemaphoreSlim> FinalizeOrderLocks = new();
+
     public async Task<IApiResponse<FinalizePickingPaymentRes>> FinalizePickingPaymentAsync(
+        int orderId,
+        CancellationToken cancelToken = default)
+    {
+        var gate = FinalizeOrderLocks.GetOrAdd(orderId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancelToken).ConfigureAwait(false);
+        try
+        {
+            return await FinalizePickingPaymentCoreAsync(orderId, cancelToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task<IApiResponse<FinalizePickingPaymentRes>> FinalizePickingPaymentCoreAsync(
         int orderId,
         CancellationToken cancelToken = default)
     {
@@ -550,6 +574,20 @@ public class PaymentService : ServiceBase
 
         if (finalAmount <= 0)
             return CreateResponse(response, StatusCode.InvalidRequest, "Order total must be positive.");
+
+        // Idempotency: never charge an order whose payment is already settled — a repeat finalize used to
+        // run the full charge again. Reports "Captured" so callers treat the order as paid.
+        var settleNow = (order.PaymentSettleStatus ?? "").Trim();
+        if (settleNow.Equals(PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase) ||
+            settleNow.Equals(PaymentSettleStatus.Refunded, StringComparison.OrdinalIgnoreCase) ||
+            settleNow.Equals(PaymentSettleStatus.PartiallyRefunded, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "FinalizePickingPayment skipped: orderId={OrderId} payment already settled (settleStatus={SettleStatus}); not charging again.",
+                order.Id, settleNow);
+            response.Data = new FinalizePickingPaymentRes { Outcome = "Captured", FinalAmount = finalAmount };
+            return response;
+        }
 
         _logger.LogInformation(
             "FinalizePickingPayment start: orderId={OrderId}, siteId={SiteId}, finalAmount={FinalAmount}, authAmount={AuthAmount}, " +
@@ -1053,6 +1091,25 @@ public class PaymentService : ServiceBase
         string? token = null;
         string? cardExp = null;
         (token, cardExp, _) = await ResolveChargeTokenAsync(order, cancelToken);
+
+        // Refund needs either a numeric Cardcom transaction id (RefundByTransactionId) or a stored card
+        // token. An order can be Captured with neither — marked paid manually ("חויב טלפונית"), charged on
+        // an external terminal, or ingested by an old webhook without transactionId. Fail with an
+        // actionable Hebrew message instead of Cardcom's generic English one.
+        var txIdUsable = !string.IsNullOrWhiteSpace(originalTxId)
+            && !string.IsNullOrWhiteSpace(creds.ApiPassword)
+            && long.TryParse(originalTxId!.Trim(), out var parsedRefundTxId) && parsedRefundTxId > 0;
+        var tokenUsable = !string.IsNullOrWhiteSpace(token) && !string.IsNullOrWhiteSpace(cardExp);
+        if (!txIdUsable && !tokenUsable)
+        {
+            await LogEventAsync(order.Id, "Refund", "-1",
+                $"no usable Cardcom transaction/token for refund (txId='{originalTxId ?? ""}')",
+                null, null, amount, null, cancelToken);
+            return CreateResponse(response, StatusCode.InvalidRequest,
+                "לא נמצאה עסקת Cardcom לזיכוי בהזמנה זו — אין מזהה עסקה ואין כרטיס שמור. " +
+                "אם החיוב בוצע מחוץ למערכת (מסוף חיצוני או סימון ידני כ\"חויב טלפונית\") יש לזכות באותו אמצעי; " +
+                "אם החיוב קיים בקארדקום, יש להשלים את מזהה העסקה להזמנה.");
+        }
 
         var tx = await _cardcom.RefundAsync(creds, new RefundRequest
         {

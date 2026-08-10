@@ -2174,7 +2174,22 @@ namespace George.Services
                             images.Add(new { src = woltJpegSideloadUrl, name = compatFile, position });
                         }
                         else
-                            _logger.LogWarning("Woo sync: wp/v2/media upload failed for product {ProductId}, file {File}; image skipped.", product.Id, compatFile);
+                        {
+                            // WP blocks media create for WooCommerce keys (401 rest_cannot_create) and the image
+                            // has no Media row to mirror (e.g. Woo-imported ProductImage with URL only) — host the
+                            // JPEG on OUR storage and let Woo sideload it by URL. The deterministic attachment name
+                            // (compatFile) makes the next sync reuse the attachment instead of re-uploading.
+                            var mirroredJpegUrl = await TryUploadJpegBytesToOurStorageAsync(jpegBytes, compatFile, cancelToken).ConfigureAwait(false);
+                            if (!string.IsNullOrEmpty(mirroredJpegUrl))
+                            {
+                                _logger.LogInformation(
+                                    "Woo sync: wp/v2/media failed ({Status}) for product {ProductId}; sideloading mirrored JPEG from our storage.",
+                                    uploadResult.HttpStatus, product.Id);
+                                images.Add(new { src = mirroredJpegUrl, name = compatFile, position });
+                            }
+                            else
+                                _logger.LogWarning("Woo sync: wp/v2/media upload failed for product {ProductId}, file {File}; image skipped.", product.Id, compatFile);
+                        }
                         continue;
                     }
 
@@ -3661,6 +3676,7 @@ namespace George.Services
                                 mediaId = await TryFindWordPressMediaIdByCompatFileNameAsync(wpJsonBaseForMedia, compatFile, httpClient, cancelToken).ConfigureAwait(false);
 
                             string? woltSideloadSrc = null;
+                            string? mirroredJpegSrc = null;
                             if (!mediaId.HasValue)
                             {
                                 try
@@ -3674,6 +3690,17 @@ namespace George.Services
                                             "Woo sync: wp/v2/media failed ({Status}) for product {ProductId} variant {VariantId}; using Wolt JPEG URL sideload.",
                                             uploadResult.HttpStatus, product.Id, variant.Id);
                                         woltSideloadSrc = woltJpegSideloadUrl;
+                                    }
+                                    else if (!mediaId.HasValue)
+                                    {
+                                        // WP blocks media create for WooCommerce keys — host the JPEG on our storage
+                                        // and sideload by URL; the deterministic compat name lets the next sync reuse
+                                        // the attachment (TryGetWooVariationCompatImageMediaIdAsync matches by stem).
+                                        mirroredJpegSrc = await TryUploadJpegBytesToOurStorageAsync(jpegBytes, compatFile, cancelToken).ConfigureAwait(false);
+                                        if (mirroredJpegSrc != null)
+                                            _logger.LogInformation(
+                                                "Woo sync: wp/v2/media failed ({Status}) for product {ProductId} variant {VariantId}; sideloading mirrored JPEG from our storage.",
+                                                uploadResult.HttpStatus, product.Id, variant.Id);
                                     }
                                 }
                                 catch (Exception ex)
@@ -3693,6 +3720,8 @@ namespace George.Services
                                 wooVariation["image"] = new { id = mediaId.Value };
                             else if (woltSideloadSrc != null)
                                 wooVariation["image"] = new { src = woltSideloadSrc, name = compatFile };
+                            else if (mirroredJpegSrc != null)
+                                wooVariation["image"] = new { src = mirroredJpegSrc, name = compatFile };
                             else
                                 _logger.LogWarning("Woo sync: variation image skipped (JPEG upload path) product {ProductId} variant {VariantId}", product.Id, variant.Id);
                         }
@@ -4411,17 +4440,12 @@ namespace George.Services
             }
         }
 
-        /// <summary>
-        /// Downloads the external image, encodes as JPEG, uploads via <see cref="IFileStorage"/> (same as media library), updates <see cref="Media"/> and linked <see cref="ProductImage"/> URLs.
-        /// </summary>
-        private async Task<string?> TryMirrorProductImageToOurStorageForWooAsync(int mediaId, string sourceUrl, CancellationToken cancelToken)
+        /// <summary>Uploads JPEG bytes to our public storage (no Media row involved) and returns the public URL, or null.</summary>
+        private async Task<string?> TryUploadJpegBytesToOurStorageAsync(byte[] jpegBytes, string fileName, CancellationToken cancelToken)
         {
             try
             {
-                var jpegBytes = await DownloadImageAndEncodeAsJpegAsync(sourceUrl, cancelToken).ConfigureAwait(false);
                 if (jpegBytes.Length == 0) return null;
-
-                var fileName = $"woo-sync-{mediaId}.jpg";
                 using var stream = new MemoryStream(jpegBytes);
                 var formFile = new FormFile(stream, 0, jpegBytes.Length, "file", fileName)
                 {
@@ -4434,13 +4458,33 @@ namespace George.Services
                 if (!uploadResult.IsSuccessful || string.IsNullOrEmpty(uploadResult.FilePath))
                 {
                     _logger.LogWarning(
-                        "Woo sync: mirror to our storage failed for media {MediaId}: {Message}",
-                        mediaId,
+                        "Woo sync: JPEG upload to our storage failed for {FileName}: {Message}",
+                        fileName,
                         uploadResult.Exception?.Message ?? "upload failed");
                     return null;
                 }
 
-                var newUrl = FileHelper.GetFileExternalPath(uploadResult.FilePath);
+                return FileHelper.GetFileExternalPath(uploadResult.FilePath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Woo sync: JPEG upload to our storage threw for {FileName}", fileName);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Downloads the external image, encodes as JPEG, uploads via <see cref="IFileStorage"/> (same as media library), updates <see cref="Media"/> and linked <see cref="ProductImage"/> URLs.
+        /// </summary>
+        private async Task<string?> TryMirrorProductImageToOurStorageForWooAsync(int mediaId, string sourceUrl, CancellationToken cancelToken)
+        {
+            try
+            {
+                var jpegBytes = await DownloadImageAndEncodeAsJpegAsync(sourceUrl, cancelToken).ConfigureAwait(false);
+                var newUrl = await TryUploadJpegBytesToOurStorageAsync(jpegBytes, $"woo-sync-{mediaId}.jpg", cancelToken).ConfigureAwait(false);
+                if (string.IsNullOrEmpty(newUrl))
+                    return null;
+
                 var updated = await _mediaStorage.UpdateMediaUrlAndSizeAsync(mediaId, newUrl, jpegBytes.LongLength, updateUserId: null, cancelToken).ConfigureAwait(false);
                 return updated ? newUrl : null;
             }
