@@ -12,6 +12,23 @@ namespace George.Api
 			var logger = NLog.LogManager.Setup().LoadConfigurationFromAppSettings().GetCurrentClassLogger();
 			logger.Info("********** Process - START **********");
 
+			// Deploy stamp: which binaries this process actually loaded (build time of each core dll).
+			// Grep "Deploy stamp" after every deploy to confirm the new build is the one running.
+			try
+			{
+				var baseDir = AppContext.BaseDirectory;
+				foreach (var dllName in new[] { "George.Api.dll", "George.Services.dll", "George.Data.dll" })
+				{
+					var dllPath = Path.Combine(baseDir, dllName);
+					if (File.Exists(dllPath))
+						logger.Info("Deploy stamp: {0} built {1:yyyy-MM-dd HH:mm:ss} (local)", dllName, File.GetLastWriteTime(dllPath));
+				}
+			}
+			catch (Exception stampEx)
+			{
+				logger.Warn(stampEx, "Deploy stamp logging failed.");
+			}
+
 			try
 			{
 				// Create builder.

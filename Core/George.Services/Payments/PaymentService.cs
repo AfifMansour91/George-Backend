@@ -627,6 +627,12 @@ public class PaymentService : ServiceBase
             !string.IsNullOrWhiteSpace(cardOwner?.Name),
             !string.IsNullOrWhiteSpace(cardOwner?.Phone),
             !string.IsNullOrWhiteSpace(cardOwner?.Email));
+        // Always logged: the installments the upcoming charge will use and where they came from.
+        _logger.LogInformation(
+            "FinalizePickingPayment installments: orderId={OrderId}, storedSelection={StoredSelection}, chargeWith={ChargeWith}",
+            order.Id,
+            order.CardcomSelectedInstallments,
+            ResolveSelectedInstallments(order));
 
         if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(cardExp))
         {
@@ -1488,7 +1494,19 @@ public class PaymentService : ServiceBase
         order.CardcomTokenLast4 = CoalesceNonEmpty(payload.Last4Digits, callbackDisplay.Last4Digits);
         order.CardcomCardBrand = CoalesceNonEmpty(payload.CardBrand, callbackDisplay.CardBrand);
         if (payload.NumOfPayments is > 1 and <= 36)
+        {
             order.CardcomSelectedInstallments = payload.NumOfPayments;
+            _logger.LogInformation(
+                "Cardcom installments selection stored from callback: orderId={OrderId}, numOfPayments={NumOfPayments}",
+                order.Id, payload.NumOfPayments);
+        }
+        else
+        {
+            // Positive signal either way — proves this code ran and shows what the payload carried.
+            _logger.LogInformation(
+                "Cardcom callback without multi-installment selection: orderId={OrderId}, numOfPayments={NumOfPayments}",
+                order.Id, payload.NumOfPayments);
+        }
         if (!string.IsNullOrWhiteSpace(payload.DocumentNumber))
             order.InvoiceNumber = payload.DocumentNumber;
         if (!string.IsNullOrWhiteSpace(payload.DocumentUrl))
@@ -2843,8 +2861,13 @@ public class PaymentService : ServiceBase
         var payload = ResolveCallbackPayload(validated);
         // Missed-webhook recovery must also restore the installments the customer picked at the J5 hold,
         // or the picking charge silently goes out as a single payment.
-        if (payload.NumOfPayments is > 1 and <= 36)
-            order.CardcomSelectedInstallments ??= payload.NumOfPayments;
+        if (payload.NumOfPayments is > 1 and <= 36 && order.CardcomSelectedInstallments == null)
+        {
+            order.CardcomSelectedInstallments = payload.NumOfPayments;
+            _logger.LogInformation(
+                "TrySyncTokenFromCardcom: orderId={OrderId} — restored installments selection from GetLpResult (numOfPayments={NumOfPayments})",
+                order.Id, payload.NumOfPayments);
+        }
         if (!string.IsNullOrWhiteSpace(payload.Token))
         {
             _logger.LogInformation(
@@ -2876,8 +2899,13 @@ public class PaymentService : ServiceBase
             CardcomGateway.DescribeTokenShape(reparsed.Token));
         if (!string.IsNullOrWhiteSpace(reparsed.ApprovalNumber))
             order.CardcomApprovalNumber ??= reparsed.ApprovalNumber;
-        if (reparsed.NumOfPayments is > 1 and <= 36)
-            order.CardcomSelectedInstallments ??= reparsed.NumOfPayments;
+        if (reparsed.NumOfPayments is > 1 and <= 36 && order.CardcomSelectedInstallments == null)
+        {
+            order.CardcomSelectedInstallments = reparsed.NumOfPayments;
+            _logger.LogInformation(
+                "TrySyncTokenFromCardcom backfill: orderId={OrderId} — restored installments selection from ValidateCallback event (numOfPayments={NumOfPayments})",
+                order.Id, reparsed.NumOfPayments);
+        }
         if (!string.IsNullOrWhiteSpace(reparsed.Token))
         {
             await PersistCardcomTokenAsync(order, reparsed, lastCallback.RawResponseJson, cancelToken);

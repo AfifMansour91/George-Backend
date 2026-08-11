@@ -1168,8 +1168,14 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
 
     private static bool TryGetObjectProperty(JsonElement parent, string name, out JsonElement obj)
     {
+        // BUG HISTORY (12/08/2026): this used to return true WITHOUT assigning `obj`, so every
+        // nested-object read (TranzactionInfo/TokenInfo/DocumentInfo/SuspendedInfo) silently got
+        // an empty element — NumberOfPayments/ApprovalNumber/etc. were never parsed from LP results.
         obj = default;
-        return SafeTryGetProperty(parent, name, out var el) && el.ValueKind == JsonValueKind.Object;
+        if (!SafeTryGetProperty(parent, name, out var el) || el.ValueKind != JsonValueKind.Object)
+            return false;
+        obj = el;
+        return true;
     }
 
     private static int GetInt32Property(JsonElement parent, string name, int defaultValue = -1)

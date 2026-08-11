@@ -293,7 +293,25 @@ public class PaymentStorage : StorageBase
         tracked.CardcomApprovalNumber = order.CardcomApprovalNumber;
         tracked.CardcomTokenLast4 = order.CardcomTokenLast4;
         tracked.CardcomCardBrand = order.CardcomCardBrand;
-        tracked.CardcomSelectedInstallments = order.CardcomSelectedInstallments;
+        // Write-once guard: the installments selection is stored by the payment webhook, but many
+        // flows load an Order, spend seconds on a Cardcom roundtrip, then save — a stale instance
+        // here must not regress the selection back to NULL (lost update → charge as 1 payment).
+        if (order.CardcomSelectedInstallments != null)
+        {
+            if (tracked.CardcomSelectedInstallments != order.CardcomSelectedInstallments)
+                _logger.LogInformation(
+                    "Order {OrderId}: CardcomSelectedInstallments {OldValue} -> {NewValue}",
+                    order.Id, tracked.CardcomSelectedInstallments, order.CardcomSelectedInstallments);
+            tracked.CardcomSelectedInstallments = order.CardcomSelectedInstallments;
+        }
+        else if (tracked.CardcomSelectedInstallments != null)
+        {
+            // A stale in-memory Order tried to wipe a stored selection — this is the lost-update
+            // race; the guard keeps the DB value. Logged to make any clobber attempt visible.
+            _logger.LogWarning(
+                "Order {OrderId}: blocked stale save from clearing CardcomSelectedInstallments (kept {Value})",
+                order.Id, tracked.CardcomSelectedInstallments);
+        }
         tracked.CustomerPaymentMethodId = order.CustomerPaymentMethodId;
         tracked.CardcomPaymentJson = order.CardcomPaymentJson;
         if (order.CustomerId is int customerId)
