@@ -314,6 +314,32 @@ namespace George.Data
             return true;
         }
 
+        /// <summary>
+        /// Every distinct product-image URL in the system: canonical gallery, per-site images and variant
+        /// images. Used by thumbnail cache warming.
+        /// </summary>
+        public async Task<List<string>> GetAllProductImageUrlsAsync(CancellationToken cancelToken)
+        {
+            var canonical = await _dbContext.ProductImage.AsNoTracking()
+                .Where(pi => pi.Url != null && pi.Url != "")
+                .Select(pi => pi.Url!)
+                .Distinct()
+                .ToListAsync(cancelToken);
+            var perSite = await _dbContext.ProductSiteImage.AsNoTracking()
+                .Where(si => si.Url != null && si.Url != "")
+                .Select(si => si.Url!)
+                .Distinct()
+                .ToListAsync(cancelToken);
+            var variants = await _dbContext.ProductVariant.AsNoTracking()
+                .Where(v => !v.IsDeleted && v.ImageUrl != null && v.ImageUrl != "")
+                .Select(v => v.ImageUrl!)
+                .Distinct()
+                .ToListAsync(cancelToken);
+            return canonical.Concat(perSite).Concat(variants)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
         /// <summary>Returns the first (min Id) site for the account, or null if account has no sites.</summary>
         public async Task<int?> GetFirstSiteIdForAccountAsync(int accountId, CancellationToken cancelToken)
         {

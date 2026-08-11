@@ -15,10 +15,68 @@ namespace George.Api.Controllers
     public class MediaController : GeorgeControllerBase, IAuthUserProvider
     {
         private readonly MediaService _mediaSvc;
+        private readonly ThumbnailService _thumbSvc;
+        private readonly ILogger<MediaController> _logger;
 
-        public MediaController(MediaService mediaSvc, ILogger<MediaController> logger) : base(logger)
+        public MediaController(MediaService mediaSvc, ThumbnailService thumbSvc, ILogger<MediaController> logger) : base(logger)
         {
             _mediaSvc = mediaSvc;
+            _thumbSvc = thumbSvc;
+            _logger = logger;
+        }
+
+        /// <summary>
+        /// Serves a cached, resized JPEG of a George-hosted /files image (generated on first request;
+        /// originals are never modified). Anonymous — img tags cannot send Bearer headers, and the
+        /// underlying /files mount is public anyway. Falls back to redirecting to the original when the
+        /// thumbnail cannot be produced (e.g. S3 storage mode or a missing file).
+        /// </summary>
+        [HttpGet("thumb")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetThumbAsync([FromQuery] string src, [FromQuery] int w = 400, CancellationToken cancelToken = default)
+        {
+            try
+            {
+                var (path, _) = await _thumbSvc.GetOrCreateThumbAsync(src, w, cancelToken);
+                if (path != null)
+                {
+                    Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+                    return PhysicalFile(path, "image/jpeg");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Thumb generation failed for {Src} w={Width}", src, w);
+            }
+
+            // Only redirect to URLs that resolve inside OUR storage (never an open redirect).
+            if (ThumbnailService.TryResolveOriginalPhysicalPath(src) != null)
+                return Redirect(src);
+            return NotFound();
+        }
+
+        /// <summary>
+        /// Pre-generates thumbnails for all product images (background, own DI scope). Idempotent —
+        /// already-cached sizes are skipped, so it is safe to trigger after bulk imports/uploads.
+        /// </summary>
+        [HttpPost("thumbs/warm")]
+        public IActionResult WarmThumbs([FromServices] IServiceScopeFactory scopeFactory)
+        {
+            _ = Task.Run(async () =>
+            {
+                using var scope = scopeFactory.CreateScope();
+                var svc = scope.ServiceProvider.GetRequiredService<ThumbnailService>();
+                var logger = scope.ServiceProvider.GetRequiredService<ILogger<MediaController>>();
+                try
+                {
+                    await svc.WarmProductImageThumbsAsync(null, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Thumbnail cache warming failed");
+                }
+            });
+            return Ok(new { started = true });
         }
 
         [HttpGet]

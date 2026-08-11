@@ -426,7 +426,24 @@ namespace George.Services
 
             // MultiSite Phase 2: when editing a single branch, write a per-site override instead of mutating
             // the canonical product (so changes do not leak to other sites). 'all_sites' / null = canonical update.
-            if (string.Equals(req.EditScope, "selected_site", StringComparison.OrdinalIgnoreCase) && req.SiteId.HasValue)
+            var isSelectedSiteEdit = string.Equals(req.EditScope, "selected_site", StringComparison.OrdinalIgnoreCase) && req.SiteId.HasValue;
+
+            // A selected_site edit of a product whose ONLY site is the edited one, on a non-network account,
+            // has no "other sites" to protect — write canonically instead. Separate-mode accounts send
+            // selected_site on EVERY save, which otherwise splits the truth between Product (stale, e.g.
+            // price 0 from creation) and ProductSiteOverride forever; direct Product readers then see the
+            // stale values. The canonical branch below also clears the product's now-redundant per-site rows
+            // so a stale override cannot shadow the fresh canonical values.
+            var canonicalizeSingleSiteEdit = false;
+            if (isSelectedSiteEdit)
+            {
+                var linkedSiteIds = existingProduct.Site?.Select(s => s.Id).Distinct().ToList() ?? new List<int>();
+                canonicalizeSingleSiteEdit = linkedSiteIds.Count == 1
+                    && linkedSiteIds[0] == req.SiteId!.Value
+                    && !await _overrideStorage.IsSiteNetworkManagedAsync(req.SiteId.Value, cancelToken);
+            }
+
+            if (isSelectedSiteEdit && !canonicalizeSingleSiteEdit)
             {
                 var siteId = req.SiteId.Value;
 
@@ -768,6 +785,23 @@ namespace George.Services
                     var assignedSiteIds = (req.SiteIds != null && req.SiteIds.Any())
                         ? req.SiteIds.ToList()
                         : (product.Site?.Select(s => s.Id).ToList() ?? new List<int>());
+
+                    // Canonicalized single-site edit: the canonical row now holds the truth, so drop the
+                    // product's per-site override rows for this site — left behind they would shadow the
+                    // fresh canonical values on read and in the Woo sync.
+                    if (canonicalizeSingleSiteEdit)
+                    {
+                        try
+                        {
+                            await _overrideStorage.DeleteSiteOverrideArtifactsAsync(product.Id, req.SiteId!.Value, cancelToken);
+                        }
+                        catch (Exception cleanupEx)
+                        {
+                            _logger.LogWarning(cleanupEx,
+                                "Failed to clear per-site override rows after canonical single-site edit for product {ProductId} site {SiteId}",
+                                product.Id, req.SiteId);
+                        }
+                    }
 
                     // All-sites stock change: clear any stale per-site STOCK overrides so the new canonical stock
                     // wins on every site (list/filter aggregate + WooCommerce). Without this a site keeps its old

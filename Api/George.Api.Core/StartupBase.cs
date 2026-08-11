@@ -429,6 +429,7 @@ namespace George.Api.Core
 			services.AddScoped<BrandService>();
 			services.AddScoped<AttributeService>();
 			services.AddScoped<MediaService>();
+			services.AddScoped<ThumbnailService>();
 			services.AddScoped<OrderService>();
 			services.AddScoped<PromotionService>();
 			services.AddScoped<PromotionWebhookDispatcher>();

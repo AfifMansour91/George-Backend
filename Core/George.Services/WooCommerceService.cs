@@ -1915,27 +1915,24 @@ namespace George.Services
             {
                 await EnsureAssignedBrandsSyncedToWooForSiteAsync(siteId, product, cancelToken).ConfigureAwait(false);
 
-                // MultiSite Phase 2: only network-managed accounts can have per-site overrides. For single-site /
-                // non-network accounts, skip ALL override lookups so behavior + cost are identical to before.
-                var siteIsNetworkManaged = await IsSiteNetworkManagedCachedAsync(siteId, cancelToken).ConfigureAwait(false);
-
                 // External price management: this store's prices come from the POS (Site.ExternalPriceManagement).
                 // George must never overwrite them on Woo UPDATES; creates still seed an initial price.
                 var sitePricesExternallyManaged = await IsSitePriceExternallyManagedCachedAsync(siteId, cancelToken).ConfigureAwait(false);
 
                 // Load this site's per-site override (price/stock/availability). Null when no override (canonical used).
+                // Loaded UNCONDITIONALLY (not only for network-managed accounts): the frontend writes selected_site
+                // overrides for "separate"-mode accounts too, so gating on network mode made the sync push canonical
+                // values (e.g. price 0) while the app showed the override — the read side applies overrides with no
+                // such gate (ApplyEffectiveSiteValuesAsync).
                 SiteOverrideValues? siteOverride = null;
-                if (siteIsNetworkManaged)
+                try
                 {
-                    try
-                    {
-                        var ovList = await _overrideStorage.GetOverridesForSiteAsync(new[] { product.Id }, siteId, cancelToken).ConfigureAwait(false);
-                        siteOverride = ovList.Count > 0 ? ovList[0] : null;
-                    }
-                    catch (Exception ovEx)
-                    {
-                        _logger.LogWarning(ovEx, "Failed to load per-site override for product {ProductId} site {SiteId}; using canonical values", product.Id, siteId);
-                    }
+                    var ovList = await _overrideStorage.GetOverridesForSiteAsync(new[] { product.Id }, siteId, cancelToken).ConfigureAwait(false);
+                    siteOverride = ovList.Count > 0 ? ovList[0] : null;
+                }
+                catch (Exception ovEx)
+                {
+                    _logger.LogWarning(ovEx, "Failed to load per-site override for product {ProductId} site {SiteId}; using canonical values", product.Id, siteId);
                 }
 
                 // Map stock status
@@ -1987,19 +1984,17 @@ namespace George.Services
                     shippingClass = "fragile";
 
                 // Map categories. MultiSite Phase 2: per-site category assignment overrides the canonical for this branch.
+                // Loaded unconditionally (same reasoning as the per-site override above — separate-mode accounts write these too).
                 List<int> perSiteCatIds = new List<int>();
-                if (siteIsNetworkManaged)
+                try
                 {
-                    try
-                    {
-                        perSiteCatIds = (await _overrideStorage.GetSiteCategoriesAsync(new[] { product.Id }, siteId, cancelToken).ConfigureAwait(false))
-                            .Select(c => c.CategoryId).ToList();
-                    }
-                    catch (Exception catEx)
-                    {
-                        _logger.LogWarning(catEx, "Woo sync: failed to load per-site categories for product {ProductId} site {SiteId}; using canonical", product.Id, siteId);
-                        perSiteCatIds = new List<int>();
-                    }
+                    perSiteCatIds = (await _overrideStorage.GetSiteCategoriesAsync(new[] { product.Id }, siteId, cancelToken).ConfigureAwait(false))
+                        .Select(c => c.CategoryId).ToList();
+                }
+                catch (Exception catEx)
+                {
+                    _logger.LogWarning(catEx, "Woo sync: failed to load per-site categories for product {ProductId} site {SiteId}; using canonical", product.Id, siteId);
+                    perSiteCatIds = new List<int>();
                 }
                 var canonicalCatIds = product.ProductCategory?.Select(pc => pc.CategoryId).ToList() ?? new List<int>();
                 var catIdsForWoo = perSiteCatIds.Count > 0 ? perSiteCatIds : canonicalCatIds;
@@ -2061,18 +2056,16 @@ namespace George.Services
                 // Map images: when updating, use existing WooCommerce image id when URL matches to avoid duplicating in media library.
                 // Use the image name from the system (Media.Name) so WooCommerce gets a friendly filename instead of the long URL.
                 // MultiSite Phase 2: per-site images override the canonical for this branch (urls only, sideloaded by Woo).
+                // Loaded unconditionally (same reasoning as the per-site override above — separate-mode accounts write these too).
                 List<(int ProductId, string Url, int SortOrder)> perSiteImages = new List<(int, string, int)>();
-                if (siteIsNetworkManaged)
+                try
                 {
-                    try
-                    {
-                        perSiteImages = await _overrideStorage.GetSiteImagesAsync(new[] { product.Id }, siteId, cancelToken).ConfigureAwait(false);
-                    }
-                    catch (Exception imgEx)
-                    {
-                        _logger.LogWarning(imgEx, "Woo sync: failed to load per-site images for product {ProductId} site {SiteId}; using canonical", product.Id, siteId);
-                        perSiteImages = new List<(int, string, int)>();
-                    }
+                    perSiteImages = await _overrideStorage.GetSiteImagesAsync(new[] { product.Id }, siteId, cancelToken).ConfigureAwait(false);
+                }
+                catch (Exception imgEx)
+                {
+                    _logger.LogWarning(imgEx, "Woo sync: failed to load per-site images for product {ProductId} site {SiteId}; using canonical", product.Id, siteId);
+                    perSiteImages = new List<(int, string, int)>();
                 }
                 var canonicalProductImages = product.ProductImage?
                     .OrderBy(pi => pi.SortOrder)
@@ -3503,19 +3496,17 @@ namespace George.Services
             }
 
             // MultiSite Phase 2: per-site variant overrides (price/sale/stock/exclusion) for this site, when present.
-            // Skipped for non-network accounts (no overrides possible) so single-site sync is unchanged.
+            // Loaded unconditionally: selected_site edits write variant overrides for separate-mode accounts too,
+            // so gating on network mode pushed canonical variant values while the app showed the override.
             Dictionary<int, ProductSiteOverrideStorage.VariantSiteOverride> perSiteVariantOverrides = new();
-            if (isNetworkManagedForVariants)
+            try
             {
-                try
-                {
-                    perSiteVariantOverrides = await _overrideStorage.GetVariantOverridesForSiteAsync(product.Id, siteId, cancelToken).ConfigureAwait(false);
-                }
-                catch (Exception vsEx)
-                {
-                    _logger.LogWarning(vsEx, "Failed to load per-site variant overrides for product {ProductId} site {SiteId}; using canonical", product.Id, siteId);
-                    perSiteVariantOverrides = new();
-                }
+                perSiteVariantOverrides = await _overrideStorage.GetVariantOverridesForSiteAsync(product.Id, siteId, cancelToken).ConfigureAwait(false);
+            }
+            catch (Exception vsEx)
+            {
+                _logger.LogWarning(vsEx, "Failed to load per-site variant overrides for product {ProductId} site {SiteId}; using canonical", product.Id, siteId);
+                perSiteVariantOverrides = new();
             }
 
             foreach (var variant in variants)

@@ -976,6 +976,52 @@ namespace George.Data
             await _dbContext.SaveChangesAsync(cancelToken);
         }
 
+        /// <summary>
+        /// Removes every per-site override VALUE artifact for (product, site): the override row, the per-site
+        /// variant rows, and — only when the canonical product has its own rows to fall back to — the per-site
+        /// image and category rows. Used when a single-site product of a non-network account is written
+        /// canonically: the canonical row is now the source of truth, and a stale override left behind would
+        /// shadow the fresh canonical values on read and in the Woo sync. A variant excluded on the product's
+        /// ONLY site is effectively deleted, so it is soft-deleted canonically before its row is dropped.
+        /// Per-site Woo-ID mappings (ProductSiteWooId / ProductSiteVariantWooId) are intentionally untouched.
+        /// </summary>
+        public async Task DeleteSiteOverrideArtifactsAsync(int productId, int siteId, CancellationToken cancelToken)
+        {
+            var overrideRow = await _dbContext.ProductSiteOverride
+                .FirstOrDefaultAsync(o => o.ProductId == productId && o.SiteId == siteId, cancelToken);
+            if (overrideRow != null)
+                _dbContext.ProductSiteOverride.Remove(overrideRow);
+
+            var variantRows = await _dbContext.ProductSiteVariantStock
+                .Include(v => v.ProductVariant)
+                .Where(v => v.SiteId == siteId && (v.ProductId == productId || v.ProductVariant.ProductId == productId))
+                .ToListAsync(cancelToken);
+            foreach (var vr in variantRows)
+            {
+                if (vr.IsExcluded && vr.ProductVariant != null)
+                    vr.ProductVariant.IsDeleted = true;
+                _dbContext.ProductSiteVariantStock.Remove(vr);
+            }
+
+            if (await _dbContext.ProductImage.AnyAsync(pi => pi.ProductId == productId, cancelToken))
+            {
+                var imageRows = await _dbContext.ProductSiteImage
+                    .Where(i => i.ProductId == productId && i.SiteId == siteId)
+                    .ToListAsync(cancelToken);
+                _dbContext.ProductSiteImage.RemoveRange(imageRows);
+            }
+
+            if (await _dbContext.ProductCategory.AnyAsync(pc => pc.ProductId == productId, cancelToken))
+            {
+                var categoryRows = await _dbContext.ProductSiteCategory
+                    .Where(c => c.ProductId == productId && c.SiteId == siteId)
+                    .ToListAsync(cancelToken);
+                _dbContext.ProductSiteCategory.RemoveRange(categoryRows);
+            }
+
+            await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
         public async Task SetExcludedAsync(int productId, int siteId, int? accountId, bool excluded, bool resetFields, CancellationToken cancelToken)
         {
             var row = await GetOrCreateAsync(productId, siteId, accountId, cancelToken);
