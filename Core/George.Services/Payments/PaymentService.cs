@@ -2839,6 +2839,10 @@ public class PaymentService : ServiceBase
         }
 
         var payload = ResolveCallbackPayload(validated);
+        // Missed-webhook recovery must also restore the installments the customer picked at the J5 hold,
+        // or the picking charge silently goes out as a single payment.
+        if (payload.NumOfPayments is > 1 and <= 36)
+            order.CardcomSelectedInstallments ??= payload.NumOfPayments;
         if (!string.IsNullOrWhiteSpace(payload.Token))
         {
             _logger.LogInformation(
@@ -2870,6 +2874,8 @@ public class PaymentService : ServiceBase
             CardcomGateway.DescribeTokenShape(reparsed.Token));
         if (!string.IsNullOrWhiteSpace(reparsed.ApprovalNumber))
             order.CardcomApprovalNumber ??= reparsed.ApprovalNumber;
+        if (reparsed.NumOfPayments is > 1 and <= 36)
+            order.CardcomSelectedInstallments ??= reparsed.NumOfPayments;
         if (!string.IsNullOrWhiteSpace(reparsed.Token))
         {
             await PersistCardcomTokenAsync(order, reparsed, lastCallback.RawResponseJson, cancelToken);
