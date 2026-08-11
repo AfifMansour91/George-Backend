@@ -189,6 +189,24 @@ public partial class Site
     /// <summary>When true, show the product SKU (מק"ט) on picking-screen lines. Off by default.</summary>
     public bool? ShowSkuInPicking { get; set; }
 
+    /// <summary>Manual-order payment option: מזומן. NULL = enabled (legacy default).</summary>
+    public bool? PaymentCashEnabled { get; set; }
+
+    /// <summary>Manual-order payment option: אשראי ב-SMS (Cardcom). NULL = enabled when Cardcom is configured.</summary>
+    public bool? PaymentCreditSmsEnabled { get; set; }
+
+    /// <summary>Manual-order payment option: אשראי טלפוני (Cardcom MOTO). NULL = enabled when Cardcom is configured.</summary>
+    public bool? PaymentCreditPhoneEnabled { get; set; }
+
+    /// <summary>Manual-order payment option: אשראי חיצוני (external physical terminal). NULL = enabled (legacy default).</summary>
+    public bool? PaymentExternalCreditEnabled { get; set; }
+
+    /// <summary>Manual-order payment option: בהקפה (on account / tab, cash-like flow). NULL/0 = hidden (opt-in).</summary>
+    public bool? PaymentOnAccountEnabled { get; set; }
+
+    /// <summary>Manual-order payment option: העברה בנקאית (bank transfer, cash-like flow). NULL/0 = hidden (opt-in).</summary>
+    public bool? PaymentBankTransferEnabled { get; set; }
+
     /// <summary>
     /// When true, hide the per-unit / size approximate weight (e.g. "(כ 3 ק"ג)", "700 גרם ליח'") on
     /// printouts, order cards and picking lines. Customer-chosen weights (בחירת משקל ליחידה) always show.

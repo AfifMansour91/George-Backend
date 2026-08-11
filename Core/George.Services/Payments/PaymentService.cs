@@ -2399,7 +2399,9 @@ public class PaymentService : ServiceBase
         var method = (order.PaymentMethod ?? "").Trim();
         if (!method.Equals("Cash", StringComparison.OrdinalIgnoreCase) &&
             !method.Contains("cod", StringComparison.OrdinalIgnoreCase) &&
-            !method.Equals("ExternalCredit", StringComparison.OrdinalIgnoreCase))
+            !method.Equals("ExternalCredit", StringComparison.OrdinalIgnoreCase) &&
+            !method.Equals("OnAccount", StringComparison.OrdinalIgnoreCase) &&
+            !method.Equals("BankTransfer", StringComparison.OrdinalIgnoreCase))
             return;
 
         if (string.Equals(order.PaymentSettleStatus, PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase))

@@ -90,10 +90,13 @@ namespace George.Data
                 var kind = filter.PaymentMethod!.Trim().ToLowerInvariant();
                 if (kind == "cash")
                 {
+                    // OnAccount (בהקפה) and BankTransfer (העברה בנקאית) count as cash: no card charge.
                     query = query.Where(o =>
                         (o.PaymentMethod != null &&
                             (o.PaymentMethod.ToLower() == "cash" ||
                              o.PaymentMethod.ToLower() == "cod" ||
+                             o.PaymentMethod.ToLower() == "onaccount" ||
+                             o.PaymentMethod.ToLower() == "banktransfer" ||
                              o.PaymentMethod.Contains("מזומן"))) ||
                         (o.PaymentMethod == null &&
                             ((o.GatewayPaymentMethodCode != null && o.GatewayPaymentMethodCode.ToLower() == "cod") ||
@@ -106,6 +109,8 @@ namespace George.Data
                         !(o.PaymentMethod != null &&
                             (o.PaymentMethod.ToLower() == "cash" ||
                              o.PaymentMethod.ToLower() == "cod" ||
+                             o.PaymentMethod.ToLower() == "onaccount" ||
+                             o.PaymentMethod.ToLower() == "banktransfer" ||
                              o.PaymentMethod.Contains("מזומן"))) &&
                         !(o.GatewayPaymentMethodCode != null && o.GatewayPaymentMethodCode.ToLower() == "cod") &&
                         !(o.PaymentLabel != null && o.PaymentLabel.Contains("מזומן")) &&

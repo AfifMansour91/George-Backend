@@ -194,6 +194,12 @@ namespace George.Data
             if (updated.ConfirmPickingAfterScan.HasValue) dbSite.ConfirmPickingAfterScan = updated.ConfirmPickingAfterScan;
             if (updated.ShowPickingDeviation.HasValue) dbSite.ShowPickingDeviation = updated.ShowPickingDeviation;
             if (updated.ShowSkuInPicking.HasValue) dbSite.ShowSkuInPicking = updated.ShowSkuInPicking;
+            if (updated.PaymentCashEnabled.HasValue) dbSite.PaymentCashEnabled = updated.PaymentCashEnabled;
+            if (updated.PaymentCreditSmsEnabled.HasValue) dbSite.PaymentCreditSmsEnabled = updated.PaymentCreditSmsEnabled;
+            if (updated.PaymentCreditPhoneEnabled.HasValue) dbSite.PaymentCreditPhoneEnabled = updated.PaymentCreditPhoneEnabled;
+            if (updated.PaymentExternalCreditEnabled.HasValue) dbSite.PaymentExternalCreditEnabled = updated.PaymentExternalCreditEnabled;
+            if (updated.PaymentOnAccountEnabled.HasValue) dbSite.PaymentOnAccountEnabled = updated.PaymentOnAccountEnabled;
+            if (updated.PaymentBankTransferEnabled.HasValue) dbSite.PaymentBankTransferEnabled = updated.PaymentBankTransferEnabled;
             if (updated.HideUnitWeightInOrders.HasValue) dbSite.HideUnitWeightInOrders = updated.HideUnitWeightInOrders;
             if (updated.ShowCustomerProfileNoteInPrints.HasValue) dbSite.ShowCustomerProfileNoteInPrints = updated.ShowCustomerProfileNoteInPrints;
             if (updated.ShowOrderHandler.HasValue) dbSite.ShowOrderHandler = updated.ShowOrderHandler;

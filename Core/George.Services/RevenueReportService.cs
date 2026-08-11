@@ -299,6 +299,8 @@ namespace George.Services
         {
             var m = (o.PaymentMethod ?? "").Trim();
             if (string.Equals(m, "Cash", StringComparison.OrdinalIgnoreCase)) return "cash";
+            // בהקפה gets its own slice; BankTransfer falls into "transfer" below.
+            if (string.Equals(m, "OnAccount", StringComparison.OrdinalIgnoreCase)) return "onaccount";
             if (m.Contains("Bit", StringComparison.OrdinalIgnoreCase)) return "bit";
             if (m.Contains("Transfer", StringComparison.OrdinalIgnoreCase) ||
                 m.Contains("Bank", StringComparison.OrdinalIgnoreCase)) return "transfer";
@@ -724,7 +726,7 @@ namespace George.Services
         private static List<RevenueReportFilterOptionDto> BuildPaymentOptions() =>
             new[]
             {
-                ("credit", "credit"), ("cash", "cash"), ("bit", "bit"), ("transfer", "transfer"),
+                ("credit", "credit"), ("cash", "cash"), ("bit", "bit"), ("transfer", "transfer"), ("onaccount", "onaccount"),
             }.Select(x => new RevenueReportFilterOptionDto { Key = x.Item1, Name = x.Item2 }).ToList();
 
         private static List<RevenueReportFilterOptionDto> BuildStatusOptions() =>

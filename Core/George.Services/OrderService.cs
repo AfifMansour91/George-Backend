@@ -2736,6 +2736,10 @@ namespace George.Services
             // External terminal — keep in sync with frontend voucherFigmaLayout.voucherPaymentHeadline.
             if (string.Equals(m, "ExternalCredit", StringComparison.OrdinalIgnoreCase))
                 return settled ? "שולם באשראי חיצוני" : "תשלום באשראי חיצוני";
+            if (string.Equals(m, "OnAccount", StringComparison.OrdinalIgnoreCase))
+                return settled ? "שולם בהקפה" : "תשלום בהקפה";
+            if (string.Equals(m, "BankTransfer", StringComparison.OrdinalIgnoreCase))
+                return settled ? "שולם בהעברה בנקאית" : "תשלום בהעברה בנקאית";
             var lower = m.ToLowerInvariant();
             if (lower.Contains("card", StringComparison.Ordinal) || lower.Contains("credit", StringComparison.Ordinal) ||
                 string.Equals(m, "SavedCard", StringComparison.OrdinalIgnoreCase) ||

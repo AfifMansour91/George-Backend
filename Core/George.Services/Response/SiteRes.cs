@@ -83,6 +83,24 @@ namespace George.Services.Response
         /// <summary>When true, show the product SKU (מק"ט) on picking-screen lines. Off by default.</summary>
         public bool? ShowSkuInPicking { get; set; }
 
+        /// <summary>Manual-order payment option: מזומן. NULL = enabled.</summary>
+        public bool? PaymentCashEnabled { get; set; }
+
+        /// <summary>Manual-order payment option: אשראי ב-SMS. NULL = enabled when Cardcom is configured.</summary>
+        public bool? PaymentCreditSmsEnabled { get; set; }
+
+        /// <summary>Manual-order payment option: אשראי טלפוני. NULL = enabled when Cardcom is configured.</summary>
+        public bool? PaymentCreditPhoneEnabled { get; set; }
+
+        /// <summary>Manual-order payment option: אשראי חיצוני. NULL = enabled.</summary>
+        public bool? PaymentExternalCreditEnabled { get; set; }
+
+        /// <summary>Manual-order payment option: בהקפה (cash-like flow). NULL/0 = hidden.</summary>
+        public bool? PaymentOnAccountEnabled { get; set; }
+
+        /// <summary>Manual-order payment option: העברה בנקאית (cash-like flow). NULL/0 = hidden.</summary>
+        public bool? PaymentBankTransferEnabled { get; set; }
+
         /// <summary>When true, hide per-unit / size approximate weight on printouts, order cards and picking. Off by default.</summary>
         public bool? HideUnitWeightInOrders { get; set; }
 
