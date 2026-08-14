@@ -4974,10 +4974,34 @@ namespace George.Services
                 .Where(p => !p.IsDeleted && p.AccountId == accountId && p.Site.Any(s => s.Id == siteId))
                 .ToListAsync(cancelToken);
 
-            var byWooId = existingProducts
-                .Where(p => p.WooCommerceId.HasValue)
-                .GroupBy(p => p.WooCommerceId!.Value)
+            // MultiSite: this store's Woo ids live in ProductSiteWooId; the legacy Product.WooCommerceId column keeps
+            // the FIRST store's id, so on another branch it can collide with a DIFFERENT product whose first-store id
+            // happens to equal this store's id. Per-site rows win; a legacy match only counts when no per-site row
+            // for (product, this site) claims a different Woo id. Mirrors GetProductIdByWooCommerceIdAndSiteAsync.
+            var perSiteWooRows = await db.ProductSiteWooId
+                .Where(x => x.SiteId == siteId)
+                .ToListAsync(cancelToken);
+            var perSiteWooRowByProductId = perSiteWooRows
+                .GroupBy(x => x.ProductId)
                 .ToDictionary(g => g.Key, g => g.First());
+
+            var existingProductById = existingProducts.ToDictionary(p => p.Id);
+            var byWooId = new Dictionary<int, Product>();
+            foreach (var p in existingProducts)
+            {
+                if (!p.WooCommerceId.HasValue || p.WooCommerceId.Value <= 0)
+                    continue;
+                if (perSiteWooRowByProductId.TryGetValue(p.Id, out var claim)
+                    && claim.WooCommerceProductId != p.WooCommerceId.Value)
+                    continue;
+                if (!byWooId.ContainsKey(p.WooCommerceId.Value))
+                    byWooId[p.WooCommerceId.Value] = p;
+            }
+            foreach (var row in perSiteWooRows)
+            {
+                if (row.WooCommerceProductId > 0 && existingProductById.TryGetValue(row.ProductId, out var p))
+                    byWooId[row.WooCommerceProductId] = p;
+            }
 
             var bySku = existingProducts
                 .Where(p => !string.IsNullOrWhiteSpace(p.Sku))
@@ -5021,8 +5045,13 @@ namespace George.Services
                     else if (!string.IsNullOrWhiteSpace(wp.sku) && bySku.TryGetValue(wp.sku.Trim(), out var existingBySku))
                     {
                         // Two different Woo ids must not share one local row (duplicate SKUs in Woo are common).
-                        // SKU match only when this row is still unlinked to Woo, or already this Woo id.
-                        if (existingBySku.WooCommerceId == null || existingBySku.WooCommerceId == wp.id)
+                        // SKU match only when this row is unlinked FOR THIS SITE, or already this Woo id: a per-site
+                        // row wins; without one, the legacy column counts only when the product isn't on other sites
+                        // (on a shared product it holds another store's id and must not block this site's link).
+                        var siteClaim = perSiteWooRowByProductId.TryGetValue(existingBySku.Id, out var skuClaim)
+                            ? skuClaim.WooCommerceProductId
+                            : (existingBySku.Site.All(s => s.Id == siteId) ? existingBySku.WooCommerceId : null);
+                        if (siteClaim == null || siteClaim == wp.id)
                             product = existingBySku;
                     }
 
@@ -5076,13 +5105,28 @@ namespace George.Services
                     product.ShortDescription = wp.short_description;
                     product.LongDescription = wp.description;
                     product.Sku = string.IsNullOrWhiteSpace(wp.sku) ? null : wp.sku.Trim();
-                    product.WooCommerceId = wp.id;
+                    // Legacy column keeps the FIRST store's id on shared products — claim it only when unset or the
+                    // product lives solely on this site. The per-site row below is the authoritative mapping either way.
+                    if (product.WooCommerceId == null || product.Site.All(s => s.Id == siteId))
+                        product.WooCommerceId = wp.id;
                     product.Price = ParseNullableDecimal(wp.regular_price);
                     product.SalePrice = ParseNullableDecimal(wp.sale_price);
                     product.Weight = ParseNullableDecimal(wp.weight);
                     product.StockQuantity = wp.manage_stock == true ? wp.stock_quantity : null;
 
                     await db.SaveChangesAsync(cancelToken);
+
+                    // Upsert this site's Woo id row (persisted by the next SaveChanges in this product's flow).
+                    if (perSiteWooRowByProductId.TryGetValue(product.Id, out var siteWooRow))
+                    {
+                        siteWooRow.WooCommerceProductId = wp.id;
+                    }
+                    else
+                    {
+                        siteWooRow = new ProductSiteWooId { ProductId = product.Id, SiteId = siteId, WooCommerceProductId = wp.id };
+                        db.ProductSiteWooId.Add(siteWooRow);
+                        perSiteWooRowByProductId[product.Id] = siteWooRow;
+                    }
 
                     if (importProductStatsIds.Add(product.Id))
                     {
@@ -5097,6 +5141,9 @@ namespace George.Services
                     var variantIds = product.ProductVariant.Select(v => v.Id).ToList();
                     if (variantIds.Count > 0)
                     {
+                        // Per-site variation-id rows FK the variants being replaced (no cascade) — drop them first.
+                        // Other sites' stores still hold their variations; the next sync re-resolves by attribute signature.
+                        db.ProductSiteVariantWooId.RemoveRange(db.ProductSiteVariantWooId.Where(x => variantIds.Contains(x.ProductVariantId)));
                         db.ProductVariantOptionValue.RemoveRange(db.ProductVariantOptionValue.Where(x => variantIds.Contains(x.ProductVariantId)));
                         db.ProductVariant.RemoveRange(db.ProductVariant.Where(x => variantIds.Contains(x.Id)));
                     }
@@ -5180,6 +5227,15 @@ namespace George.Services
                         };
                         db.ProductVariant.Add(variant);
                         await db.SaveChangesAsync(cancelToken);
+
+                        // This site's variation id, per-site (the legacy WooCommerceVariationId column above can only hold one store's id).
+                        db.ProductSiteVariantWooId.Add(new ProductSiteVariantWooId
+                        {
+                            ProductVariantId = variant.Id,
+                            SiteId = siteId,
+                            ProductId = product.Id,
+                            WooCommerceVariationId = vv.id
+                        });
 
                         foreach (var a in vv.attributes ?? new List<WooImportVariationAttributeItem>())
                         {
