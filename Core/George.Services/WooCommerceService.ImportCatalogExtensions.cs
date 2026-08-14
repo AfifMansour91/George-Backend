@@ -617,9 +617,10 @@ public partial class WooCommerceService
             await gate.WaitAsync(cancelToken).ConfigureAwait(false);
             try
             {
+                // orderby=id: deterministic pagination — bulk-created variations share one timestamp, and the default date order can drop/duplicate rows across pages.
                 var list = await FetchWooPagedAsync<WooImportVariationItem>(
                     httpClient,
-                    $"{baseUrl}/products/{wp.id}/variations",
+                    $"{baseUrl}/products/{wp.id}/variations?orderby=id&order=asc",
                     cancelToken).ConfigureAwait(false);
                 lock (map)
                 {

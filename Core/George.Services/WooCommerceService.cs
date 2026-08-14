@@ -340,7 +340,8 @@ namespace George.Services
                 httpClient.DefaultRequestHeaders.Clear();
                 httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
 
-                var wooProducts = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products?status=any", cancelToken);
+                // orderby=id: deterministic pagination (default date-order drops/duplicates rows when many products share a creation timestamp).
+                var wooProducts = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products?status=any&orderby=id&order=asc", cancelToken);
                 var wooIdToProductId = await _productStorage.GetWooCommerceIdToProductIdForSiteAsync(siteId, cancelToken);
 
                 var matched = wooProducts
@@ -405,9 +406,10 @@ namespace George.Services
                 httpClient.DefaultRequestHeaders.Clear();
                 httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
 
+                // orderby=id: deterministic pagination (default date-order drops/duplicates rows when many products share a creation timestamp).
                 var wooProducts = await FetchWooPagedAsync<WooImportProductItem>(
                     httpClient,
-                    $"{baseUrl}/products?status=any",
+                    $"{baseUrl}/products?status=any&orderby=id&order=asc",
                     cancelToken);
                 var wooIdToProductId = await _productStorage.GetWooCommerceIdToProductIdForSiteAsync(siteId, cancelToken);
 
@@ -621,10 +623,13 @@ namespace George.Services
                 var wooCategories = await FetchWooPagedAsync<WooImportCategoryItem>(httpClient, $"{baseUrl}/products/categories", cancelToken);
                 importProgress?.Report(new WooCommerceImportProgress { Phase = "fetch", Total = 2, Completed = 1 });
                 // Include draft/private/pending/future (status=any). Woo often keeps trashed posts out of "any" — merge a trash pass so counts match admin "All".
-                var wooProductsRaw = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products?status=any", cancelToken);
+                // orderby=id: the default (date) has no tie-breaker, so bulk-created catalogs (many products
+                // sharing one creation second) paginate nondeterministically — same product on two pages,
+                // another dropped entirely (ha-roe: 297-298 of 301 per run).
+                var wooProductsRaw = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products?status=any&orderby=id&order=asc", cancelToken);
                 try
                 {
-                    var trashedRows = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products?status=trash", cancelToken);
+                    var trashedRows = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products?status=trash&orderby=id&order=asc", cancelToken);
                     if (trashedRows.Count > 0)
                     {
                         // Same post id must not appear twice in the merged feed (avoids false "duplicate" counts when any+trash overlap or plugins echo rows).
@@ -3904,7 +3909,8 @@ namespace George.Services
             var pageLimit = maxPages ?? MaxVariationFetchPages;
             for (var page = 1; page <= pageLimit; page++)
             {
-                var url = $"{baseUrl}/products/{wooProductId}/variations?per_page={VariationsPerPage}&page={page}";
+                // orderby=id: deterministic pagination — the default date order can drop/duplicate rows when variations share a creation timestamp, and a missed row here feeds duplicate-create / orphan-delete.
+                var url = $"{baseUrl}/products/{wooProductId}/variations?per_page={VariationsPerPage}&page={page}&orderby=id&order=asc";
                 var response = await httpClient.GetAsync(url, cancelToken);
                 if (!response.IsSuccessStatusCode) break;
                 var body = await response.Content.ReadAsStringAsync(cancelToken);

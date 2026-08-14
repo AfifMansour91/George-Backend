@@ -7,6 +7,12 @@ public enum GatewayVerifyOutcome
     Inconclusive,
     /// <summary>Transaction is an authorization hold only — final charge hasn't happened yet, nothing to compare.</summary>
     HoldOnly,
+    /// <summary>
+    /// The order claims a captured charge, but the transaction George knows about is a hold only.
+    /// This is the false-success signature (Delinka #18326): the plugin reported "charged" while the
+    /// capture never happened. Surface loudly — the order looks paid with no money behind it.
+    /// </summary>
+    HoldButMarkedCaptured,
     /// <summary>Cardcom's transaction is consistent with what George expects (within tolerance).</summary>
     Match,
     /// <summary>Cardcom's transaction diverges from what George expects — surface loudly, never auto-correct.</summary>
@@ -35,7 +41,8 @@ public static class GatewayChargeVerification
     public static GatewayVerifyOutcome Evaluate(
         CardcomTransactionInfoResult info,
         decimal? orderTotal,
-        decimal? refundedAmount)
+        decimal? refundedAmount,
+        bool orderMarkedCaptured = false)
     {
         if (info is not { Success: true })
             return GatewayVerifyOutcome.Inconclusive;
@@ -51,7 +58,15 @@ public static class GatewayChargeVerification
         }
 
         if (info.IsAuthorizationHold && !info.IsFinalCharge)
-            return GatewayVerifyOutcome.HoldOnly;
+        {
+            // "Information" rows are parsed as holds too, but they are inquiry echoes — ambiguous
+            // evidence, not proof the capture is missing. Only a genuine J5 hold on an order that
+            // claims to be captured is the false-success signature.
+            var isGenuineHold = !string.Equals(info.DealType, "Information", StringComparison.OrdinalIgnoreCase);
+            return orderMarkedCaptured && isGenuineHold
+                ? GatewayVerifyOutcome.HoldButMarkedCaptured
+                : GatewayVerifyOutcome.HoldOnly;
+        }
 
         // "Information" rows are inquiries/echoes, not charges.
         if (!info.IsFinalCharge && string.Equals(info.DealType, "Information", StringComparison.OrdinalIgnoreCase))

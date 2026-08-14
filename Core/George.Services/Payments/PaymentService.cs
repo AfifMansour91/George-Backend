@@ -3248,7 +3248,9 @@ public class PaymentService : ServiceBase
     /// echo alone. Best-effort — never throws, never blocks payment intake. Runs only for orders whose
     /// payment arrived from the website gateway (<see cref="Order.GatewayPaymentTransactionId"/>) on a
     /// Cardcom site with API credentials. A hold-only transaction leaves the verification state untouched
-    /// (the final charge is verified when its own webhook arrives); a final charge is compared against
+    /// (the final charge is verified when its own webhook arrives) — unless the order is already marked
+    /// captured, in which case a hold-only inquiry means the reported charge never happened and the
+    /// mismatch flag is raised (verified amount 0); a final charge is compared against
     /// <see cref="Order.Total"/> and the verdict persisted for the order card. A mismatch is surfaced
     /// (flag + payment event + warning log), never auto-corrected.
     /// </summary>
@@ -3289,7 +3291,11 @@ public class PaymentService : ServiceBase
         // orders (charged by George, which creates the document itself) ever got CardcomDocumentUrl.
         var invoiceBackfilled = ApplyInvoiceDocumentFromInquiry(order, info);
 
-        var outcome = GatewayChargeVerification.Evaluate(info, order.Total, order.RefundedAmount);
+        var outcome = GatewayChargeVerification.Evaluate(
+            info,
+            order.Total,
+            order.RefundedAmount,
+            orderMarkedCaptured: order.PaymentSettleStatus == PaymentSettleStatus.Captured);
         if (outcome is GatewayVerifyOutcome.Inconclusive or GatewayVerifyOutcome.HoldOnly)
         {
             if (invoiceBackfilled)
@@ -3300,15 +3306,22 @@ public class PaymentService : ServiceBase
             return;
         }
 
-        var mismatch = outcome == GatewayVerifyOutcome.Mismatch;
-        order.GatewayVerifiedAmount = info.Amount;
+        // False-success signature (Delinka #18326): the order says captured, but the transaction it
+        // points at is an authorization hold only — the plugin reported "charged" while the capture
+        // never happened. Verified amount 0 = "no final charge found", which the order card renders
+        // as "חויב בפועל ₪0" against the order total.
+        var holdButMarkedCaptured = outcome == GatewayVerifyOutcome.HoldButMarkedCaptured;
+        var mismatch = outcome == GatewayVerifyOutcome.Mismatch || holdButMarkedCaptured;
+        order.GatewayVerifiedAmount = holdButMarkedCaptured ? 0m : info.Amount;
         order.GatewayVerifiedAt = DateTime.UtcNow;
         order.GatewayAmountMismatch = mismatch;
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
 
-        var description = mismatch
-            ? $"Cardcom: {info.Amount:0.##} ₪, expected {order.Total:0.##} ₪" + (info.IsRefund == true ? " (refunded at Cardcom)" : "")
-            : $"Cardcom amount verified ({info.Amount:0.##} ₪)";
+        var description = holdButMarkedCaptured
+            ? $"Cardcom shows an authorization hold only ({info.Amount:0.##} ₪) — no final charge found, but the order is marked as paid"
+            : mismatch
+                ? $"Cardcom: {info.Amount:0.##} ₪, expected {order.Total:0.##} ₪" + (info.IsRefund == true ? " (refunded at Cardcom)" : "")
+                : $"Cardcom amount verified ({info.Amount:0.##} ₪)";
         await LogEventAsync(
             order.Id,
             "GatewayVerify",
@@ -3320,7 +3333,11 @@ public class PaymentService : ServiceBase
             info.RawJson,
             cancelToken);
 
-        if (mismatch)
+        if (holdButMarkedCaptured)
+            _logger.LogWarning(
+                "Gateway verify: order marked captured but Cardcom shows hold only orderId={OrderId} tx={TransactionId} holdAmount={HoldAmount} orderTotal={OrderTotal}",
+                order.Id, info.TranzactionId ?? order.GatewayPaymentTransactionId, info.Amount, order.Total);
+        else if (mismatch)
             _logger.LogWarning(
                 "Gateway amount mismatch orderId={OrderId} cardcomAmount={CardcomAmount} orderTotal={OrderTotal} isRefund={IsRefund}",
                 order.Id, info.Amount, order.Total, info.IsRefund);

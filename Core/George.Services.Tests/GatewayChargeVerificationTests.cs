@@ -60,6 +60,53 @@ public class GatewayChargeVerificationTests
     }
 
     [Fact]
+    public void Hold_on_captured_order_is_flagged_as_false_success()
+    {
+        // Delinka #18326: J5 succeeded, the capture failed, but the plugin reported "charged" —
+        // the order was marked Captured/Paid while the only transaction Cardcom knows is the hold.
+        var info = new CardcomTransactionInfoResult
+        {
+            Success = true,
+            ResponseCode = 700,
+            Amount = 325m,
+            IsFinalCharge = false,
+            IsAuthorizationHold = true,
+        };
+        Assert.Equal(
+            GatewayVerifyOutcome.HoldButMarkedCaptured,
+            GatewayChargeVerification.Evaluate(info, 325m, null, orderMarkedCaptured: true));
+    }
+
+    [Fact]
+    public void Captured_order_with_real_final_charge_stays_match()
+    {
+        // A legitimate capture points the order at the charge deal — captured state must not
+        // affect the normal amount comparison.
+        Assert.Equal(
+            GatewayVerifyOutcome.Match,
+            GatewayChargeVerification.Evaluate(FinalCharge(325m), 325m, null, orderMarkedCaptured: true));
+    }
+
+    [Fact]
+    public void Information_row_on_captured_order_is_not_flagged()
+    {
+        // Information rows parse as holds, but they are inquiry echoes — ambiguous evidence,
+        // not proof the capture is missing.
+        var info = new CardcomTransactionInfoResult
+        {
+            Success = true,
+            ResponseCode = 0,
+            Amount = 325m,
+            DealType = "Information",
+            IsFinalCharge = false,
+            IsAuthorizationHold = true,
+        };
+        Assert.Equal(
+            GatewayVerifyOutcome.HoldOnly,
+            GatewayChargeVerification.Evaluate(info, 325m, null, orderMarkedCaptured: true));
+    }
+
+    [Fact]
     public void Refunded_deal_with_covering_george_refund_is_match()
     {
         var info = new CardcomTransactionInfoResult
