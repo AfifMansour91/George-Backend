@@ -40,6 +40,10 @@ public class WooCommerceOrderPayload
     [JsonPropertyName("shippingAddress")]
     public WooCommerceShippingAddressPayload? ShippingAddress { get; set; }
 
+    /// <summary>Plugin >= 1.7.8: delivery recipient ("ship to another person"). Sent on every order — <c>isOther</c> distinguishes "same person" from "not sent".</summary>
+    [JsonPropertyName("recipient")]
+    public WooCommerceRecipientPayload? Recipient { get; set; }
+
     [JsonPropertyName("items")]
     public List<WooCommerceOrderItemPayload> Items { get; set; } = new();
 
@@ -211,6 +215,44 @@ public class WooCommerceOrderPayload
     public string? GetResolvedGatewayPaymentStatus() =>
         string.IsNullOrWhiteSpace(GatewayPaymentStatus) ? null : GatewayPaymentStatus.Trim();
 
+    /// <summary>
+    /// Delivery recipient when the order was placed FOR someone else; null when the customer receives it
+    /// (or nothing was sent). Prefers the root <c>recipient</c> object, falls back to
+    /// <c>shippingAddress.recipientName/recipientPhone</c>. An explicit <c>isOther=false</c> wins; when the
+    /// flag is missing (older plugin / manually edited order) a recipient counts as "other" only when the
+    /// name or phone actually differ from the customer's.
+    /// </summary>
+    public (string? Name, string? Phone)? GetResolvedOtherRecipient()
+    {
+        var name = FirstNonEmpty(Recipient?.Name, ShippingAddress?.RecipientName);
+        var phone = FirstNonEmpty(Recipient?.Phone, ShippingAddress?.RecipientPhone);
+        if (name == null && phone == null)
+            return null;
+
+        var isOther = Recipient?.ResolvedIsOther;
+        if (isOther == false)
+            return null;
+        if (isOther == true)
+            return (name, phone);
+
+        var sameName = name != null && Customer?.Name != null
+            && string.Equals(name, Customer.Name.Trim(), StringComparison.OrdinalIgnoreCase);
+        var samePhone = phone != null && PhoneDigits(phone) is { Length: > 0 } d
+            && d == PhoneDigits(Customer?.Phone);
+        if ((name == null || sameName) && (phone == null || samePhone))
+            return null;
+        return (name, phone);
+    }
+
+    private static string? FirstNonEmpty(string? a, string? b)
+    {
+        if (!string.IsNullOrWhiteSpace(a)) return a.Trim();
+        return string.IsNullOrWhiteSpace(b) ? null : b.Trim();
+    }
+
+    private static string PhoneDigits(string? phone) =>
+        new(phone?.Where(char.IsDigit).ToArray() ?? Array.Empty<char>());
+
     public string? GetResolvedShippingLabel()
     {
         var a = ShippingLabel?.Trim();
@@ -308,6 +350,43 @@ public class WooCommerceShippingAddressPayload
     [System.Text.Json.Serialization.JsonIgnore]
     public string? ResolvedEntranceCode =>
         string.IsNullOrWhiteSpace(EntranceCode) ? (string.IsNullOrWhiteSpace(EnterCode) ? null : EnterCode.Trim()) : EntranceCode.Trim();
+
+    /// <summary>Plugin >= 1.7.8 alias fields for the delivery recipient (also sent as the root <c>recipient</c> object).</summary>
+    [JsonPropertyName("recipientName")]
+    public string? RecipientName { get; set; }
+
+    [JsonPropertyName("recipientPhone")]
+    public string? RecipientPhone { get; set; }
+}
+
+/// <summary>
+/// Delivery recipient from the plugin (>= 1.7.8): OC Woo Shipping "שליחה למישהו אחר" (ocws_recipient_*)
+/// with WooCommerce shipping-name fallback. <c>isOther</c> is a plugin-computed flag; typed as string
+/// because the PHP side may serialize it as bool/int/string.
+/// </summary>
+public class WooCommerceRecipientPayload
+{
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("phone")]
+    public string? Phone { get; set; }
+
+    [JsonPropertyName("isOther")]
+    public string? IsOther { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool? ResolvedIsOther
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(IsOther)) return null;
+            var v = IsOther.Trim().ToLowerInvariant();
+            if (v is "true" or "1" or "yes") return true;
+            if (v is "false" or "0" or "no") return false;
+            return null;
+        }
+    }
 }
 
 /// <summary>One selected option in a variant (e.g. cutting shape or size). <see cref="Name"/> is used for display; <see cref="Id"/> is accepted from JSON but not used for matching (we use variationId / names).</summary>

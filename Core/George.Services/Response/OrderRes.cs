@@ -55,6 +55,9 @@ public class OrderRes
     public string? DeliveryApartment { get; set; }
     public string? DeliveryFloor { get; set; }
     public string? DeliveryEntranceCode { get; set; }
+    /// <summary>Recipient when the order was placed FOR someone else (משלוח עבור); null = the customer receives it.</summary>
+    public string? DeliveryRecipientName { get; set; }
+    public string? DeliveryRecipientPhone { get; set; }
     public DateTime? DeliveryDate { get; set; }
     public string? DeliveryTime { get; set; }
     public DateTime? PickupDate { get; set; }

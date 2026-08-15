@@ -1326,6 +1326,18 @@ namespace George.Services
             o.DeliveryAddress = JoinMainDeliveryLine(a.Street, a.City, a.Zip);
         }
 
+        /// <summary>
+        /// "Ship to another person": persist the recipient ONLY when they differ from the customer, so a
+        /// non-null <see cref="Order.DeliveryRecipientName"/> always means the order is FOR someone else.
+        /// Cleared on update when the order no longer has another recipient.
+        /// </summary>
+        private static void ApplyWooCommerceDeliveryRecipientToOrder(Order o, WooCommerceOrderPayload payload)
+        {
+            var recipient = payload.GetResolvedOtherRecipient();
+            o.DeliveryRecipientName = NullIfWhiteSpace(recipient?.Name);
+            o.DeliveryRecipientPhone = NullIfWhiteSpace(recipient?.Phone);
+        }
+
         /// <summary>Phone/Kiosk/manual pickup: persist branch name from Site when not supplied by client.</summary>
         private async Task ApplyPickupSiteNameOnCreateAsync(Order order, int siteId, CancellationToken cancelToken)
         {
@@ -1768,6 +1780,7 @@ namespace George.Services
                     o.CustomerEmail = payload.Customer?.Email;
                     o.CustomerId = updateCustomer.Id;
                     ApplyWooCommerceShippingAddressToOrder(o, payload.ShippingAddress);
+                    ApplyWooCommerceDeliveryRecipientToOrder(o, payload);
                     o.BillingNotes = wooBillingNotes;
                     o.CustomerNote = wooCustomerNote;
                     o.ManagerNote = null;
@@ -1966,6 +1979,7 @@ namespace George.Services
                 cancelToken: cancelToken).ConfigureAwait(false);
             var order = _mapper.Map<Order>(req);
             ApplyWooCommerceShippingAddressToOrder(order, payload.ShippingAddress);
+            ApplyWooCommerceDeliveryRecipientToOrder(order, payload);
             order.CustomerId = customer.Id;
             order.ManagerNote = null;
             await _paymentService.PrepareOrderPaymentOnCreateAsync(order, cancelToken).ConfigureAwait(false);

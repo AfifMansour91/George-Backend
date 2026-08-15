@@ -157,6 +157,13 @@ public partial class Order
     [StringLength(64)]
     public string? DeliveryEntranceCode { get; set; }
 
+    /// <summary>Delivery recipient when the order was placed FOR someone else (Woo "ship to another person"). Null = the customer receives it.</summary>
+    [StringLength(200)]
+    public string? DeliveryRecipientName { get; set; }
+
+    [StringLength(50)]
+    public string? DeliveryRecipientPhone { get; set; }
+
     [Precision(0)]
     public DateTime? DeliveryDate { get; set; }
 
