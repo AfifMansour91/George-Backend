@@ -13,6 +13,14 @@ public enum GatewayVerifyOutcome
     /// capture never happened. Surface loudly — the order looks paid with no money behind it.
     /// </summary>
     HoldButMarkedCaptured,
+    /// <summary>
+    /// The stored transaction is a hold, the order is marked captured — but the order carries a Cardcom
+    /// charge document (invoice). Capturing a suspended/J5 deal creates a NEW transaction id at Cardcom,
+    /// and the Woo plugin keeps reporting the original hold's id, so the inquiry sees "hold" forever
+    /// (Zano-Dagim false alarms). A Cardcom document only exists when a real charge ran, so this is a
+    /// captured order whose charge lives under a transaction id George doesn't have — not a false success.
+    /// </summary>
+    HoldWithCaptureEvidence,
     /// <summary>Cardcom's transaction is consistent with what George expects (within tolerance).</summary>
     Match,
     /// <summary>Cardcom's transaction diverges from what George expects — surface loudly, never auto-correct.</summary>
@@ -42,7 +50,8 @@ public static class GatewayChargeVerification
         CardcomTransactionInfoResult info,
         decimal? orderTotal,
         decimal? refundedAmount,
-        bool orderMarkedCaptured = false)
+        bool orderMarkedCaptured = false,
+        bool orderHasChargeDocument = false)
     {
         if (info is not { Success: true })
             return GatewayVerifyOutcome.Inconclusive;
@@ -63,9 +72,16 @@ public static class GatewayChargeVerification
             // evidence, not proof the capture is missing. Only a genuine J5 hold on an order that
             // claims to be captured is the false-success signature.
             var isGenuineHold = !string.Equals(info.DealType, "Information", StringComparison.OrdinalIgnoreCase);
-            return orderMarkedCaptured && isGenuineHold
-                ? GatewayVerifyOutcome.HoldButMarkedCaptured
-                : GatewayVerifyOutcome.HoldOnly;
+            if (orderMarkedCaptured && isGenuineHold)
+            {
+                // A Cardcom document on the order proves a real charge ran — the capture of a
+                // suspended/J5 deal lives under a different transaction id than the hold George
+                // stores, so the "hold" answer is expected, not a missing capture.
+                return orderHasChargeDocument
+                    ? GatewayVerifyOutcome.HoldWithCaptureEvidence
+                    : GatewayVerifyOutcome.HoldButMarkedCaptured;
+            }
+            return GatewayVerifyOutcome.HoldOnly;
         }
 
         // "Information" rows are inquiries/echoes, not charges.

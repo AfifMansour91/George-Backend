@@ -3295,7 +3295,9 @@ public class PaymentService : ServiceBase
             info,
             order.Total,
             order.RefundedAmount,
-            orderMarkedCaptured: order.PaymentSettleStatus == PaymentSettleStatus.Captured);
+            orderMarkedCaptured: order.PaymentSettleStatus == PaymentSettleStatus.Captured,
+            orderHasChargeDocument: !string.IsNullOrWhiteSpace(order.InvoiceNumber)
+                || !string.IsNullOrWhiteSpace(order.CardcomDocumentUrl));
         if (outcome is GatewayVerifyOutcome.Inconclusive or GatewayVerifyOutcome.HoldOnly)
         {
             if (invoiceBackfilled)
@@ -3303,6 +3305,35 @@ public class PaymentService : ServiceBase
             _logger.LogInformation(
                 "Gateway verify inconclusive orderId={OrderId} outcome={Outcome} responseCode={ResponseCode} dealType={DealType}",
                 order.Id, outcome, info.ResponseCode, info.DealType);
+            return;
+        }
+
+        // J5→capture flow: the stored transaction is the checkout hold, the real charge lives under a
+        // capture transaction id George never received — but the order's Cardcom document proves the
+        // charge ran. Not a mismatch; also clears the false flag raised before this rule existed.
+        if (outcome == GatewayVerifyOutcome.HoldWithCaptureEvidence)
+        {
+            var hadStaleFlag = order.GatewayAmountMismatch == true;
+            order.GatewayAmountMismatch = false;
+            order.GatewayVerifiedAmount = null; // actual charge amount is unknown from the hold row
+            order.GatewayVerifiedAt = DateTime.UtcNow;
+            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            await LogEventAsync(
+                order.Id,
+                "GatewayVerify",
+                "0",
+                $"Cardcom shows the checkout hold ({info.Amount:0.##} ₪); order carries Cardcom document"
+                    + (string.IsNullOrWhiteSpace(order.InvoiceNumber) ? "" : $" #{order.InvoiceNumber}")
+                    + " — charge captured under a separate transaction (J5→capture)."
+                    + (hadStaleFlag ? " Cleared stale mismatch flag." : ""),
+                info.TranzactionId ?? order.GatewayPaymentTransactionId,
+                null,
+                info.Amount,
+                info.RawJson,
+                cancelToken);
+            _logger.LogInformation(
+                "Gateway verify: hold with capture evidence orderId={OrderId} tx={TransactionId} invoice={InvoiceNumber} clearedStaleFlag={ClearedStaleFlag}",
+                order.Id, info.TranzactionId ?? order.GatewayPaymentTransactionId, order.InvoiceNumber, hadStaleFlag);
             return;
         }
 

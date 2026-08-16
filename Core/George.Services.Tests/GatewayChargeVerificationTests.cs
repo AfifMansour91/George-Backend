@@ -78,6 +78,55 @@ public class GatewayChargeVerificationTests
     }
 
     [Fact]
+    public void Hold_on_captured_order_with_charge_document_is_capture_evidence_not_mismatch()
+    {
+        // Zano-Dagim: J5 captured by the Woo plugin — the capture lives under a NEW Cardcom
+        // transaction id, but the plugin keeps sending the original hold's id, so the inquiry
+        // sees "hold" forever. The Cardcom charge document on the order proves the charge ran.
+        var info = new CardcomTransactionInfoResult
+        {
+            Success = true,
+            ResponseCode = 700,
+            Amount = 1031.50m,
+            IsFinalCharge = false,
+            IsAuthorizationHold = true,
+        };
+        Assert.Equal(
+            GatewayVerifyOutcome.HoldWithCaptureEvidence,
+            GatewayChargeVerification.Evaluate(info, 1031.50m, null,
+                orderMarkedCaptured: true, orderHasChargeDocument: true));
+    }
+
+    [Fact]
+    public void Hold_on_captured_order_without_document_still_flags_false_success()
+    {
+        // The document is the discriminator: no document → keep the Delinka #18326 alarm.
+        var info = new CardcomTransactionInfoResult
+        {
+            Success = true,
+            ResponseCode = 700,
+            Amount = 325m,
+            IsFinalCharge = false,
+            IsAuthorizationHold = true,
+        };
+        Assert.Equal(
+            GatewayVerifyOutcome.HoldButMarkedCaptured,
+            GatewayChargeVerification.Evaluate(info, 325m, null,
+                orderMarkedCaptured: true, orderHasChargeDocument: false));
+    }
+
+    [Fact]
+    public void Document_does_not_mask_a_real_final_charge_amount_mismatch()
+    {
+        // Capture evidence only applies to the hold row — when the inquiry finds the actual
+        // charge, the amount comparison must still run and still flag a wrong amount.
+        Assert.Equal(
+            GatewayVerifyOutcome.Mismatch,
+            GatewayChargeVerification.Evaluate(FinalCharge(380m), 325m, null,
+                orderMarkedCaptured: true, orderHasChargeDocument: true));
+    }
+
+    [Fact]
     public void Captured_order_with_real_final_charge_stays_match()
     {
         // A legitimate capture points the order at the charge deal — captured state must not

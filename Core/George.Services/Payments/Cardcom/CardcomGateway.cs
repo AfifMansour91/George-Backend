@@ -441,7 +441,26 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
             };
         }
 
-        return ParseTransactionInfoResult(json);
+        var result = ParseTransactionInfoResult(json);
+
+        // Charge transactions (J4 capture / token charge) live on the no-CVV charge terminal when one
+        // is configured, while holds and the payment page stay on the primary — retry there before
+        // giving up, so verification can find charges made on the second terminal.
+        var chargeTerminal = credentials.EffectiveChargeTerminalNumber;
+        if (!result.Success && chargeTerminal is > 0 && chargeTerminal != credentials.TerminalNumber)
+        {
+            body["TerminalNumber"] = chargeTerminal.Value;
+            var retryJson = await PostJsonAsync("Transactions/GetTransactionInfoById", body, cancelToken)
+                .ConfigureAwait(false);
+            if (retryJson != null)
+            {
+                var retry = ParseTransactionInfoResult(retryJson);
+                if (retry.Success)
+                    return retry;
+            }
+        }
+
+        return result;
     }
 
     internal static CardcomTransactionInfoResult ParseTransactionInfoResult(string json)
