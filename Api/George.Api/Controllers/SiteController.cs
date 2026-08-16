@@ -25,7 +25,6 @@ namespace George.Api.Controllers
             _woltDispatchSvc = woltDispatchSvc;
         }
 
-        [AllowAnonymous]
         [HttpGet]
         [ProducesResponseType(typeof(IApiResponse<ApiListResponse<SiteFilter>>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetSitesAsync(

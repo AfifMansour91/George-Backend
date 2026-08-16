@@ -13,17 +13,20 @@ namespace George.Services
     {
         private readonly SiteStorage _siteStorage;
         private readonly PaymentTokenProtector _paymentTokenProtector;
+        private readonly SiteAccessService _siteAccessService;
 
         public SiteService(
             ILogger<SiteService> logger,
             IMapper mapper,
             CacheManager cache,
             SiteStorage siteStorage,
-            PaymentTokenProtector paymentTokenProtector
+            PaymentTokenProtector paymentTokenProtector,
+            SiteAccessService siteAccessService
         ) : base(logger, mapper, cache)
         {
             _siteStorage = siteStorage;
             _paymentTokenProtector = paymentTokenProtector;
+            _siteAccessService = siteAccessService;
         }
 
         public async Task<IApiResponse<ApiListResponse<SiteRes>>> GetSitesAsync(
@@ -35,7 +38,12 @@ namespace George.Services
                 Data = new ApiListResponse<SiteRes>()
             };
 
-            var res = await _siteStorage.GetSitesAsync(request.Filter, request, cancelToken);
+            // Scope the list to the caller's account (null scope = master/admin sees all).
+            var scope = await _siteAccessService
+                .GetSiteScopeAsync(AuthUser.Id, AuthUser.IsMaster, cancelToken)
+                .ConfigureAwait(false);
+
+            var res = await _siteStorage.GetSitesAsync(request.Filter, request, cancelToken, scope);
 
             response.Data!.Items = res.Items.ConvertAll(a => _mapper.Map<SiteRes>(a));
 

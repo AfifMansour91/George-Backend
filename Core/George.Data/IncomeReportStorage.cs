@@ -95,6 +95,8 @@ namespace George.Data
                 .Include(p => p.ProductCategory)
                 .ThenInclude(pc => pc.Category)
                 .Include(p => p.ProductImage)
+                // Needed by ProductCatalogStockClassification.IsWeightedLikeProduct (kg vs units labels).
+                .Include(p => p.SetupType)
                 .ToListAsync(cancelToken)
                 .ConfigureAwait(false);
 

@@ -115,8 +115,17 @@ public class DashboardService : ServiceBase
         var productUpdates = await _dashboardStorage
             .GetRecentProductUpdatesAsync(siteIds, sinceUtc, take, cancelToken)
             .ConfigureAwait(false);
+        // Account per site (cached) so low-stock thresholds honor the account's configured defaults.
+        var accountCache = new Dictionary<int, Account?>();
         foreach (var (product, site) in productUpdates)
-            events.Add(MapProductUpdateEvent(product, site));
+        {
+            if (!accountCache.TryGetValue(site.AccountId, out var account))
+            {
+                account = await _dashboardStorage.GetAccountAsync(site.AccountId, cancelToken).ConfigureAwait(false);
+                accountCache[site.AccountId] = account;
+            }
+            events.Add(MapProductUpdateEvent(product, site, account));
+        }
 
         var paymentEvents = await _dashboardStorage
             .GetRecentPaymentEventsAsync(siteIds, sinceUtc, take, cancelToken)
@@ -170,11 +179,18 @@ public class DashboardService : ServiceBase
             {
                 if (line.IsDeleted || line.ProductId is not > 0) continue;
                 if (!products.TryGetValue(line.ProductId.Value, out var p)) continue;
-                var qty = line.PickedQuantity is > 0 ? line.PickedQuantity.Value : line.Quantity;
+                // PickedQuantity is stored in kg for weighted lines; for unpicked lines resolve the
+                // ordered amount in the same catalog units (kg for weighted, pieces for units) so a
+                // product's total never mixes kg with piece counts.
+                var lineStoresKg = OrderItemStockConsumption.LinePickingStoresKg(line);
+                var qty = line.PickedQuantity is > 0
+                    ? line.PickedQuantity.Value
+                    : OrderItemStockConsumption.ResolveOrderedCatalogConsumption(line);
                 if (!agg.ContainsKey(p.Id))
-                    agg[p.Id] = (p.Name ?? "", 0m, new HashSet<int>(), p.IsWeighted == true);
+                    agg[p.Id] = (p.Name ?? "", 0m, new HashSet<int>(), ProductCatalogStockClassification.IsWeightedLikeProduct(p));
                 var t = agg[p.Id];
                 t.Qty += qty;
+                t.Weighted |= lineStoresKg;
                 t.OrderIds.Add(order.Id);
                 agg[p.Id] = t;
             }
@@ -553,17 +569,20 @@ public class DashboardService : ServiceBase
         };
     }
 
-    private static LiveActivityEventRes MapProductUpdateEvent(Product product, Site site)
+    private static LiveActivityEventRes MapProductUpdateEvent(Product product, Site site, Account? account)
     {
-        var stockStatus = ProductCatalogStockClassification.ClassifyStock(product, account: null);
+        var stockStatus = ProductCatalogStockClassification.ClassifyStock(product, account);
         var type = stockStatus switch
         {
             "low" => "stock_low",
             "out" => "stock_out",
             _ => "stock_update",
         };
-        var stockQty = product.StockQuantity ?? 0m;
-        var qtyLabel = product.IsWeighted == true
+        // Variation-managed products track stock on the variants, not the parent row.
+        var stockQty = ProductCatalogStockClassification.IsVariationManagement(product)
+            ? ProductCatalogStockClassification.ActiveVariants(product).Sum(v => v.StockQuantity ?? 0m)
+            : product.StockQuantity ?? 0m;
+        var qtyLabel = ProductCatalogStockClassification.IsWeightedLikeProduct(product)
             ? $"נשארו {DashboardMetricsHelper.Round2(stockQty)} ק\"ג"
             : $"נשארו {DashboardMetricsHelper.Round2(stockQty)} יח'";
         var title = type switch
@@ -572,7 +591,12 @@ public class DashboardService : ServiceBase
             "stock_out" => $"אזל מהמלאי: {product.Name}",
             _ => $"עודכן מלאי: {product.Name}",
         };
-        string? subtitle = type is "stock_low" or "stock_out" ? qtyLabel : null;
+        // Numeric "X remaining" only for products that actually track a quantity — a status-only
+        // product has no meaningful on-hand number to show.
+        string? subtitle = type is "stock_low" or "stock_out"
+            && ProductCatalogStockClassification.UsesNumericStockDisplay(product)
+            ? qtyLabel
+            : null;
 
         return new LiveActivityEventRes
         {

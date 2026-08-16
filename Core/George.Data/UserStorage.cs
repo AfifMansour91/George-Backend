@@ -428,10 +428,15 @@ namespace George.Data
 
         public async Task<User?> UpdateUserAsync(User user, CancellationToken cancelToken = default)
         {
-            return await UpdateUserAsync(user, null, cancelToken);
+            return await UpdateUserAsync(user, null, detachFromAccount: false, cancelToken);
         }
 
         public async Task<User?> UpdateUserAsync(User user, List<int>? siteIds, CancellationToken cancelToken = default)
+        {
+            return await UpdateUserAsync(user, siteIds, detachFromAccount: false, cancelToken);
+        }
+
+        public async Task<User?> UpdateUserAsync(User user, List<int>? siteIds, bool detachFromAccount, CancellationToken cancelToken = default)
         {
             // Get the data from the DB (include Sites for site_admin updates)
             User? dbModel = await _dbContext.User
@@ -484,8 +489,17 @@ namespace George.Data
                 dbModel.IsEmailVerified = true;
             }
 
-            // Apply AccountId including null (detach from account). Callers merge intent in UserService.
-            dbModel.AccountId = user.AccountId;
+            // Never wipe the account link implicitly: a partial User with AccountId=null must not
+            // detach the user from their account (that silently breaks all tenant scoping).
+            // Detach only on explicit intent (detachFromAccount, from UpdateUserReq.RemoveFromAccount).
+            if (detachFromAccount)
+            {
+                dbModel.AccountId = null;
+            }
+            else if (user.AccountId.HasValue)
+            {
+                dbModel.AccountId = user.AccountId;
+            }
 
             if (user.RoleId > 0)
             {

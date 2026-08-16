@@ -319,7 +319,7 @@ namespace George.Services
 		List<int>? siteIdsForStorage = removeFromAccount ? new List<int>() : request.SiteIds;
 
 		// Update in DB (with site associations for site_admin)
-		User? updatedUser = await _userStorage.UpdateUserAsync(user, siteIdsForStorage, cancelToken).ConfigureAwait(false);
+		User? updatedUser = await _userStorage.UpdateUserAsync(user, siteIdsForStorage, removeFromAccount, cancelToken).ConfigureAwait(false);
 
 			if (updatedUser != null)
 			{

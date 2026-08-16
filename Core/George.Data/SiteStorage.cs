@@ -14,7 +14,8 @@ namespace George.Data
         public async Task<DataListResult<Site>> GetSitesAsync(
             SiteFilter filter,
             PagingExDto paging,
-            CancellationToken cancelToken)
+            CancellationToken cancelToken,
+            IReadOnlyCollection<int>? allowedSiteIds = null)
         {
             var res = new DataListResult<Site>();
 
@@ -22,7 +23,12 @@ namespace George.Data
             var query = _dbContext.Site
                 .Include(a => a.Account)
                 .Include(s => s.BusinessType.Where(bt => !bt.IsDeleted))
+                .Where(s => !s.IsDeleted)
                 .AsNoTracking();
+
+            // Multi-tenant scoping: null = unrestricted (master/admin); otherwise only these sites.
+            if (allowedSiteIds != null)
+                query = query.Where(s => allowedSiteIds.Contains(s.Id));
 
             if (filter?.Search?.SearchTerm.HasValue() == true)
             {
