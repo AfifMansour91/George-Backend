@@ -3104,7 +3104,8 @@ public class PaymentService : ServiceBase
         string? isFinished,
         string? gatewayOrderId,
         string? gatewayExternalOrderId,
-        string? gatewaySiteId)
+        string? gatewaySiteId,
+        string? failureReason = null)
     {
         if (gatewayOrderId != null)
             order.GatewayPaymentOrderId = gatewayOrderId;
@@ -3114,6 +3115,24 @@ public class PaymentService : ServiceBase
             order.GatewayPaymentSiteId = gatewaySiteId;
         if (!string.IsNullOrWhiteSpace(isFinished))
             order.IsFinished = isFinished.Trim();
+
+        // A stray "failed" echo must not undo real money state: older plugin builds report "failed"
+        // whenever the Cardcom deal meta is momentarily missing — including the 1-2s window while the
+        // picking capture is running (order 6042: "failed" arrived one second before the capture
+        // success) — and a failure webhook can also lose the race and arrive after the capture success.
+        if (WooCommerceGatewayPaymentInterpreter.ShouldIgnoreGatewayFailure(
+                order.PaymentSettleStatus, gatewayStatus, payment?.ResolveTransactionId(), failureReason))
+        {
+            _logger.LogWarning(
+                "Woo gateway 'failed' report ignored (transient/stale): orderId={OrderId}, settleStatus={SettleStatus}, " +
+                "gatewayStatus={GatewayStatus}, hasTx={HasTx}, failureReason={FailureReason}",
+                order.Id,
+                order.PaymentSettleStatus,
+                gatewayStatus,
+                payment?.ResolveTransactionId() != null,
+                failureReason);
+            return;
+        }
 
         var isNonGatewayLabelBlock = IsNonGatewayPaymentLabelBlock(payment);
         if (!string.IsNullOrWhiteSpace(gatewayStatus) && !isNonGatewayLabelBlock)
@@ -3189,6 +3208,7 @@ public class PaymentService : ServiceBase
         WooCommerceOrderPaymentGatewayDetails? payment,
         string? gatewayStatus,
         string? isFinished,
+        string? failureReason = null,
         CancellationToken cancelToken = default)
     {
         if (IsNonGatewayPaymentLabelBlock(payment))
@@ -3208,11 +3228,15 @@ public class PaymentService : ServiceBase
                 ? "CaptureAuthorization"
                 : "TokenAuthorizationHold";
 
+        var description = gatewayFailed && !string.IsNullOrWhiteSpace(failureReason)
+            ? $"{gatewayStatus}: {failureReason.Trim()}"
+            : gatewayStatus;
+
         await LogEventAsync(
             orderId,
             eventType,
             gatewayFailed ? "1" : "0",
-            gatewayStatus,
+            description,
             payment?.ResolveTransactionId(),
             null,
             payment?.ResolveAuthOrPaymentAmount(),
@@ -3237,7 +3261,7 @@ public class PaymentService : ServiceBase
             gatewayExternalOrderId: null,
             gatewaySiteId: null);
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
-        await LogWooCommerceGatewayPaymentEventAsync(order.Id, payment, gatewayStatus, isFinished, cancelToken);
+        await LogWooCommerceGatewayPaymentEventAsync(order.Id, payment, gatewayStatus, isFinished, failureReason: null, cancelToken);
         // Checkout-paid website order: send the invoice SMS like a StoreOS capture (no-op unless Paid+Captured).
         await TrySendInvoiceSmsForWooCapturedOrderAsync(order, cancelToken);
         await TryVerifyWooGatewayChargeAsync(order, cancelToken);

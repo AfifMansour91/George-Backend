@@ -3001,7 +3001,8 @@ namespace George.Services
                     payment.IsFinished,
                     o.GatewayPaymentOrderId,
                     o.GatewayPaymentExternalOrderId,
-                    o.GatewayPaymentSiteId);
+                    o.GatewayPaymentSiteId,
+                    payment.FailureReason);
                 if (!string.IsNullOrWhiteSpace(payment.PaymentReference))
                     o.PaymentReference = payment.PaymentReference;
             }, cancelToken).ConfigureAwait(false);
@@ -3022,7 +3023,8 @@ namespace George.Services
                     payment.IsFinished,
                     loaded.GatewayPaymentOrderId,
                     loaded.GatewayPaymentExternalOrderId,
-                    loaded.GatewayPaymentSiteId);
+                    loaded.GatewayPaymentSiteId,
+                    payment.FailureReason);
                 await _paymentService.PersistOrderPaymentStateAsync(loaded, cancelToken).ConfigureAwait(false);
                 await LogOrderEventAsync(IntegrationLogOperation.Payment, IntegrationLogDirection.Inbound, siteId, loaded.Id, loaded.ExternalOrderId, true,
                     requestJson: OrderLogSnapshot(loaded), cancelToken: cancelToken).ConfigureAwait(false);
@@ -3031,6 +3033,7 @@ namespace George.Services
                     payment.Payment,
                     payment.Status,
                     payment.IsFinished,
+                    payment.FailureReason,
                     cancelToken).ConfigureAwait(false);
                 // Checkout-paid website order: send the invoice SMS like a StoreOS capture (no-op unless Paid+Captured; deduped).
                 await _paymentService.TrySendInvoiceSmsForWooCapturedOrderAsync(loaded, cancelToken).ConfigureAwait(false);

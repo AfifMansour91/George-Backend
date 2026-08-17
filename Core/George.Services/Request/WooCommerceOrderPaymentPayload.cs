@@ -79,6 +79,15 @@ public class WooCommerceOrderPaymentPayload
     [JsonProperty("isFinished")]
     public string? IsFinished { get; set; }
 
+    /// <summary>
+    /// Explicit failure reason from newer plugin builds (e.g. <c>cardcom_capture_not_confirmed</c> when a
+    /// J5 hold exists but the capture flag says the charge did not go through). Its presence marks a REAL
+    /// gateway failure, as opposed to the transient "failed" older builds emit while the capture is still
+    /// running and the Cardcom deal meta is momentarily missing.
+    /// </summary>
+    [JsonProperty("failureReason")]
+    public string? FailureReason { get; set; }
+
     [JsonProperty("payment")]
     public WooCommerceOrderPaymentGatewayDetails? Payment { get; set; }
 
@@ -168,6 +177,41 @@ public static class WooCommerceGatewayPaymentInterpreter
     {
         if (string.IsNullOrWhiteSpace(status)) return true;
         return !IsGatewayFailureStatus(status);
+    }
+
+    /// <summary>
+    /// True when an incoming gateway "failed" report must NOT change the order's payment state.
+    /// Two cases:
+    /// (1) The order's payment is already settled (captured/refunded) — a late or racing "failed"
+    ///     webhook can never undo money that actually moved.
+    /// (2) The order holds a live authorization (J5) and the failure carries no transaction id and no
+    ///     explicit <c>failureReason</c> — older plugin builds emit exactly this shape during the 1-2s
+    ///     window while the picking capture runs and the Cardcom deal meta is momentarily missing
+    ///     (order 6042: "failed" arrived one second before the capture success). A REAL capture
+    ///     failure from newer builds always carries <c>failureReason</c>, and checkout declines happen
+    ///     before any hold exists — neither is suppressed here.
+    /// </summary>
+    public static bool ShouldIgnoreGatewayFailure(
+        string? currentSettleStatus,
+        string? gatewayStatus,
+        string? transactionId,
+        string? failureReason)
+    {
+        if (!IsGatewayFailureStatus(gatewayStatus))
+            return false;
+
+        var settle = (currentSettleStatus ?? "").Trim();
+        var alreadySettled =
+            settle.Equals(George.Common.Payment.PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase) ||
+            settle.Equals(George.Common.Payment.PaymentSettleStatus.PartiallyCaptured, StringComparison.OrdinalIgnoreCase) ||
+            settle.Equals(George.Common.Payment.PaymentSettleStatus.Refunded, StringComparison.OrdinalIgnoreCase) ||
+            settle.Equals(George.Common.Payment.PaymentSettleStatus.PartiallyRefunded, StringComparison.OrdinalIgnoreCase);
+        if (alreadySettled)
+            return true;
+
+        var bareFailure = string.IsNullOrWhiteSpace(transactionId) && string.IsNullOrWhiteSpace(failureReason);
+        return bareFailure
+            && settle.Equals(George.Common.Payment.PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase);
     }
 
   /// <summary>True when gateway reports final charge (not J5 hold at checkout).</summary>

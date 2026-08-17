@@ -23,6 +23,12 @@ FROM ProductVariant pv
 WHERE pv.ProductId = @ProductId AND pv.IsDeleted = 0;
 
 -- 3. Per-site override rows (out-of-stock set per branch lands here, not on the canonical product)
-SELECT SiteId, IsExcluded, StockStatus, StockQuantity, StockManagementType, UpdatedDate
-FROM ProductSiteOverride
-WHERE ProductId = @ProductId AND IsDeleted = 0;
+SELECT o.SiteId, o.IsExcluded,
+       oss.Name  AS StockStatus,
+       o.StockQuantity,
+       osmt.Name AS StockManagementType,
+       o.UpdatedDate
+FROM ProductSiteOverride o
+LEFT JOIN StockStatus oss ON oss.Id = o.StockStatusId
+LEFT JOIN StockManagementType osmt ON osmt.Id = o.StockManagementTypeId
+WHERE o.ProductId = @ProductId AND o.IsDeleted = 0;
