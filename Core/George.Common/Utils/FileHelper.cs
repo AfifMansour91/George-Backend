@@ -33,15 +33,33 @@ namespace George.Common
 			return string.Empty;
 
 		filePath = filePath!.Trim('/').Trim('\\');
-		
+
 		// Use local storage external path if configured, otherwise use S3 path
-		string baseUrl = string.IsNullOrEmpty(SysConfig.Data.StorageLocalExternalBasePath) 
+		string baseUrl = string.IsNullOrEmpty(SysConfig.Data.StorageLocalExternalBasePath)
 			? SysConfig.Data.StorageExternalBasePath.Trim('/').Trim('\\')
 			: SysConfig.Data.StorageLocalExternalBasePath.Trim('/').Trim('\\');
 
 		string res = $"{baseUrl}/{filePath}";
 
-		return res;
+		return UpgradeInsecureExternalUrl(res);
+	}
+
+	/// <summary>
+	/// Public file links must be https: storefront/kiosk pages are served over https, and the browser
+	/// treats an http video/image there as mixed content (the Dubi-Dagim kiosk showed an HTTPS warning
+	/// for its home video). The scheme comes from config (StorageLocalExternalBasePath), so a single
+	/// "http://" there stamps every uploaded file's STORED url — upgrade here instead of trusting the
+	/// config. Loopback hosts are left alone (dev runs without a certificate).
+	/// </summary>
+	public static string UpgradeInsecureExternalUrl(string? url)
+	{
+		if (string.IsNullOrEmpty(url) || !url.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+			return url ?? string.Empty;
+
+		if (Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && uri.IsLoopback)
+			return url;
+
+		return string.Concat("https://", url.Substring("http://".Length));
 	}
 
 		public static string GetSystemFolderPath()
