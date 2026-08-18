@@ -3,7 +3,6 @@ using George.Data;
 using George.Services.Request;
 using George.Services.Response;
 using Microsoft.Extensions.Logging;
-using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 
@@ -91,12 +90,13 @@ public class OrderReceptionService : ServiceBase
         httpClient.Timeout = TimeSpan.FromSeconds(30);
         httpClient.DefaultRequestHeaders.Clear();
 
-        if (!string.IsNullOrWhiteSpace(site.WooCommerceKey) && !string.IsNullOrWhiteSpace(site.WooCommerceSecret))
-        {
-            var basic = Convert.ToBase64String(
-                Encoding.ASCII.GetBytes($"{site.WooCommerceKey.Trim()}:{site.WooCommerceSecret.Trim()}"));
-            httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", basic);
-        }
+        // oc-storeos is a custom REST namespace: WooCommerce ck/cs Basic auth is only honored on wc/*
+        // routes, so WordPress treats the consumer key as an application-password username and rejects
+        // the whole request with 401 invalid_username before the route's permission callback runs.
+        // Authenticate like the other oc-storeos/ed calls instead: shared token via X-Api-Key.
+        var apiToken = site.InternalApiKey?.Trim();
+        if (!string.IsNullOrEmpty(apiToken))
+            httpClient.DefaultRequestHeaders.Add("X-Api-Key", apiToken);
 
         var today = DateTime.UtcNow.Date;
 
