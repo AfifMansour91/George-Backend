@@ -4665,6 +4665,40 @@ namespace George.Services
             return s;
         }
 
+        private static readonly Regex PercentEncodedSequence = new(@"%[0-9a-fA-F]{2}", RegexOptions.Compiled);
+
+        /// <summary>
+        /// Woo's variation REST endpoint returns the term SLUG instead of the display name whenever it fails to
+        /// resolve the term (Hebrew slugs are percent-encoded by sanitize_title, e.g. "%d7%98..." = "טחינה-כפולה").
+        /// Decode such values and map them back to the parent attribute's display values so slugs are never stored
+        /// (they render as gibberish in the UI and would sync back to Woo as new bogus terms).
+        /// </summary>
+        private static string ResolveWooImportVariationOptionValue(
+            string rawOption,
+            string optionName,
+            Dictionary<string, HashSet<string>> optionNameToValues)
+        {
+            var value = rawOption.Trim();
+            if (PercentEncodedSequence.IsMatch(value))
+            {
+                try { value = Uri.UnescapeDataString(value).Trim(); }
+                catch (UriFormatException) { /* keep the raw value */ }
+            }
+
+            if (optionNameToValues.TryGetValue(optionName, out var candidates))
+            {
+                var key = NormalizeOptionValueForSlugMatch(value);
+                var match = candidates.FirstOrDefault(c => NormalizeOptionValueForSlugMatch(c) == key);
+                if (match != null)
+                    return match;
+            }
+            return value;
+        }
+
+        /// <summary>sanitize_title turns spaces into hyphens — compare slug and display value as equal ("טחינה-כפולה" = "טחינה כפולה").</summary>
+        private static string NormalizeOptionValueForSlugMatch(string s) =>
+            Regex.Replace(s.Trim().Replace('-', ' '), @"\s+", " ").ToLowerInvariant();
+
         /// <summary>
         /// Values to register on the Woo global attribute: use <see cref="ProductOptionValue"/> when present;
         /// if empty, derive distinct values from <see cref="ProductVariantOptionValue"/> so variable products
@@ -4905,6 +4939,9 @@ namespace George.Services
                         Description = wc.description,
                         WooCommerceId = wc.id,
                         IsActive = true,
+                        // Explicit true: NULL is filtered out by every IsEnabled:true consumer (order building, reports),
+                        // which made all imported categories invisible there.
+                        IsEnabled = true,
                         IsDeleted = false,
                         CreationTime = DateTime.UtcNow,
                         GuidId = Guid.NewGuid()
@@ -4920,6 +4957,8 @@ namespace George.Services
                     category.Description = wc.description;
                     category.WooCommerceId = wc.id;
                     category.IsDeleted = false;
+                    // Backfill categories imported before IsEnabled was set on create; never override an explicit false.
+                    category.IsEnabled ??= true;
                     category.UpdatedDate = DateTime.UtcNow;
                     if (!category.Site.Any(s => s.Id == siteId))
                         category.Site.Add(site);
@@ -5250,7 +5289,7 @@ namespace George.Services
                             {
                                 ProductVariantId = variant.Id,
                                 OptionName = optionName,
-                                OptionValue = a.option.Trim()
+                                OptionValue = ResolveWooImportVariationOptionValue(a.option, optionName, optionNameToValues)
                             });
                         }
                     }

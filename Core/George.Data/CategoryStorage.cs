@@ -50,7 +50,10 @@ namespace George.Data
 
                 if (filter.IsEnabled.HasValue)
                 {
-                    query = query.Where(c => c.IsEnabled == filter.IsEnabled.Value);
+                    // NULL = never explicitly disabled (the WooCommerce import historically left it unset),
+                    // so it must count as enabled — otherwise imported categories vanish from every
+                    // isEnabled:true consumer (order building, reports, kiosk).
+                    query = query.Where(c => (c.IsEnabled ?? true) == filter.IsEnabled.Value);
                 }
 
                 if (filter.Search?.SearchTerm.HasValue() == true)
