@@ -463,9 +463,23 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         return result;
     }
 
-    internal static CardcomTransactionInfoResult ParseTransactionInfoResult(string json)
+    public static CardcomTransactionInfoResult ParseTransactionInfoResult(string json)
     {
-        var responseCode = GetInt(json, "ResponseCode");
+        // Cardcom occasionally returns a non-object body (e.g. "\"\"" — a bare JSON string) for
+        // GetTransactionInfoById. Every property reader then falls back to its default, which made
+        // ResponseCode=0 + empty DealType read as a successful final charge (order 6321, 2026-08-20:
+        // an uncharged order was marked Paid from exactly such a response). Anything that is not a
+        // JSON object carrying ResponseCode is an inquiry failure, never a charge.
+        if (!TryGetRequiredResponseCode(json, out var responseCode))
+        {
+            return new CardcomTransactionInfoResult
+            {
+                Success = false,
+                ResponseCode = -1,
+                Description = "Unexpected response from Cardcom transaction inquiry.",
+                RawJson = json,
+            };
+        }
         var dealType = GetString(json, "DealType");
         var isRefund = TryGetBool(json, "IsRefund");
         var isHold = IsCardcomTransactionInfoAuthorizationHold(responseCode, dealType, json);
@@ -562,8 +576,10 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
 
     private static bool? TryGetBool(string json, string name)
     {
+        // These scalar readers must use SafeTryGetProperty — TryGetObjectProperty only matches
+        // object-valued properties, so Amount/IsRefund/JParameter always read as missing.
         using var doc = JsonDocument.Parse(json);
-        if (!TryGetObjectProperty(doc.RootElement, name, out var el))
+        if (!SafeTryGetProperty(doc.RootElement, name, out var el))
             return null;
         return el.ValueKind switch
         {
@@ -577,7 +593,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
     private static decimal? TryGetDecimal(string json, string name)
     {
         using var doc = JsonDocument.Parse(json);
-        if (!TryGetObjectProperty(doc.RootElement, name, out var el))
+        if (!SafeTryGetProperty(doc.RootElement, name, out var el))
             return null;
         if (el.ValueKind == JsonValueKind.Number && el.TryGetDecimal(out var d))
             return d;
@@ -588,10 +604,37 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         return null;
     }
 
+    /// <summary>False when the body is not parseable JSON, not an object, or lacks ResponseCode.</summary>
+    private static bool TryGetRequiredResponseCode(string json, out int responseCode)
+    {
+        responseCode = -1;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!SafeTryGetProperty(doc.RootElement, "ResponseCode", out var el))
+                return false;
+            if (el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out var i))
+            {
+                responseCode = i;
+                return true;
+            }
+            if (el.ValueKind == JsonValueKind.String && int.TryParse(el.GetString(), out var parsed))
+            {
+                responseCode = parsed;
+                return true;
+            }
+            return false;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     private static int TryGetInt(string json, string name)
     {
         using var doc = JsonDocument.Parse(json);
-        if (!TryGetObjectProperty(doc.RootElement, name, out var el))
+        if (!SafeTryGetProperty(doc.RootElement, name, out var el))
             return -1;
         if (el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out var i))
             return i;
