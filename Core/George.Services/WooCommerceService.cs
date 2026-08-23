@@ -2538,9 +2538,20 @@ namespace George.Services
                     }
                     else
                     {
-                        // If update fails, try to create
                         var errorContent = await updateResponse.Content.ReadAsStringAsync(cancelToken);
-                        _logger.LogWarning("Failed to update product {ProductId} in WooCommerce: {Error}", product.Id, errorContent);
+                        // Fall through to CREATE only when the Woo product is genuinely gone (404). Any other failure
+                        // (502/timeout/validation) used to create a DUPLICATE Woo product: the store then sold both,
+                        // the per-site map pointed at the copy, and orders for the original no longer resolved to a
+                        // George product (Zano Dagim 20/8: lavrak → lavrak-2, picking charged 190 ₪/kg instead of 95).
+                        if (updateResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+                        {
+                            _logger.LogWarning("Woo product {WooId} for product {ProductId} no longer exists on site {SiteId}; creating it. {Error}", existingWooId.Value, product.Id, siteId, errorContent);
+                        }
+                        else
+                        {
+                            _logger.LogError("Failed to update product {ProductId} (Woo {WooId}) on site {SiteId}: {Status} {Error}", product.Id, existingWooId.Value, siteId, (int)updateResponse.StatusCode, errorContent);
+                            throw new Exception(GetUserFriendlyWooCommerceError((int)updateResponse.StatusCode, errorContent));
+                        }
                     }
                 }
 

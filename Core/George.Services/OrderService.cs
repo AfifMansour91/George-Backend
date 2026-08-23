@@ -1639,7 +1639,15 @@ namespace George.Services
             }
 
             if (product == null)
-                return (saleUnits ?? it.Quantity, null, null);
+            {
+                // Unlinked line (Woo product not in our catalog): keep the plugin's explicit per-piece weight so
+                // picking/display still know it is N pieces of X kg instead of guessing from labels.
+                var payloadUnitWeightGrams = string.Equals(it.QuantityType, "kg", StringComparison.OrdinalIgnoreCase)
+                    && it.Unit is > 0 && it.UnitWeight is > 0
+                    ? (decimal?)(it.UnitWeight!.Value * 1000m)
+                    : null;
+                return (saleUnits ?? it.Quantity, payloadUnitWeightGrams, null);
+            }
 
             var setupTypeName = product.SetupType?.Name ?? "";
             var isWeightedBySetup = setupTypeName is "by_weight" or "by_unit" or "by_unit_and_weight";
