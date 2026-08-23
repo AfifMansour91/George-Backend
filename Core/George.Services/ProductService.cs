@@ -380,6 +380,7 @@ namespace George.Services
                 {
                     var variantDtos = req.Variants.Select(v => new ProductVariantDto
                     {
+                        Id = v.Id,
                         ImageUrl = v.ImageUrl,
                         OptionValues = v.OptionValues,
                         Price = v.Price,
@@ -583,6 +584,7 @@ namespace George.Services
                     {
                         var newDtos = newVariantReqs.Select(v => new ProductVariantDto
                         {
+                            Id = v.Id,
                             ImageUrl = v.ImageUrl,
                             OptionValues = v.OptionValues,
                             Price = v.Price,
@@ -763,6 +765,7 @@ namespace George.Services
                 {
                     var variantDtos = req.Variants.Select(v => new ProductVariantDto
                     {
+                        Id = v.Id,
                         ImageUrl = v.ImageUrl,
                         OptionValues = v.OptionValues,
                         Price = v.Price,
@@ -1211,6 +1214,7 @@ namespace George.Services
                             {
                                 var variantDtos = productReq.Variants.Select(v => new ProductVariantDto
                                 {
+                                    Id = v.Id,
                                     ImageUrl = v.ImageUrl,
                                     OptionValues = v.OptionValues,
                                     Price = v.Price,
@@ -1278,6 +1282,7 @@ namespace George.Services
                             {
                                 var variantDtos = productReq.Variants.Select(v => new ProductVariantDto
                                 {
+                                    Id = v.Id,
                                     ImageUrl = v.ImageUrl,
                                     OptionValues = v.OptionValues,
                                     Price = v.Price,

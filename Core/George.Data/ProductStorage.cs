@@ -4,6 +4,7 @@ using George.Data.Dto;
 using George.DB;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Text.RegularExpressions;
 
 namespace George.Data
 {
@@ -1146,6 +1147,15 @@ namespace George.Data
                     await _dbContext.SaveChangesAsync(cancelToken);
                 }
 
+                await EnsureSiteAttributesForOptionAsync(opt.Name, distinctValues, siteIds, cancelToken);
+            }
+        }
+
+        /// <summary>Find/create the per-site global Attribute + AttributeValues backing a product option (shared by create and upsert).</summary>
+        private async Task EnsureSiteAttributesForOptionAsync(string optName, List<string> distinctValues, List<int> siteIds, CancellationToken cancelToken)
+        {
+            {
+                var opt = new ProductOptionDto { Name = optName, Values = distinctValues };
                 // "גודל" (Size) is a product variation dimension (e.g. weight-by-size), not a reusable feature — do not create a global Attribute for it
                 var isVariationOnlyOption = opt.Name == "גודל" || string.Equals(opt.Name, "Size", StringComparison.OrdinalIgnoreCase);
                 if (!isVariationOnlyOption)
@@ -1208,17 +1218,63 @@ namespace George.Data
         {
             if (options == null) return;
 
-            var existingOptions = await _dbContext.ProductOption
-                .Where(po => po.ProductId == productId)
+            // Upsert by option name: keep ProductOption ids stable (the old delete+recreate left variants pointing at
+            // deleted options — see Scan_VariantsWithDeletedOption.sql) and touch ProductOptionValue only on real change.
+            var live = await _dbContext.ProductOption
+                .Include(po => po.ProductOptionValue)
+                .Where(po => po.ProductId == productId && !po.IsDeleted)
                 .ToListAsync(cancelToken);
 
-            foreach (var existing in existingOptions)
+            static string NormName(string? s) => Regex.Replace((s ?? "").Trim(), @"\s+", " ").ToLowerInvariant();
+            var liveByName = new Dictionary<string, ProductOption>(StringComparer.Ordinal);
+            foreach (var po in live)
+                liveByName.TryAdd(NormName(po.Name), po);
+
+            var product = await _dbContext.Product
+                .Include(p => p.Site)
+                .FirstOrDefaultAsync(p => p.Id == productId, cancelToken);
+            var siteIds = limitAttributeToSiteIds != null && limitAttributeToSiteIds.Any()
+                ? limitAttributeToSiteIds
+                : (product?.Site?.Select(s => s.Id).ToList() ?? new List<int>());
+
+            var claimed = new HashSet<int>();
+            var toCreate = new List<ProductOptionDto>();
+
+            foreach (var opt in options)
             {
-                existing.IsDeleted = true;
+                if (string.IsNullOrWhiteSpace(opt.Name)) continue;
+                if (!liveByName.TryGetValue(NormName(opt.Name), out var match) || claimed.Contains(match.Id))
+                {
+                    toCreate.Add(opt);
+                    continue;
+                }
+                claimed.Add(match.Id);
+                if (match.Name != opt.Name) match.Name = opt.Name; // keep the user's current spelling/spacing
+
+                var wanted = DistinctOptionValuesPreserveOrder(opt.Values);
+                var current = match.ProductOptionValue.Select(v => v.Value).ToHashSet(StringComparer.Ordinal);
+                var wantedSet = wanted.ToHashSet(StringComparer.Ordinal);
+
+                foreach (var v in match.ProductOptionValue.Where(v => !wantedSet.Contains(v.Value)).ToList())
+                    _dbContext.ProductOptionValue.Remove(v);
+                var added = wanted.Where(v => !current.Contains(v)).ToList();
+                foreach (var v in added)
+                    _dbContext.ProductOptionValue.Add(new ProductOptionValue { ProductOptionId = match.Id, Value = v });
+
+                if (added.Count > 0)
+                    await EnsureSiteAttributesForOptionAsync(opt.Name, wanted, siteIds, cancelToken);
             }
+
+            foreach (var po in live)
+            {
+                if (!claimed.Contains(po.Id))
+                    po.IsDeleted = true;
+            }
+
             await _dbContext.SaveChangesAsync(cancelToken);
 
-            await CreateProductOptionsAsync(productId, options, limitAttributeToSiteIds, cancelToken);
+            if (toCreate.Count > 0)
+                await CreateProductOptionsAsync(productId, toCreate, limitAttributeToSiteIds, cancelToken);
         }
 
         public async Task<List<int>> CreateProductVariantsAsync(int productId, List<ProductVariantDto> variants, List<ProductOptionDto>? options, CancellationToken cancelToken)
@@ -1274,21 +1330,124 @@ namespace George.Data
             return createdIds;
         }
 
+        /// <summary>
+        /// Upsert the product's variants IN PLACE. Matches each incoming variant to a live one by <see cref="ProductVariantDto.Id"/>
+        /// (edit form) or by its option-value set; updates matched rows, creates unmatched ones, soft-deletes live rows
+        /// the request no longer contains. Variant ids are stable across saves — OrderItem.ProductVariantId,
+        /// ProductSiteVariantWooId and ProductSiteVariantStock all reference them (the old delete+recreate orphaned
+        /// ~5,000 order lines and reset the Woo variation map on every save; Zano Dagim 23/08/2026).
+        /// </summary>
         public async Task UpdateProductVariantsAsync(int productId, List<ProductVariantDto>? variants, List<ProductOptionDto>? options, CancellationToken cancelToken)
         {
             if (variants == null) return;
 
-            var existingVariants = await _dbContext.ProductVariant
-                .Where(pv => pv.ProductId == productId)
+            var parentSku = await _dbContext.Product
+                .Where(p => p.Id == productId)
+                .Select(p => p.Sku)
+                .FirstOrDefaultAsync(cancelToken);
+
+            var live = await _dbContext.ProductVariant
+                .Include(pv => pv.ProductVariantOptionValue)
+                .Where(pv => pv.ProductId == productId && !pv.IsDeleted)
                 .ToListAsync(cancelToken);
 
-            foreach (var existing in existingVariants)
+            var liveById = live.ToDictionary(pv => pv.Id);
+            var liveByKey = new Dictionary<string, List<ProductVariant>>(StringComparer.Ordinal);
+            foreach (var pv in live)
             {
-                existing.IsDeleted = true;
+                var k = VariantOptionKey(pv.ProductVariantOptionValue.Select(x => (x.OptionName, x.OptionValue)));
+                if (!liveByKey.TryGetValue(k, out var list)) liveByKey[k] = list = new List<ProductVariant>();
+                list.Add(pv);
             }
+
+            var claimed = new HashSet<int>();
+            var toCreate = new List<ProductVariantDto>();
+
+            foreach (var dto in variants)
+            {
+                ProductVariant? match = null;
+                if (dto.Id is > 0 && liveById.TryGetValue(dto.Id.Value, out var byId) && !claimed.Contains(byId.Id))
+                    match = byId;
+                if (match == null)
+                {
+                    var k = VariantOptionKey((dto.OptionValues ?? new Dictionary<string, string>()).Select(kv => (kv.Key, kv.Value)));
+                    if (liveByKey.TryGetValue(k, out var candidates))
+                        match = candidates.FirstOrDefault(c => !claimed.Contains(c.Id));
+                }
+
+                if (match == null)
+                {
+                    toCreate.Add(dto);
+                    continue;
+                }
+
+                claimed.Add(match.Id);
+                ApplyVariantDto(match, dto, parentSku);
+
+                // Option values: PK is (ProductVariantId, OptionName) — replace only when the set actually changed.
+                var wantedValues = (dto.OptionValues ?? new Dictionary<string, string>())
+                    .Where(kv => !string.IsNullOrWhiteSpace(kv.Key))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value ?? "", StringComparer.Ordinal);
+                var currentValues = match.ProductVariantOptionValue.ToDictionary(x => x.OptionName, x => x.OptionValue, StringComparer.Ordinal);
+                var same = wantedValues.Count == currentValues.Count
+                    && wantedValues.All(kv => currentValues.TryGetValue(kv.Key, out var cur) && cur == kv.Value);
+                if (!same && wantedValues.Count > 0)
+                {
+                    foreach (var stale in match.ProductVariantOptionValue.Where(x => !wantedValues.ContainsKey(x.OptionName)).ToList())
+                        _dbContext.ProductVariantOptionValue.Remove(stale);
+                    foreach (var kv in wantedValues)
+                    {
+                        var row = match.ProductVariantOptionValue.FirstOrDefault(x => x.OptionName == kv.Key);
+                        if (row != null)
+                            row.OptionValue = kv.Value;
+                        else
+                            _dbContext.ProductVariantOptionValue.Add(new ProductVariantOptionValue
+                            {
+                                ProductVariantId = match.Id,
+                                OptionName = kv.Key,
+                                OptionValue = kv.Value
+                            });
+                    }
+                }
+            }
+
+            foreach (var pv in live)
+            {
+                if (!claimed.Contains(pv.Id))
+                    pv.IsDeleted = true;
+            }
+
             await _dbContext.SaveChangesAsync(cancelToken);
 
-            await CreateProductVariantsAsync(productId, variants, options, cancelToken);
+            if (toCreate.Count > 0)
+                await CreateProductVariantsAsync(productId, toCreate, options, cancelToken);
+        }
+
+        private static void ApplyVariantDto(ProductVariant target, ProductVariantDto dto, string? parentSku)
+        {
+            var variantSku = string.IsNullOrWhiteSpace(dto.Sku) ? null : dto.Sku.Trim();
+            if (variantSku != null && !string.IsNullOrWhiteSpace(parentSku)
+                && string.Equals(variantSku, parentSku.Trim(), StringComparison.OrdinalIgnoreCase))
+                variantSku = null; // same guard as CreateProductVariantsAsync (Woo rejects variation sku == parent sku)
+
+            target.ImageUrl = dto.ImageUrl;
+            target.Price = dto.Price;
+            target.SalePrice = dto.SalePrice;
+            target.StockQuantity = dto.StockQuantity;
+            target.Sku = variantSku;
+            target.Weight = dto.Weight;
+        }
+
+        /// <summary>Order-independent, whitespace/case-insensitive key of a variant's option values ("name=value" pairs sorted).</summary>
+        private static string VariantOptionKey(IEnumerable<(string Name, string? Value)> pairs)
+        {
+            static string Norm(string? s) => Regex.Replace((s ?? "").Trim(), @"\s+", " ").ToLowerInvariant();
+            var parts = pairs
+                .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+                .Select(p => Norm(p.Name) + "=" + Norm(p.Value))
+                .OrderBy(s => s, StringComparer.Ordinal)
+                .ToList();
+            return string.Join(" ; ", parts);
         }
 
         public async Task<Product?> GetProductBySkuAsync(string sku, int? accountId, CancellationToken cancelToken)

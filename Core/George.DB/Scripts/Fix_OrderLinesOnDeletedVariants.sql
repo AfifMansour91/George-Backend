@@ -74,5 +74,5 @@ FROM OrderItem oi JOIN [Order] o ON o.Id = oi.OrderId JOIN ProductVariant pv ON 
 WHERE o.SiteId = 45 AND o.PaymentStatus = 'Unpaid' AND o.IsDeleted = 0
 ORDER BY pv.IsDeleted DESC, o.OrderNumber;
 
--- FOLLOW-UP (code, not data): ProductStorage should update variants in place (match by option set) instead of
--- delete+recreate on every save — otherwise this drift returns with every product edit.
+-- DONE 23/08/2026: ProductStorage.UpdateProductVariantsAsync/UpdateProductOptionsAsync and the Woo re-import now UPSERT
+-- (match by id / Woo variation id / option values) instead of delete+recreate, so this drift does not return.

@@ -4676,6 +4676,16 @@ namespace George.Services
             return s;
         }
 
+        /// <summary>Order-independent, case/whitespace-insensitive key of a variant's option values — import upsert fallback match.</summary>
+        private static string ImportVariantOptionKey(IEnumerable<(string Name, string? Value)> pairs)
+        {
+            var parts = pairs
+                .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+                .Select(p => NormalizeOptionKey(p.Name).ToLowerInvariant() + "=" + NormalizeOptionKey(p.Value).ToLowerInvariant())
+                .OrderBy(s => s, StringComparer.Ordinal);
+            return string.Join(" ; ", parts);
+        }
+
         private static readonly Regex PercentEncodedSequence = new(@"%[0-9a-fA-F]{2}", RegexOptions.Compiled);
 
         /// <summary>
@@ -5187,21 +5197,9 @@ namespace George.Services
                     }
 
                     db.ProductCategory.RemoveRange(db.ProductCategory.Where(x => x.ProductId == product.Id));
-                    var optionIds = product.ProductOption.Select(o => o.Id).ToList();
-                    var variantIds = product.ProductVariant.Select(v => v.Id).ToList();
-                    if (variantIds.Count > 0)
-                    {
-                        // Per-site variation-id rows FK the variants being replaced (no cascade) — drop them first.
-                        // Other sites' stores still hold their variations; the next sync re-resolves by attribute signature.
-                        db.ProductSiteVariantWooId.RemoveRange(db.ProductSiteVariantWooId.Where(x => variantIds.Contains(x.ProductVariantId)));
-                        db.ProductVariantOptionValue.RemoveRange(db.ProductVariantOptionValue.Where(x => variantIds.Contains(x.ProductVariantId)));
-                        db.ProductVariant.RemoveRange(db.ProductVariant.Where(x => variantIds.Contains(x.Id)));
-                    }
-                    if (optionIds.Count > 0)
-                    {
-                        db.ProductOptionValue.RemoveRange(db.ProductOptionValue.Where(x => optionIds.Contains(x.ProductOptionId)));
-                        db.ProductOption.RemoveRange(db.ProductOption.Where(x => optionIds.Contains(x.Id)));
-                    }
+                    // Options and variants are UPSERTED below (matched by Woo variation id / option values) — never
+                    // hard-deleted: OrderItem, ProductSiteVariantStock and other sites' ProductSiteVariantWooId rows
+                    // reference the existing ids, and a re-import used to orphan all of them.
 
                     if (wp.categories != null)
                     {
@@ -5237,14 +5235,55 @@ namespace George.Services
                         }
                     }
 
+                    // Options: upsert by name (keep ids), reconcile values, soft-delete options Woo no longer has.
+                    var liveOptionsByName = new Dictionary<string, ProductOption>(StringComparer.Ordinal);
+                    foreach (var po in product.ProductOption.Where(o => !o.IsDeleted))
+                        liveOptionsByName.TryAdd(NormalizeOptionKey(po.Name).ToLowerInvariant(), po);
+                    var claimedOptionIds = new HashSet<int>();
                     foreach (var kv in optionNameToValues)
                     {
-                        var po = new ProductOption { ProductId = product.Id, Name = kv.Key, IsDeleted = false };
-                        db.ProductOption.Add(po);
-                        await db.SaveChangesAsync(cancelToken);
-                        foreach (var value in kv.Value)
-                            db.ProductOptionValue.Add(new ProductOptionValue { ProductOptionId = po.Id, Value = value });
+                        if (liveOptionsByName.TryGetValue(NormalizeOptionKey(kv.Key).ToLowerInvariant(), out var po) && claimedOptionIds.Add(po.Id))
+                        {
+                            po.Name = kv.Key;
+                            var current = po.ProductOptionValue.ToList();
+                            foreach (var stale in current.Where(v => !kv.Value.Contains(v.Value)))
+                                db.ProductOptionValue.Remove(stale);
+                            var have = current.Select(v => v.Value).ToHashSet(StringComparer.Ordinal);
+                            foreach (var value in kv.Value.Where(v => !have.Contains(v)))
+                                db.ProductOptionValue.Add(new ProductOptionValue { ProductOptionId = po.Id, Value = value });
+                        }
+                        else
+                        {
+                            po = new ProductOption { ProductId = product.Id, Name = kv.Key, IsDeleted = false };
+                            db.ProductOption.Add(po);
+                            await db.SaveChangesAsync(cancelToken);
+                            claimedOptionIds.Add(po.Id);
+                            foreach (var value in kv.Value)
+                                db.ProductOptionValue.Add(new ProductOptionValue { ProductOptionId = po.Id, Value = value });
+                        }
                     }
+                    foreach (var po in product.ProductOption.Where(o => !o.IsDeleted && !claimedOptionIds.Contains(o.Id)))
+                        po.IsDeleted = true;
+
+                    // Variants: match this store's variation id (per-site map, then legacy column), else option values.
+                    var liveVariants = product.ProductVariant.Where(v => !v.IsDeleted).ToList();
+                    var siteVariantRows = await db.ProductSiteVariantWooId
+                        .Where(x => x.SiteId == siteId && x.ProductId == product.Id)
+                        .ToListAsync(cancelToken);
+                    var liveVariantBySiteWooId = new Dictionary<int, ProductVariant>();
+                    foreach (var row in siteVariantRows)
+                    {
+                        var lv = liveVariants.FirstOrDefault(v => v.Id == row.ProductVariantId);
+                        if (lv != null) liveVariantBySiteWooId.TryAdd(row.WooCommerceVariationId, lv);
+                    }
+                    var liveVariantByKey = new Dictionary<string, List<ProductVariant>>(StringComparer.Ordinal);
+                    foreach (var lv in liveVariants)
+                    {
+                        var k = ImportVariantOptionKey(lv.ProductVariantOptionValue.Select(x => (x.OptionName, x.OptionValue)));
+                        if (!liveVariantByKey.TryGetValue(k, out var list)) liveVariantByKey[k] = list = new List<ProductVariant>();
+                        list.Add(lv);
+                    }
+                    var claimedVariantIds = new HashSet<int>();
 
                     var variationStockSources = wooVariations
                         .Select(v => new WooCommerceImportStockMapping.VariationStockSource(v.manage_stock, v.stock_quantity, v.stock_status))
@@ -5263,30 +5302,8 @@ namespace George.Services
                         {
                             rawVariantSku = null;
                         }
-                        var variant = new ProductVariant
-                        {
-                            ProductId = product.Id,
-                            WooCommerceVariationId = vv.id,
-                            Sku = rawVariantSku,
-                            Price = ParseNullableDecimal(vv.regular_price),
-                            SalePrice = ParseNullableDecimal(vv.sale_price),
-                            Weight = ParseNullableDecimal(vv.weight),
-                            StockQuantity = ResolveImportedVariantStockQuantity(vv, usesVariationStock),
-                            ImageUrl = vv.image?.src,
-                            IsDeleted = false
-                        };
-                        db.ProductVariant.Add(variant);
-                        await db.SaveChangesAsync(cancelToken);
-
-                        // This site's variation id, per-site (the legacy WooCommerceVariationId column above can only hold one store's id).
-                        db.ProductSiteVariantWooId.Add(new ProductSiteVariantWooId
-                        {
-                            ProductVariantId = variant.Id,
-                            SiteId = siteId,
-                            ProductId = product.Id,
-                            WooCommerceVariationId = vv.id
-                        });
-
+                        // Resolve this variation's option values first — they are also the fallback match key.
+                        var wantedOptionValues = new Dictionary<string, string>(StringComparer.Ordinal);
                         foreach (var a in vv.attributes ?? new List<WooImportVariationAttributeItem>())
                         {
                             if (string.IsNullOrWhiteSpace(a.name) || string.IsNullOrWhiteSpace(a.option))
@@ -5296,13 +5313,80 @@ namespace George.Services
                                 out var resolvedName)
                                 ? resolvedName
                                 : a.name.Trim();
-                            db.ProductVariantOptionValue.Add(new ProductVariantOptionValue
-                            {
-                                ProductVariantId = variant.Id,
-                                OptionName = optionName,
-                                OptionValue = ResolveWooImportVariationOptionValue(a.option, optionName, optionNameToValues)
-                            });
+                            wantedOptionValues[optionName] = ResolveWooImportVariationOptionValue(a.option, optionName, optionNameToValues);
                         }
+
+                        ProductVariant? variant = null;
+                        if (liveVariantBySiteWooId.TryGetValue(vv.id, out var bySiteId) && !claimedVariantIds.Contains(bySiteId.Id))
+                            variant = bySiteId;
+                        variant ??= liveVariants.FirstOrDefault(v => v.WooCommerceVariationId == vv.id && !claimedVariantIds.Contains(v.Id));
+                        if (variant == null && liveVariantByKey.TryGetValue(ImportVariantOptionKey(wantedOptionValues.Select(kv => (kv.Key, kv.Value))), out var byKey))
+                            variant = byKey.FirstOrDefault(v => !claimedVariantIds.Contains(v.Id));
+
+                        var isNewVariant = variant == null;
+                        if (variant == null)
+                        {
+                            variant = new ProductVariant { ProductId = product.Id, IsDeleted = false };
+                            db.ProductVariant.Add(variant);
+                        }
+                        claimedVariantIds.Add(variant.Id);
+
+                        // Legacy column keeps ONE store's id — claim it only when unset (per-site row is authoritative).
+                        if (variant.WooCommerceVariationId == null || variant.WooCommerceVariationId == vv.id || isNewVariant)
+                            variant.WooCommerceVariationId = vv.id;
+                        variant.Sku = rawVariantSku;
+                        variant.Price = ParseNullableDecimal(vv.regular_price);
+                        variant.SalePrice = ParseNullableDecimal(vv.sale_price);
+                        variant.Weight = ParseNullableDecimal(vv.weight);
+                        variant.StockQuantity = ResolveImportedVariantStockQuantity(vv, usesVariationStock);
+                        variant.ImageUrl = vv.image?.src;
+                        if (isNewVariant)
+                            await db.SaveChangesAsync(cancelToken); // need the id for the rows below
+
+                        // This site's variation id, per-site (the legacy WooCommerceVariationId column above can only hold one store's id).
+                        var siteRow = siteVariantRows.FirstOrDefault(r => r.ProductVariantId == variant.Id);
+                        if (siteRow == null)
+                        {
+                            siteRow = new ProductSiteVariantWooId { ProductVariantId = variant.Id, SiteId = siteId, ProductId = product.Id, WooCommerceVariationId = vv.id };
+                            db.ProductSiteVariantWooId.Add(siteRow);
+                            siteVariantRows.Add(siteRow);
+                        }
+                        else
+                        {
+                            siteRow.WooCommerceVariationId = vv.id;
+                        }
+
+                        // Option values (PK ProductVariantId+OptionName): rewrite only when the set changed.
+                        var currentOptionValues = variant.ProductVariantOptionValue.ToDictionary(x => x.OptionName, x => x.OptionValue, StringComparer.Ordinal);
+                        var sameOptionValues = currentOptionValues.Count == wantedOptionValues.Count
+                            && wantedOptionValues.All(kv => currentOptionValues.TryGetValue(kv.Key, out var cur) && cur == kv.Value);
+                        if (!sameOptionValues)
+                        {
+                            foreach (var stale in variant.ProductVariantOptionValue.Where(x => !wantedOptionValues.ContainsKey(x.OptionName)).ToList())
+                                db.ProductVariantOptionValue.Remove(stale);
+                            foreach (var kv in wantedOptionValues)
+                            {
+                                var existingRow = variant.ProductVariantOptionValue.FirstOrDefault(x => x.OptionName == kv.Key);
+                                if (existingRow != null)
+                                    existingRow.OptionValue = kv.Value;
+                                else
+                                    db.ProductVariantOptionValue.Add(new ProductVariantOptionValue
+                                    {
+                                        ProductVariantId = variant.Id,
+                                        OptionName = kv.Key,
+                                        OptionValue = kv.Value
+                                    });
+                            }
+                        }
+                    }
+
+                    // Variations Woo no longer has: soft-delete (order lines / other sites still reference them) and
+                    // drop only THIS site's per-site id row.
+                    foreach (var gone in liveVariants.Where(v => !claimedVariantIds.Contains(v.Id)))
+                    {
+                        gone.IsDeleted = true;
+                        var goneRow = siteVariantRows.FirstOrDefault(r => r.ProductVariantId == gone.Id);
+                        if (goneRow != null) db.ProductSiteVariantWooId.Remove(goneRow);
                     }
                     stats.Variations.Updated += wooVariations.Count;
 

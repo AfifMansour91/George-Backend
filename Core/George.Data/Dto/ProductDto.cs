@@ -12,6 +12,8 @@ namespace George.Data.Dto
 
     public class ProductVariantDto
     {
+        /// <summary>Existing ProductVariant id (edit form). Null = match by option values, else create.</summary>
+        public int? Id { get; set; }
         public string? ImageUrl { get; set; }
         public Dictionary<string, string>? OptionValues { get; set; }
         public decimal? Price { get; set; }
