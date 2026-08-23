@@ -34,6 +34,46 @@ public class WooCommerceOrderPaymentGatewayDetails
     [JsonProperty("approvalNumber")]
     public string? ApprovalNumber { get; set; }
 
+    // ---- Giorgio-owns-capture handover (giorgio "Giorgio charges Cardcom" mode) ----
+
+    /// <summary>"Giorgio" when the store plugin will NOT capture and hands the token over instead.</summary>
+    [JsonProperty("captureOwner")]
+    public string? CaptureOwner { get; set; }
+
+    /// <summary>Cardcom token (UUID) the gateway plugin stored at checkout (<c>cardcom_token_val</c>).</summary>
+    [JsonProperty("token")]
+    public string? Token { get; set; }
+
+    /// <summary>Card expiry MMYY (<c>cardcom_Tokef</c>).</summary>
+    [JsonProperty("tokenExpiry")]
+    public string? TokenExpiry { get; set; }
+
+    /// <summary>Installments the customer selected at checkout (<c>cardcom_NumOfPayments</c>).</summary>
+    [JsonProperty("numOfPayments")]
+    public int? NumOfPayments { get; set; }
+
+    public bool IsGiorgioCaptureHandover() =>
+        string.Equals(CaptureOwner?.Trim(), "Giorgio", StringComparison.OrdinalIgnoreCase)
+        && !string.IsNullOrWhiteSpace(Token)
+        && !string.IsNullOrWhiteSpace(TokenExpiry);
+
+    /// <summary>
+    /// Normalizes MM/YY, MMYY, MM/YYYY, MMYYYY to MMYY; null when unparseable. Also accepts a
+    /// single-digit month with a separator (e.g. "3 29", "3/29" — QA order 1982: the gateway's
+    /// cardcom_Tokef carried an unpadded month) by treating a 3-digit digit-only remainder as M+YY.
+    /// </summary>
+    public string? ResolveTokenExpiryMMYY()
+    {
+        var digits = new string((TokenExpiry ?? "").Where(char.IsDigit).ToArray());
+        return digits.Length switch
+        {
+            3 => "0" + digits,
+            4 => digits,
+            6 => digits[..2] + digits[4..],
+            _ => null,
+        };
+    }
+
     public string? ResolveTransactionId() =>
         string.IsNullOrWhiteSpace(TransactionId) ? null : TransactionId.Trim();
 

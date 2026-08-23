@@ -312,6 +312,10 @@ public class PaymentStorage : StorageBase
                 "Order {OrderId}: blocked stale save from clearing CardcomSelectedInstallments (kept {Value})",
                 order.Id, tracked.CardcomSelectedInstallments);
         }
+        // Same lost-update protection: once the store handed Giorgio the token, a stale instance
+        // must not flip the order back to plugin-captured.
+        if (!string.IsNullOrWhiteSpace(order.PaymentCaptureOwner))
+            tracked.PaymentCaptureOwner = order.PaymentCaptureOwner;
         tracked.CustomerPaymentMethodId = order.CustomerPaymentMethodId;
         tracked.CardcomPaymentJson = order.CardcomPaymentJson;
         if (order.CustomerId is int customerId)

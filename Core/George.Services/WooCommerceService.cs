@@ -3161,6 +3161,9 @@ namespace George.Services
                 ["shipping_label"] = order.ShippingLabel,
                 ["payment_label"] = order.PaymentLabel
             };
+            var paymentBlock = BuildOcStoreosGiorgioPaymentBlock(order);
+            if (paymentBlock != null)
+                payload["payment"] = paymentBlock;
             var jsonOptions = new JsonSerializerOptions
             {
                 WriteIndented = false,
@@ -3176,7 +3179,6 @@ namespace George.Services
             // TODO(auth): this outbound order sync is currently unauthenticated (auth=None). Once the
             // WordPress oc-storeos plugin agrees on a scheme (e.g. X-OC-Storeos-Secret), add the header
             // here from a per-site secret. Spec §4 Q6 / §5.
-            using var content = new StringContent(body, Encoding.UTF8, "application/json");
             var url = $"{ocV1Base}/orders";
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -3184,33 +3186,50 @@ namespace George.Services
             var success = false;
             string? responseBody = null;
             string? errorText = null;
-            try
+            // The store's proxy intermittently answers 502 after a few seconds (Zano-Dagim 20/08 + 23/08:
+            // four picked website orders never reached "completed", so the plugin never charged them).
+            // The upsert is idempotent per externalOrderId, so a transient gateway failure is retried.
+            var attempt = 0;
+            for (; ; )
             {
-                var response = await httpClient.PostAsync(url, content, cancelToken);
-                httpStatus = (int)response.StatusCode;
-                success = response.IsSuccessStatusCode;
-                responseBody = await response.Content.ReadAsStringAsync(cancelToken);
-                if (success)
+                attempt++;
+                try
                 {
-                    _logger.LogInformation(
-                        "oc-storeos POST /orders succeeded. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}, httpStatus={HttpStatus}",
-                        siteId, orderId, order.ExternalOrderId, httpStatus);
+                    using var content = new StringContent(body, Encoding.UTF8, "application/json");
+                    using var response = await httpClient.PostAsync(url, content, cancelToken);
+                    httpStatus = (int)response.StatusCode;
+                    success = response.IsSuccessStatusCode;
+                    responseBody = await response.Content.ReadAsStringAsync(cancelToken);
+                    errorText = success ? null : responseBody;
+                    if (success)
+                    {
+                        _logger.LogInformation(
+                            "oc-storeos POST /orders succeeded. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}, httpStatus={HttpStatus}, attempt={Attempt}",
+                            siteId, orderId, order.ExternalOrderId, httpStatus, attempt);
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "oc-storeos POST /orders failed. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}, httpStatus={HttpStatus}, attempt={Attempt}, error={Error}",
+                            siteId, orderId, order.ExternalOrderId, httpStatus, attempt, errorText);
+                    }
                 }
-                else
+                catch (Exception ex) when (!cancelToken.IsCancellationRequested)
                 {
-                    errorText = responseBody;
-                    _logger.LogWarning(
-                        "oc-storeos POST /orders failed. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}, httpStatus={HttpStatus}, error={Error}",
-                        siteId, orderId, order.ExternalOrderId, httpStatus, errorText);
+                    httpStatus = null;
+                    success = false;
+                    errorText = ex.Message;
+                    _logger.LogWarning(ex,
+                        "oc-storeos POST /orders threw. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}, attempt={Attempt}",
+                        siteId, orderId, order.ExternalOrderId, attempt);
                 }
+
+                if (success || attempt >= OcStoreosOrderPushMaxAttempts || !IsTransientOcStoreosFailure(httpStatus))
+                    break;
+                await Task.Delay(OcStoreosOrderPushRetryDelays[attempt - 1], cancelToken);
             }
-            catch (Exception ex)
-            {
-                errorText = ex.Message;
-                _logger.LogWarning(ex,
-                    "oc-storeos POST /orders threw. siteId={SiteId}, internalOrderId={InternalOrderId}, storeOrderId={StoreOrderId}",
-                    siteId, orderId, order.ExternalOrderId);
-            }
+            if (!success && attempt > 1)
+                errorText = $"attempt {attempt}/{OcStoreosOrderPushMaxAttempts}: {errorText}";
             sw.Stop();
 
             // Persist the full request/response so the admin sync-logs screen can show what was sent.
@@ -3235,6 +3254,60 @@ namespace George.Services
                 CreatedAtUtc = DateTime.UtcNow,
             });
         }
+
+        /// <summary>
+        /// Payment result Giorgio mirrors to the store for website orders it charges itself
+        /// (<see cref="George.Common.Payment.PaymentCaptureOwner.Giorgio"/>). The giorgio plugin applies it
+        /// (paid date, transaction id, note, refund) and never charges such orders. Null for plugin-captured
+        /// orders, so their payload is unchanged.
+        /// </summary>
+        private static Dictionary<string, object?>? BuildOcStoreosGiorgioPaymentBlock(Order order)
+        {
+            if (!George.Common.Payment.PaymentCaptureOwner.IsGiorgio(order.PaymentCaptureOwner))
+                return null;
+
+            var settle = (order.PaymentSettleStatus ?? "").Trim().ToLowerInvariant();
+            var status = settle switch
+            {
+                "captured" or "partiallycaptured" => "paid",
+                "refunded" => "refunded",
+                "partiallyrefunded" => "partiallyRefunded",
+                "failed" => "failed",
+                "authorized" or "overauthrequirestopup" => "authorized",
+                _ => "unpaid",
+            };
+
+            return new Dictionary<string, object?>
+            {
+                ["captureOwner"] = "Giorgio",
+                ["status"] = status,
+                ["transactionId"] = order.GatewayPaymentTransactionId ?? order.PaymentReference,
+                ["invoiceNumber"] = order.InvoiceNumber,
+                ["documentUrl"] = order.CardcomDocumentUrl,
+                ["paidAt"] = order.PaidAt?.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                ["amount"] = order.Total,
+                ["refundedAmount"] = order.RefundedAmount,
+                ["refundedAt"] = order.RefundedAt?.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                ["refundInvoiceNumber"] = order.RefundInvoiceNumber,
+                ["refundDocumentUrl"] = order.CardcomRefundDocumentUrl,
+                ["cardLast4"] = order.CardcomTokenLast4,
+                ["installments"] = order.CardcomSelectedInstallments,
+            };
+        }
+
+        private const int OcStoreosOrderPushMaxAttempts = 3;
+        private static readonly TimeSpan[] OcStoreosOrderPushRetryDelays =
+        {
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromSeconds(8),
+        };
+
+        /// <summary>
+        /// Gateway/timeout failures (null = exception such as HttpClient timeout) are worth a retry;
+        /// any other status is the plugin's own answer (validation, 409 reconciliation) and is final.
+        /// </summary>
+        internal static bool IsTransientOcStoreosFailure(int? httpStatus) =>
+            httpStatus is null or 502 or 503 or 504;
 
         /// <summary>Trim a value to fit a log column / keep huge responses bounded. Null/empty pass through.</summary>
         private static string? TruncateForLog(string? value, int maxChars) =>

@@ -9,6 +9,7 @@ using George.Services.Request;
 using George.Services.Response;
 using AutoMapper;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace George.Services.Payments;
@@ -23,6 +24,7 @@ public class PaymentService : ServiceBase
     private readonly PaymentTokenProtector _tokenProtector;
     private readonly CardcomGateway _cardcom;
     private readonly IIntegrationLogQueue _integrationLogQueue;
+    private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly string? _publicAppBaseUrl;
     private readonly string? _publicApiBaseUrl;
 
@@ -38,6 +40,7 @@ public class PaymentService : ServiceBase
         PaymentTokenProtector tokenProtector,
         CardcomGateway cardcom,
         IIntegrationLogQueue integrationLogQueue,
+        IServiceScopeFactory serviceScopeFactory,
         IConfiguration configuration)
         : base(logger, mapper, cache)
     {
@@ -49,6 +52,7 @@ public class PaymentService : ServiceBase
         _tokenProtector = tokenProtector;
         _cardcom = cardcom;
         _integrationLogQueue = integrationLogQueue;
+        _serviceScopeFactory = serviceScopeFactory;
         _publicAppBaseUrl = configuration["App:PublicBaseUrl"] ?? configuration["PublicAppBaseUrl"] ?? configuration["Client:BaseUrl"];
         _publicApiBaseUrl = configuration["Payment:PublicApiBaseUrl"] ?? configuration["App:ApiPublicBaseUrl"];
     }
@@ -763,6 +767,7 @@ public class PaymentService : ServiceBase
         ApplyCardDisplayFieldsFromTransaction(order, tx);
         await TryPatchLinkedPaymentMethodFromOrderAsync(order, cancelToken);
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        ScheduleStorePaymentPush(order, "capture");
         await TrySendInvoiceSmsAfterCaptureAsync(order, creds, cancelToken);
 
         // Customer activity timeline: "charged".
@@ -1169,6 +1174,7 @@ public class PaymentService : ServiceBase
         }
 
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        ScheduleStorePaymentPush(order, "refund");
 
         await TrySendRefundSmsAsync(order, creds, amount, tx.TranzactionId, order.CardcomRefundDocumentUrl, cancelToken);
 
@@ -1535,6 +1541,7 @@ public class PaymentService : ServiceBase
             }
 
             await TryPersistTokenFromLastSuccessEventAsync(order, cancelToken);
+            ScheduleStorePaymentPush(order, "hosted-page charge");
             await TrySendInvoiceSmsAfterCaptureAsync(order, creds, cancelToken);
             return;
         }
@@ -1892,6 +1899,92 @@ public class PaymentService : ServiceBase
             cancelToken: cancelToken);
         order.CustomerId = customer.Id;
         return customer.Id;
+    }
+
+    private static bool IsSettledPaymentState(string? settleStatus)
+    {
+        var s = (settleStatus ?? "").Trim();
+        return s.Equals(PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase)
+            || s.Equals(PaymentSettleStatus.PartiallyCaptured, StringComparison.OrdinalIgnoreCase)
+            || s.Equals(PaymentSettleStatus.Refunded, StringComparison.OrdinalIgnoreCase)
+            || s.Equals(PaymentSettleStatus.PartiallyRefunded, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Store the token the giorgio plugin handed over at checkout so picking charges it exactly like a
+    /// phone order (<see cref="FinalizePickingPaymentAsync"/> → void J5 + ChargeToken). Write-once: a
+    /// repeated hold webhook must not replace a stored token on an order Giorgio already settled.
+    /// </summary>
+    private void ApplyGiorgioCaptureHandover(Order order, WooCommerceOrderPaymentGatewayDetails payment)
+    {
+        if (IsSettledPaymentState(order.PaymentSettleStatus))
+            return;
+
+        // Owner first, validation second: the store has already stopped capturing this order, so even
+        // a rejected token must route it through Giorgio's flow (where a missing token is surfaced to
+        // staff at picking) rather than leave it waiting for a plugin webhook that will never come.
+        order.PaymentCaptureOwner = PaymentCaptureOwner.Giorgio;
+        order.PaymentGateway ??= PaymentGatewayProviderId.Cardcom;
+
+        var token = payment.Token!.Trim();
+        if (!CardcomGateway.IsCardcomTokenUuid(token))
+        {
+            _logger.LogWarning(
+                "Woo capture handover rejected: orderId={OrderId} — token is not a Cardcom UUID (shape={TokenShape})",
+                order.Id, CardcomGateway.DescribeTokenShape(token));
+            return;
+        }
+
+        var cardExp = payment.ResolveTokenExpiryMMYY();
+        if (cardExp == null)
+        {
+            _logger.LogWarning(
+                "Woo capture handover rejected: orderId={OrderId} — unparseable token expiry '{TokenExpiry}'",
+                order.Id, payment.TokenExpiry);
+            return;
+        }
+
+        var approval = string.IsNullOrWhiteSpace(payment.ApprovalNumber) ? null : payment.ApprovalNumber.Trim();
+        StoreOrderCardcomCredentials(order, token, cardExp, approval);
+        if (payment.NumOfPayments is > 1 and <= 36)
+            order.CardcomSelectedInstallments = payment.NumOfPayments;
+
+        _logger.LogInformation(
+            "Woo capture handover stored: orderId={OrderId}, tokenMask={TokenMask}, cardExp={CardExp}, approvalPresent={ApprovalPresent}, installments={Installments}",
+            order.Id, MaskToken(token), FormatCardExpForLog(cardExp), approval != null, order.CardcomSelectedInstallments);
+    }
+
+    /// <summary>
+    /// Giorgio-owned website order: mirror the payment result (paid / refunded, transaction id, invoice)
+    /// to the store, which no longer charges anything itself. Background + own DI scope, like the
+    /// status sync in OrderService; the push carries its own retry and integration log.
+    /// </summary>
+    private void ScheduleStorePaymentPush(Order order, string reason)
+    {
+        if (!PaymentCaptureOwner.IsGiorgio(order.PaymentCaptureOwner))
+            return;
+        if (!string.Equals(order.Source, "WooCommerce", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(order.ExternalOrderId))
+            return;
+
+        var siteId = order.SiteId;
+        var orderId = order.Id;
+        _logger.LogInformation(
+            "Store payment push scheduled ({Reason}): orderId={OrderId}, siteId={SiteId}, settleStatus={SettleStatus}",
+            reason, orderId, siteId, order.PaymentSettleStatus);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await using var scope = _serviceScopeFactory.CreateAsyncScope();
+                var woo = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
+                await woo.SyncOrderToOcStoreosAsync(siteId, orderId, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Store payment push failed ({Reason}) for order {OrderId}", reason, orderId);
+            }
+        }, CancellationToken.None);
     }
 
     private void StoreOrderCardcomCredentials(Order order, string token, string cardExp, string? approval)
@@ -3141,8 +3234,17 @@ public class PaymentService : ServiceBase
         if (payment == null || isNonGatewayLabelBlock)
             return;
 
+        // Giorgio-owns-capture handover: the store plugin created the J5 hold + token at checkout and will
+        // NOT capture; Giorgio charges at picking (phone-order path) and pushes the result back.
+        if (payment.IsGiorgioCaptureHandover())
+            ApplyGiorgioCaptureHandover(order, payment);
+        var GiorgioOwned = PaymentCaptureOwner.IsGiorgio(order.PaymentCaptureOwner);
+        var settledByGiorgio = GiorgioOwned && IsSettledPaymentState(order.PaymentSettleStatus);
+
         var txId = payment.ResolveTransactionId();
-        if (txId != null)
+        // Once Giorgio charged, the plugin's id is the original hold — never let it replace the charge id
+        // (invoice / refund / verification all key off GatewayPaymentTransactionId).
+        if (txId != null && !settledByGiorgio)
         {
             order.GatewayPaymentTransactionId = txId;
             order.PaymentReference = txId;
@@ -3165,8 +3267,11 @@ public class PaymentService : ServiceBase
         if (!string.IsNullOrWhiteSpace(payment.ApprovalNumber))
             order.CardcomApprovalNumber = payment.ApprovalNumber.Trim();
 
+        // Giorgio-owned: the hold amount is known from checkout; a later handover re-send (backfill
+        // after picking) carries the store's CURRENT total, which must not replace the amount the
+        // J5 was actually placed for (it is what the pre-charge void has to match).
         var authAmount = payment.ResolveAuthOrPaymentAmount();
-        if (authAmount is > 0)
+        if (authAmount is > 0 && !(GiorgioOwned && order.PaymentAuthorizedAmount is > 0))
             order.PaymentAuthorizedAmount = authAmount;
         else if (order.Total is > 0 && order.PaymentAuthorizedAmount == null)
             order.PaymentAuthorizedAmount = order.Total;
@@ -3175,6 +3280,19 @@ public class PaymentService : ServiceBase
         var gatewaySuccess = WooCommerceGatewayPaymentInterpreter.IsGatewaySuccessStatus(gatewayStatus);
         var hasTx = txId != null;
         var isFinalCapture = WooCommerceGatewayPaymentInterpreter.IsFinalCapture(isFinished, gatewayStatus);
+
+        // Giorgio charges this order itself: the plugin can only ever report the checkout hold. Its
+        // "captured" echo (e.g. after Giorgio pushed the paid state back) must not touch money state,
+        // and a late "failed" must not undo Giorgio's charge.
+        if (GiorgioOwned && (settledByGiorgio || isFinalCapture))
+        {
+            if (settledByGiorgio)
+                return;
+            _logger.LogWarning(
+                "Woo gateway reported a final capture on a Giorgio-owned order — ignored: orderId={OrderId}, tx={Tx}",
+                order.Id, txId);
+            isFinalCapture = false;
+        }
 
         if (gatewayFailed)
         {

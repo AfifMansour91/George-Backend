@@ -325,6 +325,14 @@ public partial class Order
     /// </summary>
     public int? CardcomSelectedInstallments { get; set; }
 
+    /// <summary>
+    /// Website orders: who charges the card after picking — null/"Plugin" = the store's Cardcom gateway
+    /// plugin (webhook reports back), "Giorgio" = the plugin handed us the token at checkout and Giorgio
+    /// charges at picking like a phone order. See George.Common.Payment.PaymentCaptureOwner.
+    /// </summary>
+    [StringLength(20)]
+    public string? PaymentCaptureOwner { get; set; }
+
     public int? CustomerPaymentMethodId { get; set; }
 
     /// <summary>Public Wolt tracking page URL after dispatch.</summary>

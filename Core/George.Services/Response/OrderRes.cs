@@ -126,6 +126,8 @@ public class OrderRes
     public DateTime? CompletedAt { get; set; }
 
     public string PaymentSettleStatus { get; set; } = "None";
+    /// <summary>Website orders: "Giorgio" when Giorgio charges the card at picking (token handed over at checkout); null/"Plugin" = store plugin captures.</summary>
+    public string? PaymentCaptureOwner { get; set; }
     public decimal? PaymentAuthorizedAmount { get; set; }
     public string? CardcomLowProfileId { get; set; }
     public int? CustomerPaymentMethodId { get; set; }
