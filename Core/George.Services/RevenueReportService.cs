@@ -803,7 +803,10 @@ namespace George.Services
             return $"{weekStart:dd/MM}–{weekEnd:dd/MM}";
         }
 
-        /// <summary>Axis buckets plus any order buckets outside the default range (e.g. late-evening charge).</summary>
+        /// <summary>Axis buckets plus any order buckets just outside the range (e.g. late-evening charge).
+        /// Daily buckets tolerate at most 1 Israel-calendar day of drift beyond the requested window;
+        /// anything further out is dropped rather than shown as a phantom row, since larger drift points
+        /// to a data bug upstream, not a timezone boundary edge case.</summary>
         private static List<(string key, string date, string label)> BuildBucketAxis(
             DateTime fromUtc,
             DateTime toUtcExclusive,
@@ -815,14 +818,29 @@ namespace George.Services
                 return axis;
 
             var seen = new HashSet<string>(axis.Select(a => a.key));
-            foreach (var key in incomeBuckets.Keys.Where(k => !seen.Contains(k)).OrderBy(k => k, StringComparer.Ordinal))
-            {
-                var label = incomeBuckets[key].label;
-                axis.Add((key, key, label));
-            }
+            var extraKeys = incomeBuckets.Keys.Where(k => !seen.Contains(k)).OrderBy(k => k, StringComparer.Ordinal);
 
             if (grouping == "daily")
+            {
+                const int toleranceDays = 1;
+                var minLocal = ToIsraelLocal(fromUtc).Date.AddDays(-toleranceDays);
+                var maxLocal = ToIsraelLocal(toUtcExclusive.AddTicks(-1)).Date.AddDays(toleranceDays);
+
+                foreach (var key in extraKeys)
+                {
+                    if (!DateTime.TryParseExact(key, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var bucketDate))
+                        continue;
+                    if (bucketDate < minLocal || bucketDate > maxLocal)
+                        continue;
+                    axis.Add((key, key, incomeBuckets[key].label));
+                }
+
                 axis = axis.OrderBy(a => a.date, StringComparer.Ordinal).ToList();
+                return axis;
+            }
+
+            foreach (var key in extraKeys)
+                axis.Add((key, key, incomeBuckets[key].label));
 
             return axis;
         }

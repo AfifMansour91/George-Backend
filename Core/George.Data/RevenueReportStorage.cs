@@ -16,8 +16,9 @@ namespace George.Data
         /// <summary>
         /// Orders in the report window.
         /// By order: <see cref="Order.CreationTime"/> in range (all statuses).
-        /// By charge: <see cref="Order.PaidAt"/> in range, legacy paid rows, successful charge events,
-        /// or cancelled-before-charge rows by <see cref="Order.UpdatedDate"/> (cancellation time).
+        /// By charge: <see cref="Order.PaidAt"/> in range; when PaidAt is unset, falls back to legacy
+        /// paid rows or a successful charge event, or to cancelled-before-charge rows by
+        /// <see cref="Order.UpdatedDate"/> (cancellation time).
         /// </summary>
         public async Task<List<Order>> GetOrdersInWindowAsync(
             int siteId,
@@ -51,7 +52,10 @@ namespace George.Data
                         && o.UpdatedDate != null
                         && o.UpdatedDate >= fromUtc
                         && o.UpdatedDate < toUtcExclusive) ||
-                    chargedOrderIds.Contains(o.Id) ||
+                    // Only fall back to a payment-event match when PaidAt isn't set: PaidAt reflects
+                    // the order's latest successful capture, so an earlier event (e.g. a re-capture at
+                    // picking time later moved PaidAt outside this window) must not re-include the order.
+                    (o.PaidAt == null && chargedOrderIds.Contains(o.Id)) ||
                     (o.Status == "Cancelled"
                         && o.PaidAt == null
                         && o.PaymentStatus != "Paid"

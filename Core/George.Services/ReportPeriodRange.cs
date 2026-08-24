@@ -40,8 +40,7 @@ namespace George.Services
                 "month" => ResolveCurrentMonthRange(today),
                 "last_month" or "prev_month" or "previous_month" => ResolveLastMonthRange(today),
                 "custom" when customFrom != null && customTo != null =>
-                    (DateTime.SpecifyKind(customFrom.Value.Date, DateTimeKind.Utc),
-                        DateTime.SpecifyKind(customTo.Value.Date.AddDays(1), DateTimeKind.Utc)),
+                    IsraelLocalRangeToUtc(customFrom.Value.Date, customTo.Value.Date.AddDays(1)),
                 _ => ResolveCurrentMonthRange(today),
             };
         }
