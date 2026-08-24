@@ -629,12 +629,19 @@ namespace George.Data
             return db;
         }
 
-        /// <summary>Normalize phone for lookup: digits only (strip spaces, dashes).</summary>
-        private static string NormalizePhone(string? phone)
-        {
-            if (string.IsNullOrWhiteSpace(phone)) return string.Empty;
-            return new string(phone.Where(char.IsDigit).ToArray());
-        }
+        /// <summary>Normalize phone for lookup: digits only, +972 → 0, restore the leading 0 on 8/9-digit
+        /// numbers - same canonical form as <see cref="CustomerStorage.CanonicalizeImportPhone"/>, so a
+        /// customer's local (05x...) and international (+972 5x...) phone formats match to the same
+        /// order history instead of each looking like a distinct "new" customer.</summary>
+        private static string NormalizePhone(string? phone) => CustomerStorage.CanonicalizeImportPhone(phone);
+
+        /// <summary>Last 9 digits of a normalized phone - stable across local (0...) vs international
+        /// (972...) formats. Used as a cheap SQL-pushable pre-filter (`CustomerPhone.Contains(suffix)`)
+        /// so phone-history lookups can scope to the matching orders directly instead of capping to the
+        /// site's N most recent orders, which under-counts (or misses entirely) a returning customer's
+        /// history on any site busy enough that their earlier order(s) aged out of that cap.</summary>
+        private static string PhoneMatchSuffix(string normalizedPhone) =>
+            normalizedPhone.Length > 9 ? normalizedPhone.Substring(normalizedPhone.Length - 9) : normalizedPhone;
 
         private static bool IsCardcomCreditPaymentMethod(string? method)
         {
@@ -658,11 +665,13 @@ namespace George.Data
                 return result;
 
             // Narrow projection: full Order rows carry multi-KB JSON columns and this runs per kanban card.
+            // Filtered by phone suffix in SQL (not capped to the site's N most recent orders), so a
+            // returning customer's full history is found regardless of how many other orders came in since.
+            var suffix = PhoneMatchSuffix(normalized);
             var siteOrders = await _dbContext.Order
                 .AsNoTracking()
-                .Where(o => !o.IsDeleted && o.SiteId == siteId && o.CustomerPhone != null)
+                .Where(o => !o.IsDeleted && o.SiteId == siteId && o.CustomerPhone != null && o.CustomerPhone.Contains(suffix))
                 .OrderByDescending(o => o.CreationTime)
-                .Take(1000)
                 .Select(o => new { o.CustomerPhone, o.CustomerName, o.Total, o.DeliveryDate, o.PickupDate })
                 .ToListAsync(cancelToken).ConfigureAwait(false);
 
@@ -693,11 +702,11 @@ namespace George.Data
             var normalized = NormalizePhone(phone);
             if (normalized.Length < 4) return null;
 
+            var suffix = PhoneMatchSuffix(normalized);
             var siteOrders = await _dbContext.Order
                 .AsNoTracking()
-                .Where(o => !o.IsDeleted && o.SiteId == siteId && o.CustomerPhone != null)
+                .Where(o => !o.IsDeleted && o.SiteId == siteId && o.CustomerPhone != null && o.CustomerPhone.Contains(suffix))
                 .OrderByDescending(o => o.CreationTime)
-                .Take(500)
                 .Select(o => new { o.Id, o.CustomerPhone })
                 .ToListAsync(cancelToken).ConfigureAwait(false);
 
@@ -719,11 +728,11 @@ namespace George.Data
             var normalized = NormalizePhone(phone);
             if (normalized.Length < 4) return new List<int>();
 
+            var suffix = PhoneMatchSuffix(normalized);
             var siteOrders = await _dbContext.Order
                 .AsNoTracking()
-                .Where(o => !o.IsDeleted && o.SiteId == siteId && o.CustomerPhone != null)
+                .Where(o => !o.IsDeleted && o.SiteId == siteId && o.CustomerPhone != null && o.CustomerPhone.Contains(suffix))
                 .OrderByDescending(o => o.CreationTime)
-                .Take(500)
                 .Select(o => new { o.Id, o.CustomerPhone })
                 .ToListAsync(cancelToken).ConfigureAwait(false);
 
