@@ -630,10 +630,10 @@ namespace George.Data
         }
 
         /// <summary>Normalize phone for lookup: digits only, +972 → 0, restore the leading 0 on 8/9-digit
-        /// numbers - same canonical form as <see cref="CustomerStorage.CanonicalizeImportPhone"/>, so a
+        /// numbers - same canonical form as <see cref="CustomerStorage.NormalizePhone"/>, so a
         /// customer's local (05x...) and international (+972 5x...) phone formats match to the same
         /// order history instead of each looking like a distinct "new" customer.</summary>
-        private static string NormalizePhone(string? phone) => CustomerStorage.CanonicalizeImportPhone(phone);
+        private static string NormalizePhone(string? phone) => CustomerStorage.NormalizePhone(phone);
 
         /// <summary>Last 9 digits of a normalized phone - stable across local (0...) vs international
         /// (972...) formats. Used as a cheap SQL-pushable pre-filter (`CustomerPhone.Contains(suffix)`)

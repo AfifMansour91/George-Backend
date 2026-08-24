@@ -14,10 +14,23 @@ public class CustomerStorage : StorageBase
     {
     }
 
-    internal static string NormalizePhone(string? phone)
+    private static string DigitsOnly(string? phone)
     {
         if (string.IsNullOrWhiteSpace(phone)) return string.Empty;
         return new string(phone.Where(char.IsDigit).ToArray());
+    }
+
+    /// <summary>Canonical phone key for dedup/lookup: digits only, +972 -> 0, restore the leading 0
+    /// that Excel/some imports strip from 8/9-digit numbers. Empty string when no digits. This is the
+    /// single source of truth for Customer.NormalizedPhone - local (05x...) and international
+    /// (+972 5x...) formats for the same real number must resolve to the same customer record.</summary>
+    internal static string NormalizePhone(string? phone)
+    {
+        var d = DigitsOnly(phone);
+        if (d.Length == 0) return d;
+        if ((d.Length == 11 || d.Length == 12) && d.StartsWith("972")) return "0" + d.Substring(3);
+        if ((d.Length == 8 || d.Length == 9) && !d.StartsWith("0")) return "0" + d;
+        return d;
     }
 
     private IQueryable<Customer> CustomerSet => _dbContext.Set<Customer>().Where(c => !c.IsDeleted);
@@ -528,15 +541,6 @@ public class CustomerStorage : StorageBase
             cancelToken: cancelToken).ConfigureAwait(false);
     }
 
-    /// <summary>Canonicalize a spreadsheet phone: digits only, +972 → 0, restore the leading 0 Excel strips from 8/9-digit numbers. Empty string when no digits.</summary>
-    internal static string CanonicalizeImportPhone(string? raw)
-    {
-        var d = NormalizePhone(raw);
-        if (d.Length == 0) return d;
-        if ((d.Length == 11 || d.Length == 12) && d.StartsWith("972")) return "0" + d.Substring(3);
-        if ((d.Length == 8 || d.Length == 9) && !d.StartsWith("0")) return "0" + d;
-        return d;
-    }
 
     public class ImportRow
     {
@@ -596,12 +600,12 @@ public class CustomerStorage : StorageBase
             var batch = rows.Skip(offset).Take(batchSize).ToList();
 
             var batchPhones = batch
-                .Select(r => CanonicalizeImportPhone(r.Phone))
+                .Select(r => NormalizePhone(r.Phone))
                 .Where(p => p.Length >= 4)
                 .Distinct()
                 .ToList();
             var batchEmails = batch
-                .Where(r => CanonicalizeImportPhone(r.Phone).Length < 4 && !string.IsNullOrWhiteSpace(r.Email))
+                .Where(r => NormalizePhone(r.Phone).Length < 4 && !string.IsNullOrWhiteSpace(r.Email))
                 .Select(r => r.Email!.Trim().ToLower())
                 .Distinct()
                 .ToList();
@@ -620,7 +624,7 @@ public class CustomerStorage : StorageBase
             var createdInBatch = new List<Customer>();
             foreach (var row in batch)
             {
-                var norm = CanonicalizeImportPhone(row.Phone);
+                var norm = NormalizePhone(row.Phone);
                 var email = string.IsNullOrWhiteSpace(row.Email) ? null : row.Email.Trim();
                 var hasPhone = norm.Length >= 4;
 

@@ -336,8 +336,7 @@ public class PaymentStorage : StorageBase
         await _dbContext.SaveChangesAsync(cancelToken);
     }
 
-    private static string NormalizePhoneDigits(string? phone) =>
-        string.IsNullOrWhiteSpace(phone) ? "" : new string(phone.Where(char.IsDigit).ToArray());
+    private static string NormalizePhoneDigits(string? phone) => CustomerStorage.NormalizePhone(phone);
 
     /// <summary>dbo.Order.ExternalPaymentStatus is NVARCHAR(100).</summary>
     private static string? TruncateExternalPaymentStatus(string? value)
