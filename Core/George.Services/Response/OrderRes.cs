@@ -135,6 +135,14 @@ public class OrderRes
     public string? CardcomTokenLast4 { get; set; }
     /// <summary>Card brand from Cardcom (e.g. Visa).</summary>
     public string? CardcomCardBrand { get; set; }
+    /// <summary>PayPlus document URL when an invoice was issued.</summary>
+    public string? PayPlusDocumentUrl { get; set; }
+    /// <summary>PayPlus credit note URL after refund.</summary>
+    public string? PayPlusRefundDocumentUrl { get; set; }
+    /// <summary>Last 4 digits from PayPlus authorization/charge.</summary>
+    public string? PayPlusCardLast4 { get; set; }
+    /// <summary>Card brand from PayPlus (e.g. Visa).</summary>
+    public string? PayPlusCardBrand { get; set; }
 
     /// <summary>Public Wolt tracking page URL after dispatch.</summary>
     public string? WoltTrackingUrl { get; set; }

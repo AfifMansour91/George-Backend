@@ -5,6 +5,7 @@ using George.Data;
 using George.DB;
 using George.Providers;
 using George.Services.Payments.Cardcom;
+using George.Services.Payments.PayPlus;
 using George.Services.Request;
 using George.Services.Response;
 using AutoMapper;
@@ -14,7 +15,7 @@ using Microsoft.Extensions.Logging;
 
 namespace George.Services.Payments;
 
-public class PaymentService : ServiceBase
+public partial class PaymentService : ServiceBase
 {
     private readonly PaymentStorage _paymentStorage;
     private readonly OrderStorage _orderStorage;
@@ -23,6 +24,7 @@ public class PaymentService : ServiceBase
     private readonly SmsProvider _smsProvider;
     private readonly PaymentTokenProtector _tokenProtector;
     private readonly CardcomGateway _cardcom;
+    private readonly PayPlusGateway _payPlus;
     private readonly IIntegrationLogQueue _integrationLogQueue;
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly string? _publicAppBaseUrl;
@@ -39,6 +41,7 @@ public class PaymentService : ServiceBase
         SmsProvider smsProvider,
         PaymentTokenProtector tokenProtector,
         CardcomGateway cardcom,
+        PayPlusGateway payPlus,
         IIntegrationLogQueue integrationLogQueue,
         IServiceScopeFactory serviceScopeFactory,
         IConfiguration configuration)
@@ -51,6 +54,7 @@ public class PaymentService : ServiceBase
         _smsProvider = smsProvider;
         _tokenProtector = tokenProtector;
         _cardcom = cardcom;
+        _payPlus = payPlus;
         _integrationLogQueue = integrationLogQueue;
         _serviceScopeFactory = serviceScopeFactory;
         _publicAppBaseUrl = configuration["App:PublicBaseUrl"] ?? configuration["PublicAppBaseUrl"] ?? configuration["Client:BaseUrl"];
@@ -122,8 +126,12 @@ public class PaymentService : ServiceBase
         }
 
         var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
-        if (creds == null || creds.ProviderId != PaymentGatewayProviderId.Cardcom)
-            return CreateResponse(response, StatusCode.InvalidRequest, "Cardcom is not configured for this site.");
+        if (creds == null || creds.ProviderId == PaymentGatewayProviderId.None)
+            return CreateResponse(response, StatusCode.InvalidRequest, "Payment gateway is not configured for this site.");
+        if (creds.ProviderId == PaymentGatewayProviderId.PayPlus)
+            return await CreatePaymentSessionForPayPlusAsync(order, creds, channel, cancelToken);
+        if (creds.ProviderId != PaymentGatewayProviderId.Cardcom)
+            return CreateResponse(response, StatusCode.InvalidRequest, "Unsupported payment gateway.");
 
         var authAmount = ComputeAuthorizationAmount(order, creds);
         var chargeNow = OrderNeedsImmediateCharge(order);
@@ -317,6 +325,12 @@ public class PaymentService : ServiceBase
         var order = await _paymentStorage.GetOrderForPaymentAsync(orderId, cancelToken);
         if (order == null)
             return CreateResponse(response, StatusCode.ItemNotFound);
+
+        // Keyed on the ORDER's own session, not the site's current provider — a PayPlus hosted-page order
+        // must never fall through to Cardcom's GetLpResult validation.
+        if (order.PaymentGateway == PaymentGatewayProviderId.PayPlus
+            || !string.IsNullOrWhiteSpace(order.PayPlusPageRequestUid))
+            return await ApplyPaymentReturnForPayPlusAsync(order, cancelToken);
 
         var lpId = lowProfileId ?? order.CardcomLowProfileId;
         if (string.IsNullOrWhiteSpace(lpId))
@@ -570,7 +584,7 @@ public class PaymentService : ServiceBase
             return CreateResponse(response, StatusCode.ItemNotFound);
 
         var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
-        if (creds == null || creds.ProviderId != PaymentGatewayProviderId.Cardcom)
+        if (creds == null || creds.ProviderId == PaymentGatewayProviderId.None)
             return CreateResponse(response, StatusCode.InvalidRequest, "Payment gateway not configured.");
 
         var finalAmount = order.Total ?? 0m;
@@ -592,6 +606,11 @@ public class PaymentService : ServiceBase
             response.Data = new FinalizePickingPaymentRes { Outcome = "Captured", FinalAmount = finalAmount };
             return response;
         }
+
+        if (creds.ProviderId == PaymentGatewayProviderId.PayPlus)
+            return await FinalizePickingPaymentForPayPlusAsync(order, creds, finalAmount, authAmount, response, cancelToken);
+        if (creds.ProviderId != PaymentGatewayProviderId.Cardcom)
+            return CreateResponse(response, StatusCode.InvalidRequest, "Unsupported payment gateway.");
 
         _logger.LogInformation(
             "FinalizePickingPayment start: orderId={OrderId}, siteId={SiteId}, finalAmount={FinalAmount}, authAmount={AuthAmount}, " +
@@ -800,6 +819,8 @@ public class PaymentService : ServiceBase
             return CreateResponse(response, StatusCode.ItemNotFound);
 
         var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
+        if (creds != null && creds.ProviderId == PaymentGatewayProviderId.PayPlus)
+            return await IssueOrderInvoiceForPayPlusAsync(order, creds, sendByEmail, cancelToken);
         if (creds == null || creds.ProviderId != PaymentGatewayProviderId.Cardcom)
             return CreateResponse(response, StatusCode.InvalidRequest, "Cardcom is not configured for this site.");
 
@@ -876,7 +897,19 @@ public class PaymentService : ServiceBase
         if (order.PaymentSettleStatus != PaymentSettleStatus.Captured)
             return CreateResponse(response, StatusCode.InvalidRequest, "Order must be paid before sending an invoice.");
 
-        if (string.IsNullOrWhiteSpace(order.CardcomDocumentUrl))
+        // PayPlus orders: make sure a document exists via the PayPlus issue path, then fall through to SMS.
+        var smsCreds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
+        if (smsCreds != null && smsCreds.ProviderId == PaymentGatewayProviderId.PayPlus)
+        {
+            if (string.IsNullOrWhiteSpace(order.PayPlusDocumentUrl))
+            {
+                var issued = await IssueOrderInvoiceForPayPlusAsync(order, smsCreds, sendByEmail: false, cancelToken);
+                if (!issued.IsSuccessful)
+                    return issued;
+                order = await _paymentStorage.GetOrderForPaymentAsync(orderId, cancelToken) ?? order;
+            }
+        }
+        else if (string.IsNullOrWhiteSpace(order.CardcomDocumentUrl))
         {
             var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
             if (creds == null)
@@ -910,7 +943,7 @@ public class PaymentService : ServiceBase
         {
             Success = true,
             InvoiceNumber = order.InvoiceNumber,
-            DocumentUrl = order.CardcomDocumentUrl,
+            DocumentUrl = CoalesceNonEmpty(order.CardcomDocumentUrl, order.PayPlusDocumentUrl),
             SmsSent = true,
             MaskedPhone = masked,
         };
@@ -1083,6 +1116,17 @@ public class PaymentService : ServiceBase
         if (creds == null)
             return CreateResponse(response, StatusCode.InvalidRequest, "Payment gateway not configured.");
 
+        var orderTotalForPayPlus = order.Total ?? 0m;
+        var amountForPayPlus = req.Amount ?? orderTotalForPayPlus;
+        if (creds.ProviderId == PaymentGatewayProviderId.PayPlus)
+        {
+            if (amountForPayPlus <= 0)
+                return CreateResponse(response, StatusCode.InvalidRequest, "Refund amount must be positive.");
+            if (orderTotalForPayPlus > 0 && amountForPayPlus > orderTotalForPayPlus)
+                return CreateResponse(response, StatusCode.InvalidRequest, "Refund amount cannot exceed order total.");
+            return await RefundOrderForPayPlusAsync(order, creds, amountForPayPlus, req.Reason, cancelToken);
+        }
+
         if (creds.ApiPasswordStoredButUnreadable)
             return CardcomApiPasswordUnreadableResponse(response);
 
@@ -1223,6 +1267,12 @@ public class PaymentService : ServiceBase
         var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken).ConfigureAwait(false);
         if (creds == null)
             return;
+
+        if (creds.ProviderId == PaymentGatewayProviderId.PayPlus)
+        {
+            await VoidAuthorizationOnCancelForPayPlusAsync(order, creds, cancelToken).ConfigureAwait(false);
+            return;
+        }
 
         var (token, cardExp, approval) = await ResolveChargeTokenAsync(order, cancelToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(cardExp) || string.IsNullOrWhiteSpace(approval))
@@ -1384,7 +1434,9 @@ public class PaymentService : ServiceBase
         var creds = await ResolveCredentialsAsync(siteId, cancelToken);
         if (creds == null)
             return CreateResponse(response, StatusCode.InvalidRequest, "Payment not configured.");
-        var result = await _cardcom.TestConnectionAsync(creds, cancelToken);
+        var result = creds.ProviderId == PaymentGatewayProviderId.PayPlus
+            ? await _payPlus.TestConnectionAsync(creds, cancelToken)
+            : await _cardcom.TestConnectionAsync(creds, cancelToken);
         response.Data = new TestConnectionRes { Success = result.Success, Message = result.Message };
         return response;
     }
@@ -1401,6 +1453,11 @@ public class PaymentService : ServiceBase
             response.Data.CardcomApiPasswordNeedsResave =
                 !_tokenProtector.TryUnprotect(site.CardcomApiPasswordEncrypted, out _);
         }
+        if (!string.IsNullOrWhiteSpace(site.PayPlusSecretKeyEncrypted))
+        {
+            response.Data.PayPlusSecretKeyNeedsResave =
+                !_tokenProtector.TryUnprotect(site.PayPlusSecretKeyEncrypted, out _);
+        }
         return response;
     }
 
@@ -1415,7 +1472,36 @@ public class PaymentService : ServiceBase
             return CreateResponse(response, StatusCode.ItemNotFound);
 
         if (req.PaymentGatewayProvider != null)
-            site.PaymentGatewayProvider = req.PaymentGatewayProvider.Trim().ToLowerInvariant();
+        {
+            var newProvider = req.PaymentGatewayProvider.Trim().ToLowerInvariant();
+            if (!string.Equals(newProvider, site.PaymentGatewayProvider, StringComparison.OrdinalIgnoreCase)
+                && site.PaymentGatewayProvider != PaymentGatewayProviderId.None
+                && !req.ForceProviderSwitch)
+            {
+                var hasUnsettled = await _paymentStorage.HasUnsettledAuthorizedOrdersAsync(siteId, cancelToken);
+                if (hasUnsettled)
+                    return CreateResponse(response, StatusCode.InvalidRequest,
+                        "This site has orders with an open authorization hold under the current gateway. " +
+                        "Settle or void them before switching providers (or resend with forceProviderSwitch).");
+            }
+            site.PaymentGatewayProvider = newProvider;
+        }
+        if (req.PayPlusPaymentPageUid != null)
+            site.PayPlusPaymentPageUid = req.PayPlusPaymentPageUid.Trim();
+        if (req.PayPlusApiKey != null)
+            site.PayPlusApiKey = req.PayPlusApiKey.Trim();
+        if (!string.IsNullOrWhiteSpace(req.PayPlusSecretKey))
+            site.PayPlusSecretKeyEncrypted = _tokenProtector.Protect(req.PayPlusSecretKey.Trim());
+        if (req.PayPlusTestMode.HasValue)
+            site.PayPlusTestMode = req.PayPlusTestMode.Value;
+        if (req.PayPlusInvoiceBrandUid != null)
+            site.PayPlusInvoiceBrandUid = string.IsNullOrWhiteSpace(req.PayPlusInvoiceBrandUid) ? null : req.PayPlusInvoiceBrandUid.Trim();
+        if (req.PayPlusMaxInstallments.HasValue)
+            site.PayPlusMaxInstallments = Math.Clamp(req.PayPlusMaxInstallments.Value, 1, 36);
+        if (req.PayPlusCssUrl != null)
+            site.PayPlusCssUrl = req.PayPlusCssUrl;
+        if (req.PayPlusLogoUrl != null)
+            site.PayPlusLogoUrl = req.PayPlusLogoUrl;
         if (req.CardcomTerminalNumber.HasValue)
             site.CardcomTerminalNumber = req.CardcomTerminalNumber;
         // Second (no-CVV) charge terminal: 0 or negative clears back to a single-terminal setup.
@@ -1447,6 +1533,11 @@ public class PaymentService : ServiceBase
         else if (!string.IsNullOrWhiteSpace(site.CardcomApiPasswordEncrypted))
             response.Data.CardcomApiPasswordNeedsResave =
                 !_tokenProtector.TryUnprotect(site.CardcomApiPasswordEncrypted, out _);
+        if (!string.IsNullOrWhiteSpace(req.PayPlusSecretKey))
+            response.Data.PayPlusSecretKeyNeedsResave = false;
+        else if (!string.IsNullOrWhiteSpace(site.PayPlusSecretKeyEncrypted))
+            response.Data.PayPlusSecretKeyNeedsResave =
+                !_tokenProtector.TryUnprotect(site.PayPlusSecretKeyEncrypted, out _);
         return response;
     }
 
@@ -1924,6 +2015,14 @@ public class PaymentService : ServiceBase
         // a rejected token must route it through Giorgio's flow (where a missing token is surfaced to
         // staff at picking) rather than leave it waiting for a plugin webhook that will never come.
         order.PaymentCaptureOwner = PaymentCaptureOwner.Giorgio;
+
+        if (!string.IsNullOrWhiteSpace(payment.TransactionUid))
+        {
+            order.PaymentGateway ??= PaymentGatewayProviderId.PayPlus;
+            ApplyGiorgioCaptureHandoverForPayPlus(order, payment);
+            return;
+        }
+
         order.PaymentGateway ??= PaymentGatewayProviderId.Cardcom;
 
         var token = payment.Token!.Trim();
@@ -2159,6 +2258,9 @@ public class PaymentService : ServiceBase
         if (site == null || site.PaymentGatewayProvider == PaymentGatewayProviderId.None)
             return null;
 
+        if (site.PaymentGatewayProvider == PaymentGatewayProviderId.PayPlus)
+            return ResolvePayPlusCredentials(site, siteId);
+
         string? password = null;
         var apiPasswordStoredButUnreadable = false;
         if (!string.IsNullOrWhiteSpace(site.CardcomApiPasswordEncrypted))
@@ -2325,6 +2427,11 @@ public class PaymentService : ServiceBase
         SitePaymentCredentials creds,
         CancellationToken cancelToken)
     {
+        // PayPlus orders get their document at Finalize (and via the manual PayPlus issue path) — this
+        // helper's document creation is Cardcom-specific and must not run against a PayPlus order.
+        if (creds.ProviderId == PaymentGatewayProviderId.PayPlus)
+            return;
+
         if (!OrderMissingInvoiceDocument(order))
             return;
 
@@ -2338,7 +2445,7 @@ public class PaymentService : ServiceBase
 
     private static string DescribeInvoiceSmsSkipReason(Order order)
     {
-        if (string.IsNullOrWhiteSpace(order.CardcomDocumentUrl))
+        if (string.IsNullOrWhiteSpace(order.CardcomDocumentUrl) && string.IsNullOrWhiteSpace(order.PayPlusDocumentUrl))
             return "missing invoice document URL";
         if (string.IsNullOrWhiteSpace(order.CustomerPhone))
             return "missing customer phone";
@@ -2352,7 +2459,7 @@ public class PaymentService : ServiceBase
         string? overridePhone,
         CancellationToken cancelToken)
     {
-        var url = order.CardcomDocumentUrl?.Trim();
+        var url = CoalesceNonEmpty(order.CardcomDocumentUrl, order.PayPlusDocumentUrl)?.Trim();
         if (string.IsNullOrWhiteSpace(url))
             return (false, null);
 
@@ -3103,13 +3210,14 @@ public class PaymentService : ServiceBase
         string? maskedToken,
         decimal? amount,
         string? rawJson,
-        CancellationToken cancelToken)
+        CancellationToken cancelToken,
+        string provider = PaymentGatewayProviderId.Cardcom)
     {
         await _paymentStorage.AddPaymentEventAsync(new OrderPaymentEvent
         {
             OrderId = orderId,
             EventType = eventType,
-            Provider = PaymentGatewayProviderId.Cardcom,
+            Provider = provider,
             StatusCode = statusCode,
             Description = description,
             GatewayTransactionId = gatewayTxId,
@@ -3135,6 +3243,15 @@ public class PaymentService : ServiceBase
             PaymentAllowCaptureAboveAuth = site.PaymentAllowCaptureAboveAuth,
             CardcomCssUrl = site.CardcomCssUrl,
             CardcomLogoUrl = site.CardcomLogoUrl,
+            PayPlusPaymentPageUid = site.PayPlusPaymentPageUid,
+            PayPlusApiKey = site.PayPlusApiKey,
+            HasPayPlusApiKey = !string.IsNullOrWhiteSpace(site.PayPlusApiKey),
+            HasPayPlusSecretKey = !string.IsNullOrWhiteSpace(site.PayPlusSecretKeyEncrypted),
+            PayPlusTestMode = site.PayPlusTestMode,
+            PayPlusInvoiceBrandUid = site.PayPlusInvoiceBrandUid,
+            PayPlusMaxInstallments = site.PayPlusMaxInstallments,
+            PayPlusCssUrl = site.PayPlusCssUrl,
+            PayPlusLogoUrl = site.PayPlusLogoUrl,
         };
 
     private static string MaskPhone(string phone)
@@ -3184,7 +3301,9 @@ public class PaymentService : ServiceBase
         if (payment.ResolveTransactionId() != null)
             return false;
         var gatewayId = payment.ResolvePaymentGatewayId();
-        return gatewayId != null && gatewayId != PaymentGatewayProviderId.Cardcom;
+        return gatewayId != null
+            && gatewayId != PaymentGatewayProviderId.Cardcom
+            && gatewayId != PaymentGatewayProviderId.PayPlus;
     }
 
     /// <summary>
@@ -3258,14 +3377,26 @@ public class PaymentService : ServiceBase
             order.InvoiceNumber = payment.InvoiceNumber.Trim();
 
         var last4 = payment.ResolveLast4Digits();
-        if (last4 != null)
-            order.CardcomTokenLast4 = last4;
+        var isPayPlusOrder = gatewayId == PaymentGatewayProviderId.PayPlus;
+        if (isPayPlusOrder)
+        {
+            if (last4 != null)
+                order.PayPlusCardLast4 = last4;
+            if (!string.IsNullOrWhiteSpace(payment.CardBrand))
+                order.PayPlusCardBrand = payment.CardBrand.Trim();
+            // PayPlus has no separate "approval number to void before charging" concept — nothing to store.
+        }
+        else
+        {
+            if (last4 != null)
+                order.CardcomTokenLast4 = last4;
 
-        if (!string.IsNullOrWhiteSpace(payment.CardBrand))
-            order.CardcomCardBrand = payment.CardBrand.Trim();
+            if (!string.IsNullOrWhiteSpace(payment.CardBrand))
+                order.CardcomCardBrand = payment.CardBrand.Trim();
 
-        if (!string.IsNullOrWhiteSpace(payment.ApprovalNumber))
-            order.CardcomApprovalNumber = payment.ApprovalNumber.Trim();
+            if (!string.IsNullOrWhiteSpace(payment.ApprovalNumber))
+                order.CardcomApprovalNumber = payment.ApprovalNumber.Trim();
+        }
 
         // Giorgio-owned: the hold amount is known from checkout; a later handover re-send (backfill
         // after picking) carries the store's CURRENT total, which must not replace the amount the
@@ -3403,11 +3534,20 @@ public class PaymentService : ServiceBase
             var txRaw = CoalesceNonEmpty(order.GatewayPaymentTransactionId, order.PaymentReference);
             if (string.IsNullOrWhiteSpace(order.GatewayPaymentTransactionId))
                 return; // payment didn't come through the website gateway — George's own records are authoritative.
-            if (string.IsNullOrWhiteSpace(txRaw) || !long.TryParse(txRaw.Trim(), out var dealNumber) || dealNumber <= 0)
-                return;
 
             var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
-            if (creds == null || creds.ProviderId != PaymentGatewayProviderId.Cardcom)
+            if (creds == null)
+                return;
+
+            if (creds.ProviderId == PaymentGatewayProviderId.PayPlus)
+            {
+                await TryVerifyWooGatewayChargeForPayPlusAsync(order, creds, txRaw, cancelToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (creds.ProviderId != PaymentGatewayProviderId.Cardcom)
+                return;
+            if (string.IsNullOrWhiteSpace(txRaw) || !long.TryParse(txRaw.Trim(), out var dealNumber) || dealNumber <= 0)
                 return;
             if (creds.ApiPasswordStoredButUnreadable || string.IsNullOrWhiteSpace(creds.ApiPassword))
                 return;
@@ -3439,7 +3579,8 @@ public class PaymentService : ServiceBase
             order.RefundedAmount,
             orderMarkedCaptured: order.PaymentSettleStatus == PaymentSettleStatus.Captured,
             orderHasChargeDocument: !string.IsNullOrWhiteSpace(order.InvoiceNumber)
-                || !string.IsNullOrWhiteSpace(order.CardcomDocumentUrl));
+                || !string.IsNullOrWhiteSpace(order.CardcomDocumentUrl)
+                || !string.IsNullOrWhiteSpace(order.PayPlusDocumentUrl));
         if (outcome is GatewayVerifyOutcome.Inconclusive or GatewayVerifyOutcome.HoldOnly)
         {
             if (invoiceBackfilled)
@@ -3523,7 +3664,16 @@ public class PaymentService : ServiceBase
     private static bool ApplyInvoiceDocumentFromInquiry(Order order, CardcomTransactionInfoResult info)
     {
         var changed = false;
-        if (string.IsNullOrWhiteSpace(order.CardcomDocumentUrl) && !string.IsNullOrWhiteSpace(info.DocumentUrl))
+        var isPayPlus = order.PaymentGateway == PaymentGatewayProviderId.PayPlus;
+        if (isPayPlus)
+        {
+            if (string.IsNullOrWhiteSpace(order.PayPlusDocumentUrl) && !string.IsNullOrWhiteSpace(info.DocumentUrl))
+            {
+                order.PayPlusDocumentUrl = info.DocumentUrl.Trim();
+                changed = true;
+            }
+        }
+        else if (string.IsNullOrWhiteSpace(order.CardcomDocumentUrl) && !string.IsNullOrWhiteSpace(info.DocumentUrl))
         {
             order.CardcomDocumentUrl = info.DocumentUrl.Trim();
             changed = true;

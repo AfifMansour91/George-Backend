@@ -308,6 +308,21 @@ namespace George.Data
                 .FirstOrDefaultAsync(o => !o.IsDeleted && o.CardcomLowProfileId == lowProfileId, cancelToken);
         }
 
+        /// <summary>Looks up by PayPlus transaction_uid first (capture/refund echoes carry it), then page_request_uid (checkout session).</summary>
+        public async Task<Order?> GetOrderByPayPlusIdAsync(string payPlusId, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(payPlusId)) return null;
+            var order = await _dbContext.Order
+                .Include(o => o.Site)
+                .Include(o => o.CustomerPaymentMethod)
+                .FirstOrDefaultAsync(o => !o.IsDeleted && o.PayPlusTransactionUid == payPlusId, cancelToken);
+            if (order != null) return order;
+            return await _dbContext.Order
+                .Include(o => o.Site)
+                .Include(o => o.CustomerPaymentMethod)
+                .FirstOrDefaultAsync(o => !o.IsDeleted && o.PayPlusPageRequestUid == payPlusId, cancelToken);
+        }
+
         /// <summary>Returns next order number for the site (e.g. 1001, 1002). Caller can assign to new order.</summary>
         public async Task<string> GetNextOrderNumberForSiteAsync(int siteId, CancellationToken cancelToken)
         {

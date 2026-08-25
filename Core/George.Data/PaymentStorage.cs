@@ -18,6 +18,15 @@ public class PaymentStorage : StorageBase
             .Include(o => o.OrderItem.Where(i => !i.IsDeleted))
             .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
 
+    /// <summary>Site has an order with an open (uncaptured) authorization hold — used to guard a provider switch.</summary>
+    public async Task<bool> HasUnsettledAuthorizedOrdersAsync(int siteId, CancellationToken cancelToken) =>
+        await _dbContext.Order.AsNoTracking().AnyAsync(o =>
+            !o.IsDeleted
+            && o.SiteId == siteId
+            && (o.PaymentSettleStatus == George.Common.Payment.PaymentSettleStatus.Authorized
+                || o.PaymentSettleStatus == George.Common.Payment.PaymentSettleStatus.OverAuthRequiresTopup),
+            cancelToken);
+
     public async Task<Site?> GetSitePaymentConfigAsync(int siteId, CancellationToken cancelToken) =>
         await _dbContext.Site.AsNoTracking()
             .FirstOrDefaultAsync(s => s.Id == siteId && !s.IsDeleted, cancelToken);
@@ -39,6 +48,14 @@ public class PaymentStorage : StorageBase
         tracked.CardcomProviderExtrasJson = site.CardcomProviderExtrasJson;
         tracked.CardcomCssUrl = site.CardcomCssUrl;
         tracked.CardcomLogoUrl = site.CardcomLogoUrl;
+        tracked.PayPlusPaymentPageUid = site.PayPlusPaymentPageUid;
+        tracked.PayPlusApiKey = site.PayPlusApiKey;
+        tracked.PayPlusSecretKeyEncrypted = site.PayPlusSecretKeyEncrypted;
+        tracked.PayPlusTestMode = site.PayPlusTestMode;
+        tracked.PayPlusMaxInstallments = site.PayPlusMaxInstallments;
+        tracked.PayPlusProviderExtrasJson = site.PayPlusProviderExtrasJson;
+        tracked.PayPlusCssUrl = site.PayPlusCssUrl;
+        tracked.PayPlusLogoUrl = site.PayPlusLogoUrl;
         tracked.UpdatedDate = DateTime.UtcNow;
         await _dbContext.SaveChangesAsync(cancelToken);
     }
@@ -327,6 +344,15 @@ public class PaymentStorage : StorageBase
         tracked.CardcomDocumentUrl = order.CardcomDocumentUrl;
         tracked.RefundInvoiceNumber = order.RefundInvoiceNumber;
         tracked.CardcomRefundDocumentUrl = order.CardcomRefundDocumentUrl;
+        tracked.PayPlusPageRequestUid = order.PayPlusPageRequestUid;
+        tracked.PayPlusTransactionUid = order.PayPlusTransactionUid;
+        tracked.PayPlusPaymentJson = order.PayPlusPaymentJson;
+        tracked.PayPlusCardLast4 = order.PayPlusCardLast4;
+        tracked.PayPlusCardBrand = order.PayPlusCardBrand;
+        tracked.PayPlusDocumentUrl = order.PayPlusDocumentUrl;
+        tracked.PayPlusRefundDocumentUrl = order.PayPlusRefundDocumentUrl;
+        if (order.PayPlusSelectedInstallments != null)
+            tracked.PayPlusSelectedInstallments = order.PayPlusSelectedInstallments;
         tracked.PaidAt = order.PaidAt;
         tracked.GatewayVerifiedAmount = order.GatewayVerifiedAmount;
         tracked.GatewayVerifiedAt = order.GatewayVerifiedAt;

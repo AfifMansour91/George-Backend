@@ -50,7 +50,10 @@ public sealed class ValidateCallbackRequest
     public IReadOnlyDictionary<string, string>? ExtraParams { get; init; }
 }
 
-/// <summary>Card display metadata extracted from Cardcom JSON (GetLpResult / callback).</summary>
+/// <summary>
+/// Card display metadata extracted from a gateway's JSON (Cardcom GetLpResult/callback, or PayPlus
+/// generateLink/IPN/View responses — content is provider-neutral, both gateways populate this same shape).
+/// </summary>
 public sealed class CardcomCardDisplayFields
 {
     public string? Last4Digits { get; init; }
@@ -101,6 +104,8 @@ public sealed class CaptureAuthorizationRequest
     public string? Token { get; init; }
     public string? CardExpirationMMYY { get; init; }
     public string? ApprovalNumber { get; init; }
+    /// <summary>PayPlus: the transaction_uid returned by the original authorization — captured via the same id.</summary>
+    public string? ProviderTransactionId { get; init; }
     public string ExternalUniqTranId { get; init; } = Guid.NewGuid().ToString("N");
     public bool CreateDocument { get; init; } = true;
     /// <summary>Installments for the charge (customer's hosted-page selection). 1 = single payment.</summary>
@@ -114,7 +119,8 @@ public sealed class PlaceTokenAuthorizationHoldRequest
 {
     public required decimal Amount { get; init; }
     public required string Token { get; init; }
-    public required string CardExpirationMMYY { get; init; }
+    /// <summary>Cardcom only — PayPlus has no separate expiry pair for a saved token.</summary>
+    public string? CardExpirationMMYY { get; init; }
     public string ExternalUniqTranId { get; init; } = Guid.NewGuid().ToString("N");
 }
 
@@ -122,7 +128,8 @@ public sealed class ChargeTokenRequest
 {
     public required decimal Amount { get; init; }
     public required string Token { get; init; }
-    public required string CardExpirationMMYY { get; init; }
+    /// <summary>Cardcom only — PayPlus has no separate expiry pair for a saved token.</summary>
+    public string? CardExpirationMMYY { get; init; }
     public string? ApprovalNumber { get; init; }
     public string ExternalUniqTranId { get; init; } = Guid.NewGuid().ToString("N");
     public bool CreateDocument { get; init; } = true;
@@ -135,6 +142,7 @@ public sealed class ChargeTokenRequest
 public sealed class RefundRequest
 {
     public required decimal Amount { get; init; }
+    /// <summary>Cardcom: numeric internal deal number. PayPlus: the transaction_uid (GUID string) to refund.</summary>
     public string? OriginalTranzactionId { get; init; }
     public string? Token { get; init; }
     public string? CardExpirationMMYY { get; init; }
@@ -144,9 +152,12 @@ public sealed class RefundRequest
 public sealed class VoidAuthorizationRequest
 {
     public required decimal Amount { get; init; }
-    public required string Token { get; init; }
-    public required string CardExpirationMMYY { get; init; }
-    public required string ApprovalNumber { get; init; }
+    /// <summary>Cardcom only — required to void via Transactions/Transaction (MTI=420).</summary>
+    public string? Token { get; init; }
+    public string? CardExpirationMMYY { get; init; }
+    public string? ApprovalNumber { get; init; }
+    /// <summary>PayPlus: the transaction_uid to cancel via Transactions/Cancel.</summary>
+    public string? ProviderTransactionId { get; init; }
     public string ExternalUniqTranId { get; init; } = Guid.NewGuid().ToString("N");
 }
 
@@ -168,7 +179,11 @@ public sealed class TestConnectionResult
     public string? Message { get; init; }
 }
 
-/// <summary>Cardcom Transactions/GetTransactionInfoById inquiry.</summary>
+/// <summary>
+/// Transaction inquiry result (Cardcom Transactions/GetTransactionInfoById, or PayPlus Transactions/View —
+/// content is provider-neutral, both gateways map into this same shape so <see cref="GatewayChargeVerification"/>
+/// can compare either provider's answer with one set of rules).
+/// </summary>
 public sealed class CardcomTransactionInfoResult
 {
     public bool Success { get; init; }
@@ -191,6 +206,12 @@ public sealed class SitePaymentCredentials
     public int SiteId { get; init; }
     public string ProviderId { get; init; } = "none";
     public int? TerminalNumber { get; init; }
+
+    /// <summary>PayPlus: the Payment Page UID (its per-site identifier — no int terminal number concept).</summary>
+    public string? PaymentPageUid { get; init; }
+
+    /// <summary>PayPlus: selects the sandbox (restapidev) vs production (restapi) base URL. Unused by Cardcom.</summary>
+    public bool TestMode { get; init; }
 
     /// <summary>
     /// Optional second Cardcom terminal (configured WITHOUT a CVV requirement) used ONLY for the actual charge
@@ -215,6 +236,8 @@ public sealed class SitePaymentCredentials
     public string? LogoUrl { get; init; }
     /// <summary>Optional JSON merged into LowProfile/Create (UIDefinition, AdvancedDefinition, etc.).</summary>
     public string? ProviderExtrasJson { get; init; }
+    /// <summary>PayPlus Invoice+ brand UID — required for books/docs/* document creation ("brand-not-found" without it).</summary>
+    public string? InvoiceBrandUid { get; init; }
     /// <summary>Cardcom document type (e.g. TaxInvoiceAndReceipt). Override via ProviderExtrasJson key cardcomDocumentType.</summary>
     public string DocumentTypeToCreate { get; init; } = CardcomDocumentBuilder.DefaultDocumentType;
     /// <summary>Send invoice link via internal SMS after successful capture (ProviderExtrasJson: cardcomSendInvoiceSmsAfterCapture).</summary>

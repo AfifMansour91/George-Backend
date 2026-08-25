@@ -36,4 +36,5 @@ public static class PaymentGatewayProviderId
 {
     public const string None = "none";
     public const string Cardcom = "cardcom";
+    public const string PayPlus = "payplus";
 }

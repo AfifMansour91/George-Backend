@@ -106,4 +106,18 @@ public class SitePaymentSettingsRes
     public bool PaymentAllowCaptureAboveAuth { get; set; }
     public string? CardcomCssUrl { get; set; }
     public string? CardcomLogoUrl { get; set; }
+
+    public string? PayPlusPaymentPageUid { get; set; }
+    /// <summary>Plaintext api_key (same sensitivity role as CardcomApiName; the secret_key is never echoed).</summary>
+    public string? PayPlusApiKey { get; set; }
+    public bool HasPayPlusApiKey { get; set; }
+    public bool HasPayPlusSecretKey { get; set; }
+    /// <summary>Encrypted secret key exists but cannot be decrypted (e.g. after server restart before keys were persisted).</summary>
+    public bool PayPlusSecretKeyNeedsResave { get; set; }
+    public bool PayPlusTestMode { get; set; }
+    /// <summary>Invoice+ brand UID (issuing business) — required for invoice creation.</summary>
+    public string? PayPlusInvoiceBrandUid { get; set; }
+    public int PayPlusMaxInstallments { get; set; } = 1;
+    public string? PayPlusCssUrl { get; set; }
+    public string? PayPlusLogoUrl { get; set; }
 }

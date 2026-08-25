@@ -52,10 +52,17 @@ public class WooCommerceOrderPaymentGatewayDetails
     [JsonProperty("numOfPayments")]
     public int? NumOfPayments { get; set; }
 
+    /// <summary>
+    /// PayPlus transaction_uid the gateway plugin placed the authorization under. Unlike Cardcom's
+    /// token+expiry pair, PayPlus captures the SAME id later — no separate reusable token to track.
+    /// </summary>
+    [JsonProperty("transactionUid")]
+    public string? TransactionUid { get; set; }
+
     public bool IsGiorgioCaptureHandover() =>
         string.Equals(CaptureOwner?.Trim(), "Giorgio", StringComparison.OrdinalIgnoreCase)
-        && !string.IsNullOrWhiteSpace(Token)
-        && !string.IsNullOrWhiteSpace(TokenExpiry);
+        && ((!string.IsNullOrWhiteSpace(Token) && !string.IsNullOrWhiteSpace(TokenExpiry)) // Cardcom shape
+            || !string.IsNullOrWhiteSpace(TransactionUid)); // PayPlus shape
 
     /// <summary>
     /// Normalizes MM/YY, MMYY, MM/YYYY, MMYYYY to MMYY; null when unparseable. Also accepts a
@@ -93,6 +100,7 @@ public class WooCommerceOrderPaymentGatewayDetails
         var g = PaymentGateway?.Trim();
         if (string.IsNullOrWhiteSpace(g)) return null;
         if (g.Contains("cardcom", StringComparison.OrdinalIgnoreCase)) return "cardcom";
+        if (g.Contains("payplus", StringComparison.OrdinalIgnoreCase)) return "payplus";
         return g.ToLowerInvariant();
     }
 }

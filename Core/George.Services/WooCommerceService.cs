@@ -3277,21 +3277,25 @@ namespace George.Services
                 _ => "unpaid",
             };
 
+            var isPayPlus = string.Equals(
+                order.PaymentGateway, George.Common.Payment.PaymentGatewayProviderId.PayPlus,
+                StringComparison.OrdinalIgnoreCase);
+
             return new Dictionary<string, object?>
             {
                 ["captureOwner"] = "Giorgio",
                 ["status"] = status,
                 ["transactionId"] = order.GatewayPaymentTransactionId ?? order.PaymentReference,
                 ["invoiceNumber"] = order.InvoiceNumber,
-                ["documentUrl"] = order.CardcomDocumentUrl,
+                ["documentUrl"] = isPayPlus ? order.PayPlusDocumentUrl : order.CardcomDocumentUrl,
                 ["paidAt"] = order.PaidAt?.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                 ["amount"] = order.Total,
                 ["refundedAmount"] = order.RefundedAmount,
                 ["refundedAt"] = order.RefundedAt?.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                 ["refundInvoiceNumber"] = order.RefundInvoiceNumber,
-                ["refundDocumentUrl"] = order.CardcomRefundDocumentUrl,
-                ["cardLast4"] = order.CardcomTokenLast4,
-                ["installments"] = order.CardcomSelectedInstallments,
+                ["refundDocumentUrl"] = isPayPlus ? order.PayPlusRefundDocumentUrl : order.CardcomRefundDocumentUrl,
+                ["cardLast4"] = isPayPlus ? order.PayPlusCardLast4 : order.CardcomTokenLast4,
+                ["installments"] = isPayPlus ? order.PayPlusSelectedInstallments : order.CardcomSelectedInstallments,
             };
         }
 

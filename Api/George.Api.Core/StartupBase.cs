@@ -437,6 +437,7 @@ namespace George.Api.Core
 			services.AddScoped<George.Services.Orders.IOrderRealtimeNotifier, George.Services.Orders.NullOrderRealtimeNotifier>();
 			services.AddScoped<George.Services.Payments.PaymentService>();
 			services.AddScoped<George.Services.Payments.Cardcom.CardcomGateway>();
+			services.AddScoped<George.Services.Payments.PayPlus.PayPlusGateway>();
 			services.AddSingleton<George.Services.Payments.PaymentTokenProtector>();
 			services.AddScoped<IncomeReportService>();
 			services.AddScoped<DashboardService>();
@@ -517,6 +518,12 @@ namespace George.Api.Core
 			services.AddHttpClient(George.Services.Payments.Cardcom.CardcomGateway.HttpClientName, client =>
 			{
 				client.BaseAddress = new Uri("https://secure.cardcom.solutions/api/v11/");
+				client.Timeout = TimeSpan.FromSeconds(60);
+			});
+			// No fixed BaseAddress: PayPlusGateway builds the full URL per-request (sandbox vs production
+			// depends on the site's PayPlusTestMode, unlike Cardcom which has one fixed base URL).
+			services.AddHttpClient(George.Services.Payments.PayPlus.PayPlusGateway.HttpClientName, client =>
+			{
 				client.Timeout = TimeSpan.FromSeconds(60);
 			});
 		}

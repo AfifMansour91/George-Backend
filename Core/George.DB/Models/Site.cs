@@ -264,7 +264,7 @@ public partial class Site
     /// </summary>
     public bool? ExternalPriceManagement { get; set; }
 
-    /// <summary>Active payment provider: none | cardcom.</summary>
+    /// <summary>Active payment provider: none | cardcom | payplus. Exactly one may be active at a time.</summary>
     [StringLength(32)]
     public string PaymentGatewayProvider { get; set; } = "none";
 
@@ -308,6 +308,43 @@ public partial class Site
 
     [StringLength(500)]
     public string? CardcomLogoUrl { get; set; }
+
+    /// <summary>
+    /// PayPlus Payment Page UID — its per-site identifier (no int terminal number concept like Cardcom).
+    /// </summary>
+    [StringLength(100)]
+    public string? PayPlusPaymentPageUid { get; set; }
+
+    /// <summary>PayPlus api_key (account identifier — reuses the same role as Cardcom's ApiName).</summary>
+    [StringLength(100)]
+    public string? PayPlusApiKey { get; set; }
+
+    /// <summary>PayPlus secret_key, encrypted at rest (reuses the same role as Cardcom's ApiPassword).</summary>
+    [StringLength(500)]
+    public string? PayPlusSecretKeyEncrypted { get; set; }
+
+    /// <summary>Selects the sandbox (restapidev.payplus.co.il) vs production (restapi.payplus.co.il) base URL.</summary>
+    public bool PayPlusTestMode { get; set; }
+
+    /// <summary>Max installments (תשלומים) offered on the PayPlus hosted payment page for immediate charges only.</summary>
+    public int PayPlusMaxInstallments { get; set; } = 1;
+
+    /// <summary>
+    /// Invoice+ brand UID (the business entity issuing documents) — required by books/docs/* or PayPlus
+    /// returns "brand-not-found". Taken from the Invoice+ dashboard; sandbox and production have different
+    /// brand UIDs, which works per-site here because PayPlusTestMode is per-site too.
+    /// </summary>
+    [StringLength(64)]
+    public string? PayPlusInvoiceBrandUid { get; set; }
+
+    [StringLength(2000)]
+    public string? PayPlusProviderExtrasJson { get; set; }
+
+    [StringLength(500)]
+    public string? PayPlusCssUrl { get; set; }
+
+    [StringLength(500)]
+    public string? PayPlusLogoUrl { get; set; }
 
     [ForeignKey("AccountId")]
     [InverseProperty("Site")]

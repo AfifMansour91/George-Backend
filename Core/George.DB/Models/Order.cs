@@ -333,6 +333,40 @@ public partial class Order
     [StringLength(20)]
     public string? PaymentCaptureOwner { get; set; }
 
+    /// <summary>PayPlus document (Invoice+) PDF/view URL when an invoice was issued.</summary>
+    public string? PayPlusDocumentUrl { get; set; }
+
+    /// <summary>PayPlus credit note PDF/view URL after refund.</summary>
+    [StringLength(1000)]
+    public string? PayPlusRefundDocumentUrl { get; set; }
+
+    /// <summary>PayPlus page_request_uid (PRUID) from PaymentPages/generateLink — analogue of CardcomLowProfileId.</summary>
+    [StringLength(64)]
+    public string? PayPlusPageRequestUid { get; set; }
+
+    /// <summary>
+    /// PayPlus transaction_uid. Unlike Cardcom, the SAME id is used for both the authorization hold and its
+    /// later capture (Transactions/ChargeByTransactionUID) — no separate reusable token/approval pair needed.
+    /// </summary>
+    [StringLength(64)]
+    public string? PayPlusTransactionUid { get; set; }
+
+    /// <summary>Encrypted Giorgio-owns-capture handover blob (write-once) — analogue of CardcomPaymentJson.</summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? PayPlusPaymentJson { get; set; }
+
+    [StringLength(8)]
+    public string? PayPlusCardLast4 { get; set; }
+
+    [StringLength(32)]
+    public string? PayPlusCardBrand { get; set; }
+
+    /// <summary>
+    /// Installments (תשלומים) the customer selected on the PayPlus hosted page at order creation. Honored by
+    /// the post-picking capture. Null/1 = single payment.
+    /// </summary>
+    public int? PayPlusSelectedInstallments { get; set; }
+
     public int? CustomerPaymentMethodId { get; set; }
 
     /// <summary>Public Wolt tracking page URL after dispatch.</summary>
