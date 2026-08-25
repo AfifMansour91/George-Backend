@@ -32,9 +32,11 @@ public static class OrderLineDisplayFieldsBuilder
 
         // Woo lines never send OrderLineCuttingLabel — derive it from the resolved variant's cutting
         // option so prints/reports render like phone orders (size label + cutting, not the raw variantTitle).
-        var cuttingValue = string.IsNullOrWhiteSpace(req.OrderLineCuttingLabel)
+        // Decode defensively: catalogs imported before the Woo slug fix still hold percent-encoded
+        // option values ("%d7%9c..." = "ללא-עור") which would otherwise persist into order-line labels.
+        var cuttingValue = WooPercentEncodedText.Decode(string.IsNullOrWhiteSpace(req.OrderLineCuttingLabel)
             ? GetVariantCuttingValue(product, variantIndex)
-            : req.OrderLineCuttingLabel;
+            : req.OrderLineCuttingLabel);
 
         var snap = Build(product, purchaseAsKgLine, req.Quantity, variantIndex, variantWeightKg, cuttingValue, variableKg);
 
@@ -179,9 +181,9 @@ public static class OrderLineDisplayFieldsBuilder
             if (string.IsNullOrWhiteSpace(kv.OptionValue)) continue;
             var name = kv.OptionName ?? "";
             if (name == "גודל" || string.Equals(name, "size", StringComparison.OrdinalIgnoreCase))
-                return kv.OptionValue.Trim();
+                return WooPercentEncodedText.Decode(kv.OptionValue.Trim());
             if (firstNonCutting == null && !CuttingKeyHint.IsMatch(name))
-                firstNonCutting = kv.OptionValue.Trim();
+                firstNonCutting = WooPercentEncodedText.Decode(kv.OptionValue.Trim());
         }
         return firstNonCutting;
     }
@@ -281,7 +283,7 @@ public static class OrderLineDisplayFieldsBuilder
         foreach (var kv in ov)
         {
             if (!string.IsNullOrWhiteSpace(kv.OptionValue) && CuttingKeyHint.IsMatch(kv.OptionName ?? ""))
-                return kv.OptionValue.Trim();
+                return WooPercentEncodedText.Decode(kv.OptionValue.Trim());
         }
         return null;
     }
@@ -612,13 +614,13 @@ public static class OrderLineDisplayFieldsBuilder
     {
         if (v == null) return null;
         var ov = v.ProductVariantOptionValue?.ToDictionary(x => x.OptionName, x => x.OptionValue) ?? new Dictionary<string, string>();
-        var sizeName = (ov.GetValueOrDefault("גודל") ?? ov.GetValueOrDefault("size") ?? "").Trim();
+        var sizeName = WooPercentEncodedText.Decode((ov.GetValueOrDefault("גודל") ?? ov.GetValueOrDefault("size") ?? "").Trim());
         var wKg = v.Weight ?? 0;
         var approx = FormatApproxWeightPhrase(wKg, unitRaw);
         if (string.IsNullOrEmpty(approx)) return string.IsNullOrEmpty(sizeName) ? null : sizeName;
         if (!string.IsNullOrEmpty(sizeName)) return $"{sizeName} (כ {approx})";
         var nonCutting = ov.FirstOrDefault(kv => !string.IsNullOrWhiteSpace(kv.Value) && !CuttingKeyHint.IsMatch(kv.Key));
-        if (!string.IsNullOrWhiteSpace(nonCutting.Value)) return $"{nonCutting.Value} (כ {approx})";
+        if (!string.IsNullOrWhiteSpace(nonCutting.Value)) return $"{WooPercentEncodedText.Decode(nonCutting.Value)} (כ {approx})";
         return $"(כ {approx})";
     }
 

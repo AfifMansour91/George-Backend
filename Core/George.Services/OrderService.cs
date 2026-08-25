@@ -1536,10 +1536,12 @@ namespace George.Services
         /// <summary>Build VariantTitle from payload: variants[].name joined " | ", or variation.attributes/meta values joined " | " when plugin sends variation object.</summary>
         private static string? GetVariantTitleFromPayload(WooCommerceOrderItemPayload it)
         {
+            // Woo sends percent-encoded Hebrew term slugs when it fails to resolve a taxonomy term
+            // ("%d7%9c..." = "ללא-עור") — decode so VariantTitle never stores gibberish.
             if (it.Variants != null && it.Variants.Count > 0)
             {
                 var names = it.Variants
-                    .Select(v => v?.Name?.Trim())
+                    .Select(v => WooPercentEncodedText.Decode(v?.Name?.Trim()))
                     .Where(n => !string.IsNullOrEmpty(n))
                     .ToList();
                 if (names.Count > 0) return string.Join(" | ", names);
@@ -1548,7 +1550,7 @@ namespace George.Services
             {
                 var values = it.Variation.Attributes
                     .OrderBy(kv => kv.Key)
-                    .Select(kv => kv.Value?.Trim())
+                    .Select(kv => WooPercentEncodedText.Decode(kv.Value?.Trim()))
                     .Where(n => !string.IsNullOrEmpty(n))
                     .ToList();
                 if (values.Count > 0) return string.Join(" | ", values);
@@ -1557,7 +1559,7 @@ namespace George.Services
             {
                 var values = it.Variation.Meta
                     .OrderBy(kv => kv.Key)
-                    .Select(kv => kv.Value?.Trim())
+                    .Select(kv => WooPercentEncodedText.Decode(kv.Value?.Trim()))
                     .Where(n => !string.IsNullOrEmpty(n))
                     .ToList();
                 if (values.Count > 0) return string.Join(" | ", values);
@@ -1606,9 +1608,10 @@ namespace George.Services
             var payloadNorm = payloadTitle.Trim();
             foreach (var v in product.ProductVariant.Where(v => !v.IsDeleted))
             {
+                // Decode catalog side too — legacy imports may still hold percent-encoded slugs.
                 var optionValues = (v.ProductVariantOptionValue?
                     .OrderBy(ov => ov.OptionName)
-                    .Select(ov => ov.OptionValue?.Trim())
+                    .Select(ov => WooPercentEncodedText.Decode(ov.OptionValue?.Trim()))
                     .Where(s => !string.IsNullOrEmpty(s))
                     .ToList() ?? new List<string?>()).Cast<string>().ToList();
                 var ourTitle = optionValues.Count > 0 ? string.Join(" | ", optionValues) : null;

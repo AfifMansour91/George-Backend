@@ -4759,8 +4759,6 @@ namespace George.Services
             return string.Join(" ; ", parts);
         }
 
-        private static readonly Regex PercentEncodedSequence = new(@"%[0-9a-fA-F]{2}", RegexOptions.Compiled);
-
         /// <summary>
         /// Woo's variation REST endpoint returns the term SLUG instead of the display name whenever it fails to
         /// resolve the term (Hebrew slugs are percent-encoded by sanitize_title, e.g. "%d7%98..." = "טחינה-כפולה").
@@ -4772,12 +4770,7 @@ namespace George.Services
             string optionName,
             Dictionary<string, HashSet<string>> optionNameToValues)
         {
-            var value = rawOption.Trim();
-            if (PercentEncodedSequence.IsMatch(value))
-            {
-                try { value = Uri.UnescapeDataString(value).Trim(); }
-                catch (UriFormatException) { /* keep the raw value */ }
-            }
+            var value = WooPercentEncodedText.Decode(rawOption.Trim());
 
             if (optionNameToValues.TryGetValue(optionName, out var candidates))
             {
