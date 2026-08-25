@@ -20,6 +20,15 @@ namespace George.Services.Payments.PayPlus;
 /// the agreed scope they are tabs on PayPlus's own hosted page (dashboard-configured), invisible to this
 /// gateway, exactly like Cardcom's wallet handling today.
 /// </summary>
+/// <summary>Saved-card token fields extracted from a PayPlus IPN/callback payload.</summary>
+public sealed class PayPlusSavedTokenFields
+{
+    public string? Token { get; init; }
+    public string? CardExpirationMMYY { get; init; }
+    public string? Last4Digits { get; init; }
+    public string? CardBrand { get; init; }
+}
+
 public sealed class PayPlusGateway : IPaymentGatewayProvider
 {
     public const string HttpClientName = "PayPlusApi";
@@ -383,12 +392,31 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
             };
         }
 
-        var transactionType = GetDataString(json, "transaction_type"); // e.g. "Charge" / "Approval" / "Check"
+        // A found-but-declined transaction: the inquiry itself succeeded, but the transaction must not
+        // count as charged/held (mirrors Cardcom's non-zero ResponseCode semantics).
+        var statusCode = GetTransactionString(json, "status_code");
+        if (statusCode != null && !string.Equals(statusCode, "000", StringComparison.Ordinal))
+        {
+            return new CardcomTransactionInfoResult
+            {
+                Success = false,
+                ResponseCode = int.TryParse(statusCode, out var sc) ? sc : -1,
+                Description = GetTransactionString(json, "status_description")
+                    ?? GetResultsDescription(json) ?? "PayPlus transaction not approved.",
+                TranzactionId = GetTransactionString(json, "transaction_uid"),
+                Amount = GetTransactionDecimal(json, "amount"),
+                RawJson = json,
+            };
+        }
+
+        var transactionType = GetTransactionString(json, "transaction_type"); // e.g. "Charge" / "Approval" / "Check"
         var isHold = transactionType is "Approval" or "Check";
         var isRefund = transactionType is "Refund" or "Cancel";
-        var isFinalCharge = !isHold && !isRefund && transactionType is not null;
-        var amount = GetDataDecimal(json, "amount");
-        var txId = GetDataString(json, "transaction_uid");
+        // A voided/cancelled transaction must never read as a live charge or hold.
+        var isCancelled = string.Equals(GetTransactionString(json, "transaction_is_cancelled"), "true", StringComparison.OrdinalIgnoreCase);
+        var isFinalCharge = !isHold && !isRefund && !isCancelled && transactionType is not null;
+        var amount = GetTransactionDecimal(json, "amount");
+        var txId = GetTransactionString(json, "transaction_uid");
 
         return new CardcomTransactionInfoResult
         {
@@ -397,11 +425,11 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
             Description = GetResultsDescription(json),
             TranzactionId = txId,
             Amount = amount,
-            DealType = transactionType,
+            DealType = isCancelled ? $"{transactionType} (cancelled)" : transactionType,
             IsRefund = isRefund,
             RawJson = json,
             IsFinalCharge = isFinalCharge,
-            IsAuthorizationHold = isHold,
+            IsAuthorizationHold = isHold && !isCancelled,
         };
     }
 
@@ -450,7 +478,47 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
 
         var last4 = GetDataString(json, "four_digits");
         var brand = GetDataString(json, "brand_name") ?? GetDataString(json, "clearing_name");
+
+        // Transactions/View nests these under data[0].data.card_information.
+        if ((last4 == null || brand == null)
+            && TryResolveTransactionNodes(json, out _, out var extra)
+            && extra.ValueKind == JsonValueKind.Object
+            && extra.TryGetProperty("card_information", out var card)
+            && card.ValueKind == JsonValueKind.Object)
+        {
+            last4 ??= TryGetStringProperty(card, "four_digits", out var l4) ? l4 : null;
+            brand ??= (TryGetStringProperty(card, "brand_name", out var b) ? b : null)
+                ?? (TryGetStringProperty(card, "clearing_name", out var c) ? c : null);
+        }
+
         return new CardcomCardDisplayFields { Last4Digits = last4, CardBrand = brand };
+    }
+
+    /// <summary>
+    /// Extract the reusable saved-card token from an IPN/callback payload (token_uid + card display +
+    /// expiry). Transactions/View does NOT return the token — only the checkout IPN/callback does.
+    /// NOTE: the sandbox IPN was observed appending the card's last4 to token_uid; stored as-is because
+    /// the vendor plugin stores and replays the same value.
+    /// </summary>
+    public PayPlusSavedTokenFields ExtractSavedTokenFields(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return new PayPlusSavedTokenFields();
+
+        var mm = GetDataString(json, "expiry_month");
+        var yy = GetDataString(json, "expiry_year");
+        var exp = !string.IsNullOrWhiteSpace(mm) && !string.IsNullOrWhiteSpace(yy)
+            ? $"{mm.Trim().PadLeft(2, '0')}{(yy.Trim().Length > 2 ? yy.Trim()[^2..] : yy.Trim())}"
+            : null;
+        var display = ExtractCardDisplayFields(json);
+
+        return new PayPlusSavedTokenFields
+        {
+            Token = GetDataString(json, "token_uid"),
+            CardExpirationMMYY = exp,
+            Last4Digits = display.Last4Digits,
+            CardBrand = display.CardBrand,
+        };
     }
 
     private static ValidateCallbackResult MapTransactionResult(string json)
@@ -569,6 +637,63 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
         if (TryGetObjectProperty(json, "data", out var data) && TryGetStringProperty(data, name, out var fromData))
             return fromData;
         return TryGetStringProperty(RootOf(json), name, out var fromRoot) ? fromRoot : null;
+    }
+
+    /// <summary>
+    /// Transactions/View wraps the transaction in a data ARRAY ({data:[{transaction:{...},data:{...}}]}),
+    /// unlike IPN/charge responses where fields sit directly under a data OBJECT. Resolves both shapes:
+    /// `transaction` = the node carrying transaction_type/amount/transaction_uid, `extra` = the sibling
+    /// node carrying card_information/customer data (same node in the flat shape).
+    /// </summary>
+    private static bool TryResolveTransactionNodes(string json, out JsonElement transaction, out JsonElement extra)
+    {
+        transaction = default;
+        extra = default;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return false;
+            if (!doc.RootElement.TryGetProperty("data", out var data)) return false;
+
+            if (data.ValueKind == JsonValueKind.Object)
+            {
+                transaction = data.Clone();
+                extra = data.Clone();
+                return true;
+            }
+
+            if (data.ValueKind == JsonValueKind.Array && data.GetArrayLength() > 0)
+            {
+                var first = data[0];
+                if (first.ValueKind != JsonValueKind.Object) return false;
+                transaction = first.TryGetProperty("transaction", out var tx) && tx.ValueKind == JsonValueKind.Object
+                    ? tx.Clone() : first.Clone();
+                extra = first.TryGetProperty("data", out var ex) && ex.ValueKind == JsonValueKind.Object
+                    ? ex.Clone() : first.Clone();
+                return true;
+            }
+
+            return false;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Field lookup that understands both the flat (IPN/charge) and nested-array (Transactions/View) shapes.</summary>
+    private static string? GetTransactionString(string json, string name)
+    {
+        if (TryResolveTransactionNodes(json, out var tx, out _) && TryGetStringProperty(tx, name, out var fromTx))
+            return fromTx;
+        return GetDataString(json, name);
+    }
+
+    private static decimal? GetTransactionDecimal(string json, string name)
+    {
+        var raw = GetTransactionString(json, name);
+        return decimal.TryParse(raw, System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null;
     }
 
     private static string? GetRootString(string json, string name) =>

@@ -67,22 +67,35 @@ public partial class PaymentService : ServiceBase
         var method = order.PaymentMethod ?? "";
         if (string.Equals(method, "SavedCard", StringComparison.OrdinalIgnoreCase) && order.CustomerId is int customerId)
         {
+            // Only link a card the site's ACTIVE gateway can charge — a token belongs to its issuing gateway.
+            var savedCardSite = await _paymentStorage.GetSitePaymentConfigAsync(order.SiteId, cancelToken);
+            var siteProvider = savedCardSite?.PaymentGatewayProvider ?? PaymentGatewayProviderId.Cardcom;
+
             CustomerPaymentMethod? pm = null;
             if (order.CustomerPaymentMethodId is int requestedPmId)
             {
                 pm = await _paymentStorage.GetPaymentMethodByIdAsync(requestedPmId, cancelToken);
-                if (pm != null && (pm.CustomerId != customerId || pm.SiteId != order.SiteId))
+                if (pm != null && (pm.CustomerId != customerId || pm.SiteId != order.SiteId
+                    || !string.Equals(pm.GatewayProvider, siteProvider, StringComparison.OrdinalIgnoreCase)))
                     pm = null;
             }
 
-            pm ??= await _paymentStorage.GetDefaultPaymentMethodAsync(customerId, order.SiteId, cancelToken);
+            pm ??= await _paymentStorage.GetDefaultPaymentMethodAsync(customerId, order.SiteId, cancelToken, siteProvider);
             if (pm != null)
             {
                 order.CustomerPaymentMethodId = pm.Id;
-                order.CardcomTokenLast4 = pm.Last4Digits;
-                order.CardcomCardBrand = pm.CardBrand;
                 order.PaymentSettleStatus = PaymentSettleStatus.Initiated;
-                order.PaymentGateway = PaymentGatewayProviderId.Cardcom;
+                order.PaymentGateway = siteProvider;
+                if (string.Equals(siteProvider, PaymentGatewayProviderId.PayPlus, StringComparison.OrdinalIgnoreCase))
+                {
+                    order.PayPlusCardLast4 = pm.Last4Digits;
+                    order.PayPlusCardBrand = pm.CardBrand;
+                }
+                else
+                {
+                    order.CardcomTokenLast4 = pm.Last4Digits;
+                    order.CardcomCardBrand = pm.CardBrand;
+                }
             }
             return;
         }
@@ -373,10 +386,16 @@ public partial class PaymentService : ServiceBase
             || order.PaymentSettleStatus == PaymentSettleStatus.Captured)
             return;
 
+        var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
+        if (creds != null && creds.ProviderId == PaymentGatewayProviderId.PayPlus)
+        {
+            await TryPlaceAuthorizationHoldForPayPlusAsync(order, creds, cancelToken);
+            return;
+        }
+
         if (!string.IsNullOrWhiteSpace(order.CardcomLowProfileId))
             return;
 
-        var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
         if (creds == null || creds.ProviderId != PaymentGatewayProviderId.Cardcom)
             return;
 
@@ -385,7 +404,8 @@ public partial class PaymentService : ServiceBase
 
         if (order.CustomerPaymentMethodId is not > 0 && order.CustomerId is int cid)
         {
-            var defaultPm = await _paymentStorage.GetDefaultPaymentMethodAsync(cid, order.SiteId, cancelToken);
+            var defaultPm = await _paymentStorage.GetDefaultPaymentMethodAsync(
+                cid, order.SiteId, cancelToken, PaymentGatewayProviderId.Cardcom);
             if (defaultPm != null)
             {
                 order.CustomerPaymentMethodId = defaultPm.Id;
@@ -400,12 +420,15 @@ public partial class PaymentService : ServiceBase
         if (order.CustomerPaymentMethodId is int pmId)
             pm = await _paymentStorage.GetPaymentMethodByIdAsync(pmId, cancelToken);
         else if (order.CustomerId is int customerId)
-            pm = await _paymentStorage.GetDefaultPaymentMethodAsync(customerId, order.SiteId, cancelToken);
+            pm = await _paymentStorage.GetDefaultPaymentMethodAsync(
+                customerId, order.SiteId, cancelToken, PaymentGatewayProviderId.Cardcom);
 
-        if (pm == null)
+        if (pm == null || !string.Equals(pm.GatewayProvider, PaymentGatewayProviderId.Cardcom, StringComparison.OrdinalIgnoreCase))
         {
             await MarkSavedCardHoldFailedAsync(order,
-                "No saved card on file for this customer.", cancelToken);
+                pm == null
+                    ? "No saved card on file for this customer."
+                    : "Saved card belongs to a different payment gateway.", cancelToken);
             return;
         }
 
@@ -504,15 +527,18 @@ public partial class PaymentService : ServiceBase
         }
     }
 
-    private async Task MarkSavedCardHoldFailedAsync(Order order, string message, CancellationToken cancelToken)
+    private async Task MarkSavedCardHoldFailedAsync(
+        Order order, string message, CancellationToken cancelToken, string? provider = null)
     {
+        provider ??= PaymentGatewayProviderId.Cardcom;
         _logger.LogWarning("Saved card authorization hold skipped for order {OrderId}: {Message}", order.Id, message);
         order.PaymentSettleStatus = PaymentSettleStatus.Failed;
         order.ExternalPaymentStatus = TruncatePaymentStatusMessage(message);
-        order.PaymentGateway = PaymentGatewayProviderId.Cardcom;
+        order.PaymentGateway = provider;
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
         var logDescription = message.Length > 500 ? message[..500] : message;
-        await LogEventAsync(order.Id, "TokenAuthorizationHold", "-1", logDescription, null, null, order.Total, null, cancelToken);
+        await LogEventAsync(order.Id, "TokenAuthorizationHold", "-1", logDescription, null, null, order.Total, null,
+            cancelToken, provider: provider);
     }
 
     private static string TruncatePaymentStatusMessage(string message)
@@ -1939,6 +1965,7 @@ public partial class PaymentService : ServiceBase
             {
                 CustomerId = cid,
                 SiteId = order.SiteId,
+                GatewayProvider = PaymentGatewayProviderId.Cardcom,
                 EncryptedToken = _tokenProtector.Protect(validated.Token),
                 TokenExDate = tokenEx,
                 CardExpirationMMYY = cardExp,
@@ -2633,6 +2660,12 @@ public partial class PaymentService : ServiceBase
         order.CustomerPaymentMethodId = null;
         order.CardcomTokenLast4 = null;
         order.CardcomCardBrand = null;
+        // PayPlus twin fields — same "order is no longer a card payment" cleanup.
+        order.PayPlusPageRequestUid = null;
+        order.PayPlusTransactionUid = null;
+        order.PayPlusCardLast4 = null;
+        order.PayPlusCardBrand = null;
+        order.PayPlusSelectedInstallments = null;
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
     }
 
@@ -2883,7 +2916,8 @@ public partial class PaymentService : ServiceBase
 
         if (order.CustomerId is int cid)
         {
-            var pm = await _paymentStorage.GetDefaultPaymentMethodAsync(cid, order.SiteId, cancelToken);
+            var pm = await _paymentStorage.GetDefaultPaymentMethodAsync(
+                cid, order.SiteId, cancelToken, PaymentGatewayProviderId.Cardcom);
             if (pm == null)
             {
                 _logger.LogDebug(
@@ -3710,6 +3744,13 @@ public partial class PaymentService : ServiceBase
             return CreateResponse(response, StatusCode.InvalidRequest,
                 "Gateway payment sync is only available for website/WooCommerce orders.");
         }
+
+        // Keyed on the ORDER's own gateway (not just the site's current provider) so a PayPlus order can
+        // still be synced after the site switched provider, and vice versa.
+        if (order.PaymentGateway == PaymentGatewayProviderId.PayPlus
+            || !string.IsNullOrWhiteSpace(order.PayPlusTransactionUid)
+            || !string.IsNullOrWhiteSpace(order.PayPlusPageRequestUid))
+            return await SyncWooGatewayPaymentFromPayPlusAsync(order, response, cancelToken);
 
         var settle = (order.PaymentSettleStatus ?? "").Trim();
         var alreadyCaptured = string.Equals(order.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase)

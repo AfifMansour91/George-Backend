@@ -52,6 +52,7 @@ public class PaymentStorage : StorageBase
         tracked.PayPlusApiKey = site.PayPlusApiKey;
         tracked.PayPlusSecretKeyEncrypted = site.PayPlusSecretKeyEncrypted;
         tracked.PayPlusTestMode = site.PayPlusTestMode;
+        tracked.PayPlusInvoiceBrandUid = site.PayPlusInvoiceBrandUid;
         tracked.PayPlusMaxInstallments = site.PayPlusMaxInstallments;
         tracked.PayPlusProviderExtrasJson = site.PayPlusProviderExtrasJson;
         tracked.PayPlusCssUrl = site.PayPlusCssUrl;
@@ -73,9 +74,13 @@ public class PaymentStorage : StorageBase
             .OrderByDescending(e => e.CreationTime)
             .ToListAsync(cancelToken);
 
-    public async Task<CustomerPaymentMethod?> GetDefaultPaymentMethodAsync(int customerId, int siteId, CancellationToken cancelToken) =>
+    /// <summary>Default saved card; pass <paramref name="gatewayProvider"/> to only match tokens redeemable
+    /// at that gateway (a Cardcom token is useless at PayPlus and vice versa). Null = no provider filter.</summary>
+    public async Task<CustomerPaymentMethod?> GetDefaultPaymentMethodAsync(
+        int customerId, int siteId, CancellationToken cancelToken, string? gatewayProvider = null) =>
         await _dbContext.CustomerPaymentMethod
-            .Where(m => m.CustomerId == customerId && m.SiteId == siteId && !m.IsRetired)
+            .Where(m => m.CustomerId == customerId && m.SiteId == siteId && !m.IsRetired
+                && (gatewayProvider == null || m.GatewayProvider == gatewayProvider))
             .OrderByDescending(m => m.IsDefault)
             .ThenByDescending(m => m.CreationTime)
             .FirstOrDefaultAsync(cancelToken);
@@ -253,8 +258,11 @@ public class PaymentStorage : StorageBase
         var normalizedLast4 = NormalizeLast4Digits(method.Last4Digits);
         if (!string.IsNullOrWhiteSpace(normalizedLast4))
         {
+            // Same physical card saved at a DIFFERENT gateway is a separate row — its token belongs to
+            // the other provider and must not be overwritten.
             var sameLast4 = existing.FirstOrDefault(m =>
-                string.Equals(NormalizeLast4Digits(m.Last4Digits), normalizedLast4, StringComparison.Ordinal));
+                string.Equals(NormalizeLast4Digits(m.Last4Digits), normalizedLast4, StringComparison.Ordinal)
+                && string.Equals(m.GatewayProvider, method.GatewayProvider, StringComparison.OrdinalIgnoreCase));
             if (sameLast4 != null)
             {
                 foreach (var m in existing)
@@ -403,7 +411,13 @@ public class PaymentStorage : StorageBase
         if (resolvedCustomerId is not int custId)
             return null;
 
-        var pm = await GetDefaultPaymentMethodAsync(custId, siteId, cancelToken);
+        // Only offer a card the site's ACTIVE gateway can actually charge.
+        var siteProvider = await _dbContext.Site
+            .Where(s => s.Id == siteId && !s.IsDeleted)
+            .Select(s => s.PaymentGatewayProvider)
+            .FirstOrDefaultAsync(cancelToken);
+
+        var pm = await GetDefaultPaymentMethodAsync(custId, siteId, cancelToken, siteProvider);
         if (pm == null)
             return null;
 

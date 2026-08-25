@@ -594,7 +594,10 @@ public partial class PaymentService
             await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
             ScheduleStorePaymentPush(order, pushReason);
         }
-        else if (info.IsAuthorizationHold && order.PaymentSettleStatus is null or PaymentSettleStatus.None or PaymentSettleStatus.Initiated)
+        // Failed is deliberately included: a success verified straight at PayPlus outranks an earlier
+        // failure mark (the Cardcom failed-webhook-race lesson — success can land after "failed").
+        else if (info.IsAuthorizationHold && order.PaymentSettleStatus is null or PaymentSettleStatus.None
+            or PaymentSettleStatus.Initiated or PaymentSettleStatus.Failed)
         {
             order.PaymentSettleStatus = PaymentSettleStatus.Authorized;
             order.PaymentGateway = PaymentGatewayProviderId.PayPlus;
@@ -676,8 +679,286 @@ public partial class PaymentService
         order.PayPlusCardBrand = CoalesceNonEmpty(display.CardBrand, order.PayPlusCardBrand);
         order.PayPlusPaymentJson = info.RawJson ?? order.PayPlusPaymentJson;
 
+        await TryPersistPayPlusTokenAsync(order, info.RawJson, cancelToken).ConfigureAwait(false);
+
         await ApplyVerifiedPayPlusInfoAsync(order, info, fallbackTransactionUid: null, "hosted-page charge", cancelToken)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Persist the reusable token the checkout IPN returned as a CustomerPaymentMethod (PayPlus sibling of
+    /// PersistCardcomTokenAsync). Best-effort: a persist failure never fails the payment path.
+    /// </summary>
+    private async Task TryPersistPayPlusTokenAsync(Order order, string? ipnJson, CancellationToken cancelToken)
+    {
+        try
+        {
+            var fields = _payPlus.ExtractSavedTokenFields(ipnJson);
+            if (string.IsNullOrWhiteSpace(fields.Token))
+                return;
+
+            var customerId = await EnsureOrderCustomerIdAsync(order, cancelToken);
+            if (customerId is not int cid || !await _paymentStorage.CustomerExistsAsync(cid, cancelToken))
+            {
+                _logger.LogInformation(
+                    "Skip PayPlus CustomerPaymentMethod for order {OrderId}: no customer (phone={Phone})",
+                    order.Id, order.CustomerPhone);
+                return;
+            }
+
+            var pm = await _paymentStorage.SavePaymentMethodAsync(new CustomerPaymentMethod
+            {
+                CustomerId = cid,
+                SiteId = order.SiteId,
+                GatewayProvider = PaymentGatewayProviderId.PayPlus,
+                EncryptedToken = _tokenProtector.Protect(fields.Token.Trim()),
+                CardExpirationMMYY = fields.CardExpirationMMYY,
+                Last4Digits = fields.Last4Digits,
+                CardBrand = fields.CardBrand,
+            }, cancelToken);
+            order.CustomerPaymentMethodId = pm.Id;
+
+            _logger.LogInformation(
+                "Saved PayPlus CustomerPaymentMethod {PaymentMethodId} for order {OrderId} customer {CustomerId} last4={Last4}",
+                pm.Id, order.Id, cid, fields.Last4Digits ?? "(none)");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Could not save PayPlus CustomerPaymentMethod for order {OrderId}; payment state was stored.",
+                order.Id);
+        }
+    }
+
+    /// <summary>
+    /// SavedCard phone/manual orders: place an authorization hold on the customer's saved PayPlus token
+    /// (sibling of the Cardcom branch in TryPlaceAuthorizationHoldIfNeededAsync). The hold's
+    /// transaction_uid is stored so the existing picking capture path charges it unchanged.
+    /// NOTE: PayPlus's synchronous token flow is not yet sandbox-verified — a failure surfaces clearly
+    /// as a Failed settle status with the gateway's message, never as a silent success.
+    /// </summary>
+    private async Task TryPlaceAuthorizationHoldForPayPlusAsync(
+        Order order,
+        SitePaymentCredentials creds,
+        CancellationToken cancelToken)
+    {
+        // Only SavedCard orders place a server-side hold; kiosk/SMS credit orders go through the hosted page.
+        if (!string.Equals(order.PaymentMethod, "SavedCard", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        // A hosted-page session already owns this order's payment lifecycle.
+        if (!string.IsNullOrWhiteSpace(order.PayPlusPageRequestUid))
+            return;
+
+        if (creds.ApiPasswordStoredButUnreadable || string.IsNullOrWhiteSpace(creds.ApiPassword))
+        {
+            await MarkSavedCardHoldFailedAsync(order,
+                "PayPlus secret key is missing or unreadable. Re-save it in PayPlus settings.",
+                cancelToken, PaymentGatewayProviderId.PayPlus);
+            return;
+        }
+
+        if (order.CustomerPaymentMethodId is not > 0 && order.CustomerId is int cid)
+        {
+            var defaultPm = await _paymentStorage.GetDefaultPaymentMethodAsync(
+                cid, order.SiteId, cancelToken, PaymentGatewayProviderId.PayPlus);
+            if (defaultPm != null)
+            {
+                order.CustomerPaymentMethodId = defaultPm.Id;
+                order.PayPlusCardLast4 = defaultPm.Last4Digits;
+                order.PayPlusCardBrand = defaultPm.CardBrand;
+                order.PaymentGateway = PaymentGatewayProviderId.PayPlus;
+                order.PaymentSettleStatus ??= PaymentSettleStatus.Initiated;
+            }
+        }
+
+        CustomerPaymentMethod? pm = null;
+        if (order.CustomerPaymentMethodId is int pmId)
+            pm = await _paymentStorage.GetPaymentMethodByIdAsync(pmId, cancelToken);
+        else if (order.CustomerId is int customerId)
+            pm = await _paymentStorage.GetDefaultPaymentMethodAsync(
+                customerId, order.SiteId, cancelToken, PaymentGatewayProviderId.PayPlus);
+
+        if (pm == null || !string.Equals(pm.GatewayProvider, PaymentGatewayProviderId.PayPlus, StringComparison.OrdinalIgnoreCase))
+        {
+            await MarkSavedCardHoldFailedAsync(order,
+                pm == null
+                    ? "No saved card on file for this customer."
+                    : "Saved card belongs to a different payment gateway.",
+                cancelToken, PaymentGatewayProviderId.PayPlus);
+            return;
+        }
+
+        if (!_tokenProtector.TryUnprotect(pm.EncryptedToken, out var token) || string.IsNullOrWhiteSpace(token))
+        {
+            await MarkSavedCardHoldFailedAsync(order,
+                "Saved card unreadable (encryption changed). Remove card and pay again.",
+                cancelToken, PaymentGatewayProviderId.PayPlus);
+            return;
+        }
+
+        var authAmount = ComputeAuthorizationAmount(order, creds);
+        var hold = await _payPlus.PlaceTokenAuthorizationHoldAsync(creds, new PlaceTokenAuthorizationHoldRequest
+        {
+            Amount = authAmount,
+            Token = token,
+            ExternalUniqTranId = $"hold-{order.Id}-{DateTime.UtcNow:yyyyMMddHHmmss}",
+        }, cancelToken);
+
+        await LogEventAsync(order.Id, "TokenAuthorizationHold", hold.ResponseCode.ToString(), hold.Description,
+            hold.TranzactionId, MaskToken(token), authAmount, hold.RawJson, cancelToken,
+            provider: PaymentGatewayProviderId.PayPlus);
+
+        if (!hold.Success)
+        {
+            order.PaymentSettleStatus = PaymentSettleStatus.Failed;
+            order.ExternalPaymentStatus = TruncatePaymentStatusMessage(hold.Description ?? "Authorization hold failed");
+            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            return;
+        }
+
+        order.PaymentGateway = PaymentGatewayProviderId.PayPlus;
+        order.PaymentSettleStatus = PaymentSettleStatus.Authorized;
+        order.PaymentAuthorizedAmount = authAmount;
+        order.PayPlusTransactionUid = hold.TranzactionId;
+        order.GatewayPaymentTransactionId = hold.TranzactionId;
+        order.PaymentReference = hold.TranzactionId;
+        order.CustomerPaymentMethodId = pm.Id;
+        order.PayPlusCardLast4 = pm.Last4Digits ?? order.PayPlusCardLast4;
+        order.PayPlusCardBrand = pm.CardBrand ?? order.PayPlusCardBrand;
+        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await TrySendPhoneNewOrderSmsAfterSavedCardHoldAsync(order, cancelToken);
+    }
+
+    /// <summary>
+    /// Manual "sync from gateway" recovery for PayPlus website orders (sibling of the Cardcom body of
+    /// SyncWooGatewayPaymentFromCardcomAsync): re-asks PayPlus what actually happened and applies the
+    /// verified state. Falls back to a page-request (IPN) inquiry when no transaction_uid was ever stored —
+    /// exactly the stuck-Initiated case this button exists to rescue.
+    /// </summary>
+    private async Task<IApiResponse<SyncGatewayPaymentRes>> SyncWooGatewayPaymentFromPayPlusAsync(
+        Order order,
+        ApiResponse<SyncGatewayPaymentRes> response,
+        CancellationToken cancelToken)
+    {
+        var settle = (order.PaymentSettleStatus ?? "").Trim();
+        var alreadyCaptured = string.Equals(order.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(settle, PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase);
+        var refundedState = string.Equals(settle, PaymentSettleStatus.Refunded, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(settle, PaymentSettleStatus.PartiallyRefunded, StringComparison.OrdinalIgnoreCase);
+        if (alreadyCaptured || refundedState)
+        {
+            await TryVerifyWooGatewayChargeAsync(order, cancelToken).ConfigureAwait(false);
+            var verifiedMismatch = order.GatewayAmountMismatch == true;
+            response.Data = new SyncGatewayPaymentRes
+            {
+                Outcome = "AlreadyPaid",
+                Message = verifiedMismatch
+                    ? $"Order is marked paid, but PayPlus reports {order.GatewayVerifiedAmount:0.##} ₪ (order total {order.Total:0.##} ₪)."
+                    : "Order is already marked as paid.",
+                TransactionId = CoalesceNonEmpty(order.PayPlusTransactionUid, order.GatewayPaymentTransactionId) ?? order.PaymentReference,
+                Amount = order.GatewayVerifiedAmount,
+                PaymentStatus = order.PaymentStatus,
+                PaymentSettleStatus = order.PaymentSettleStatus,
+            };
+            return response;
+        }
+
+        var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
+        if (creds == null || creds.ProviderId != PaymentGatewayProviderId.PayPlus
+            || creds.ApiPasswordStoredButUnreadable || string.IsNullOrWhiteSpace(creds.ApiPassword))
+        {
+            response.Data = new SyncGatewayPaymentRes
+            {
+                Outcome = "GatewayNotConfigured",
+                Message = "PayPlus is not configured (or its secret key is unreadable) for this site.",
+                PaymentStatus = order.PaymentStatus,
+                PaymentSettleStatus = order.PaymentSettleStatus,
+            };
+            return CreateResponse(response, StatusCode.InvalidRequest, response.Data.Message);
+        }
+
+        var txRaw = CoalesceNonEmpty(order.PayPlusTransactionUid, order.GatewayPaymentTransactionId) ?? order.PaymentReference;
+        CardcomTransactionInfoResult info;
+        if (!string.IsNullOrWhiteSpace(txRaw))
+        {
+            info = await _payPlus.InquireTransactionAsync(creds, txRaw.Trim(), cancelToken).ConfigureAwait(false);
+        }
+        else if (!string.IsNullOrWhiteSpace(order.PayPlusPageRequestUid))
+        {
+            info = await _payPlus.InquirePageRequestAsync(creds, order.PayPlusPageRequestUid.Trim(), cancelToken).ConfigureAwait(false);
+        }
+        else
+        {
+            response.Data = new SyncGatewayPaymentRes
+            {
+                Outcome = "MissingTransactionId",
+                Message = "No PayPlus transaction or page-request id on the order. Cannot query PayPlus.",
+                PaymentStatus = order.PaymentStatus,
+                PaymentSettleStatus = order.PaymentSettleStatus,
+            };
+            return CreateResponse(response, StatusCode.InvalidRequest, response.Data.Message);
+        }
+
+        _logger.LogInformation(
+            "SyncWooGatewayPaymentFromPayPlus orderId={OrderId} tx={TransactionId} responseCode={ResponseCode} dealType={DealType} isFinalCharge={IsFinalCharge} isHold={IsHold}",
+            order.Id, txRaw ?? order.PayPlusPageRequestUid, info.ResponseCode, info.DealType, info.IsFinalCharge, info.IsAuthorizationHold);
+
+        if (!info.Success)
+        {
+            response.Data = new SyncGatewayPaymentRes
+            {
+                Outcome = "GatewayError",
+                Message = info.Description ?? "PayPlus did not confirm a transaction for this order.",
+                TransactionId = txRaw,
+                PaymentStatus = order.PaymentStatus,
+                PaymentSettleStatus = order.PaymentSettleStatus,
+            };
+            return CreateResponse(response, StatusCode.InvalidRequest, response.Data.Message);
+        }
+
+        if (info.IsRefund == true)
+        {
+            response.Data = new SyncGatewayPaymentRes
+            {
+                Outcome = "NotCharged",
+                Message = info.Description ?? "Transaction was refunded at PayPlus.",
+                TransactionId = txRaw,
+                DealType = info.DealType,
+                Amount = info.Amount,
+                PaymentStatus = order.PaymentStatus,
+                PaymentSettleStatus = order.PaymentSettleStatus,
+            };
+            return response;
+        }
+
+        // Applies hold → Authorized / final charge → Captured (+ verification verdict + store push).
+        await ApplyVerifiedPayPlusInfoAsync(order, info, txRaw, "manual sync", cancelToken).ConfigureAwait(false);
+
+        if (info.IsFinalCharge)
+        {
+            await LogEventAsync(order.Id, "CaptureAuthorization", "0", $"PayPlus sync ({info.DealType ?? "charged"})",
+                info.TranzactionId ?? txRaw, null, info.Amount ?? order.Total, info.RawJson, cancelToken,
+                provider: PaymentGatewayProviderId.PayPlus).ConfigureAwait(false);
+        }
+
+        response.Data = new SyncGatewayPaymentRes
+        {
+            Outcome = info.IsFinalCharge ? "Synced"
+                : info.IsAuthorizationHold ? "AuthorizationHoldOnly"
+                : "NotCharged",
+            Message = info.IsFinalCharge
+                ? (info.Description ?? "Payment status synced from PayPlus.")
+                : info.IsAuthorizationHold
+                    ? "PayPlus shows an authorization hold — order marked as authorized (not charged yet)."
+                    : (info.Description ?? "PayPlus did not confirm a final charge for this transaction."),
+            TransactionId = info.TranzactionId ?? txRaw,
+            DealType = info.DealType,
+            Amount = info.Amount,
+            PaymentStatus = order.PaymentStatus,
+            PaymentSettleStatus = order.PaymentSettleStatus,
+        };
+        return response;
     }
 
     /// <summary>
