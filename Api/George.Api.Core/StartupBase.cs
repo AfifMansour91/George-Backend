@@ -405,6 +405,7 @@ namespace George.Api.Core
 			services.AddScoped<RevenueReportStorage>();
 			services.AddScoped<ProductsReportStorage>();
 			services.AddScoped<QuantityConcentrationReportStorage>();
+			services.AddScoped<OrdersReportStorage>();
 			services.AddScoped<CustomerStorage>();
 			services.AddScoped<OrderReceptionStorage>();
 			services.AddScoped<PrintJobStorage>();
@@ -420,6 +421,7 @@ namespace George.Api.Core
 			services.AddScoped<IdentityService>();
 			services.AddScoped<UserService>();
 			services.AddScoped<AccountService>();
+			services.AddScoped<AccountSmsService>();
 
 			services.AddScoped<BusinessTypeService>();
 			services.AddScoped<SiteService>();
@@ -445,6 +447,7 @@ namespace George.Api.Core
 			services.AddScoped<ProductsReportService>();
 			services.AddScoped<InventoryReportService>();
 			services.AddScoped<QuantityConcentrationReportService>();
+			services.AddScoped<OrdersReportService>();
 			services.AddScoped<IntegrationLogService>();
 			services.AddScoped<CustomerService>();
 			services.AddScoped<OrderReceptionService>();
@@ -558,12 +561,15 @@ namespace George.Api.Core
 			CacheManager.SetCacheInterval(SysConfig.Data.CacheIntervalInSec);
 
 
-            SmsProvider.Init("https://webapi.mymarketing.co.il/api/smscampaign/OperationalMessage",
-                "0X614FC42DF9E797A0738F2BC8F3211E35EBC29E247603CDFBD9865FC00C7FF0ECEBE00C4034D90AEAF27B45498AF9453C",
-				"StoreOS",
-				"0545555555",
-                "StoreOS",
-                "StoreOS",
+            // System-wide (default) SMS account; per-account overrides live in AccountSmsSettings (see AccountSmsService).
+            // Configuration wins; hard-coded values remain as fallback for environments without an Sms section.
+            SmsProvider.Init(
+                Configuration["Sms:ApiBaseUrl"] ?? "https://webapi.mymarketing.co.il/api/smscampaign/OperationalMessage",
+                Configuration["Sms:AuthToken"] ?? "0X614FC42DF9E797A0738F2BC8F3211E35EBC29E247603CDFBD9865FC00C7FF0ECEBE00C4034D90AEAF27B45498AF9453C",
+                Configuration["Sms:Username"] ?? "StoreOS",
+                Configuration["Sms:SourcePhone"] ?? "0545555555",
+                Configuration["Sms:CampaignUrl"] ?? "StoreOS",
+                Configuration["Sms:DisplayName"] ?? "StoreOS",
                 otpWebOriginHost: Configuration["Auth:OtpSmsWebOriginHost"]);
  
 

@@ -22,6 +22,7 @@ public partial class PaymentService : ServiceBase
     private readonly AccountStorage _accountStorage;
     private readonly CustomerStorage _customerStorage;
     private readonly SmsProvider _smsProvider;
+    private readonly AccountSmsService _accountSmsService;
     private readonly PaymentTokenProtector _tokenProtector;
     private readonly CardcomGateway _cardcom;
     private readonly PayPlusGateway _payPlus;
@@ -39,6 +40,7 @@ public partial class PaymentService : ServiceBase
         AccountStorage accountStorage,
         CustomerStorage customerStorage,
         SmsProvider smsProvider,
+        AccountSmsService accountSmsService,
         PaymentTokenProtector tokenProtector,
         CardcomGateway cardcom,
         PayPlusGateway payPlus,
@@ -52,6 +54,7 @@ public partial class PaymentService : ServiceBase
         _accountStorage = accountStorage;
         _customerStorage = customerStorage;
         _smsProvider = smsProvider;
+        _accountSmsService = accountSmsService;
         _tokenProtector = tokenProtector;
         _cardcom = cardcom;
         _payPlus = payPlus;
@@ -301,10 +304,11 @@ public partial class PaymentService : ServiceBase
                 "Payment link is missing from SMS message. Add [payment_url] to the payment SMS template in notification settings.");
         }
 
-        if (!SmsProvider.IsInitialized)
+        var smsConfig = await _accountSmsService.GetAccountConfigAsync(order.AccountId, cancelToken);
+        if (!SmsProvider.CanSendWith(smsConfig))
             return CreateResponse(new ApiResponse<SendPaymentSmsRes>(), StatusCode.InvalidRequest, "SMS provider is not configured.");
 
-        var sent = await _smsProvider.SendTextAsync(phone, body, cancelToken);
+        var sent = await _smsProvider.SendTextAsync(phone, body, smsConfig, cancelToken);
         if (!sent)
             return CreateResponse(new ApiResponse<SendPaymentSmsRes>(), StatusCode.InvalidRequest, "SMS send failed.");
 
@@ -501,7 +505,8 @@ public partial class PaymentService : ServiceBase
         var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
         try
         {
-            if (!SmsProvider.IsInitialized)
+            var smsConfig = await _accountSmsService.GetAccountConfigAsync(order.AccountId, cancelToken);
+            if (!SmsProvider.CanSendWith(smsConfig))
             {
                 _logger.LogWarning(
                     "SMS provider not initialized; skipping new-order SMS after saved-card hold for order {OrderId}.",
@@ -509,7 +514,7 @@ public partial class PaymentService : ServiceBase
                 return;
             }
 
-            var sent = await _smsProvider.SendTextAsync(order.CustomerPhone, body, cancelToken);
+            var sent = await _smsProvider.SendTextAsync(order.CustomerPhone, body, smsConfig, cancelToken);
             if (sent)
             {
                 await LogEventAsync(order.Id, "NewOrderSms", "0", MaskPhone(order.CustomerPhone.Trim()), null, null,
@@ -997,7 +1002,8 @@ public partial class PaymentService : ServiceBase
             return CreateResponse(response, StatusCode.InvalidRequest,
                 "Customer phone is required to send the credit invoice by SMS.");
 
-        if (!SmsProvider.IsInitialized)
+        var smsConfig = await _accountSmsService.GetAccountConfigAsync(order.AccountId, cancelToken);
+        if (!SmsProvider.CanSendWith(smsConfig))
             return CreateResponse(response, StatusCode.InvalidRequest, "SMS provider is not configured.");
 
         var amount = order.RefundedAmount ?? 0m;
@@ -1005,7 +1011,7 @@ public partial class PaymentService : ServiceBase
         if (!body.Contains(url, StringComparison.OrdinalIgnoreCase))
             body = $"{body.TrimEnd()}\n{url}";
 
-        var sent = await _smsProvider.SendTextAsync(phone, body, cancelToken);
+        var sent = await _smsProvider.SendTextAsync(phone, body, smsConfig, cancelToken);
         if (!sent)
             return CreateResponse(response, StatusCode.InvalidRequest,
                 "Could not send credit invoice SMS. Check customer phone and SMS provider configuration.");
@@ -2352,7 +2358,7 @@ public partial class PaymentService : ServiceBase
                 return;
             }
 
-            var reason = DescribeInvoiceSmsSkipReason(order);
+            var reason = await DescribeInvoiceSmsSkipReasonAsync(order, cancelToken);
             await LogEventAsync(order.Id, "InvoiceSms", "Skipped", reason, null, null, order.Total, null,
                 cancelToken);
             _logger.LogInformation(
@@ -2412,7 +2418,7 @@ public partial class PaymentService : ServiceBase
                 return;
             }
 
-            var reason = DescribeInvoiceSmsSkipReason(order);
+            var reason = await DescribeInvoiceSmsSkipReasonAsync(order, cancelToken);
             await LogEventAsync(order.Id, "InvoiceSms", "Skipped", reason, null, null, order.Total, null,
                 cancelToken);
             _logger.LogInformation(
@@ -2470,13 +2476,13 @@ public partial class PaymentService : ServiceBase
             await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
     }
 
-    private static string DescribeInvoiceSmsSkipReason(Order order)
+    private async Task<string> DescribeInvoiceSmsSkipReasonAsync(Order order, CancellationToken cancelToken)
     {
         if (string.IsNullOrWhiteSpace(order.CardcomDocumentUrl) && string.IsNullOrWhiteSpace(order.PayPlusDocumentUrl))
             return "missing invoice document URL";
         if (string.IsNullOrWhiteSpace(order.CustomerPhone))
             return "missing customer phone";
-        if (!SmsProvider.IsInitialized)
+        if (!await _accountSmsService.CanSendForAccountAsync(order.AccountId, cancelToken))
             return "SMS provider not configured";
         return "SMS send failed";
     }
@@ -2494,7 +2500,8 @@ public partial class PaymentService : ServiceBase
         if (string.IsNullOrWhiteSpace(phone))
             return (false, null);
 
-        if (!SmsProvider.IsInitialized)
+        var smsConfig = await _accountSmsService.GetAccountConfigAsync(order.AccountId, cancelToken);
+        if (!SmsProvider.CanSendWith(smsConfig))
             return (false, null);
 
         var body = await BuildInvoiceSmsBodyAsync(order, url, cancelToken);
@@ -2504,7 +2511,7 @@ public partial class PaymentService : ServiceBase
             body = $"{body.TrimEnd()}\n{url.Trim()}";
         }
 
-        var sent = await _smsProvider.SendTextAsync(phone, body, cancelToken);
+        var sent = await _smsProvider.SendTextAsync(phone, body, smsConfig, cancelToken);
         return sent ? (true, MaskPhone(phone)) : (false, null);
     }
 
@@ -2517,13 +2524,17 @@ public partial class PaymentService : ServiceBase
         CancellationToken cancelToken)
     {
         var phone = (order.CustomerPhone ?? "").Trim();
-        if (string.IsNullOrWhiteSpace(phone) || !SmsProvider.IsInitialized)
+        if (string.IsNullOrWhiteSpace(phone))
+            return;
+
+        var smsConfig = await _accountSmsService.GetAccountConfigAsync(order.AccountId, cancelToken);
+        if (!SmsProvider.CanSendWith(smsConfig))
             return;
 
         try
         {
             var body = await BuildRefundSmsBodyAsync(order, refundDocumentUrl ?? "", refundAmount, cancelToken);
-            var sent = await _smsProvider.SendTextAsync(phone, body, cancelToken);
+            var sent = await _smsProvider.SendTextAsync(phone, body, smsConfig, cancelToken);
             if (sent)
             {
                 await LogEventAsync(order.Id, "RefundSms", "0", MaskPhone(phone), refundTransactionId, null,

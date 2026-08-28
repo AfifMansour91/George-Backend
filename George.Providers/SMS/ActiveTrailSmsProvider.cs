@@ -42,17 +42,24 @@ namespace George.Providers.ActiveTrail
 				IsInitialized = false;
 		}
 		
-		public async Task<HttpHelperResult<string>?> SendSmsAsync(string phone, string campaignName, string text, CancellationToken cancelToken = default)
+		public async Task<HttpHelperResult<string>?> SendSmsAsync(string phone, string campaignName, string text, SmsAccountConfig? accountConfig = null, CancellationToken cancelToken = default)
 		{
-			VerifyInit();
+			// A valid per-account config carries its own credentials, so the static (system) init is not required for it.
+			bool useAccountConfig = accountConfig?.IsValid == true;
+			if (!useAccountConfig)
+				VerifyInit();
+
+			string displayName = useAccountConfig ? accountConfig!.FromName : _displayName;
+			string apiBaseUrl = useAccountConfig && accountConfig!.ApiBaseUrl.HasValue() ? accountConfig.ApiBaseUrl! : _apiBaseUrl;
+			string authToken = useAccountConfig ? accountConfig!.ApiToken : _authToken;
 
 			// Build the request.
 			var body = new ActiveTrailSmsReq {
 				Details = new DetailsReq {
 					Content = text,
-					Name = _displayName,
+					Name = displayName,
 					//CampaignName = campaignName,
-					FromName = _displayName,
+					FromName = displayName,
 					CanUnsubscribe = false,
 				},
 				Mobiles = new List<MobileReq>
@@ -68,22 +75,22 @@ namespace George.Providers.ActiveTrail
 			};
 
 			// Send it.
-			return await ExecuteAsync(_apiBaseUrl, body);
+			return await ExecuteAsync(apiBaseUrl, authToken, body);
 		}
 
 
 		//*************************    Private Methods    ************************//
-		
+
 		private void VerifyInit()
 		{
-			if(!IsInitialized) 
+			if(!IsInitialized)
 				throw new GeorgeNotInitializedException("SMS provider is not initialized");
 		}
-		
-		private async Task<HttpHelperResult<string>?> ExecuteAsync(string url, ActiveTrailSmsReq? req = null, CancellationToken cancelToken = default)
+
+		private async Task<HttpHelperResult<string>?> ExecuteAsync(string url, string authToken, ActiveTrailSmsReq? req = null, CancellationToken cancelToken = default)
 		{
 			// Set authentication.
-			_httpHelper.SetHttpHeaderKey("Authorization", _authToken);
+			_httpHelper.SetHttpHeaderKey("Authorization", authToken);
 
 			// Sens the request to active trail API.
 			return await _httpHelper.HttpPostAsync<ActiveTrailSmsReq>(req, url, cancelToken);

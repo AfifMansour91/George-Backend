@@ -83,18 +83,30 @@ namespace George.Providers
 
         public async Task<bool> SendTextAsync(string phone, string text, CancellationToken cancelToken = default)
         {
-            VerifyInit();
+            return await SendTextAsync(phone, text, accountConfig: null, cancelToken);
+        }
+
+        /// <summary>Send with per-account credentials; a null/invalid <paramref name="accountConfig"/> falls back to the system-wide SMS account.</summary>
+        public async Task<bool> SendTextAsync(string phone, string text, SmsAccountConfig? accountConfig, CancellationToken cancelToken = default)
+        {
+            VerifyInit(accountConfig);
 
             var phones = new List<string>() { phone };
 
-            return await SendAsync(phones, text, cancelToken);
+            return await SendAsync(phones, text, accountConfig, cancelToken);
         }
 
         public async Task<bool> SendTextAsync(List<string> phones, string text, CancellationToken cancelToken = default)
         {
             VerifyInit();
 
-            return await SendAsync(phones, text, cancelToken);
+            return await SendAsync(phones, text, accountConfig: null, cancelToken);
+        }
+
+        /// <summary>True when a send can go out either via the given account config or via the system-wide account.</summary>
+        public static bool CanSendWith(SmsAccountConfig? accountConfig)
+        {
+            return accountConfig?.IsValid == true || IsInitialized;
         }
 
         public async Task<bool> SendLoginMessageAsync(string phone, int languageId, string otp, CancellationToken cancelToken = default)
@@ -140,13 +152,17 @@ namespace George.Providers
             string otpText = string.Join(Environment.NewLine, lines);
 
             var phones = new List<string>() { phone };
-            return await SendAsync(phones, otpText, cancelToken);
+            return await SendAsync(phones, otpText, accountConfig: null, cancelToken);
         }
 
         //*************************    Private Methods    ************************//
 
-        private void VerifyInit()
+        private void VerifyInit(SmsAccountConfig? accountConfig = null)
         {
+            // A valid per-account config carries its own credentials, so the system-wide init is not required for it.
+            if (accountConfig?.IsValid == true)
+                return;
+
             if (!IsInitialized)
                 throw new GeorgeNotInitializedException("SMS provider is not initialized");
         }
@@ -212,7 +228,7 @@ namespace George.Providers
             try
             {
                 //var response = await _provider.SendSmsAsync(text, phones, cancelToken);
-                var response = await _provider.SendSmsAsync(phones.First(), campaignName: CAMPAIGN_NAME, text, cancelToken);
+                var response = await _provider.SendSmsAsync(phones.First(), campaignName: CAMPAIGN_NAME, text, accountConfig: null, cancelToken);
                 if (!response.IsSuccessful)
                 {
                     _logger.LogError($"Failed to send SMS.");
@@ -228,14 +244,14 @@ namespace George.Providers
             return true;
         }
 
-        private async Task<bool> SendAsync(List<string> phones, string text, CancellationToken cancelToken = default)
+        private async Task<bool> SendAsync(List<string> phones, string text, SmsAccountConfig? accountConfig, CancellationToken cancelToken = default)
         {
             _logger.LogTrace($"Sending SMS to {phones.Count} phones (first one is {phones[0]}).");
 
             try
             {
                 //var response = await _provider.SendSmsAsync(text, phones, cancelToken);
-                var response = await _provider.SendSmsAsync(phones.First(), campaignName: CAMPAIGN_NAME, text, cancelToken);
+                var response = await _provider.SendSmsAsync(phones.First(), campaignName: CAMPAIGN_NAME, text, accountConfig, cancelToken);
                 if (!response.IsSuccessful)
                 {
                     _logger.LogError($"Failed to send SMS.");
