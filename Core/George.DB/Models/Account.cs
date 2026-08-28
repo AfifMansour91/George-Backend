@@ -99,6 +99,9 @@ public partial class Account
     public virtual ICollection<AccountNotificationSettings> AccountNotificationSettings { get; set; } = new List<AccountNotificationSettings>();
 
     [InverseProperty("Account")]
+    public virtual ICollection<AccountSmsSettings> AccountSmsSettings { get; set; } = new List<AccountSmsSettings>();
+
+    [InverseProperty("Account")]
     public virtual ICollection<AccountWizardStepData> AccountWizardStepData { get; set; } = new List<AccountWizardStepData>();
 
     [InverseProperty("Account")]

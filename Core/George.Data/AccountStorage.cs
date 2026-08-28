@@ -286,6 +286,49 @@ namespace George.Data
             return true;
         }
 
+        public async Task<AccountSmsSettings?> GetSmsSettingsAsync(int accountId, CancellationToken cancelToken)
+        {
+            return await _dbContext.AccountSmsSettings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.AccountId == accountId, cancelToken);
+        }
+
+        public async Task<AccountSmsSettings> UpsertSmsSettingsAsync(AccountSmsSettings settings, CancellationToken cancelToken)
+        {
+            var existing = await _dbContext.AccountSmsSettings
+                .FirstOrDefaultAsync(s => s.AccountId == settings.AccountId, cancelToken);
+            if (existing != null)
+            {
+                existing.IsEnabled = settings.IsEnabled;
+                existing.Provider = settings.Provider;
+                existing.ApiBaseUrl = settings.ApiBaseUrl;
+                existing.ApiToken = settings.ApiToken;
+                existing.FromName = settings.FromName;
+                existing.SourcePhone = settings.SourcePhone;
+                existing.UpdatedDate = DateTime.UtcNow;
+                existing.UpdateUserId = settings.UpdateUserId;
+                await _dbContext.SaveChangesAsync(cancelToken);
+                return existing;
+            }
+
+            settings.CreationTime = DateTime.UtcNow;
+            _dbContext.AccountSmsSettings.Add(settings);
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return settings;
+        }
+
+        /// <summary>Remove the account's SMS credentials row so it goes back to the system-wide SMS account. Hard delete — the unique AccountId index must stay free for a future row.</summary>
+        public async Task<bool> DeleteSmsSettingsAsync(int accountId, CancellationToken cancelToken)
+        {
+            var existing = await _dbContext.AccountSmsSettings
+                .FirstOrDefaultAsync(s => s.AccountId == accountId, cancelToken);
+            if (existing == null)
+                return false;
+            _dbContext.AccountSmsSettings.Remove(existing);
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return true;
+        }
+
         public async Task<Account?> DeleteAccountAsync(int id, CancellationToken cancelToken = default)
         {
             var dbModel = await _dbContext.Account

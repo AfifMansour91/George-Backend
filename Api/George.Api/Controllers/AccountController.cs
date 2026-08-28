@@ -14,10 +14,12 @@ namespace George.Api.Controllers
     public class AccountController : GeorgeControllerBase, IAuthUserProvider
     {
         private readonly AccountService _accountSvc;
+        private readonly AccountSmsService _accountSmsSvc;
 
-        public AccountController(AccountService accountSvc, ILogger<AccountController> logger) : base(logger)
+        public AccountController(AccountService accountSvc, AccountSmsService accountSmsSvc, ILogger<AccountController> logger) : base(logger)
         {
             _accountSvc = accountSvc;
+            _accountSmsSvc = accountSmsSvc;
         }
 
         [AllowAnonymous]
@@ -80,6 +82,38 @@ namespace George.Api.Controllers
         public async Task<IActionResult> DeleteNotificationSettingsOverrideAsync([FromRoute] int accountId, [FromQuery] int siteId, CancellationToken cancelToken = default)
         {
             return await SafeCallWithErrorCatchingAsync(() => _accountSvc.DeleteNotificationSettingsOverrideAsync(accountId, siteId, cancelToken));
+        }
+
+        /// <summary>Per-account SMS account settings (token returned masked). No row / disabled = the account uses the system-wide SMS account.</summary>
+        [HttpGet("{accountId:int}/sms-settings")]
+        [ProducesResponseType(typeof(IApiResponse<AccountSmsSettingsRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetSmsSettingsAsync([FromRoute] int accountId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _accountSmsSvc.GetSettingsAsync(accountId, cancelToken));
+        }
+
+        /// <summary>Save per-account SMS credentials. An empty ApiToken keeps the stored token.</summary>
+        [HttpPut("{accountId:int}/sms-settings")]
+        [ProducesResponseType(typeof(IApiResponse<AccountSmsSettingsRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> UpsertSmsSettingsAsync([FromRoute] int accountId, [FromBody] AccountSmsSettingsReq req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _accountSmsSvc.UpsertSettingsAsync(accountId, req, cancelToken));
+        }
+
+        /// <summary>Remove the account's SMS credentials; it goes back to the system-wide SMS account.</summary>
+        [HttpDelete("{accountId:int}/sms-settings")]
+        [ProducesResponseType(typeof(IApiResponse<AccountSmsSettingsRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> DeleteSmsSettingsAsync([FromRoute] int accountId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _accountSmsSvc.DeleteSettingsAsync(accountId, cancelToken));
+        }
+
+        /// <summary>Send a test SMS using the account's saved SMS settings (save first, then test).</summary>
+        [HttpPost("{accountId:int}/sms-settings/test")]
+        [ProducesResponseType(typeof(IApiResponse<AccountSmsTestRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> SendSmsTestAsync([FromRoute] int accountId, [FromBody] AccountSmsTestReq req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _accountSmsSvc.SendTestAsync(accountId, req, cancelToken));
         }
 
         [HttpGet("{accountId:int}/wizard-session")]

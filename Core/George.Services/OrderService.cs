@@ -32,6 +32,7 @@ namespace George.Services
         private readonly ProductStorage _productStorage;
         private readonly UserStorage _userStorage;
         private readonly SmsProvider _smsProvider;
+        private readonly AccountSmsService _accountSmsService;
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly PrintJobService _printJobService;
         private readonly PromotionStorage _promotionStorage;
@@ -67,6 +68,7 @@ namespace George.Services
             ProductStorage productStorage,
             UserStorage userStorage,
             SmsProvider smsProvider,
+            AccountSmsService accountSmsService,
             IServiceScopeFactory serviceScopeFactory,
             PrintJobService printJobService,
             PromotionStorage promotionStorage,
@@ -84,6 +86,7 @@ namespace George.Services
             _productStorage = productStorage;
             _userStorage = userStorage;
             _smsProvider = smsProvider;
+            _accountSmsService = accountSmsService;
             _serviceScopeFactory = serviceScopeFactory;
             _printJobService = printJobService;
             _promotionStorage = promotionStorage;
@@ -367,12 +370,13 @@ namespace George.Services
             var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
             try
             {
-                if (!SmsProvider.IsInitialized)
+                var smsConfig = await _accountSmsService.GetAccountConfigAsync(order.AccountId, cancelToken).ConfigureAwait(false);
+                if (!SmsProvider.CanSendWith(smsConfig))
                 {
                     _logger.LogWarning("SMS provider not initialized; skipping new-order customer SMS.");
                     return;
                 }
-                var sent = await _smsProvider.SendTextAsync(order.CustomerPhone, body, cancelToken).ConfigureAwait(false);
+                var sent = await _smsProvider.SendTextAsync(order.CustomerPhone, body, smsConfig, cancelToken).ConfigureAwait(false);
                 if (!sent)
                     _logger.LogWarning("New-order customer SMS returned false for order {OrderId}.", order.Id);
             }
@@ -409,7 +413,8 @@ namespace George.Services
             var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
             try
             {
-                if (!SmsProvider.IsInitialized)
+                var smsConfig = await _accountSmsService.GetAccountConfigAsync(order.AccountId, cancelToken).ConfigureAwait(false);
+                if (!SmsProvider.CanSendWith(smsConfig))
                 {
                     _logger.LogWarning("SMS provider not initialized; skipping new-order manager SMS for order {OrderId}.", order.Id);
                     return;
@@ -418,7 +423,7 @@ namespace George.Services
                 var anySent = false;
                 foreach (var phone in phones)
                 {
-                    var sent = await _smsProvider.SendTextAsync(phone, body, cancelToken).ConfigureAwait(false);
+                    var sent = await _smsProvider.SendTextAsync(phone, body, smsConfig, cancelToken).ConfigureAwait(false);
                     if (sent)
                         anySent = true;
                     else
@@ -455,12 +460,13 @@ namespace George.Services
             var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
             try
             {
-                if (!SmsProvider.IsInitialized)
+                var smsConfig = await _accountSmsService.GetAccountConfigAsync(order.AccountId, cancelToken).ConfigureAwait(false);
+                if (!SmsProvider.CanSendWith(smsConfig))
                 {
                     _logger.LogWarning("SMS provider not initialized; skipping ready-order customer SMS.");
                     return;
                 }
-                var sent = await _smsProvider.SendTextAsync(order.CustomerPhone, body, cancelToken).ConfigureAwait(false);
+                var sent = await _smsProvider.SendTextAsync(order.CustomerPhone, body, smsConfig, cancelToken).ConfigureAwait(false);
                 if (!sent)
                     _logger.LogWarning("Ready-order customer SMS returned false for order {OrderId}.", order.Id);
             }
@@ -510,12 +516,13 @@ namespace George.Services
             var body = NotificationMessageHelper.ReplaceOrderPlaceholders(template, order);
             try
             {
-                if (!SmsProvider.IsInitialized)
+                var smsConfig = await _accountSmsService.GetAccountConfigAsync(order.AccountId, cancelToken).ConfigureAwait(false);
+                if (!SmsProvider.CanSendWith(smsConfig))
                 {
                     _logger.LogWarning("SMS provider not initialized; cannot send reminder.");
                     return CreateResponse(response, StatusCode.InvalidRequest, "SMS provider not initialized.");
                 }
-                var sent = await _smsProvider.SendTextAsync(order.CustomerPhone, body, cancelToken).ConfigureAwait(false);
+                var sent = await _smsProvider.SendTextAsync(order.CustomerPhone, body, smsConfig, cancelToken).ConfigureAwait(false);
                 response.Data = sent;
                 if (!sent)
                 {

@@ -18,6 +18,8 @@ public partial class GeorgeDBContextBase : DbContext
 
     public virtual DbSet<AccountNotificationSettings> AccountNotificationSettings { get; set; }
 
+    public virtual DbSet<AccountSmsSettings> AccountSmsSettings { get; set; }
+
     public virtual DbSet<AccountStatus> AccountStatus { get; set; }
 
     public virtual DbSet<AccountWizardStepData> AccountWizardStepData { get; set; }
@@ -205,6 +207,14 @@ public partial class GeorgeDBContextBase : DbContext
             entity.HasOne(d => d.Site).WithMany()
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_AccountNotificationSettings_Site");
+        });
+
+        modelBuilder.Entity<AccountSmsSettings>(entity =>
+        {
+            entity.Property(e => e.CreationTime).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.Provider).HasDefaultValue("ActiveTrail");
+
+            entity.HasOne(d => d.Account).WithMany(p => p.AccountSmsSettings).HasConstraintName("FK_AccountSmsSettings_Account");
         });
 
         modelBuilder.Entity<AccountWizardStepData>(entity =>
