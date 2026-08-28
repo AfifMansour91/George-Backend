@@ -141,7 +141,7 @@ public class PromotionRedemptionIdempotencyTests
         SeedPromotion(ctx);
         var storage = NewStorage(ctx);
 
-        // No George order with this external id (store using Promeng without order sync) — legacy aggregate.
+        // No George order with this external id (store using Promeng without order sync) - legacy aggregate.
         var recorded = await storage.RecordExternalRedemptionsAsync(
             SiteId,
             new[] { (PromoId, 5m, RedeemedAt, "web", (string?)"999") },

@@ -10,7 +10,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace George.Api.Controllers;
 
 /// <summary>
-/// Inbound redemption reports from WordPress Promeng — GIORGIO_API §2.1 <c>POST /redemptions</c>.
+/// Inbound redemption reports from WordPress Promeng - GIORGIO_API §2.1 <c>POST /redemptions</c>.
 /// Auth: site <c>InternalApiKey</c> via <c>X-Api-Key</c> or <c>Authorization: Bearer</c>.
 /// </summary>
 [Route("redemptions")]

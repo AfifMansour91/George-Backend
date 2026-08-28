@@ -38,7 +38,7 @@ namespace George.Services.Request
 
         public string? SeoDescription { get; set; }
 
-        /// <summary>Pre-existing WooCommerce taxonomy term id; usually null on create — sync fills it in.</summary>
+        /// <summary>Pre-existing WooCommerce taxonomy term id; usually null on create - sync fills it in.</summary>
         public int? WooCommerceBrandId { get; set; }
 
         /// <summary>If this brand was copied down from a GlobalBrand, the source id.</summary>

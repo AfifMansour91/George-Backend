@@ -9,7 +9,7 @@
 -- non-ASCII percent-encoded UTF-8, lowercase) and matching it to the stored slug.
 
 ------------------------------------------------------------------------------------------------
--- 0. Helper: WordPress-style slugify (encode direction — no UTF-8 collation needed)
+-- 0. Helper: WordPress-style slugify (encode direction - no UTF-8 collation needed)
 ------------------------------------------------------------------------------------------------
 GO
 CREATE OR ALTER FUNCTION dbo.fn_WooSlugifyForRepair(@s nvarchar(400))
@@ -85,7 +85,7 @@ SELECT @@ROWCOUNT AS SlugsRepaired;
 -- ROLLBACK;
 
 ------------------------------------------------------------------------------------------------
--- 3. Verify: remaining encoded rows (rows the slug-match could not resolve — e.g. the product has
+-- 3. Verify: remaining encoded rows (rows the slug-match could not resolve - e.g. the product has
 --    no ProductOptionValue rows at all). These need the Woo term names / a re-import of the product.
 ------------------------------------------------------------------------------------------------
 SELECT pv.ProductId, pvo.ProductVariantId, pvo.OptionName, pvo.OptionValue

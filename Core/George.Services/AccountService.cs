@@ -415,7 +415,7 @@ namespace George.Services
             return response;
         }
 
-        /// <summary>Save notification settings for a scope. siteId == null updates the account default; a siteId creates/updates that site's FULL override row (whole-row copy — the client sends the complete settings object).</summary>
+        /// <summary>Save notification settings for a scope. siteId == null updates the account default; a siteId creates/updates that site's FULL override row (whole-row copy - the client sends the complete settings object).</summary>
         public async Task<IApiResponse<SiteNotificationSettingsRes>> UpsertNotificationSettingsAsync(int accountId, int? siteId, NotificationSettingsReq req, CancellationToken cancelToken)
         {
             var response = new ApiResponse<SiteNotificationSettingsRes>();

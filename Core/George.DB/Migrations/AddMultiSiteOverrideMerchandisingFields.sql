@@ -1,4 +1,4 @@
--- Migration: MultiSite Phase 2 — per-site merchandising overrides on ProductSiteOverride.
+-- Migration: MultiSite Phase 2 - per-site merchandising overrides on ProductSiteOverride.
 -- Adds CostPrice, IsKosher, StatusId, VisibilityId, Slug, ShippingClassId, SupplierId and the storefront
 -- Label* fields so every product field a branch (selected-site) edit touches follows the same model as
 -- Price: a canonical all-sites value + an optional per-site override (null = inherit canonical).

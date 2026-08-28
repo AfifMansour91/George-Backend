@@ -184,7 +184,7 @@ public class DashboardStorage : StorageBase
     {
         if (siteIds.Count == 0) return new List<(Product, Site)>();
 
-        // Full include set so ProductCatalogStockClassification sees the real management mode —
+        // Full include set so ProductCatalogStockClassification sees the real management mode -
         // same navigations as ProductsReportStorage; without them a status-only or variation-managed
         // product is misclassified from a stale numeric StockQuantity (false "low stock" alerts).
         var products = await _dbContext.Product

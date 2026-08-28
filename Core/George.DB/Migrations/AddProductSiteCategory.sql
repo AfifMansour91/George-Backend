@@ -1,4 +1,4 @@
--- Migration: MultiSite Phase 2 — per-site category assignment (ProductSiteCategory).
+-- Migration: MultiSite Phase 2 - per-site category assignment (ProductSiteCategory).
 -- A product can be assigned to different categories per branch. When rows exist for a (product, site),
 -- they replace the canonical ProductCategory for that site (effective view). Idempotent.
 

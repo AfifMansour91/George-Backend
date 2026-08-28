@@ -1,4 +1,4 @@
--- Migration: MultiSite Phase 2 — per-site scalar field overrides on ProductSiteOverride.
+-- Migration: MultiSite Phase 2 - per-site scalar field overrides on ProductSiteOverride.
 -- Adds Name, ShortDescription, LongDescription, Weight, WeightUnit, Sku, SeoTitle, SeoDescription
 -- so name/description/weight/sku/seo can be overridden per branch (full per-site editing of scalars).
 -- Idempotent. Run after AddMultiSiteProductOverrides.sql.

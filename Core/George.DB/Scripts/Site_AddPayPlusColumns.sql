@@ -1,7 +1,7 @@
 -- Adds PayPlus payment-gateway columns to Site, parallel to the existing Cardcom* columns.
 -- PayPlusApiKey/PayPlusSecretKeyEncrypted reuse the same role as Cardcom's ApiName/ApiPasswordEncrypted;
 -- PayPlusPaymentPageUid is PayPlus's per-site identifier (no int terminal number concept like Cardcom).
--- Site.PaymentGatewayProvider (existing single string column) already enforces "one gateway per site" —
+-- Site.PaymentGatewayProvider (existing single string column) already enforces "one gateway per site" -
 -- no schema change needed for exclusivity itself.
 -- Run once against the George database. Safe to re-run.
 
@@ -35,7 +35,7 @@ BEGIN
 END
 GO
 
--- Invoice+ brand UID (issuing business) — required by books/docs/* ("brand-not-found" without it).
+-- Invoice+ brand UID (issuing business) - required by books/docs/* ("brand-not-found" without it).
 IF COL_LENGTH(N'dbo.Site', N'PayPlusInvoiceBrandUid') IS NULL
 BEGIN
     ALTER TABLE [dbo].[Site] ADD [PayPlusInvoiceBrandUid] NVARCHAR(64) NULL;

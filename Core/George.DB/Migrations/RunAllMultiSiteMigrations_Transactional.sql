@@ -1,5 +1,5 @@
 -- ============================================================================
--- MultiSite Phase 2 — RUN-ALL, TRANSACTION-WRAPPED variant.
+-- MultiSite Phase 2 - RUN-ALL, TRANSACTION-WRAPPED variant.
 -- Identical content to RunAllMultiSiteMigrations.sql, wrapped in ONE transaction
 -- for all-or-nothing safety:
 --   * SET XACT_ABORT ON  -> any runtime error aborts the batch and rolls back.
@@ -24,9 +24,9 @@ BEGIN TRANSACTION;
 GO
 
 -- ============================================================================
--- MultiSite Phase 2 — RUN-ALL migration bundle.
+-- MultiSite Phase 2 - RUN-ALL migration bundle.
 -- Runs every MultiSite migration in the REQUIRED order, in one go. Fully idempotent:
--- safe to re-run. ALWAYS use this (or run the files in this exact order) — never a
+-- safe to re-run. ALWAYS use this (or run the files in this exact order) - never a
 -- single migration alone, because the backend EF model spans all of them and the
 -- self-repair (drop a malformed table missing [Id]) relies on later files re-adding
 -- their columns. Run in SSMS against the George DB.
@@ -35,7 +35,7 @@ GO
 
 -- ===================== AddMultiSiteProductOverrides.sql =====================
 
--- Migration: MultiSite Phase 2 — per-site product override layer.
+-- Migration: MultiSite Phase 2 - per-site product override layer.
 -- Adds: ProductSiteOverride + ProductSiteVariantStock tables, Product.ManagementMode/OwnerSiteId,
 --       Account.ManagementMode. Idempotent; run in SSMS or sqlcmd against your George DB.
 -- See MultiSite/חוזה-בקאנד-מולטיסייט-Phase2-Override.md.
@@ -62,7 +62,7 @@ GO
 -- 3. ProductSiteOverride table
 -- Self-repair: an earlier partial run may have left this table WITHOUT its [Id] PK (the self-heal below cannot
 -- add an IDENTITY PK). Such a table is unusable (EF selects [Id]); drop the malformed leftover so it is recreated
--- correctly. Only triggers when [Id] is missing — a healthy table is untouched. (QA override data is disposable.)
+-- correctly. Only triggers when [Id] is missing - a healthy table is untouched. (QA override data is disposable.)
 IF OBJECT_ID(N'[dbo].[ProductSiteOverride]', N'U') IS NOT NULL AND COL_LENGTH(N'[dbo].[ProductSiteOverride]', N'Id') IS NULL
     DROP TABLE [dbo].[ProductSiteOverride];
 GO
@@ -148,7 +148,7 @@ IF XACT_STATE() = 0 SET NOEXEC ON;  -- a prior step failed + rolled back; skip t
 GO
 
 -- 4. ProductSiteVariantStock table
--- Self-repair: same as above — drop a malformed leftover missing its [Id] PK so it is recreated correctly.
+-- Self-repair: same as above - drop a malformed leftover missing its [Id] PK so it is recreated correctly.
 -- (Re-run AddMultiSiteVariantPriceExclusion.sql afterwards to re-add the per-site variant Price/SalePrice/IsExcluded columns.)
 IF OBJECT_ID(N'[dbo].[ProductSiteVariantStock]', N'U') IS NOT NULL AND COL_LENGTH(N'[dbo].[ProductSiteVariantStock]', N'Id') IS NULL
     DROP TABLE [dbo].[ProductSiteVariantStock];
@@ -219,7 +219,7 @@ GO
 
 -- ===================== AddMultiSiteOverrideScalarFields.sql =====================
 
--- Migration: MultiSite Phase 2 — per-site scalar field overrides on ProductSiteOverride.
+-- Migration: MultiSite Phase 2 - per-site scalar field overrides on ProductSiteOverride.
 -- Adds Name, ShortDescription, LongDescription, Weight, WeightUnit, Sku, SeoTitle, SeoDescription
 -- so name/description/weight/sku/seo can be overridden per branch (full per-site editing of scalars).
 -- Idempotent. Run after AddMultiSiteProductOverrides.sql.
@@ -239,7 +239,7 @@ GO
 
 -- ===================== AddMultiSiteOverrideMerchandisingFields.sql =====================
 
--- Migration: MultiSite Phase 2 — per-site merchandising overrides on ProductSiteOverride.
+-- Migration: MultiSite Phase 2 - per-site merchandising overrides on ProductSiteOverride.
 -- Adds CostPrice, IsKosher, StatusId, VisibilityId, Slug, ShippingClassId, SupplierId and the storefront
 -- Label* fields so every product field a branch (selected-site) edit touches follows the same model as
 -- Price: a canonical all-sites value + an optional per-site override (null = inherit canonical).
@@ -272,7 +272,7 @@ GO
 
 -- ===================== AddProductSiteCategory.sql =====================
 
--- Migration: MultiSite Phase 2 — per-site category assignment (ProductSiteCategory).
+-- Migration: MultiSite Phase 2 - per-site category assignment (ProductSiteCategory).
 -- A product can be assigned to different categories per branch. When rows exist for a (product, site),
 -- they replace the canonical ProductCategory for that site (effective view). Idempotent.
 
@@ -336,7 +336,7 @@ GO
 
 -- ===================== AddProductSiteImage.sql =====================
 
--- Migration: MultiSite Phase 2 — per-site product images (ProductSiteImage).
+-- Migration: MultiSite Phase 2 - per-site product images (ProductSiteImage).
 -- A product can have different images per branch. When rows exist for a (product, site), they replace
 -- the canonical ProductImage list for that site (effective view). Idempotent.
 
@@ -391,7 +391,7 @@ GO
 
 -- ===================== AddProductSiteWooId.sql =====================
 
--- Migration: MultiSite Phase 2 — per-site WooCommerce product id (ProductSiteWooId).
+-- Migration: MultiSite Phase 2 - per-site WooCommerce product id (ProductSiteWooId).
 -- The same product has a DIFFERENT Woo product id in each site's store; the single Product.WooCommerceId
 -- column can only track one, so syncing a multi-site product to the 2nd store used the wrong id and only
 -- one site actually updated. This table maps (ProductId, SiteId) -> WooCommerceProductId. Idempotent.
@@ -459,7 +459,7 @@ GO
 
 -- ===================== AddCategorySiteWooId.sql =====================
 
--- Migration: MultiSite Phase 2 — per-site WooCommerce category id (CategorySiteWooId).
+-- Migration: MultiSite Phase 2 - per-site WooCommerce category id (CategorySiteWooId).
 -- A category shared across sites (network mode) has a DIFFERENT Woo category id in each store; the single
 -- Category.WooCommerceId column can only track one, so syncing a shared category to the 2nd store reused the
 -- 1st store's id and overwrote/corrupted whatever category sat at that id ("categories mess"). This table maps
@@ -552,7 +552,7 @@ GO
 
 -- ===================== AddMultiSiteVariantPriceExclusion.sql =====================
 
--- Migration: MultiSite Phase 2 — per-site variant price + exclusion.
+-- Migration: MultiSite Phase 2 - per-site variant price + exclusion.
 -- Extends ProductSiteVariantStock (already per-(variant,site) stock) with per-site variant Price/SalePrice and
 -- an IsExcluded flag, so a network product's variations can be priced per branch and a variation can be
 -- "removed" in one branch (hidden there) without deleting it from the canonical product. Idempotent.

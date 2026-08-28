@@ -12,7 +12,7 @@ public static class PromotionCatalogBadgeResolver
     public sealed class BadgeRule
     {
         public int PromotionId { get; set; }
-        /// <summary>Promotion display name — shown on the catalog banner (plugin uses <c>promotion-&gt;name</c>).</summary>
+        /// <summary>Promotion display name - shown on the catalog banner (plugin uses <c>promotion-&gt;name</c>).</summary>
         public string Label { get; set; } = string.Empty;
         public string PromotionType { get; set; } = string.Empty;
         /// <summary>For discount promotions: "percent" | "amount".</summary>
@@ -25,7 +25,7 @@ public static class PromotionCatalogBadgeResolver
         public HashSet<int> ExcludedProductIds { get; } = new();
     }
 
-    /// <summary>Legacy merged scope — kept for backward compatibility only.</summary>
+    /// <summary>Legacy merged scope - kept for backward compatibility only.</summary>
     public sealed class BadgeScope
     {
         public HashSet<int> ProductIds { get; } = new();
@@ -187,8 +187,8 @@ public static class PromotionCatalogBadgeResolver
     {
         if (!payload.TryGetProperty("condition", out var cond) || cond.ValueKind != JsonValueKind.Object) return;
         AddExcluded(rule, cond);
-        // productScope is the BUY condition. "all" = "buy anything" — that must NOT badge the whole
-        // catalog; only the reward (gift) products — and specific trigger products — get the badge.
+        // productScope is the BUY condition. "all" = "buy anything" - that must NOT badge the whole
+        // catalog; only the reward (gift) products - and specific trigger products - get the badge.
         var productScope = (ReadString(cond, "productScope") ?? "all").ToLowerInvariant();
         if (productScope == "specific_products")
             AddIntSet(rule.ProductIds, cond, "productIds");

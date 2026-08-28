@@ -1,7 +1,7 @@
 -- DataFix: stored file URLs http://api.storeos.co.il -> https://api.storeos.co.il  (19/08/2026)
 -- Production appsettings.json had FileStorage:StorageLocalExternalBasePath configured with "http://",
 -- so every uploaded file's url was STORED with http. Pages served over https (kiosk, storefront)
--- treat http media as mixed content — the Dubi-Dagim kiosk showed an HTTPS warning for its home
+-- treat http media as mixed content - the Dubi-Dagim kiosk showed an HTTPS warning for its home
 -- video. Code now upgrades the scheme on the way in (FileHelper.UpgradeInsecureExternalUrl); this
 -- fixes the ~10K rows already stored with http.
 -- Idempotent: after the first run nothing matches the http prefix anymore.
@@ -26,7 +26,7 @@ WHERE [Url] LIKE @Match;
 PRINT 'Media rows updated: ' + CAST(@@ROWCOUNT AS VARCHAR(10));
 
 ------------------------------------------------------------------------------
--- 2. ProductImage — unique index on (ProductId, Url): drop http rows whose
+-- 2. ProductImage - unique index on (ProductId, Url): drop http rows whose
 --    https twin already exists for the same product, then rewrite the rest.
 ------------------------------------------------------------------------------
 DELETE pi
@@ -43,7 +43,7 @@ WHERE [Url] LIKE @Match;
 PRINT 'ProductImage rows updated: ' + CAST(@@ROWCOUNT AS VARCHAR(10));
 
 ------------------------------------------------------------------------------
--- 3. TemplateProductImage — same unique-index pattern on (TemplateProductId, Url).
+-- 3. TemplateProductImage - same unique-index pattern on (TemplateProductId, Url).
 ------------------------------------------------------------------------------
 DELETE ti
 FROM [dbo].[TemplateProductImage] ti

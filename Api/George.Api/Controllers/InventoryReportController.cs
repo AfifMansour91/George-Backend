@@ -20,7 +20,7 @@ namespace George.Api.Controllers
             _service = service;
         }
 
-        /// <summary>דוח מלאי — מוצרי קטלוג לאתר, מלאי ווריאציות, ספקים ומותגים לסינון.</summary>
+        /// <summary>דוח מלאי - מוצרי קטלוג לאתר, מלאי ווריאציות, ספקים ומותגים לסינון.</summary>
         [HttpGet]
         [ProducesResponseType(typeof(IApiResponse<George.Services.Response.InventoryReportRes>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetAsync(

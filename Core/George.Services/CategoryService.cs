@@ -41,7 +41,7 @@ namespace George.Services
             // of what the client sends. Without this the list endpoint returned categories from EVERY account when
             // the client omitted AccountId. Master AND system-admin (UserRole.Admin / super-admin) users are
             // unrestricted: they browse and impersonate any account, so we must NOT pin them to their home account
-            // — doing so overrode the impersonated AccountId the client sent and hid the impersonated account's
+            // - doing so overrode the impersonated AccountId the client sent and hid the impersonated account's
             // categories. Same isMaster-or-Admin rule used by DashboardService / SiteAccessService.
             if (!AuthUser.IsMaster && AuthUser.Id > 0)
             {
@@ -64,9 +64,9 @@ namespace George.Services
             return response;
         }
 
-        // Categories are always account-scoped, but the create/edit client never sends AccountId. Derive it —
+        // Categories are always account-scoped, but the create/edit client never sends AccountId. Derive it -
         // preferring an explicit request value, then a known fallback (e.g. the existing row's account on update),
-        // then the signed-in user's account — so the row is never persisted with AccountId = NULL. A NULL-account
+        // then the signed-in user's account - so the row is never persisted with AccountId = NULL. A NULL-account
         // category is hidden by the account-scoped read filter in GetCategoriesAsync and skipped by per-site
         // WooCommerce sync, so it would never appear in the product create/edit category picker.
         private async Task EnsureAccountIdAsync(Category model, CancellationToken cancelToken, int? fallbackAccountId = null)

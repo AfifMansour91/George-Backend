@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace George.Services.Request;
 
 /// <summary>
-/// Request payload for <c>POST /Promotion/evaluate</c> — see <c>Sprint4/מבצעים.md</c>.
+/// Request payload for <c>POST /Promotion/evaluate</c> - see <c>Sprint4/מבצעים.md</c>.
 /// Storefront/kiosk sends the cart and asks which promotions apply.
 /// </summary>
 public class EvaluatePromotionsReq
@@ -20,12 +20,12 @@ public class EvaluatePromotionsReq
     /// <summary>Optional coupon code typed at checkout (case-insensitive on the server).</summary>
     public string? CouponCode { get; set; }
 
-    /// <summary>"web" | "mobile" | "store" — must match `PromotionWire.Channel`.</summary>
+    /// <summary>"web" | "mobile" | "store" - must match `PromotionWire.Channel`.</summary>
     public string? Channel { get; set; }
 
     public string? CustomerId { get; set; }
 
-    /// <summary>Optional customer phone — resolved to <see cref="CustomerId"/> for per-customer limits when ID is unknown (kiosk).</summary>
+    /// <summary>Optional customer phone - resolved to <see cref="CustomerId"/> for per-customer limits when ID is unknown (kiosk).</summary>
     public string? CustomerPhone { get; set; }
 
     /// <summary>
@@ -49,10 +49,10 @@ public class EvaluateCartLine
 
     public string? CategoryId { get; set; }
 
-    /// <summary>All category ids for the product (parent + sub) — used when <see cref="CategoryId"/> is absent.</summary>
+    /// <summary>All category ids for the product (parent + sub) - used when <see cref="CategoryId"/> is absent.</summary>
     public List<string>? CategoryIds { get; set; }
 
-    /// <summary>"unit" | "kg" | "package" — falls back to product's catalog unit.</summary>
+    /// <summary>"unit" | "kg" | "package" - falls back to product's catalog unit.</summary>
     public string? Unit { get; set; }
 
     /// <summary>"scale" when the quantity comes from a connected weighing scale (kiosk).</summary>

@@ -18,7 +18,7 @@ public class PaymentStorage : StorageBase
             .Include(o => o.OrderItem.Where(i => !i.IsDeleted))
             .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
 
-    /// <summary>Site has an order with an open (uncaptured) authorization hold — used to guard a provider switch.</summary>
+    /// <summary>Site has an order with an open (uncaptured) authorization hold - used to guard a provider switch.</summary>
     public async Task<bool> HasUnsettledAuthorizedOrdersAsync(int siteId, CancellationToken cancelToken) =>
         await _dbContext.Order.AsNoTracking().AnyAsync(o =>
             !o.IsDeleted
@@ -258,7 +258,7 @@ public class PaymentStorage : StorageBase
         var normalizedLast4 = NormalizeLast4Digits(method.Last4Digits);
         if (!string.IsNullOrWhiteSpace(normalizedLast4))
         {
-            // Same physical card saved at a DIFFERENT gateway is a separate row — its token belongs to
+            // Same physical card saved at a DIFFERENT gateway is a separate row - its token belongs to
             // the other provider and must not be overwritten.
             var sameLast4 = existing.FirstOrDefault(m =>
                 string.Equals(NormalizeLast4Digits(m.Last4Digits), normalizedLast4, StringComparison.Ordinal)
@@ -319,7 +319,7 @@ public class PaymentStorage : StorageBase
         tracked.CardcomTokenLast4 = order.CardcomTokenLast4;
         tracked.CardcomCardBrand = order.CardcomCardBrand;
         // Write-once guard: the installments selection is stored by the payment webhook, but many
-        // flows load an Order, spend seconds on a Cardcom roundtrip, then save — a stale instance
+        // flows load an Order, spend seconds on a Cardcom roundtrip, then save - a stale instance
         // here must not regress the selection back to NULL (lost update → charge as 1 payment).
         if (order.CardcomSelectedInstallments != null)
         {
@@ -331,7 +331,7 @@ public class PaymentStorage : StorageBase
         }
         else if (tracked.CardcomSelectedInstallments != null)
         {
-            // A stale in-memory Order tried to wipe a stored selection — this is the lost-update
+            // A stale in-memory Order tried to wipe a stored selection - this is the lost-update
             // race; the guard keeps the DB value. Logged to make any clobber attempt visible.
             _logger.LogWarning(
                 "Order {OrderId}: blocked stale save from clearing CardcomSelectedInstallments (kept {Value})",

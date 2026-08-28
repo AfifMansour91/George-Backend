@@ -1,4 +1,4 @@
--- Migration: MultiSite Phase 2 — per-site WooCommerce category id (CategorySiteWooId).
+-- Migration: MultiSite Phase 2 - per-site WooCommerce category id (CategorySiteWooId).
 -- A category shared across sites (network mode) has a DIFFERENT Woo category id in each store; the single
 -- Category.WooCommerceId column can only track one, so syncing a shared category to the 2nd store reused the
 -- 1st store's id and overwrote/corrupted whatever category sat at that id ("categories mess"). This table maps

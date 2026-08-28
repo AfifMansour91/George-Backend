@@ -51,7 +51,7 @@ public class PromotionStorage : StorageBase
             select new PromotionListRow
             {
                 Promotion = p,
-                // Left-join null metrics (e.g. drafts) must coalesce in SQL — non-nullable reads throw.
+                // Left-join null metrics (e.g. drafts) must coalesce in SQL - non-nullable reads throw.
                 PeriodRedemptions = (int?)g.Redemptions ?? 0,
                 PeriodRevenueNis = (decimal?)g.RevenueNis ?? 0m,
                 PeriodDiscountNis = (decimal?)g.DiscountNis ?? 0m,
@@ -391,7 +391,7 @@ public class PromotionStorage : StorageBase
             if (ext != null && orderByExternalId.TryGetValue(ext, out var orderId))
             {
                 if (countedByOrder.Contains((orderId, r.PromotionId)))
-                    continue; // already counted via the order payload — skip (no double count).
+                    continue; // already counted via the order payload - skip (no double count).
 
                 _dbContext.PromotionOrderRedemption.Add(new PromotionOrderRedemption
                 {
@@ -413,7 +413,7 @@ public class PromotionStorage : StorageBase
             }
             else
             {
-                // No matching George order (store using Promeng without order sync) — legacy aggregate.
+                // No matching George order (store using Promeng without order sync) - legacy aggregate.
                 await ApplyDailyMetricDeltaAsync(r.PromotionId, metricDate, channel, +1, 0m, discount, cancelToken)
                     .ConfigureAwait(false);
                 recorded++;
@@ -440,7 +440,7 @@ public class PromotionStorage : StorageBase
     }
 
     /// <summary>
-    /// Counts prior redemptions per promotion for a customer — distinct orders with a stamped
+    /// Counts prior redemptions per promotion for a customer - distinct orders with a stamped
     /// <see cref="OrderItem.PromotionId"/>. Used to enforce <c>limits.perCustomer</c> at evaluate time.
     /// </summary>
     public async Task<IReadOnlyDictionary<int, int>> GetCustomerPromotionRedemptionCountsAsync(

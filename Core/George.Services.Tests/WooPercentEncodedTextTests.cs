@@ -20,7 +20,7 @@ public class WooPercentEncodedTextTests
     }
 
     // Woo order for a variant whose catalog option value is still the percent-encoded slug
-    // (catalogs imported before the 2026-08-20 decode fix) — the persisted cutting label and
+    // (catalogs imported before the 2026-08-20 decode fix) - the persisted cutting label and
     // LineDisplayJson must render readable Hebrew, not the slug (דגי גת order 5832 item 12133).
     [Fact]
     public void MergeComputedDisplayFields_DecodesEncodedCatalogCuttingValue()

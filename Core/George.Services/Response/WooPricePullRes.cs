@@ -17,7 +17,7 @@ namespace George.Services.Response
         /// <summary>George variants whose price actually changed.</summary>
         public int VariantsUpdated { get; set; }
 
-        /// <summary>Store products with no linked George product (never synced / not on this site) — skipped.</summary>
+        /// <summary>Store products with no linked George product (never synced / not on this site) - skipped.</summary>
         public int UnmatchedWooProducts { get; set; }
 
         /// <summary>Products that failed to apply (see server log).</summary>

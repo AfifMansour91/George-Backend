@@ -29,7 +29,7 @@ public class InventoryProductGroupDto
     public string? SupplierName { get; set; }
     public int? BrandId { get; set; }
     public string? BrandName { get; set; }
-    /// <summary>quantity | status | variation — תואם SPA (<c>stock_management_type</c>).</summary>
+    /// <summary>quantity | status | variation - תואם SPA (<c>stock_management_type</c>).</summary>
     public string? StockManagementType { get; set; }
     /// <summary>כש־<see cref="StockManagementType"/> הוא variation: האם מלאי לפי כמות בכל וריאציה.</summary>
     public bool? VariationStockByQuantity { get; set; }

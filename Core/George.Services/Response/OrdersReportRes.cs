@@ -45,7 +45,7 @@ namespace George.Services.Response
         public string SupplyDateLocal { get; set; } = "";
         /// <summary>Delivery/pickup time window as stored (e.g. "10:00-12:00").</summary>
         public string? SupplyTime { get; set; }
-        /// <summary><c>cash</c> | <c>credit</c> | <c>other</c> — same semantics as the orders-list payment filter.</summary>
+        /// <summary><c>cash</c> | <c>credit</c> | <c>other</c> - same semantics as the orders-list payment filter.</summary>
         public string PaymentKind { get; set; } = "other";
         /// <summary>Raw gateway/method title for display next to the kind.</summary>
         public string? PaymentLabel { get; set; }

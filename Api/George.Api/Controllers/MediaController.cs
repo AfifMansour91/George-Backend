@@ -27,7 +27,7 @@ namespace George.Api.Controllers
 
         /// <summary>
         /// Serves a cached, resized JPEG of a George-hosted /files image (generated on first request;
-        /// originals are never modified). Anonymous — img tags cannot send Bearer headers, and the
+        /// originals are never modified). Anonymous - img tags cannot send Bearer headers, and the
         /// underlying /files mount is public anyway. Falls back to redirecting to the original when the
         /// thumbnail cannot be produced (e.g. S3 storage mode or a missing file).
         /// </summary>
@@ -56,7 +56,7 @@ namespace George.Api.Controllers
         }
 
         /// <summary>
-        /// Pre-generates thumbnails for all product images (background, own DI scope). Idempotent —
+        /// Pre-generates thumbnails for all product images (background, own DI scope). Idempotent -
         /// already-cached sizes are skipped, so it is safe to trigger after bulk imports/uploads.
         /// </summary>
         [HttpPost("thumbs/warm")]

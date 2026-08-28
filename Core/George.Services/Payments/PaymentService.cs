@@ -70,7 +70,7 @@ public partial class PaymentService : ServiceBase
         var method = order.PaymentMethod ?? "";
         if (string.Equals(method, "SavedCard", StringComparison.OrdinalIgnoreCase) && order.CustomerId is int customerId)
         {
-            // Only link a card the site's ACTIVE gateway can charge — a token belongs to its issuing gateway.
+            // Only link a card the site's ACTIVE gateway can charge - a token belongs to its issuing gateway.
             var savedCardSite = await _paymentStorage.GetSitePaymentConfigAsync(order.SiteId, cancelToken);
             var siteProvider = savedCardSite?.PaymentGatewayProvider ?? PaymentGatewayProviderId.Cardcom;
 
@@ -343,7 +343,7 @@ public partial class PaymentService : ServiceBase
         if (order == null)
             return CreateResponse(response, StatusCode.ItemNotFound);
 
-        // Keyed on the ORDER's own session, not the site's current provider — a PayPlus hosted-page order
+        // Keyed on the ORDER's own session, not the site's current provider - a PayPlus hosted-page order
         // must never fall through to Cardcom's GetLpResult validation.
         if (order.PaymentGateway == PaymentGatewayProviderId.PayPlus
             || !string.IsNullOrWhiteSpace(order.PayPlusPageRequestUid))
@@ -583,7 +583,7 @@ public partial class PaymentService : ServiceBase
 
     /// <summary>
     /// Per-order gate so concurrent finalize calls serialize instead of double-charging (Zano order 4757,
-    /// 10/08: five successful captures — parallel finish/auto-finalize calls plus a later retry all charged
+    /// 10/08: five successful captures - parallel finish/auto-finalize calls plus a later retry all charged
     /// because nothing checked the settle state). Single-process only; the settled-state guard inside the
     /// core covers non-concurrent repeats across restarts/instances.
     /// </summary>
@@ -624,7 +624,7 @@ public partial class PaymentService : ServiceBase
         if (finalAmount <= 0)
             return CreateResponse(response, StatusCode.InvalidRequest, "Order total must be positive.");
 
-        // Idempotency: never charge an order whose payment is already settled — a repeat finalize used to
+        // Idempotency: never charge an order whose payment is already settled - a repeat finalize used to
         // run the full charge again. Reports "Captured" so callers treat the order as paid.
         var settleNow = (order.PaymentSettleStatus ?? "").Trim();
         if (settleNow.Equals(PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase) ||
@@ -729,7 +729,7 @@ public partial class PaymentService : ServiceBase
         if (!CardcomGateway.IsCardcomTokenUuid(token))
         {
             _logger.LogError(
-                "FinalizePickingPayment abort: orderId={OrderId} — refusing ChargeToken with invalid token shape={TokenShape}",
+                "FinalizePickingPayment abort: orderId={OrderId} - refusing ChargeToken with invalid token shape={TokenShape}",
                 order.Id,
                 CardcomGateway.DescribeTokenShape(token));
             return CreateResponse(response, StatusCode.InvalidRequest,
@@ -752,7 +752,7 @@ public partial class PaymentService : ServiceBase
         else if (!string.IsNullOrWhiteSpace(order.CardcomLowProfileId))
         {
             _logger.LogWarning(
-                "FinalizePickingPayment: orderId={OrderId} — no J5 approval to void before token charge (lowProfileId present)",
+                "FinalizePickingPayment: orderId={OrderId} - no J5 approval to void before token charge (lowProfileId present)",
                 order.Id);
         }
 
@@ -1180,7 +1180,7 @@ public partial class PaymentService : ServiceBase
         (token, cardExp, _) = await ResolveChargeTokenAsync(order, cancelToken);
 
         // Refund needs either a numeric Cardcom transaction id (RefundByTransactionId) or a stored card
-        // token. An order can be Captured with neither — marked paid manually ("חויב טלפונית"), charged on
+        // token. An order can be Captured with neither - marked paid manually ("חויב טלפונית"), charged on
         // an external terminal, or ingested by an old webhook without transactionId. Fail with an
         // actionable Hebrew message instead of Cardcom's generic English one.
         var txIdUsable = !string.IsNullOrWhiteSpace(originalTxId)
@@ -1193,7 +1193,7 @@ public partial class PaymentService : ServiceBase
                 $"no usable Cardcom transaction/token for refund (txId='{originalTxId ?? ""}')",
                 null, null, amount, null, cancelToken);
             return CreateResponse(response, StatusCode.InvalidRequest,
-                "לא נמצאה עסקת Cardcom לזיכוי בהזמנה זו — אין מזהה עסקה ואין כרטיס שמור. " +
+                "לא נמצאה עסקת Cardcom לזיכוי בהזמנה זו - אין מזהה עסקה ואין כרטיס שמור. " +
                 "אם החיוב בוצע מחוץ למערכת (מסוף חיצוני או סימון ידני כ\"חויב טלפונית\") יש לזכות באותו אמצעי; " +
                 "אם החיוב קיים בקארדקום, יש להשלים את מזהה העסקה להזמנה.");
         }
@@ -1310,9 +1310,9 @@ public partial class PaymentService : ServiceBase
         if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(cardExp) || string.IsNullOrWhiteSpace(approval))
         {
             _logger.LogWarning(
-                "Order {OrderId} cancel: cannot void Cardcom authorization — missing token or approval (settle={Settle}).",
+                "Order {OrderId} cancel: cannot void Cardcom authorization - missing token or approval (settle={Settle}).",
                 order.Id, settle);
-            await ClearPendingCardcomSessionAsync(order, "Order cancel (void skipped — missing credentials)", cancelToken)
+            await ClearPendingCardcomSessionAsync(order, "Order cancel (void skipped - missing credentials)", cancelToken)
                 .ConfigureAwait(false);
             return;
         }
@@ -1631,7 +1631,7 @@ public partial class PaymentService : ServiceBase
         }
         else
         {
-            // Positive signal either way — proves this code ran and shows what the payload carried.
+            // Positive signal either way - proves this code ran and shows what the payload carried.
             _logger.LogInformation(
                 "Cardcom callback without multi-installment selection: orderId={OrderId}, numOfPayments={NumOfPayments}",
                 order.Id, payload.NumOfPayments);
@@ -2062,7 +2062,7 @@ public partial class PaymentService : ServiceBase
         if (!CardcomGateway.IsCardcomTokenUuid(token))
         {
             _logger.LogWarning(
-                "Woo capture handover rejected: orderId={OrderId} — token is not a Cardcom UUID (shape={TokenShape})",
+                "Woo capture handover rejected: orderId={OrderId} - token is not a Cardcom UUID (shape={TokenShape})",
                 order.Id, CardcomGateway.DescribeTokenShape(token));
             return;
         }
@@ -2071,7 +2071,7 @@ public partial class PaymentService : ServiceBase
         if (cardExp == null)
         {
             _logger.LogWarning(
-                "Woo capture handover rejected: orderId={OrderId} — unparseable token expiry '{TokenExpiry}'",
+                "Woo capture handover rejected: orderId={OrderId} - unparseable token expiry '{TokenExpiry}'",
                 order.Id, payment.TokenExpiry);
             return;
         }
@@ -2136,7 +2136,7 @@ public partial class PaymentService : ServiceBase
         if (string.IsNullOrWhiteSpace(order.CardcomPaymentJson))
         {
             _logger.LogDebug(
-                "TryReadOrderCardcomCredentials: orderId={OrderId} — no CardcomPaymentJson",
+                "TryReadOrderCardcomCredentials: orderId={OrderId} - no CardcomPaymentJson",
                 order.Id);
             return null;
         }
@@ -2147,7 +2147,7 @@ public partial class PaymentService : ServiceBase
             if (payload?.Et == null || string.IsNullOrWhiteSpace(payload.Exp))
             {
                 _logger.LogWarning(
-                    "TryReadOrderCardcomCredentials: orderId={OrderId} — invalid payload (Et or Exp missing), jsonLen={JsonLen}",
+                    "TryReadOrderCardcomCredentials: orderId={OrderId} - invalid payload (Et or Exp missing), jsonLen={JsonLen}",
                     order.Id,
                     order.CardcomPaymentJson.Length);
                 return null;
@@ -2156,7 +2156,7 @@ public partial class PaymentService : ServiceBase
             if (!_tokenProtector.TryUnprotect(payload.Et, out var token))
             {
                 _logger.LogWarning(
-                    "TryReadOrderCardcomCredentials: orderId={OrderId} — Et decrypt failed (encryptionKeyConfigured={EncryptionKeyConfigured}, etPrefix={EtPrefix})",
+                    "TryReadOrderCardcomCredentials: orderId={OrderId} - Et decrypt failed (encryptionKeyConfigured={EncryptionKeyConfigured}, etPrefix={EtPrefix})",
                     order.Id,
                     _tokenProtector.UsesDatabaseEncryptionKey,
                     payload.Et.Length > 3 ? payload.Et[..3] : payload.Et);
@@ -2178,7 +2178,7 @@ public partial class PaymentService : ServiceBase
             if (!CardcomGateway.IsCardcomTokenUuid(token) || string.IsNullOrWhiteSpace(cardExp))
             {
                 _logger.LogWarning(
-                    "TryReadOrderCardcomCredentials: orderId={OrderId} — token not usable after decrypt (shapeBefore={ShapeBefore}, shapeAfter={ShapeAfter}, cardExpPresent={CardExpPresent})",
+                    "TryReadOrderCardcomCredentials: orderId={OrderId} - token not usable after decrypt (shapeBefore={ShapeBefore}, shapeAfter={ShapeAfter}, cardExpPresent={CardExpPresent})",
                     order.Id,
                     shapeBeforeNormalize,
                     shapeAfterNormalize,
@@ -2187,7 +2187,7 @@ public partial class PaymentService : ServiceBase
             }
 
             _logger.LogInformation(
-                "TryReadOrderCardcomCredentials: orderId={OrderId} — ok (shapeBefore={ShapeBefore}, shapeAfter={ShapeAfter}, tokenMask={TokenMask}, cardExp={CardExp}, approvalPresent={ApprovalPresent})",
+                "TryReadOrderCardcomCredentials: orderId={OrderId} - ok (shapeBefore={ShapeBefore}, shapeAfter={ShapeAfter}, tokenMask={TokenMask}, cardExp={CardExp}, approvalPresent={ApprovalPresent})",
                 order.Id,
                 shapeBeforeNormalize,
                 shapeAfterNormalize,
@@ -2199,7 +2199,7 @@ public partial class PaymentService : ServiceBase
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "TryReadOrderCardcomCredentials: orderId={OrderId} — exception parsing CardcomPaymentJson",
+                "TryReadOrderCardcomCredentials: orderId={OrderId} - exception parsing CardcomPaymentJson",
                 order.Id);
             return null;
         }
@@ -2219,7 +2219,7 @@ public partial class PaymentService : ServiceBase
 
         var shape = CardcomGateway.DescribeTokenShape(t);
         _logger.LogWarning(
-            "TryNormalizeChargeToken: orderId={OrderId} — non-uuid token shape={Shape}",
+            "TryNormalizeChargeToken: orderId={OrderId} - non-uuid token shape={Shape}",
             orderId,
             shape);
 
@@ -2232,7 +2232,7 @@ public partial class PaymentService : ServiceBase
             if (nested?.Et == null)
             {
                 _logger.LogWarning(
-                    "TryNormalizeChargeToken: orderId={OrderId} — nested JSON missing Et",
+                    "TryNormalizeChargeToken: orderId={OrderId} - nested JSON missing Et",
                     orderId);
                 return null;
             }
@@ -2240,7 +2240,7 @@ public partial class PaymentService : ServiceBase
             if (!_tokenProtector.TryUnprotect(nested.Et, out var inner))
             {
                 _logger.LogWarning(
-                    "TryNormalizeChargeToken: orderId={OrderId} — nested Et decrypt failed",
+                    "TryNormalizeChargeToken: orderId={OrderId} - nested Et decrypt failed",
                     orderId);
                 return null;
             }
@@ -2248,7 +2248,7 @@ public partial class PaymentService : ServiceBase
             if (!CardcomGateway.IsCardcomTokenUuid(inner))
             {
                 _logger.LogWarning(
-                    "TryNormalizeChargeToken: orderId={OrderId} — nested inner token shape={InnerShape}",
+                    "TryNormalizeChargeToken: orderId={OrderId} - nested inner token shape={InnerShape}",
                     orderId,
                     CardcomGateway.DescribeTokenShape(inner));
                 return null;
@@ -2263,7 +2263,7 @@ public partial class PaymentService : ServiceBase
             }
 
             _logger.LogWarning(
-                "TryNormalizeChargeToken: orderId={OrderId} — unwrapped nested credential JSON, innerMask={InnerMask}",
+                "TryNormalizeChargeToken: orderId={OrderId} - unwrapped nested credential JSON, innerMask={InnerMask}",
                 orderId,
                 MaskToken(inner));
             return inner;
@@ -2271,7 +2271,7 @@ public partial class PaymentService : ServiceBase
         catch (JsonException ex)
         {
             _logger.LogWarning(ex,
-                "TryNormalizeChargeToken: orderId={OrderId} — nested JSON parse failed",
+                "TryNormalizeChargeToken: orderId={OrderId} - nested JSON parse failed",
                 orderId);
             return null;
         }
@@ -2375,7 +2375,7 @@ public partial class PaymentService : ServiceBase
     /// <summary>
     /// Website/Woo order captured on the Woo checkout (Cardcom plugin): send the invoice SMS exactly like a
     /// StoreOS capture. The plugin payload carries the invoice number but NOT the document URL, so when the
-    /// URL is missing it is fetched from Cardcom via GetTransactionInfoById (no document is created — the
+    /// URL is missing it is fetched from Cardcom via GetTransactionInfoById (no document is created - the
     /// checkout already issued it). Deduped via the InvoiceSms payment event, since the plugin can post the
     /// payment more than once (embedded in the order payload + the OrderPayment webhook).
     /// </summary>
@@ -2387,7 +2387,7 @@ public partial class PaymentService : ServiceBase
                 return;
             if (!string.Equals(order.PaymentSettleStatus?.Trim(), PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase))
                 return;
-            // Only gateway-paid orders — cash/label-block website orders never set PaymentGateway.
+            // Only gateway-paid orders - cash/label-block website orders never set PaymentGateway.
             if (!string.Equals(order.PaymentGateway, PaymentGatewayProviderId.Cardcom, StringComparison.OrdinalIgnoreCase))
                 return;
 
@@ -2460,7 +2460,7 @@ public partial class PaymentService : ServiceBase
         SitePaymentCredentials creds,
         CancellationToken cancelToken)
     {
-        // PayPlus orders get their document at Finalize (and via the manual PayPlus issue path) — this
+        // PayPlus orders get their document at Finalize (and via the manual PayPlus issue path) - this
         // helper's document creation is Cardcom-specific and must not run against a PayPlus order.
         if (creds.ProviderId == PaymentGatewayProviderId.PayPlus)
             return;
@@ -2671,7 +2671,7 @@ public partial class PaymentService : ServiceBase
         order.CustomerPaymentMethodId = null;
         order.CardcomTokenLast4 = null;
         order.CardcomCardBrand = null;
-        // PayPlus twin fields — same "order is no longer a card payment" cleanup.
+        // PayPlus twin fields - same "order is no longer a card payment" cleanup.
         order.PayPlusPageRequestUid = null;
         order.PayPlusTransactionUid = null;
         order.PayPlusCardLast4 = null;
@@ -2769,7 +2769,7 @@ public partial class PaymentService : ServiceBase
         if (forceRefreshFromCardcom && !string.IsNullOrWhiteSpace(order.CardcomLowProfileId))
         {
             _logger.LogInformation(
-                "ResolveChargeToken: orderId={OrderId} — force syncing from Cardcom GetLpResult",
+                "ResolveChargeToken: orderId={OrderId} - force syncing from Cardcom GetLpResult",
                 order.Id);
             await TrySyncTokenFromCardcomAsync(order, cancelToken);
         }
@@ -2778,7 +2778,7 @@ public partial class PaymentService : ServiceBase
         if (IsResolvedChargeTokenUsable(resolved))
         {
             _logger.LogInformation(
-                "ResolveChargeToken: orderId={OrderId} — stored credentials usable (tokenShape={TokenShape}, approvalPresent={ApprovalPresent})",
+                "ResolveChargeToken: orderId={OrderId} - stored credentials usable (tokenShape={TokenShape}, approvalPresent={ApprovalPresent})",
                 order.Id,
                 CardcomGateway.DescribeTokenShape(resolved.Token),
                 !string.IsNullOrWhiteSpace(resolved.Approval ?? order.CardcomApprovalNumber));
@@ -2789,7 +2789,7 @@ public partial class PaymentService : ServiceBase
         }
 
         _logger.LogWarning(
-            "ResolveChargeToken: orderId={OrderId} — stored credentials not usable (tokenShape={TokenShape}, cardExpPresent={CardExpPresent})",
+            "ResolveChargeToken: orderId={OrderId} - stored credentials not usable (tokenShape={TokenShape}, cardExpPresent={CardExpPresent})",
             order.Id,
             CardcomGateway.DescribeTokenShape(resolved.Token),
             !string.IsNullOrWhiteSpace(resolved.CardExp));
@@ -2800,14 +2800,14 @@ public partial class PaymentService : ServiceBase
                 || order.PaymentSettleStatus == PaymentSettleStatus.Failed))
         {
             _logger.LogInformation(
-                "ResolveChargeToken: orderId={OrderId} — syncing token from Cardcom GetLpResult",
+                "ResolveChargeToken: orderId={OrderId} - syncing token from Cardcom GetLpResult",
                 order.Id);
             await TrySyncTokenFromCardcomAsync(order, cancelToken);
             resolved = await TryResolveStoredChargeTokenAsync(order, cancelToken);
             if (IsResolvedChargeTokenUsable(resolved))
             {
                 _logger.LogInformation(
-                    "ResolveChargeToken: orderId={OrderId} — usable after Cardcom sync (tokenShape={TokenShape})",
+                    "ResolveChargeToken: orderId={OrderId} - usable after Cardcom sync (tokenShape={TokenShape})",
                     order.Id,
                     CardcomGateway.DescribeTokenShape(resolved.Token));
                 return (
@@ -2817,14 +2817,14 @@ public partial class PaymentService : ServiceBase
             }
 
             _logger.LogWarning(
-                "ResolveChargeToken: orderId={OrderId} — still not usable after Cardcom sync (tokenShape={TokenShape})",
+                "ResolveChargeToken: orderId={OrderId} - still not usable after Cardcom sync (tokenShape={TokenShape})",
                 order.Id,
                 CardcomGateway.DescribeTokenShape(resolved.Token));
         }
         else if (!forceRefreshFromCardcom)
         {
             _logger.LogWarning(
-                "ResolveChargeToken: orderId={OrderId} — skipped Cardcom sync (lowProfileIdPresent={LowProfilePresent}, settleStatus={SettleStatus})",
+                "ResolveChargeToken: orderId={OrderId} - skipped Cardcom sync (lowProfileIdPresent={LowProfilePresent}, settleStatus={SettleStatus})",
                 order.Id,
                 !string.IsNullOrWhiteSpace(order.CardcomLowProfileId),
                 order.PaymentSettleStatus);
@@ -2854,7 +2854,7 @@ public partial class PaymentService : ServiceBase
             && CardcomGateway.IsCardcomTokenUuid(creds.Token))
         {
             _logger.LogInformation(
-                "TryResolveStoredChargeToken: orderId={OrderId} — source=order.CardcomPaymentJson, tokenMask={TokenMask}",
+                "TryResolveStoredChargeToken: orderId={OrderId} - source=order.CardcomPaymentJson, tokenMask={TokenMask}",
                 order.Id,
                 MaskToken(creds.Token));
             return (creds.Token, creds.CardExp, creds.Approval ?? approval);
@@ -2863,7 +2863,7 @@ public partial class PaymentService : ServiceBase
         if (fromOrder != null)
         {
             _logger.LogWarning(
-                "TryResolveStoredChargeToken: orderId={OrderId} — order.CardcomPaymentJson rejected (tokenShape={TokenShape})",
+                "TryResolveStoredChargeToken: orderId={OrderId} - order.CardcomPaymentJson rejected (tokenShape={TokenShape})",
                 order.Id,
                 CardcomGateway.DescribeTokenShape(fromOrder.Value.Token));
         }
@@ -2874,14 +2874,14 @@ public partial class PaymentService : ServiceBase
             if (pm == null)
             {
                 _logger.LogWarning(
-                    "TryResolveStoredChargeToken: orderId={OrderId} — CustomerPaymentMethodId={PmId} not found",
+                    "TryResolveStoredChargeToken: orderId={OrderId} - CustomerPaymentMethodId={PmId} not found",
                     order.Id,
                     pmId);
             }
             else if (!_tokenProtector.TryUnprotect(pm.EncryptedToken, out var rawToken))
             {
                 _logger.LogWarning(
-                    "TryResolveStoredChargeToken: orderId={OrderId} — CustomerPaymentMethodId={PmId} decrypt failed (encryptionKeyConfigured={EncryptionKeyConfigured})",
+                    "TryResolveStoredChargeToken: orderId={OrderId} - CustomerPaymentMethodId={PmId} decrypt failed (encryptionKeyConfigured={EncryptionKeyConfigured})",
                     order.Id,
                     pmId,
                     _tokenProtector.UsesDatabaseEncryptionKey);
@@ -2889,7 +2889,7 @@ public partial class PaymentService : ServiceBase
             else if (string.IsNullOrWhiteSpace(pm.CardExpirationMMYY))
             {
                 _logger.LogWarning(
-                    "TryResolveStoredChargeToken: orderId={OrderId} — CustomerPaymentMethodId={PmId} missing CardExpirationMMYY",
+                    "TryResolveStoredChargeToken: orderId={OrderId} - CustomerPaymentMethodId={PmId} missing CardExpirationMMYY",
                     order.Id,
                     pmId);
             }
@@ -2908,7 +2908,7 @@ public partial class PaymentService : ServiceBase
                 if (token != null && CardcomGateway.IsCardcomTokenUuid(token))
                 {
                     _logger.LogInformation(
-                        "TryResolveStoredChargeToken: orderId={OrderId} — source=CustomerPaymentMethodId={PmId}, rawShape={RawShape}, tokenMask={TokenMask}",
+                        "TryResolveStoredChargeToken: orderId={OrderId} - source=CustomerPaymentMethodId={PmId}, rawShape={RawShape}, tokenMask={TokenMask}",
                         order.Id,
                         pmId,
                         rawShape,
@@ -2917,7 +2917,7 @@ public partial class PaymentService : ServiceBase
                 }
 
                 _logger.LogWarning(
-                    "TryResolveStoredChargeToken: orderId={OrderId} — CustomerPaymentMethodId={PmId} rejected (rawShape={RawShape}, normalizedShape={NormalizedShape})",
+                    "TryResolveStoredChargeToken: orderId={OrderId} - CustomerPaymentMethodId={PmId} rejected (rawShape={RawShape}, normalizedShape={NormalizedShape})",
                     order.Id,
                     pmId,
                     rawShape,
@@ -2932,21 +2932,21 @@ public partial class PaymentService : ServiceBase
             if (pm == null)
             {
                 _logger.LogDebug(
-                    "TryResolveStoredChargeToken: orderId={OrderId} — no default payment method for customerId={CustomerId}",
+                    "TryResolveStoredChargeToken: orderId={OrderId} - no default payment method for customerId={CustomerId}",
                     order.Id,
                     cid);
             }
             else if (!_tokenProtector.TryUnprotect(pm.EncryptedToken, out var rawToken))
             {
                 _logger.LogWarning(
-                    "TryResolveStoredChargeToken: orderId={OrderId} — default PM decrypt failed for customerId={CustomerId}",
+                    "TryResolveStoredChargeToken: orderId={OrderId} - default PM decrypt failed for customerId={CustomerId}",
                     order.Id,
                     cid);
             }
             else if (string.IsNullOrWhiteSpace(pm.CardExpirationMMYY))
             {
                 _logger.LogWarning(
-                    "TryResolveStoredChargeToken: orderId={OrderId} — default PM missing CardExpirationMMYY for customerId={CustomerId}",
+                    "TryResolveStoredChargeToken: orderId={OrderId} - default PM missing CardExpirationMMYY for customerId={CustomerId}",
                     order.Id,
                     cid);
             }
@@ -2965,7 +2965,7 @@ public partial class PaymentService : ServiceBase
                 if (token != null && CardcomGateway.IsCardcomTokenUuid(token))
                 {
                     _logger.LogInformation(
-                        "TryResolveStoredChargeToken: orderId={OrderId} — source=defaultCustomerPM customerId={CustomerId}, rawShape={RawShape}, tokenMask={TokenMask}",
+                        "TryResolveStoredChargeToken: orderId={OrderId} - source=defaultCustomerPM customerId={CustomerId}, rawShape={RawShape}, tokenMask={TokenMask}",
                         order.Id,
                         cid,
                         rawShape,
@@ -2974,14 +2974,14 @@ public partial class PaymentService : ServiceBase
                 }
 
                 _logger.LogWarning(
-                    "TryResolveStoredChargeToken: orderId={OrderId} — default PM rejected (rawShape={RawShape})",
+                    "TryResolveStoredChargeToken: orderId={OrderId} - default PM rejected (rawShape={RawShape})",
                     order.Id,
                     rawShape);
             }
         }
 
         _logger.LogWarning(
-            "TryResolveStoredChargeToken: orderId={OrderId} — no usable token (approvalPresent={ApprovalPresent})",
+            "TryResolveStoredChargeToken: orderId={OrderId} - no usable token (approvalPresent={ApprovalPresent})",
             order.Id,
             !string.IsNullOrWhiteSpace(approval));
         return (null, null, approval);
@@ -3026,7 +3026,7 @@ public partial class PaymentService : ServiceBase
         }
 
         _logger.LogWarning(
-            "TryRecoverJ5Approval: orderId={OrderId} — no approval in {EventCount} payment events",
+            "TryRecoverJ5Approval: orderId={OrderId} - no approval in {EventCount} payment events",
             order.Id,
             events.Count);
         return null;
@@ -3060,7 +3060,7 @@ public partial class PaymentService : ServiceBase
         if (creds == null || string.IsNullOrWhiteSpace(order.CardcomLowProfileId))
         {
             _logger.LogWarning(
-                "TrySyncTokenFromCardcom: orderId={OrderId} — skipped (creds={CredsPresent}, lowProfileId={LowProfilePresent})",
+                "TrySyncTokenFromCardcom: orderId={OrderId} - skipped (creds={CredsPresent}, lowProfileId={LowProfilePresent})",
                 order.Id,
                 creds != null,
                 !string.IsNullOrWhiteSpace(order.CardcomLowProfileId));
@@ -3093,7 +3093,7 @@ public partial class PaymentService : ServiceBase
                 order.CardcomApprovalNumber ??= recoveredApproval;
                 validated = CopyCallback(validated, approval: recoveredApproval);
                 _logger.LogInformation(
-                    "TrySyncTokenFromCardcom: orderId={OrderId} — recovered J5 approval from payment events",
+                    "TrySyncTokenFromCardcom: orderId={OrderId} - recovered J5 approval from payment events",
                     order.Id);
             }
         }
@@ -3110,13 +3110,13 @@ public partial class PaymentService : ServiceBase
         {
             order.CardcomSelectedInstallments = payload.NumOfPayments;
             _logger.LogInformation(
-                "TrySyncTokenFromCardcom: orderId={OrderId} — restored installments selection from GetLpResult (numOfPayments={NumOfPayments})",
+                "TrySyncTokenFromCardcom: orderId={OrderId} - restored installments selection from GetLpResult (numOfPayments={NumOfPayments})",
                 order.Id, payload.NumOfPayments);
         }
         if (!string.IsNullOrWhiteSpace(payload.Token))
         {
             _logger.LogInformation(
-                "TrySyncTokenFromCardcom: orderId={OrderId} — persisting token from GetLpResult (shape={TokenShape})",
+                "TrySyncTokenFromCardcom: orderId={OrderId} - persisting token from GetLpResult (shape={TokenShape})",
                 order.Id,
                 CardcomGateway.DescribeTokenShape(payload.Token));
             await PersistCardcomTokenAsync(order, payload, payload.RawJson, cancelToken);
@@ -3132,7 +3132,7 @@ public partial class PaymentService : ServiceBase
         if (lastCallback?.RawResponseJson == null)
         {
             _logger.LogWarning(
-                "TrySyncTokenFromCardcom: orderId={OrderId} — no token in GetLpResult and no ValidateCallback event to backfill",
+                "TrySyncTokenFromCardcom: orderId={OrderId} - no token in GetLpResult and no ValidateCallback event to backfill",
                 order.Id);
             return;
         }
@@ -3148,7 +3148,7 @@ public partial class PaymentService : ServiceBase
         {
             order.CardcomSelectedInstallments = reparsed.NumOfPayments;
             _logger.LogInformation(
-                "TrySyncTokenFromCardcom backfill: orderId={OrderId} — restored installments selection from ValidateCallback event (numOfPayments={NumOfPayments})",
+                "TrySyncTokenFromCardcom backfill: orderId={OrderId} - restored installments selection from ValidateCallback event (numOfPayments={NumOfPayments})",
                 order.Id, reparsed.NumOfPayments);
         }
         if (!string.IsNullOrWhiteSpace(reparsed.Token))
@@ -3196,7 +3196,7 @@ public partial class PaymentService : ServiceBase
         if (string.IsNullOrWhiteSpace(approval))
         {
             _logger.LogInformation(
-                "VoidBeforeCharge skipped: orderId={OrderId} — no approval number",
+                "VoidBeforeCharge skipped: orderId={OrderId} - no approval number",
                 order.Id);
             return;
         }
@@ -3204,7 +3204,7 @@ public partial class PaymentService : ServiceBase
         if (!forceVoid && order.PaymentSettleStatus != PaymentSettleStatus.Authorized)
         {
             _logger.LogInformation(
-                "VoidBeforeCharge skipped: orderId={OrderId} — settleStatus={SettleStatus} (not authorized)",
+                "VoidBeforeCharge skipped: orderId={OrderId} - settleStatus={SettleStatus} (not authorized)",
                 order.Id,
                 order.PaymentSettleStatus);
             return;
@@ -3335,7 +3335,7 @@ public partial class PaymentService : ServiceBase
     }
 
     /// <summary>
-    /// Payment block whose <c>paymentGateway</c> is only a payment-method label (e.g. "מזומן") —
+    /// Payment block whose <c>paymentGateway</c> is only a payment-method label (e.g. "מזומן") -
     /// no transaction id and not a known gateway. Older Giorgio plugins send these with status
     /// "failed" for cash orders; they are informational and must not mark the payment as failed.
     /// </summary>
@@ -3352,7 +3352,7 @@ public partial class PaymentService : ServiceBase
     }
 
     /// <summary>
-    /// Apply WooCommerce gateway payment (checkout J5 auth or final capture) onto an order — same fields as phone Cardcom flow.
+    /// Apply WooCommerce gateway payment (checkout J5 auth or final capture) onto an order - same fields as phone Cardcom flow.
     /// </summary>
     public void ApplyWooCommerceGatewayPaymentFields(
         Order order,
@@ -3374,9 +3374,9 @@ public partial class PaymentService : ServiceBase
             order.IsFinished = isFinished.Trim();
 
         // A stray "failed" echo must not undo real money state: older plugin builds report "failed"
-        // whenever the Cardcom deal meta is momentarily missing — including the 1-2s window while the
+        // whenever the Cardcom deal meta is momentarily missing - including the 1-2s window while the
         // picking capture is running (order 6042: "failed" arrived one second before the capture
-        // success) — and a failure webhook can also lose the race and arrive after the capture success.
+        // success) - and a failure webhook can also lose the race and arrive after the capture success.
         if (WooCommerceGatewayPaymentInterpreter.ShouldIgnoreGatewayFailure(
                 order.PaymentSettleStatus, gatewayStatus, payment?.ResolveTransactionId(), failureReason))
         {
@@ -3406,7 +3406,7 @@ public partial class PaymentService : ServiceBase
         var settledByGiorgio = GiorgioOwned && IsSettledPaymentState(order.PaymentSettleStatus);
 
         var txId = payment.ResolveTransactionId();
-        // Once Giorgio charged, the plugin's id is the original hold — never let it replace the charge id
+        // Once Giorgio charged, the plugin's id is the original hold - never let it replace the charge id
         // (invoice / refund / verification all key off GatewayPaymentTransactionId).
         if (txId != null && !settledByGiorgio)
         {
@@ -3429,7 +3429,7 @@ public partial class PaymentService : ServiceBase
                 order.PayPlusCardLast4 = last4;
             if (!string.IsNullOrWhiteSpace(payment.CardBrand))
                 order.PayPlusCardBrand = payment.CardBrand.Trim();
-            // PayPlus has no separate "approval number to void before charging" concept — nothing to store.
+            // PayPlus has no separate "approval number to void before charging" concept - nothing to store.
         }
         else
         {
@@ -3465,7 +3465,7 @@ public partial class PaymentService : ServiceBase
             if (settledByGiorgio)
                 return;
             _logger.LogWarning(
-                "Woo gateway reported a final capture on a Giorgio-owned order — ignored: orderId={OrderId}, tx={Tx}",
+                "Woo gateway reported a final capture on a Giorgio-owned order - ignored: orderId={OrderId}, tx={Tx}",
                 order.Id, txId);
             isFinalCapture = false;
         }
@@ -3487,7 +3487,7 @@ public partial class PaymentService : ServiceBase
             return;
         }
 
-        // Website checkout: J5 authorization hold — unpaid until picking capture.
+        // Website checkout: J5 authorization hold - unpaid until picking capture.
         order.PaymentSettleStatus = PaymentSettleStatus.Authorized;
         if (string.Equals(order.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase))
             return;
@@ -3563,10 +3563,10 @@ public partial class PaymentService : ServiceBase
 
     /// <summary>
     /// Verify a website order's Cardcom charge directly against Cardcom, instead of trusting the plugin's
-    /// echo alone. Best-effort — never throws, never blocks payment intake. Runs only for orders whose
+    /// echo alone. Best-effort - never throws, never blocks payment intake. Runs only for orders whose
     /// payment arrived from the website gateway (<see cref="Order.GatewayPaymentTransactionId"/>) on a
     /// Cardcom site with API credentials. A hold-only transaction leaves the verification state untouched
-    /// (the final charge is verified when its own webhook arrives) — unless the order is already marked
+    /// (the final charge is verified when its own webhook arrives) - unless the order is already marked
     /// captured, in which case a hold-only inquiry means the reported charge never happened and the
     /// mismatch flag is raised (verified amount 0); a final charge is compared against
     /// <see cref="Order.Total"/> and the verdict persisted for the order card. A mismatch is surfaced
@@ -3578,7 +3578,7 @@ public partial class PaymentService : ServiceBase
         {
             var txRaw = CoalesceNonEmpty(order.GatewayPaymentTransactionId, order.PaymentReference);
             if (string.IsNullOrWhiteSpace(order.GatewayPaymentTransactionId))
-                return; // payment didn't come through the website gateway — George's own records are authoritative.
+                return; // payment didn't come through the website gateway - George's own records are authoritative.
 
             var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
             if (creds == null)
@@ -3614,7 +3614,7 @@ public partial class PaymentService : ServiceBase
         CancellationToken cancelToken)
     {
         // Website invoice copy: the same inquiry response carries the checkout-issued Cardcom document.
-        // Persist it so the archive shows צפייה בחשבונית for website orders too — previously only phone
+        // Persist it so the archive shows צפייה בחשבונית for website orders too - previously only phone
         // orders (charged by George, which creates the document itself) ever got CardcomDocumentUrl.
         var invoiceBackfilled = ApplyInvoiceDocumentFromInquiry(order, info);
 
@@ -3637,7 +3637,7 @@ public partial class PaymentService : ServiceBase
         }
 
         // J5→capture flow: the stored transaction is the checkout hold, the real charge lives under a
-        // capture transaction id George never received — but the order's Cardcom document proves the
+        // capture transaction id George never received - but the order's Cardcom document proves the
         // charge ran. Not a mismatch; also clears the false flag raised before this rule existed.
         if (outcome == GatewayVerifyOutcome.HoldWithCaptureEvidence)
         {
@@ -3652,7 +3652,7 @@ public partial class PaymentService : ServiceBase
                 "0",
                 $"Cardcom shows the checkout hold ({info.Amount:0.##} ₪); order carries Cardcom document"
                     + (string.IsNullOrWhiteSpace(order.InvoiceNumber) ? "" : $" #{order.InvoiceNumber}")
-                    + " — charge captured under a separate transaction (J5→capture)."
+                    + " - charge captured under a separate transaction (J5→capture)."
                     + (hadStaleFlag ? " Cleared stale mismatch flag." : ""),
                 info.TranzactionId ?? order.GatewayPaymentTransactionId,
                 null,
@@ -3666,7 +3666,7 @@ public partial class PaymentService : ServiceBase
         }
 
         // False-success signature (Delinka #18326): the order says captured, but the transaction it
-        // points at is an authorization hold only — the plugin reported "charged" while the capture
+        // points at is an authorization hold only - the plugin reported "charged" while the capture
         // never happened. Verified amount 0 = "no final charge found", which the order card renders
         // as "חויב בפועל ₪0" against the order total.
         var holdButMarkedCaptured = outcome == GatewayVerifyOutcome.HoldButMarkedCaptured;
@@ -3677,7 +3677,7 @@ public partial class PaymentService : ServiceBase
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
 
         var description = holdButMarkedCaptured
-            ? $"Cardcom shows an authorization hold only ({info.Amount:0.##} ₪) — no final charge found, but the order is marked as paid"
+            ? $"Cardcom shows an authorization hold only ({info.Amount:0.##} ₪) - no final charge found, but the order is marked as paid"
             : mismatch
                 ? $"Cardcom: {info.Amount:0.##} ₪, expected {order.Total:0.##} ₪" + (info.IsRefund == true ? " (refunded at Cardcom)" : "")
                 : $"Cardcom amount verified ({info.Amount:0.##} ₪)";
@@ -3766,7 +3766,7 @@ public partial class PaymentService : ServiceBase
         var settle = (order.PaymentSettleStatus ?? "").Trim();
         var alreadyCaptured = string.Equals(order.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase)
             && string.Equals(settle, PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase);
-        // A refunded order was charged first — it can still be verified, but must NEVER fall through
+        // A refunded order was charged first - it can still be verified, but must NEVER fall through
         // to the mark-paid path below, which would overwrite the refunded state back to Paid/Captured.
         var refundedState = string.Equals(settle, PaymentSettleStatus.Refunded, StringComparison.OrdinalIgnoreCase)
             || string.Equals(settle, PaymentSettleStatus.PartiallyRefunded, StringComparison.OrdinalIgnoreCase);
@@ -3883,7 +3883,7 @@ public partial class PaymentService : ServiceBase
             response.Data = new SyncGatewayPaymentRes
             {
                 Outcome = "AuthorizationHoldOnly",
-                Message = info.Description ?? "Cardcom shows an authorization hold only — not a final charge.",
+                Message = info.Description ?? "Cardcom shows an authorization hold only - not a final charge.",
                 TransactionId = txRaw,
                 DealType = info.DealType,
                 Amount = info.Amount,

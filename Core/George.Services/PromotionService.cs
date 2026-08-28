@@ -294,7 +294,7 @@ public class PromotionService : ServiceBase
     }
 
     /// <summary>
-    /// `POST /Promotion/evaluate` — runs the cart-eligibility + math engine
+    /// `POST /Promotion/evaluate` - runs the cart-eligibility + math engine
     /// (<see cref="PromotionEvaluator"/>) for the given site and cart. Returns the list
     /// of applied promotions and the total discount, per <c>Sprint4/מבצעים.md</c>.
     /// </summary>

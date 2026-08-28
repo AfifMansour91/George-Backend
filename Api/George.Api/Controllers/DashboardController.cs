@@ -19,7 +19,7 @@ public class DashboardController : GeorgeControllerBase, IAuthUserProvider
         _dashboardService = dashboardService;
     }
 
-    /// <summary>Store operations dashboard — KPIs, active orders, forward projection, insights.</summary>
+    /// <summary>Store operations dashboard - KPIs, active orders, forward projection, insights.</summary>
     [HttpGet("Summary")]
     [ProducesResponseType(typeof(IApiResponse<DashboardSummaryRes>), (int)HttpStatusCode.OK)]
     public async Task<IActionResult> GetSummaryAsync(

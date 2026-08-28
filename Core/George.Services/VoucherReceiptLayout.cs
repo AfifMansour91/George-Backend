@@ -5,7 +5,7 @@ using George.DB;
 namespace George.Services;
 
 /// <summary>
-/// Receipt-style discount layout for thermal vouchers — keep in sync with shop-manager
+/// Receipt-style discount layout for thermal vouchers - keep in sync with shop-manager
 /// <c>voucherReceiptLayout.ts</c>.
 /// </summary>
 public static class VoucherReceiptLayout
@@ -73,7 +73,7 @@ public static class VoucherReceiptLayout
     {
         var items = order.OrderItem ?? new List<OrderItem>();
         // Same rule as OrderService.SumStampedPromotionDiscount: once picking started, only
-        // meaningfully-picked lines contribute their discount — the discount follows its merchandise
+        // meaningfully-picked lines contribute their discount - the discount follows its merchandise
         // (DiscountAmount is kept paired with the line gross by the picking save).
         var activeItems = items.Where(i => !i.IsDeleted).ToList();
         var anyPicked = activeItems.Any(OrderItemLineDisplay.OrderMeaningfulPick);
@@ -123,7 +123,7 @@ public static class VoucherReceiptLayout
         if (summary.ManualDiscount > 0m)
             rows.Add(ReceiptRowHtml(escapeHtml(summary.ManualDiscountLabel), escapeHtml(FormatAmount(summary.ManualDiscount, negative: true))));
         if (!string.IsNullOrEmpty(summary.CouponCode))
-            rows.Add(ReceiptRowHtml($"קופון ({escapeHtml(summary.CouponCode.ToUpperInvariant())})", "—", "font-size:11px;color:#374151;"));
+            rows.Add(ReceiptRowHtml($"קופון ({escapeHtml(summary.CouponCode.ToUpperInvariant())})", "-", "font-size:11px;color:#374151;"));
         if (summary.Shipping > 0m)
             rows.Add(ReceiptRowHtml("משלוח", escapeHtml(FormatAmount(summary.Shipping))));
 
@@ -147,7 +147,7 @@ public static class VoucherReceiptLayout
 
     public static string PickedTotalCellHtml(LinePricing? pricing, string fallbackTotal, string valStyle, Func<string, string> escapeHtml)
     {
-        if (pricing is null || pricing.Discount <= 0m || fallbackTotal == "—")
+        if (pricing is null || pricing.Discount <= 0m || fallbackTotal == "-")
             return $"<div style=\"{valStyle}\"><bdi dir=\"ltr\">{escapeHtml(fallbackTotal)}</bdi></div>";
         return
             $"<div style=\"{valStyle}line-height:12px;\">" +

@@ -270,11 +270,11 @@ namespace George.Services
             || string.Equals(o.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase)
             || string.Equals(o.PaymentStatus, "Refunded", StringComparison.OrdinalIgnoreCase);
 
-        /// <summary>Gross charged — includes paid/refunded rows even if later cancelled.</summary>
+        /// <summary>Gross charged - includes paid/refunded rows even if later cancelled.</summary>
         private static decimal GrossChargedAmount(Order o) =>
             WasEverCharged(o) ? OrderTotal(o) : 0m;
 
-        /// <summary>Cancellation KPI — every cancelled order (may also appear in credits KPI).</summary>
+        /// <summary>Cancellation KPI - every cancelled order (may also appear in credits KPI).</summary>
         private static decimal CancellationKpiAmount(Order o) =>
             IsCancelled(o) ? OrderTotal(o) : 0m;
 

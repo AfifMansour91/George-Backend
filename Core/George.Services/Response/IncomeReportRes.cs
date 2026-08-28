@@ -69,7 +69,7 @@ namespace George.Services.Response
         public DateTime OrderDate { get; set; }
         public string CustomerName { get; set; } = "";
         public string Source { get; set; } = "";
-        /// <summary>Merchandise (line totals) attributed to this row — אפיון עמודת "מוצרים".</summary>
+        /// <summary>Merchandise (line totals) attributed to this row - אפיון עמודת "מוצרים".</summary>
         public decimal ProductRevenue { get; set; }
         /// <summary>סה״כ לתשלום (כמו Order.Total) לפי הקצאת קטגוריה.</summary>
         public decimal Income { get; set; }

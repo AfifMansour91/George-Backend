@@ -10,7 +10,7 @@ public static class OrderDiscountTotals
 
     /// <summary>
     /// Effective line discount for a given line gross. A George-linked stamp (<paramref name="promotionId"/> &gt; 0)
-    /// is returned as-is — the promotion evaluator re-derives it on picking. An unlinked stamp (a WP-local
+    /// is returned as-is - the promotion evaluator re-derives it on picking. An unlinked stamp (a WP-local
     /// promotion) has no evaluator, so it is scaled proportionally when picking changed the line gross
     /// (e.g. a 5% discount stamped on 500g follows the line to the actual picked weight).
     /// </summary>

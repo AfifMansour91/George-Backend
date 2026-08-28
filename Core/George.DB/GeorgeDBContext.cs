@@ -45,7 +45,7 @@ namespace George.DB
 
 		public GeorgeStoredProcedures StoredProcedures { get { return _storedProcedures; } }
 
-		// MultiSite Phase 2 — per-site override layer (configured in MapNonScaffoldEntities).
+		// MultiSite Phase 2 - per-site override layer (configured in MapNonScaffoldEntities).
 		public virtual DbSet<ProductSiteOverride> ProductSiteOverride { get; set; }
 		public virtual DbSet<ProductSiteVariantStock> ProductSiteVariantStock { get; set; }
 		public virtual DbSet<ProductSiteCategory> ProductSiteCategory { get; set; }
@@ -244,7 +244,7 @@ namespace George.DB
 					.HasConstraintName("FK_UserPreference_User");
 			});
 
-			// MultiSite Phase 2 — per-site product override layer.
+			// MultiSite Phase 2 - per-site product override layer.
 			modelBuilder.Entity<ProductSiteOverride>(entity =>
 			{
 				entity.ToTable("ProductSiteOverride");

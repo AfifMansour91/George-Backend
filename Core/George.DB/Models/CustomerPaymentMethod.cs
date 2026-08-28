@@ -15,7 +15,7 @@ public partial class CustomerPaymentMethod
     public int SiteId { get; set; }
 
     /// <summary>
-    /// Which gateway issued the token ("cardcom" / "payplus") — a token is only redeemable at its own
+    /// Which gateway issued the token ("cardcom" / "payplus") - a token is only redeemable at its own
     /// gateway, so saved-card flows must filter on the site's active provider.
     /// </summary>
     [StringLength(32)]

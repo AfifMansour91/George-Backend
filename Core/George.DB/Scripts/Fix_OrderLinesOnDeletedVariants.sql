@@ -2,7 +2,7 @@
 --
 -- Why: saving/syncing a product soft-deletes and recreates all its variants with new ids (see the many
 -- IsDeleted=1 copies per Woo variation id). Every order line keeps the OLD ProductVariantId, so the picking
--- catalog lookup by variant id fails and falls back to the product base price — a cutting-surcharge variant
+-- catalog lookup by variant id fails and falls back to the product base price - a cutting-surcharge variant
 -- (לברק 145 ₪/kg) was priced at 95 ₪/kg (Zano Dagim order 1149, 23/08/2026). Lines that carry a
 -- OrderLineCuttingLabel snapshot were mostly unaffected; lines relinked by Fix_ZanoDagim_DuplicateWooProducts
 -- have no snapshot. Frontend now also falls back to matching the variant by variantTitle, so after deploy this
@@ -38,7 +38,7 @@ SELECT SiteId, COUNT(*) AS LinesOnDeletedVariant,
 FROM cand GROUP BY SiteId ORDER BY LinesOnDeletedVariant DESC;
 
 ------------------------------------------------------------------------------------------------
--- 1. THE FIX (check the count against WillRelink, then COMMIT — do not leave the transaction open)
+-- 1. THE FIX (check the count against WillRelink, then COMMIT - do not leave the transaction open)
 ------------------------------------------------------------------------------------------------
 BEGIN TRAN;
 

@@ -3,7 +3,7 @@ using George.DB;
 
 namespace George.Services.Payments;
 
-/// <summary>Cardcom sandbox terminal credentials — seeded on new site creation when payment is not configured.</summary>
+/// <summary>Cardcom sandbox terminal credentials - seeded on new site creation when payment is not configured.</summary>
 public static class CardcomTestTerminalDefaults
 {
     public const int TerminalNumber = 1000;

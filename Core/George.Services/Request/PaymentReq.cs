@@ -32,7 +32,7 @@ public class UpdateSitePaymentSettingsReq
     public string? PayPlusApiKey { get; set; }
     public string? PayPlusSecretKey { get; set; }
     public bool? PayPlusTestMode { get; set; }
-    /// <summary>Invoice+ brand UID (issuing business) — required for invoice creation; empty string clears it.</summary>
+    /// <summary>Invoice+ brand UID (issuing business) - required for invoice creation; empty string clears it.</summary>
     public string? PayPlusInvoiceBrandUid { get; set; }
     /// <summary>Max installments on the hosted payment page for immediate charges (1-36). 1 hides the selector.</summary>
     public int? PayPlusMaxInstallments { get; set; }

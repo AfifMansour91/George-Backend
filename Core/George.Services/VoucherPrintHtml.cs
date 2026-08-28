@@ -1,7 +1,7 @@
 namespace George.Services;
 
 /// <summary>
-/// Thermal voucher HTML — keep in sync with shop-manager
+/// Thermal voucher HTML - keep in sync with shop-manager
 /// <c>OrderVoucherPrint.tsx</c> (<c>buildVoucherHtmlString</c>, <c>VOUCHER_*</c> constants).
 /// </summary>
 public static class VoucherPrintHtml

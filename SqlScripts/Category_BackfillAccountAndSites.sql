@@ -3,7 +3,7 @@
 -- Background: historically Category.AccountId was left NULL on virtually every row. The MultiSite product
 -- create/edit screen now fetches categories with GET /Category?Filter.AccountId=<acct> and then keeps, client-side,
 -- only those whose site_ids include the selected site (or have no site links at all). A category with the WRONG or
--- NULL AccountId is dropped by the server-side account filter and never reaches the picker — so the branch's
+-- NULL AccountId is dropped by the server-side account filter and never reaches the picker - so the branch's
 -- categories disappear (e.g. account 54 / site 66).
 --
 -- A category is owned by the account of the site(s) it lives in. The root cause is fixed in code (CategoryStorage
@@ -29,7 +29,7 @@ CROSS APPLY (
 WHERE c.AccountId IS NULL OR c.AccountId <> s.AccountId;
 
 -------------------------------------------------------------------------------
--- STEP 2 (OPTIONAL — REVIEW BEFORE RUNNING): legacy categories that have NO site link at all.
+-- STEP 2 (OPTIONAL - REVIEW BEFORE RUNNING): legacy categories that have NO site link at all.
 -- These cannot be resolved from a site, so the account is guessed from the user who created the category. This can
 -- mis-assign categories created by master/admin users, so it is left commented out. Inspect the affected rows first:
 --
@@ -40,7 +40,7 @@ WHERE c.AccountId IS NULL OR c.AccountId <> s.AccountId;
 --     AND NOT EXISTS (SELECT 1 FROM dbo.CategorySite cs WHERE cs.CategoryId = c.Id);
 --
 -- Note: a category with no site links is already shown for ALL sites by the picker's client-side filter, so it only
--- needs a correct AccountId to reappear — it does NOT need to be linked to any site.
+-- needs a correct AccountId to reappear - it does NOT need to be linked to any site.
 --
 -- UPDATE c
 -- SET c.AccountId = u.AccountId

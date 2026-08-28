@@ -5,7 +5,7 @@
 --   VariantTitle -> OrderLineCuttingLabel -> OrderLineSizeLabel (first non-empty, in that order).
 -- A label is DISCARDED (treated as "not an option") when it is generic ("יחידה", "ק\"ג")
 -- or weight/quantity-like ("500 גרם", "1 ק\"ג", "2 יח'...").
--- If no line of a product resolves a label, the product shows only its parent row — no variations.
+-- If no line of a product resolves a label, the product shows only its parent row - no variations.
 --
 -- Run each section and look at the "diagnosis" column.
 -- Set these two parameters first:
@@ -44,7 +44,7 @@ SELECT o.Id AS OrderId, o.Source, o.Status,
            THEN N'label גנרי ("יחידה"/"ק"ג") -> מסונן בכוונה'
          WHEN oi.VariantTitle LIKE N'[0-9]%'
            THEN N'label מתחיל במספר (למשל "500 גרם") -> מסונן כטקסט כמות, לא כאפשרות'
-         ELSE N'יש label תקין -> אמור להופיע; אם לא — בדוק שהמוצר עם וריאציות פעילות בקטלוג'
+         ELSE N'יש label תקין -> אמור להופיע; אם לא - בדוק שהמוצר עם וריאציות פעילות בקטלוג'
        END AS diagnosis,
        oi.LinePayloadJson
 FROM dbo.[Order] o
@@ -57,7 +57,7 @@ ORDER BY o.Id DESC, oi.SortOrder;
 
 -- ============================================================================
 -- 3) Site-wide summary: how many open-order lines of variation-products have no usable label,
---    grouped by product — this lists all the "many products" the customer sees.
+--    grouped by product - this lists all the "many products" the customer sees.
 -- ============================================================================
 SELECT p.Id AS ProductId, p.Name,
        COUNT(*) AS OpenLines,

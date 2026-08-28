@@ -190,7 +190,7 @@ namespace George.Services
                 });
 
             ////////////////////////// Order (Sprint 2)
-            // Creation/updated timestamps: UTC + "Z" for real instants. Delivery/pickup are calendar dates — do not SpecifyUtc or a noon UTC instant becomes the wrong calendar day in the UI (e.g. .slice(0,10) → "yesterday").
+            // Creation/updated timestamps: UTC + "Z" for real instants. Delivery/pickup are calendar dates - do not SpecifyUtc or a noon UTC instant becomes the wrong calendar day in the UI (e.g. .slice(0,10) → "yesterday").
             CreateMap<Order, OrderRes>()
                 .ForMember(dest => dest.Items, opt => opt.MapFrom(src => src.OrderItem ?? new List<OrderItem>()))
                 .ForMember(dest => dest.BagsCount, opt => opt.MapFrom(src => src.BagsCount))

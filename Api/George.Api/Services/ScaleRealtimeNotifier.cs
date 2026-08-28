@@ -12,7 +12,7 @@ public class ScaleReadingReq
     public decimal? WeightKg { get; set; }
     /// <summary>Parser status: Stable | Unstable | Zero | Negative | Over | Under | Invalid.</summary>
     public string? Status { get; set; }
-    /// <summary>Convenience flag (parser IsStableWeight) — the picking UI auto-captures only when true.</summary>
+    /// <summary>Convenience flag (parser IsStableWeight) - the picking UI auto-captures only when true.</summary>
     public bool Stable { get; set; }
     /// <summary>Optional agent label (machine name).</summary>
     public string? AgentId { get; set; }
@@ -52,7 +52,7 @@ public class ScaleRealtimeNotifier : IScaleRealtimeNotifier
         var response = new ApiResponse<object>();
 
         if (!SysConfig.Data.ScaleRealtimeEnabled)
-            return response; // feature off — accept silently so the agent doesn't error-loop
+            return response; // feature off - accept silently so the agent doesn't error-loop
 
         if (req == null || req.SiteId <= 0)
         {

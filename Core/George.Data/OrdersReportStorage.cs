@@ -14,7 +14,7 @@ namespace George.Data
 
         /// <summary>
         /// Non-cancelled orders whose date is in the inclusive calendar range <paramref name="fromLocalDate"/>..<paramref name="toLocalDate"/>.
-        /// Date basis: supply = effective delivery date (DeliveryDate, else PickupDate, else CreationTime — same
+        /// Date basis: supply = effective delivery date (DeliveryDate, else PickupDate, else CreationTime - same
         /// semantics as the orders-archive filter); order = CreationTime.
         /// </summary>
         public async Task<List<Order>> GetOrdersForReportAsync(
@@ -30,7 +30,7 @@ namespace George.Data
             var query = _dbContext.Order
                 .AsNoTracking()
                 .Where(o => !o.IsDeleted && o.SiteId == siteId)
-                // Exact literal — EF cannot translate string.Equals(..., StringComparison).
+                // Exact literal - EF cannot translate string.Equals(..., StringComparison).
                 .Where(o => o.Status != "Cancelled");
 
             query = byOrderDate

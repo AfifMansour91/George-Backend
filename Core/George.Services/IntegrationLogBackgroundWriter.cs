@@ -43,7 +43,7 @@ public sealed class IntegrationLogBackgroundWriter : BackgroundService
         }
         catch (OperationCanceledException)
         {
-            // shutting down — fall through to a final drain.
+            // shutting down - fall through to a final drain.
         }
 
         // Best-effort drain of whatever is left so in-flight logs aren't lost on shutdown.

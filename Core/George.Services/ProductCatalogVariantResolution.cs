@@ -39,7 +39,7 @@ public static class ProductCatalogVariantResolution
         {
             var byId = p.ProductVariant?.FirstOrDefault(v => !v.IsDeleted && v.Id == vid);
             if (byId != null) return byId;
-            // Stale id (variants re-created since the order) — fall through to Woo id / label matching.
+            // Stale id (variants re-created since the order) - fall through to Woo id / label matching.
         }
 
         if (line.WooCommerceVariationId is int woo && woo > 0)
@@ -64,7 +64,7 @@ public static class ProductCatalogVariantResolution
         }
 
         // A VariantTitle like "750 גרם" is excluded from ResolveOptionDisplayLabel (reads as quantity
-        // text), yet may be the exact name of a weight-named catalog option — exact-key match only.
+        // text), yet may be the exact name of a weight-named catalog option - exact-key match only.
         foreach (var candidate in new[] { line.VariantTitle, line.OrderLineCuttingLabel, line.OrderLineSizeLabel })
         {
             if (string.IsNullOrWhiteSpace(candidate)) continue;

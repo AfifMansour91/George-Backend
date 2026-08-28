@@ -310,9 +310,9 @@ namespace George.Data
         /// shares at least one SITE with the product being saved. Used to BLOCK creating/updating a product/variation
         /// with a duplicate SKU on a site: each site is one WooCommerce store and Woo links by SKU, so two products
         /// with the same SKU on the SAME site collide on a single Woo product. The same SKU on DIFFERENT sites is
-        /// allowed — WooCommerce receives a site-prefixed SKU (S{siteId}_) so cross-site overlap does not collide, and
+        /// allowed - WooCommerce receives a site-prefixed SKU (S{siteId}_) so cross-site overlap does not collide, and
         /// the MultiSite model legitimately stores one logical product as separate per-site rows that share a SKU
-        /// (a same-account sibling on another site must NOT be flagged — that was the false positive that blocked
+        /// (a same-account sibling on another site must NOT be flagged - that was the false positive that blocked
         /// stock toggles). Excludes the product being edited and, for variants, an optional variant id. Empty SKU or
         /// no target site is never "taken". Bug #17 (site-scoped).
         /// </summary>
@@ -954,7 +954,7 @@ namespace George.Data
             if (orderedProductIds == null || !orderedProductIds.Any()) return new List<(int, int)>();
             var productIdsSet = orderedProductIds.Distinct().ToHashSet();
             // MultiSite: the same product has a DIFFERENT Woo product id per branch, so menu_order must target the
-            // per-site id (ProductSiteWooId) for THIS site, not the single legacy Product.WooCommerceId column —
+            // per-site id (ProductSiteWooId) for THIS site, not the single legacy Product.WooCommerceId column -
             // otherwise the reorder was pushed to the wrong branch's product ids (only one branch "worked"). MultiSite #3/#4.
             var onSite = await _dbContext.Product
                 .AsNoTracking()
@@ -1040,7 +1040,7 @@ namespace George.Data
         /// <summary>
         /// External price pull (Woo → George): apply the store's current prices to the CANONICAL product and
         /// variant rows (single-store / non-network sites). Unlike normal edits, sale fields are assigned as
-        /// given — a null clears the sale so a sale removed at the POS also ends here. Regular price is only
+        /// given - a null clears the sale so a sale removed at the POS also ends here. Regular price is only
         /// applied when the store returned one (a Woo variable parent has no own regular_price).
         /// Returns whether the product row changed and how many variant rows changed.
         /// </summary>
@@ -1156,7 +1156,7 @@ namespace George.Data
         {
             {
                 var opt = new ProductOptionDto { Name = optName, Values = distinctValues };
-                // "גודל" (Size) is a product variation dimension (e.g. weight-by-size), not a reusable feature — do not create a global Attribute for it
+                // "גודל" (Size) is a product variation dimension (e.g. weight-by-size), not a reusable feature - do not create a global Attribute for it
                 var isVariationOnlyOption = opt.Name == "גודל" || string.Equals(opt.Name, "Size", StringComparison.OrdinalIgnoreCase);
                 if (!isVariationOnlyOption)
                 {
@@ -1219,7 +1219,7 @@ namespace George.Data
             if (options == null) return;
 
             // Upsert by option name: keep ProductOption ids stable (the old delete+recreate left variants pointing at
-            // deleted options — see Scan_VariantsWithDeletedOption.sql) and touch ProductOptionValue only on real change.
+            // deleted options - see Scan_VariantsWithDeletedOption.sql) and touch ProductOptionValue only on real change.
             var live = await _dbContext.ProductOption
                 .Include(po => po.ProductOptionValue)
                 .Where(po => po.ProductId == productId && !po.IsDeleted)
@@ -1333,7 +1333,7 @@ namespace George.Data
         /// <summary>
         /// Upsert the product's variants IN PLACE. Matches each incoming variant to a live one by <see cref="ProductVariantDto.Id"/>
         /// (edit form) or by its option-value set; updates matched rows, creates unmatched ones, soft-deletes live rows
-        /// the request no longer contains. Variant ids are stable across saves — OrderItem.ProductVariantId,
+        /// the request no longer contains. Variant ids are stable across saves - OrderItem.ProductVariantId,
         /// ProductSiteVariantWooId and ProductSiteVariantStock all reference them (the old delete+recreate orphaned
         /// ~5,000 order lines and reset the Woo variation map on every save; Zano Dagim 23/08/2026).
         /// </summary>
@@ -1384,7 +1384,7 @@ namespace George.Data
                 claimed.Add(match.Id);
                 ApplyVariantDto(match, dto, parentSku);
 
-                // Option values: PK is (ProductVariantId, OptionName) — replace only when the set actually changed.
+                // Option values: PK is (ProductVariantId, OptionName) - replace only when the set actually changed.
                 var wantedValues = (dto.OptionValues ?? new Dictionary<string, string>())
                     .Where(kv => !string.IsNullOrWhiteSpace(kv.Key))
                     .ToDictionary(kv => kv.Key, kv => kv.Value ?? "", StringComparer.Ordinal);
@@ -1568,8 +1568,8 @@ namespace George.Data
 
         /// <summary>
         /// MultiSite Phase 2: persists the structural weight settings (IsWeighted / SetupType / WeightConfig) on the
-        /// CANONICAL product. Weight settings define HOW the product is sold (by weight / by unit / weight-by-size) —
-        /// they are shared by every site, exactly like ProductOption — so a selected-site edit persists them here
+        /// CANONICAL product. Weight settings define HOW the product is sold (by weight / by unit / weight-by-size) -
+        /// they are shared by every site, exactly like ProductOption - so a selected-site edit persists them here
         /// rather than on the per-site override (where they were previously dropped and never saved).
         /// </summary>
         public async Task UpdateProductWeightSettingsAsync(int productId, bool? isWeighted, string? setupType, WeightConfigDto? weightConfig, CancellationToken cancelToken)
@@ -1810,7 +1810,7 @@ namespace George.Data
                     product.BrandId = first > 0 ? first : null;
                 }
             }
-            // Legacy free-text brand (find/create). Only when BrandIds omitted — avoids wiping BrandId on partial updates.
+            // Legacy free-text brand (find/create). Only when BrandIds omitted - avoids wiping BrandId on partial updates.
             else if (req.Brand.HasValue())
             {
                 var name = req.Brand.Trim();
@@ -1833,7 +1833,7 @@ namespace George.Data
                 product.BrandId = brand.Id;
             }
 
-            // Map supplier — find or create Supplier for this account.
+            // Map supplier - find or create Supplier for this account.
             if (req.Supplier.HasValue())
             {
                 var name = req.Supplier.Trim();

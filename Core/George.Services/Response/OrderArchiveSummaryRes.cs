@@ -1,6 +1,6 @@
 namespace George.Services.Response;
 
-/// <summary>Archive KPI summary over the whole filtered period (GET /Order/ArchiveSummary) — stable across table paging/filters.</summary>
+/// <summary>Archive KPI summary over the whole filtered period (GET /Order/ArchiveSummary) - stable across table paging/filters.</summary>
 public class OrderArchiveSummaryRes
 {
     public int Total { get; set; }

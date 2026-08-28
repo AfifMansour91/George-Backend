@@ -1,7 +1,7 @@
 -- Optional: enforce unique coupon code per site (non-deleted rows with a code).
 -- Run after Promotion_MetricsAndListColumns.sql if you want DB-level uniqueness in addition to API checks.
 
--- Filtered-index WHERE must use simple comparisons only (no LTRIM/RTRIM — SQL Server error 10735).
+-- Filtered-index WHERE must use simple comparisons only (no LTRIM/RTRIM - SQL Server error 10735).
 -- Whitespace normalization is enforced in PromotionService on create/update.
 IF EXISTS (
     SELECT 1 FROM sys.indexes

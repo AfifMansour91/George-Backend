@@ -57,7 +57,7 @@ public class OrderReceptionService : ServiceBase
 
         var result = await GetAsync(siteId, cancelToken).ConfigureAwait(false);
 
-        // Push to WooCommerce (oc-storeos) — best-effort, does not fail the save
+        // Push to WooCommerce (oc-storeos) - best-effort, does not fail the save
         try
         {
             await SyncClosingDatesToWooCommerceAsync(siteId, result.Data!, cancelToken).ConfigureAwait(false);

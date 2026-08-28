@@ -61,7 +61,7 @@ namespace George.Data
                 else if (statuses.Count > 1)
                     query = query.Where(o => statuses.Contains(o.Status));
             }
-            // Default to active orders only — UNLESS listing a specific customer's orders, where we want all of them.
+            // Default to active orders only - UNLESS listing a specific customer's orders, where we want all of them.
             else if (filter?.CustomerId.HasValue != true)
                 query = query.Where(o => o.Status != "Completed" && o.Status != "Cancelled");
 
@@ -80,9 +80,9 @@ namespace George.Data
             if (filter?.PaymentStatus.HasValue() == true)
                 query = query.Where(o => o.PaymentStatus == filter.PaymentStatus!.Trim());
 
-            // Payment-method kind: "cash" vs "credit". PaymentMethod values are heterogeneous —
+            // Payment-method kind: "cash" vs "credit". PaymentMethod values are heterogeneous -
             // internal codes (Cash, SavedCard, CreditPhone, ExternalCredit) for manual orders,
-            // mapped/free-text Woo gateway titles (possibly Hebrew) for website orders — so match
+            // mapped/free-text Woo gateway titles (possibly Hebrew) for website orders - so match
             // cash markers first and treat Cardcom/credit markers as credit. ExternalCredit
             // (external physical terminal) counts as credit here: money-wise it's a card charge.
             if (filter?.PaymentMethod.HasValue() == true)
@@ -125,7 +125,7 @@ namespace George.Data
             }
 
             // Date range: scheduled delivery/pickup date, falling back to CreationTime for orders
-            // without one — otherwise such orders are silently excluded from every bounded range
+            // without one - otherwise such orders are silently excluded from every bounded range
             // (archive "היום"/"השבוע" never showed orders handled today with no scheduled date).
             if (filter?.DeliveryDateFrom.HasValue == true)
             {
@@ -175,7 +175,7 @@ namespace George.Data
         public const string CityNoneKey = "__none__";
 
         /// <summary>
-        /// Orders a credit was issued for — full or partial. SQL mirror of the UI's
+        /// Orders a credit was issued for - full or partial. SQL mirror of the UI's
         /// isPartialRefund/isPaymentRefunded (orderPaymentDisplay.ts): settle status marked
         /// refunded, payment status refunded, a positive refunded amount, or a credit
         /// document on a paid order.
@@ -209,7 +209,7 @@ namespace George.Data
                 .Select(g => new { Status = g.Key, Count = g.Count() })
                 .ToListAsync(cancelToken).ConfigureAwait(false);
 
-            // Credited orders are a small subset — project them and compute the credited
+            // Credited orders are a small subset - project them and compute the credited
             // amount in memory with the exact UI semantics (partial → RefundedAmount;
             // full → RefundedAmount when positive, else Total).
             var creditedRows = await ApplyCreditedOrdersFilter(query)
@@ -537,9 +537,9 @@ namespace George.Data
                 // Unlinked (WP-local) promotion stamp: keep it paired with the line gross. DiscountAmount
                 // always corresponds to the current TotalPrice (at intake TotalPrice = ordered gross), so
                 // when picking changes the gross we scale the stamp by the same ratio and persist. This is
-                // deliberately ratio-based — deriving "ordered gross" from Quantity/PricePerUnit is unreliable
+                // deliberately ratio-based - deriving "ordered gross" from Quantity/PricePerUnit is unreliable
                 // (weight-per-unit lines store a per-kg price with Quantity counting units). Linked stamps
-                // (PromotionId > 0) are excluded — the promotion evaluator re-derives them after every save.
+                // (PromotionId > 0) are excluded - the promotion evaluator re-derives them after every save.
                 if (item.DiscountAmount is > 0m && item.PromotionId is not > 0)
                 {
                     var prevGross = prevTotal ?? ((prevPicked ?? item.Quantity) * (item.PricePerUnit ?? 0m));
@@ -562,7 +562,7 @@ namespace George.Data
                     item.PickingUserConfirmed = false;
                 else if (!NullableDecimalEquals(pickedQty, prevPicked) || !NullableDecimalEquals(totalPrice, prevTotal))
                     item.PickingUserConfirmed = true;
-                // else: unchanged vs DB — leave PickingUserConfirmed as-is (avoids marking every line picked when client sends full cart)
+                // else: unchanged vs DB - leave PickingUserConfirmed as-is (avoids marking every line picked when client sends full cart)
             }
             RecalculateOrderHeaderTotalsFromLines(db);
             db.UpdatedDate = DateTime.UtcNow;
@@ -621,7 +621,7 @@ namespace George.Data
             var sum = active.Sum(SumOrderLineMerchandise);
             // A discount follows its merchandise: only lines counted in `sum` contribute their discount
             // (DiscountAmount is kept paired with the line gross by UpdatePickingAsync). A not-yet-picked
-            // or zero-picked line adds neither gross nor discount — otherwise finishing with an unpicked
+            // or zero-picked line adds neither gross nor discount - otherwise finishing with an unpicked
             // line would under-charge by that line's stamp.
             var promo = active.Sum(i =>
                 SumOrderLineMerchandise(i) > 0m && i.DiscountAmount is > 0m ? i.DiscountAmount.Value : 0m);

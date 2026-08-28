@@ -20,7 +20,7 @@ namespace George.Api.Controllers
             _productsReportService = productsReportService;
         }
 
-        /// <summary>דוח מוצרים וביצועים — KPIs, טבלה, פילוח, אפסלים (לפי הזמנות בתקופה).</summary>
+        /// <summary>דוח מוצרים וביצועים - KPIs, טבלה, פילוח, אפסלים (לפי הזמנות בתקופה).</summary>
         [HttpGet]
         [ProducesResponseType(typeof(IApiResponse<George.Services.Response.ProductsReportRes>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetAsync(

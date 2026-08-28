@@ -479,7 +479,7 @@ namespace George.Services
                     var pid = kv.Key;
                     var a = kv.Value;
                     basAgg.TryGetValue(pid, out var b);
-                    // Agg is a class: when TryGetValue is false, `b` is null — do not dereference.
+                    // Agg is a class: when TryGetValue is false, `b` is null - do not dereference.
                     var trendPct = b != null && b.revenue > 0m
                         ? Math.Round((a.revenue - b.revenue) / b.revenue * 100m, 1, MidpointRounding.AwayFromZero)
                         : (decimal?)null;
@@ -567,7 +567,7 @@ namespace George.Services
                     var variant = ProductCatalogVariantResolution.FindVariantForOrderLine(p, line);
                     var cutLabel = ResolveProductsReportCutLabel(line, p.Name);
                     // Weight-named catalog options ("500 גרם") resolve to null above (they read as
-                    // quantity text) — the matched catalog variant's label is the real option name.
+                    // quantity text) - the matched catalog variant's label is the real option name.
                     if (string.IsNullOrEmpty(cutLabel) && variant != null)
                     {
                         var catalogLabel = ProductCatalogVariantResolution.FormatVariantDisplayLabel(variant);
@@ -627,7 +627,7 @@ namespace George.Services
                 return (weightKg ?? 0m, line.LineUnit ?? 0m);
             }
 
-            // Piece-count and legacy weighted lines — same kg/units rules as דוח ריכוז כמויות.
+            // Piece-count and legacy weighted lines - same kg/units rules as דוח ריכוז כמויות.
             var (kgLine, unitsFromQc) = QuantityConcentrationReportService.SplitLineQty(line, p);
             var units = unitsFromQc > 0m ? EffectiveLineUnits(line) : 0m;
             return (kgLine, units);
@@ -703,7 +703,7 @@ namespace George.Services
             return minimal;
         }
 
-        /// <summary>שרשרת מהשורש לצאצא — רק צמתים שמופיעים במוצר; משקלול 1..n נותן עדיפות לקטגוריה הספציפית.</summary>
+        /// <summary>שרשרת מהשורש לצאצא - רק צמתים שמופיעים במוצר; משקלול 1..n נותן עדיפות לקטגוריה הספציפית.</summary>
         private static List<int> AssignedAncestorChainRootToLeaf(int deepestAssigned, HashSet<int> idSet, Dictionary<int, int?> parentMap)
         {
             var path = new List<int>();

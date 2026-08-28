@@ -1,14 +1,14 @@
 -- =============================================================================
--- PROMOTIONS FEATURE — FULL PRODUCTION INSTALL (transaction-wrapped, idempotent).
+-- PROMOTIONS FEATURE - FULL PRODUCTION INSTALL (transaction-wrapped, idempotent).
 -- Run once on a DB that has nothing promotion-related yet. Safe to re-run: every
 -- block is guarded. Requires dbo.Site, dbo.[Order], dbo.OrderItem to exist.
 --
 -- ATOMIC: the whole install runs inside one transaction. If any step fails,
 -- XACT_ABORT rolls the transaction back and the "IF XACT_STATE() = 0 SET NOEXEC ON"
--- guards stop every later step from applying — so you never get a partial install.
+-- guards stop every later step from applying - so you never get a partial install.
 --   * Recommended run: sqlcmd -b -i Promotions_Prod_Install.sql   (also fine in SSMS).
 --   * If a run DID error: the changes were rolled back. The session may be left with
---     NOEXEC ON — just run "SET NOEXEC OFF;" (or open a new window) before retrying.
+--     NOEXEC ON - just run "SET NOEXEC OFF;" (or open a new window) before retrying.
 --
 -- Run order (do not reorder):
 --   1. Promotion base table              2. list columns + PromotionDailyMetric
@@ -188,7 +188,7 @@ GO
 -- Optional: enforce unique coupon code per site (non-deleted rows with a code).
 -- Run after Promotion_MetricsAndListColumns.sql if you want DB-level uniqueness in addition to API checks.
 
--- Filtered-index WHERE must use simple comparisons only (no LTRIM/RTRIM — SQL Server error 10735).
+-- Filtered-index WHERE must use simple comparisons only (no LTRIM/RTRIM - SQL Server error 10735).
 -- Whitespace normalization is enforced in PromotionService on create/update.
 IF EXISTS (
     SELECT 1 FROM sys.indexes
@@ -222,7 +222,7 @@ GO
 -- =============================================================================
 
 -- Sprint 4: per-site promotion settings.
--- Spec source: `Sprint4/מבצעים.md` — "הגדרות מבצעים (תחת הגדרות חנות תחת מבצעים)".
+-- Spec source: `Sprint4/מבצעים.md` - "הגדרות מבצעים (תחת הגדרות חנות תחת מבצעים)".
 -- Idempotent: each ALTER guarded by COL_LENGTH check so the script can be re-run safely.
 
 IF COL_LENGTH(N'dbo.Site', N'PromotionOveragePolicyDefault') IS NULL
@@ -259,7 +259,7 @@ GO
 -- =============================================================================
 
 -- Sprint 4: per-site promotion webhook URL + signing secret.
--- Spec: `Sprint4/מבצעים.md` — "סנכרון מבצעים לאתר ולקיוסק (Webhook)".
+-- Spec: `Sprint4/מבצעים.md` - "סנכרון מבצעים לאתר ולקיוסק (Webhook)".
 -- Idempotent: each ALTER guarded so the script can be re-run safely.
 
 IF COL_LENGTH(N'dbo.Site', N'PromotionWebhookUrl') IS NULL
@@ -286,7 +286,7 @@ GO
 -- =============================================================================
 
 -- Sprint 4: link order lines to the promotion that discounted them.
--- Spec: `Sprint4/מבצעים.md` — "סיכום אחריות" (promotion impact must be persisted on the
+-- Spec: `Sprint4/מבצעים.md` - "סיכום אחריות" (promotion impact must be persisted on the
 -- order so reports + per_customer enforcement can read it later).
 -- Idempotent: each ALTER guarded so the script can be re-run safely.
 

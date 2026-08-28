@@ -77,7 +77,7 @@ namespace George.Services
             }
             catch
             {
-                result = false; // on any failure, treat as non-network (skip overrides) — never breaks normal sync
+                result = false; // on any failure, treat as non-network (skip overrides) - never breaks normal sync
             }
             _siteNetworkManagedCache[siteId] = result;
             return result;
@@ -357,7 +357,7 @@ namespace George.Services
                 var updatedCount = await _productStorage.UpdateDisplayOrdersForProductsAsync(updates, cancelToken);
                 response.Data.UpdatedCount = updatedCount;
                 response.Data.SkippedCount = Math.Max(0, wooProducts.Count - matched.Count);
-                // 0 updates with matches means the order is already aligned — don't report it as "no matches".
+                // 0 updates with matches means the order is already aligned - don't report it as "no matches".
                 response.Data.Message = matched.Count == 0
                     ? "No matching products found to update display order."
                     : updatedCount == 0
@@ -622,9 +622,9 @@ namespace George.Services
                 importProgress?.Report(new WooCommerceImportProgress { Phase = "fetch", Total = 2, Completed = 0 });
                 var wooCategories = await FetchWooPagedAsync<WooImportCategoryItem>(httpClient, $"{baseUrl}/products/categories", cancelToken);
                 importProgress?.Report(new WooCommerceImportProgress { Phase = "fetch", Total = 2, Completed = 1 });
-                // Include draft/private/pending/future (status=any). Woo often keeps trashed posts out of "any" — merge a trash pass so counts match admin "All".
+                // Include draft/private/pending/future (status=any). Woo often keeps trashed posts out of "any" - merge a trash pass so counts match admin "All".
                 // orderby=id: the default (date) has no tie-breaker, so bulk-created catalogs (many products
-                // sharing one creation second) paginate nondeterministically — same product on two pages,
+                // sharing one creation second) paginate nondeterministically - same product on two pages,
                 // another dropped entirely (ha-roe: 297-298 of 301 per run).
                 var wooProductsRaw = await FetchWooPagedAsync<WooImportProductItem>(httpClient, $"{baseUrl}/products?status=any&orderby=id&order=asc", cancelToken);
                 try
@@ -1391,7 +1391,7 @@ namespace George.Services
         }
 
         /// <summary>
-        /// GETs the mapped attribute from WooCommerce. exists=false only on an explicit 404 (stale DB mapping —
+        /// GETs the mapped attribute from WooCommerce. exists=false only on an explicit 404 (stale DB mapping -
         /// the attribute id belongs to another store or was deleted); transient errors return exists=true with
         /// the fallback slug so a hiccup doesn't trigger attribute re-creation.
         /// </summary>
@@ -1414,7 +1414,7 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Product save path: attribute already mapped in DB — skip attribute PUT; POST only new term values.
+        /// Product save path: attribute already mapped in DB - skip attribute PUT; POST only new term values.
         /// Returns (null, null) when the mapped id doesn't exist on this store (stale mapping) so callers
         /// fall back to find-or-create instead of syncing terms into a phantom taxonomy.
         /// </summary>
@@ -1623,7 +1623,7 @@ namespace George.Services
 
             // 1) When we already know THIS store's category id, update it; otherwise create (find-or-create by
             // name via term_exists below). knownWooId is the per-site id for network accounts, or the legacy
-            // single field for single-site accounts — never another store's id.
+            // single field for single-site accounts - never another store's id.
             if (knownWooId.HasValue)
             {
                 var updatedId = await TryUpdateCategoryAsync(baseUrl, knownWooId.Value, wooCatData, httpClient, cancelToken);
@@ -1781,7 +1781,7 @@ namespace George.Services
 
         /// <summary>
         /// True when George stock is managed by numeric quantity (matches <see cref="ProductCatalogStockClassification.StockManagementTypeForApi"/> / import lookups, case-insensitive).
-        /// Simple-product Woo payload used <c>Name == "quantity"</c> which broke when DB row was e.g. <c>Quantity</c> — WooCommerce then ignored <c>stock_quantity</c> until a product save rewrote the lookup row.
+        /// Simple-product Woo payload used <c>Name == "quantity"</c> which broke when DB row was e.g. <c>Quantity</c> - WooCommerce then ignored <c>stock_quantity</c> until a product save rewrote the lookup row.
         /// </summary>
         private static bool IsStockQuantityManagementName(string? stockManagementTypeName)
         {
@@ -1927,7 +1927,7 @@ namespace George.Services
                 // Load this site's per-site override (price/stock/availability). Null when no override (canonical used).
                 // Loaded UNCONDITIONALLY (not only for network-managed accounts): the frontend writes selected_site
                 // overrides for "separate"-mode accounts too, so gating on network mode made the sync push canonical
-                // values (e.g. price 0) while the app showed the override — the read side applies overrides with no
+                // values (e.g. price 0) while the app showed the override - the read side applies overrides with no
                 // such gate (ApplyEffectiveSiteValuesAsync).
                 SiteOverrideValues? siteOverride = null;
                 try
@@ -1989,7 +1989,7 @@ namespace George.Services
                     shippingClass = "fragile";
 
                 // Map categories. MultiSite Phase 2: per-site category assignment overrides the canonical for this branch.
-                // Loaded unconditionally (same reasoning as the per-site override above — separate-mode accounts write these too).
+                // Loaded unconditionally (same reasoning as the per-site override above - separate-mode accounts write these too).
                 List<int> perSiteCatIds = new List<int>();
                 try
                 {
@@ -2027,7 +2027,7 @@ namespace George.Services
                     {
                         // Guard: a SKU lookup can resolve to a Woo product that ALREADY belongs to a DIFFERENT
                         // George product on this site (e.g. two products duplicated from one source share the
-                        // "{sku}-copy" SKU). Adopting it would make both George products update — and overwrite —
+                        // "{sku}-copy" SKU). Adopting it would make both George products update - and overwrite -
                         // one Woo product, so saving one makes the other vanish from the store. Only adopt the
                         // match when it is unclaimed or already owned by THIS product; otherwise leave existingWooId
                         // null so a new Woo product is created instead.
@@ -2061,7 +2061,7 @@ namespace George.Services
                 // Map images: when updating, use existing WooCommerce image id when URL matches to avoid duplicating in media library.
                 // Use the image name from the system (Media.Name) so WooCommerce gets a friendly filename instead of the long URL.
                 // MultiSite Phase 2: per-site images override the canonical for this branch (urls only, sideloaded by Woo).
-                // Loaded unconditionally (same reasoning as the per-site override above — separate-mode accounts write these too).
+                // Loaded unconditionally (same reasoning as the per-site override above - separate-mode accounts write these too).
                 List<(int ProductId, string Url, int SortOrder)> perSiteImages = new List<(int, string, int)>();
                 try
                 {
@@ -2120,7 +2120,7 @@ namespace George.Services
                             {
                                 url = mirroredUrl;
                                 // The mirrored file is a JPEG we host, but Media.Name keeps the original modern-format
-                                // name (e.g. "pic.webp") — left as-is it re-triggers the requires-upload check below on
+                                // name (e.g. "pic.webp") - left as-is it re-triggers the requires-upload check below on
                                 // the NAME hint, falling into wp/v2/media which is 401 on stores whose WordPress blocks
                                 // media create for WooCommerce keys, and the image gets skipped. Use the mirrored JPEG
                                 // filename so the normal URL-sideload path runs.
@@ -2174,7 +2174,7 @@ namespace George.Services
                         else
                         {
                             // WP blocks media create for WooCommerce keys (401 rest_cannot_create) and the image
-                            // has no Media row to mirror (e.g. Woo-imported ProductImage with URL only) — host the
+                            // has no Media row to mirror (e.g. Woo-imported ProductImage with URL only) - host the
                             // JPEG on OUR storage and let Woo sideload it by URL. The deterministic attachment name
                             // (compatFile) makes the next sync reuse the attachment instead of re-uploading.
                             var mirroredJpegUrl = await TryUploadJpegBytesToOurStorageAsync(jpegBytes, compatFile, cancelToken).ConfigureAwait(false);
@@ -2356,21 +2356,21 @@ namespace George.Services
                 }
 
                 // menu_order is pushed only on Woo product CREATE (see dedicated PUT below). Updates must not
-                // touch sort — George DisplayOrder often diverges from Woo (defaults, stale import) and
+                // touch sort - George DisplayOrder often diverges from Woo (defaults, stale import) and
                 // pushing on edit reshuffles the live catalog.
 
                 var effectiveSlug = !string.IsNullOrWhiteSpace(siteOverride?.Slug) ? siteOverride!.Slug : product.Slug;
                 if (!string.IsNullOrWhiteSpace(effectiveSlug))
                     wooProduct["slug"] = effectiveSlug.Trim();
 
-                // Linked products (WooCommerce admin: מוצרים משודרגים / מוצרים משלימים) — REST keys are upsell_ids / cross_sell_ids.
+                // Linked products (WooCommerce admin: מוצרים משודרגים / מוצרים משלימים) - REST keys are upsell_ids / cross_sell_ids.
                 // Local RelatedProduct = up-sells; ComplementaryProduct = cross-sells.
                 var upsellIds = await ResolveWooCommerceIdsForLinkedProductsAsync(baseUrl, siteId, product.RelatedProduct, httpClient, cancelToken).ConfigureAwait(false);
                 var crossSellIds = await ResolveWooCommerceIdsForLinkedProductsAsync(baseUrl, siteId, product.ComplementaryProduct, httpClient, cancelToken).ConfigureAwait(false);
                 wooProduct["upsell_ids"] = upsellIds;
                 wooProduct["cross_sell_ids"] = crossSellIds;
 
-                // Brand assignment — Woo REST expects an array of objects with "id" (see Products API brands write-mode).
+                // Brand assignment - Woo REST expects an array of objects with "id" (see Products API brands write-mode).
                 // Uses DB state after EnsureAssignedBrandsSyncedToWooForSiteAsync so new brands get IDs first.
                 // Only include the "brands" key when at least one brand is synced; otherwise leave the
                 // existing Woo-side assignment alone (avoids accidentally clearing brands when our local
@@ -2415,7 +2415,7 @@ namespace George.Services
                         foreach (var pf in simplePriceFields) wooProduct[pf.Key] = pf.Value!;
                     wooProduct["manage_stock"] = simpleManageStock;
                     // WooCommerce DERIVES stock_status from stock_quantity when manage_stock is on, so an explicit
-                    // "out of stock" is ignored while the quantity stays > 0 — the product stayed in stock on the
+                    // "out of stock" is ignored while the quantity stays > 0 - the product stayed in stock on the
                     // site. Force quantity 0 when toggled out of stock so the status actually takes. MultiSite #14.
                     wooProduct["stock_quantity"] = (simpleManageStock && stockStatus == "outofstock") ? 0 : (simpleStockQty ?? 0);
                     wooProduct["stock_status"] = stockStatus;
@@ -2954,7 +2954,7 @@ namespace George.Services
                 else
                 {
                     _logger.LogWarning(
-                        "WooCommerce UpdateOrderStatus: oc-storeos sync skipped — no local order for external id. siteId={SiteId}, externalStoreOrderId={ExternalStoreOrderId}, requestedStatusHint={RequestedStatus}",
+                        "WooCommerce UpdateOrderStatus: oc-storeos sync skipped - no local order for external id. siteId={SiteId}, externalStoreOrderId={ExternalStoreOrderId}, requestedStatusHint={RequestedStatus}",
                         siteId, wooId, status);
                 }
                 return;
@@ -3051,7 +3051,7 @@ namespace George.Services
                 row["unitPrice"] = line.PricePerUnit;
                 // lineTotal must be NET (gross minus the line's promotion stamp). The store rebuilds its
                 // order lines from lineTotal and recalculates the order total from them (payload orderTotal
-                // is reconciliation-only), and the Cardcom capture charges that recalculated total — a gross
+                // is reconciliation-only), and the Cardcom capture charges that recalculated total - a gross
                 // lineTotal here overcharges the customer by the discount. Unlinked stamps (a WP-local
                 // promotion, PromotionId == null) carry a DiscountAmount too, so net applies to every line.
                 var grossLineTotal = afterPicking
@@ -3064,7 +3064,7 @@ namespace George.Services
                 if (line.PromotionId is > 0)
                 {
                     row["promotionExternalId"] = $"george-{line.PromotionId.Value}";
-                    // Informational (the store does not subtract this — lineTotal above is already net).
+                    // Informational (the store does not subtract this - lineTotal above is already net).
                     row["discountAmount"] = lineDiscount;
                 }
                 row["saleUnits"] = line.SaleUnits;
@@ -3325,7 +3325,7 @@ namespace George.Services
             if (string.IsNullOrWhiteSpace(deliveryOrPickupTime))
                 return;
             var t = deliveryOrPickupTime.Trim();
-            foreach (var sep in new[] { " - ", " – ", " — ", "-", "–", "—" })
+            foreach (var sep in new[] { " - ", " – ", " - ", "-", "–", "-" })
             {
                 var idx = t.IndexOf(sep, StringComparison.Ordinal);
                 if (idx <= 0) continue;
@@ -3428,7 +3428,7 @@ namespace George.Services
                 {
                     foreach (var item in updateArr.EnumerateArray())
                     {
-                        // Batch reports per-item failures inline ({id, error:{code,...}}) — e.g. stale/deleted Woo ids
+                        // Batch reports per-item failures inline ({id, error:{code,...}}) - e.g. stale/deleted Woo ids
                         // come back as woocommerce_rest_product_invalid_id without failing the whole request.
                         if (item.TryGetProperty("error", out var errEl) && errEl.ValueKind == JsonValueKind.Object)
                             skippedWooIds.Add(item.TryGetProperty("id", out var idEl) && idEl.TryGetInt32(out var idVal) ? idVal : 0);
@@ -3507,7 +3507,7 @@ namespace George.Services
             SiteOverrideValues? siteOverride = null)
         {
             var variants = product.ProductVariant?.Where(v => !v.IsDeleted).ToList() ?? new List<ProductVariant>();
-            // Weighable products normally omit WC native weight (OCWSU meta). Exception: "משקל לפי וריאציה" — OCWSU reads _ocwsu_get_weight_from_variation from each variation's weight field.
+            // Weighable products normally omit WC native weight (OCWSU meta). Exception: "משקל לפי וריאציה" - OCWSU reads _ocwsu_get_weight_from_variation from each variation's weight field.
             var setupTypeNameForVariants = product.SetupType?.Name ?? "";
             var isWeightedBySetupForVariants = setupTypeNameForVariants is "by_weight" or "by_unit" or "by_unit_and_weight";
             var isWeightedForVariations = product.IsWeighted == true || (product.IsWeighted != false && isWeightedBySetupForVariants);
@@ -3516,13 +3516,13 @@ namespace George.Services
 
             // MultiSite Phase 2: resolve each variant's Woo variation id PER SITE. The single
             // ProductVariant.WooCommerceVariationId column holds at most one site's id, so on a network-managed
-            // account we use the per-(variant, site) map (ProductSiteVariantWooId) instead — trusting the shared
+            // account we use the per-(variant, site) map (ProductSiteVariantWooId) instead - trusting the shared
             // column on a second site made the PUT 404, recreate, then the orphan-cleanup delete the recreation,
             // leaving that store with zero variations (a variable product with no variations = out of stock). An
             // empty map (first sync after this fix) falls through to the signature lookup below, which matches this
             // store's own live variations. Non-network / single-site accounts keep using the legacy column.
             var isNetworkManagedForVariants = await IsSiteNetworkManagedCachedAsync(siteId, cancelToken).ConfigureAwait(false);
-            // External price management: variation prices on this store come from the POS — held out of
+            // External price management: variation prices on this store come from the POS - held out of
             // UPDATE payloads (creates still seed an initial price).
             var pricesExternallyManaged = await IsSitePriceExternallyManagedCachedAsync(siteId, cancelToken).ConfigureAwait(false);
             Dictionary<int, int> siteVariantWooIds = new();
@@ -3612,7 +3612,7 @@ namespace George.Services
                     // Derive in/out per variation:
                     // - Quantity-tracked variation stock: in/out follows the numeric quantity.
                     // - Availability-only variation stock (variation management, not quantity-tracked): George stores
-                    //   per-variation salability as StockQuantity 1/0, so honor an EXPLICIT value here — otherwise
+                    //   per-variation salability as StockQuantity 1/0, so honor an EXPLICIT value here - otherwise
                     //   removing stock from a single variation never reached Woo and it stayed "in stock". Bug #4.
                     // - A truly null quantity (no per-variation value) still inherits the product-level status so
                     //   binary in/out variations are not wrongly forced "outofstock".
@@ -3777,7 +3777,7 @@ namespace George.Services
                                     }
                                     else if (!mediaId.HasValue)
                                     {
-                                        // WP blocks media create for WooCommerce keys — host the JPEG on our storage
+                                        // WP blocks media create for WooCommerce keys - host the JPEG on our storage
                                         // and sideload by URL; the deterministic compat name lets the next sync reuse
                                         // the attachment (TryGetWooVariationCompatImageMediaIdAsync matches by stem).
                                         mirroredJpegSrc = await TryUploadJpegBytesToOurStorageAsync(jpegBytes, compatFile, cancelToken).ConfigureAwait(false);
@@ -3856,7 +3856,7 @@ namespace George.Services
                     if (!wooVariationId.HasValue) continue;
                     // Track the ACTUAL id Woo returned. A PUT to a stale id may have 404'd and CREATED a new
                     // variation with a different id; without recording it here the orphan-cleanup below deleted the
-                    // just-created variation (it only knew the old id) — the root cause of "0 variations on the 2nd site".
+                    // just-created variation (it only knew the old id) - the root cause of "0 variations on the 2nd site".
                     usedWooVariationIds.Add(wooVariationId.Value);
                     if (isNetworkManagedForVariants)
                         await _overrideStorage.SetSiteVariantWooIdAsync(variant.Id, siteId, product.Id, wooVariationId.Value, cancelToken);
@@ -3868,7 +3868,7 @@ namespace George.Services
             // Variations skipped for missing attribute data never enter usedWooVariationIds, so the orphan
             // cleanup below would DELETE their live Woo variations (e.g. a product whose ProductOption rows are
             // missing/soft-deleted would lose ALL its store variations). Broken George data must not destroy
-            // store data — skip reconciliation entirely for this product until the data is fixed.
+            // store data - skip reconciliation entirely for this product until the data is fixed.
             if (skippedNoAttributeVariations > 0)
             {
                 _logger.LogWarning(
@@ -3910,7 +3910,7 @@ namespace George.Services
                     }
                 });
                 var deletedIds = await Task.WhenAll(tasks);
-                // Drop the per-site variation-id mapping for anything actually deleted (sequential — DbContext is not
+                // Drop the per-site variation-id mapping for anything actually deleted (sequential - DbContext is not
                 // thread-safe, so not inside the parallel delete tasks above).
                 if (isNetworkManagedForVariants)
                     foreach (var deletedId in deletedIds)
@@ -3958,7 +3958,7 @@ namespace George.Services
 
                 // Only recreate when the variation is genuinely GONE (404 / stale id). For any other failure
                 // (e.g. 400 product_invalid_sku from a duplicate SKU, or a transient error) creating a fresh
-                // variation just spawns a DUPLICATE on the store — leave the existing one and report failure.
+                // variation just spawns a DUPLICATE on the store - leave the existing one and report failure.
                 // This was the main driver of variations piling up on re-sync (MultiSite #6/#7/#8).
                 if ((int)updateResponse.StatusCode != 404)
                     return wooVariationIdToUse;
@@ -3997,7 +3997,7 @@ namespace George.Services
             var pageLimit = maxPages ?? MaxVariationFetchPages;
             for (var page = 1; page <= pageLimit; page++)
             {
-                // orderby=id: deterministic pagination — the default date order can drop/duplicate rows when variations share a creation timestamp, and a missed row here feeds duplicate-create / orphan-delete.
+                // orderby=id: deterministic pagination - the default date order can drop/duplicate rows when variations share a creation timestamp, and a missed row here feeds duplicate-create / orphan-delete.
                 var url = $"{baseUrl}/products/{wooProductId}/variations?per_page={VariationsPerPage}&page={page}&orderby=id&order=asc";
                 var response = await httpClient.GetAsync(url, cancelToken);
                 if (!response.IsSuccessStatusCode) break;
@@ -4718,7 +4718,7 @@ namespace George.Services
             public int id { get; set; }
         }
 
-        /// <summary>GET single variation — image block includes media id and filename for AVIF-compat dedup.</summary>
+        /// <summary>GET single variation - image block includes media id and filename for AVIF-compat dedup.</summary>
         private class WooVariationReadForImage
         {
             public WooVariationImageBlock? image { get; set; }
@@ -4753,7 +4753,7 @@ namespace George.Services
             return s;
         }
 
-        /// <summary>Order-independent, case/whitespace-insensitive key of a variant's option values — import upsert fallback match.</summary>
+        /// <summary>Order-independent, case/whitespace-insensitive key of a variant's option values - import upsert fallback match.</summary>
         private static string ImportVariantOptionKey(IEnumerable<(string Name, string? Value)> pairs)
         {
             var parts = pairs
@@ -4786,7 +4786,7 @@ namespace George.Services
             return value;
         }
 
-        /// <summary>sanitize_title turns spaces into hyphens — compare slug and display value as equal ("טחינה-כפולה" = "טחינה כפולה").</summary>
+        /// <summary>sanitize_title turns spaces into hyphens - compare slug and display value as equal ("טחינה-כפולה" = "טחינה כפולה").</summary>
         private static string NormalizeOptionValueForSlugMatch(string s) =>
             Regex.Replace(s.Trim().Replace('-', ' '), @"\s+", " ").ToLowerInvariant();
 
@@ -5210,11 +5210,11 @@ namespace George.Services
                     if (product == null)
                         continue;
 
-                    // Rare: two Woo rows resolved to the same tracked local row in one run (e.g. odd DB state). Skipping drops Woo ids from the catalog — always persist one row per Woo id.
+                    // Rare: two Woo rows resolved to the same tracked local row in one run (e.g. odd DB state). Skipping drops Woo ids from the catalog - always persist one row per Woo id.
                     if (product.Id != 0 && importProductStatsIds.Contains(product.Id))
                     {
                         _logger.LogWarning(
-                            "WooCommerce import: Woo product id {WooId} (SKU {Sku}) resolved to local product {LocalId} already updated in this run — creating a new local product for this Woo id.",
+                            "WooCommerce import: Woo product id {WooId} (SKU {Sku}) resolved to local product {LocalId} already updated in this run - creating a new local product for this Woo id.",
                             wp.id,
                             wp.sku ?? "",
                             product.Id);
@@ -5235,7 +5235,7 @@ namespace George.Services
                     product.ShortDescription = wp.short_description;
                     product.LongDescription = wp.description;
                     product.Sku = string.IsNullOrWhiteSpace(wp.sku) ? null : wp.sku.Trim();
-                    // Legacy column keeps the FIRST store's id on shared products — claim it only when unset or the
+                    // Legacy column keeps the FIRST store's id on shared products - claim it only when unset or the
                     // product lives solely on this site. The per-site row below is the authoritative mapping either way.
                     if (product.WooCommerceId == null || product.Site.All(s => s.Id == siteId))
                         product.WooCommerceId = wp.id;
@@ -5267,7 +5267,7 @@ namespace George.Services
                     }
 
                     db.ProductCategory.RemoveRange(db.ProductCategory.Where(x => x.ProductId == product.Id));
-                    // Options and variants are UPSERTED below (matched by Woo variation id / option values) — never
+                    // Options and variants are UPSERTED below (matched by Woo variation id / option values) - never
                     // hard-deleted: OrderItem, ProductSiteVariantStock and other sites' ProductSiteVariantWooId rows
                     // reference the existing ids, and a re-import used to orphan all of them.
 
@@ -5372,7 +5372,7 @@ namespace George.Services
                         {
                             rawVariantSku = null;
                         }
-                        // Resolve this variation's option values first — they are also the fallback match key.
+                        // Resolve this variation's option values first - they are also the fallback match key.
                         var wantedOptionValues = new Dictionary<string, string>(StringComparer.Ordinal);
                         foreach (var a in vv.attributes ?? new List<WooImportVariationAttributeItem>())
                         {
@@ -5401,7 +5401,7 @@ namespace George.Services
                         }
                         claimedVariantIds.Add(variant.Id);
 
-                        // Legacy column keeps ONE store's id — claim it only when unset (per-site row is authoritative).
+                        // Legacy column keeps ONE store's id - claim it only when unset (per-site row is authoritative).
                         if (variant.WooCommerceVariationId == null || variant.WooCommerceVariationId == vv.id || isNewVariant)
                             variant.WooCommerceVariationId = vv.id;
                         variant.Sku = rawVariantSku;

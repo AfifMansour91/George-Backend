@@ -1,4 +1,4 @@
--- Adds Site.UseStructuredOrderLineDisplay: feature flag — render order-line attributes from the
+-- Adds Site.UseStructuredOrderLineDisplay: feature flag - render order-line attributes from the
 -- typed OrderItem.LineDisplayJson snapshot (no Hebrew-label parsing) on lines that have one;
 -- lines without a snapshot always use the legacy heuristics.
 -- NULL/0 = legacy rendering everywhere (default, current behavior).

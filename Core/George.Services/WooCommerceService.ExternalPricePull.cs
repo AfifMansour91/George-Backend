@@ -23,7 +23,7 @@ namespace George.Services
         /// Pulls the store's current product/variation prices and applies them to George for this site.
         /// Network-managed sites write per-site overrides (so other branches' prices are untouched);
         /// single-store sites write the canonical product/variant prices. Only linked products (a Woo id
-        /// known to George) are touched — nothing is created or deleted.
+        /// known to George) are touched - nothing is created or deleted.
         /// </summary>
         public async Task<IApiResponse<WooPricePullRes>> PullPricesFromWooCommerceAsync(int siteId, CancellationToken cancelToken)
         {
@@ -72,7 +72,7 @@ namespace George.Services
                     if (!listResponse.IsSuccessStatusCode)
                     {
                         var errorContent = await listResponse.Content.ReadAsStringAsync(cancelToken);
-                        // Some stores answer a page past the end with 400 rest_invalid_param — that's the end, not a failure.
+                        // Some stores answer a page past the end with 400 rest_invalid_param - that's the end, not a failure.
                         if (page > 1 && (int)listResponse.StatusCode == 400)
                             break;
                         throw new Exception(GetUserFriendlyWooCommerceError((int)listResponse.StatusCode, errorContent));

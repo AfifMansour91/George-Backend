@@ -1,6 +1,6 @@
 -- Adds PayPlus payment-gateway columns to [Order], parallel to the existing Cardcom* columns.
 -- PayPlusTransactionUid alone covers the whole hold-to-capture lifecycle (unlike Cardcom, PayPlus captures
--- the SAME transaction_uid the authorization returned — no separate approval-number/token split needed).
+-- the SAME transaction_uid the authorization returned - no separate approval-number/token split needed).
 -- Run once against the George database. Safe to re-run.
 
 IF COL_LENGTH(N'dbo.[Order]', N'PayPlusDocumentUrl') IS NULL

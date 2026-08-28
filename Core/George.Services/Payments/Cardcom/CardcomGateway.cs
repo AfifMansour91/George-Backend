@@ -244,7 +244,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         };
 
         // Documents reference charge transactions (DealNumbers), which live on the charge terminal when a
-        // second (no-CVV) terminal is configured — send the same terminal so the deal lookup matches.
+        // second (no-CVV) terminal is configured - send the same terminal so the deal lookup matches.
         var terminal = credentials.EffectiveChargeTerminalNumber ?? 0;
         if (terminal > 0)
             body["TerminalNumber"] = terminal;
@@ -394,7 +394,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
             .ConfigureAwait(false);
 
     /// <summary>
-    /// Cardcom <c>Transactions/GetTransactionInfoById</c> — lookup by internal deal / transaction number.
+    /// Cardcom <c>Transactions/GetTransactionInfoById</c> - lookup by internal deal / transaction number.
     /// </summary>
     public async Task<CardcomTransactionInfoResult> GetTransactionInfoByIdAsync(
         SitePaymentCredentials credentials,
@@ -444,7 +444,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         var result = ParseTransactionInfoResult(json);
 
         // Charge transactions (J4 capture / token charge) live on the no-CVV charge terminal when one
-        // is configured, while holds and the payment page stay on the primary — retry there before
+        // is configured, while holds and the payment page stay on the primary - retry there before
         // giving up, so verification can find charges made on the second terminal.
         var chargeTerminal = credentials.EffectiveChargeTerminalNumber;
         if (!result.Success && chargeTerminal is > 0 && chargeTerminal != credentials.TerminalNumber)
@@ -465,7 +465,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
 
     public static CardcomTransactionInfoResult ParseTransactionInfoResult(string json)
     {
-        // Cardcom occasionally returns a non-object body (e.g. "\"\"" — a bare JSON string) for
+        // Cardcom occasionally returns a non-object body (e.g. "\"\"" - a bare JSON string) for
         // GetTransactionInfoById. Every property reader then falls back to its default, which made
         // ResponseCode=0 + empty DealType read as a successful final charge (order 6321, 2026-08-20:
         // an uncharged order was marked Paid from exactly such a response). Anything that is not a
@@ -576,7 +576,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
 
     private static bool? TryGetBool(string json, string name)
     {
-        // These scalar readers must use SafeTryGetProperty — TryGetObjectProperty only matches
+        // These scalar readers must use SafeTryGetProperty - TryGetObjectProperty only matches
         // object-valued properties, so Amount/IsRefund/JParameter always read as missing.
         using var doc = JsonDocument.Parse(json);
         if (!SafeTryGetProperty(doc.RootElement, name, out var el))
@@ -690,10 +690,10 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
     {
         // Terminal routing with a second (no-CVV) charge terminal configured:
         // - ONLY the actual charge (J4 capture / direct token charge) and its token-refund go to the charge
-        //   terminal — these are the operations a CVV-requiring terminal rejects for token transactions.
+        //   terminal - these are the operations a CVV-requiring terminal rejects for token transactions.
         // - Authorization holds (J5) stay on the PRIMARY terminal (token creation + hold work there today),
-        //   and voiding a hold must hit the terminal that placed it — also the primary.
-        // The hosted payment page (card entry, with CVV) stays on the primary too — see CreateHostedSessionAsync.
+        //   and voiding a hold must hit the terminal that placed it - also the primary.
+        // The hosted payment page (card entry, with CVV) stays on the primary too - see CreateHostedSessionAsync.
         var useChargeTerminal = !jValidateHold && !mtiVoid;
         var terminal = (useChargeTerminal ? credentials.EffectiveChargeTerminalNumber : credentials.TerminalNumber) ?? 0;
         // Installments apply ONLY to the actual charge; holds, voids and refunds are always single-payment.
@@ -1063,7 +1063,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
 
         // Immediate charge: the customer's selection settles on the page itself.
         // J5 hold: the selection is read back from the callback (TranzactionInfo.NumOfPayments), stored on
-        // the order, and honored by the post-picking token charge — see FinalizePickingPayment.
+        // the order, and honored by the post-picking token charge - see FinalizePickingPayment.
         adv["MinNumOfPayments"] = 1;
         adv["MaxNumOfPayments"] = Math.Clamp(request.MaxInstallments, 1, 36);
         adv["SelectedNumOfPayments"] = 1;
@@ -1125,7 +1125,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
 
     /// <summary>
     /// Merges site-level JSON into Create body (e.g. UIDefinition / AdvancedDefinition overrides from Cardcom).
-    /// Bit / Google Pay / PayPal visibility is controlled by the terminal in Cardcom — not in Swagger v11 fields.
+    /// Bit / Google Pay / PayPal visibility is controlled by the terminal in Cardcom - not in Swagger v11 fields.
     /// </summary>
     private static void MergeProviderExtrasJson(Dictionary<string, object?> body, string? extrasJson)
     {
@@ -1204,7 +1204,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         return GetInt(doc.RootElement, name);
     }
 
-    /// <summary>Non-zero GetLpResult while the customer has not finished payment — not a decline.</summary>
+    /// <summary>Non-zero GetLpResult while the customer has not finished payment - not a decline.</summary>
     private static bool IsPendingLpResult(int responseCode, string? description)
     {
         if (responseCode == 0) return false;
@@ -1215,7 +1215,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         if (d.Contains("לא הושלם", StringComparison.OrdinalIgnoreCase)) return true;
         if (d.Contains("not completed", StringComparison.OrdinalIgnoreCase)) return true;
         if (d.Contains("pending", StringComparison.OrdinalIgnoreCase)) return true;
-        // LPC form / issuer decline codes (e.g. 60000042) — real failure
+        // LPC form / issuer decline codes (e.g. 60000042) - real failure
         if (responseCode >= 60000000) return false;
         return true;
     }
@@ -1232,7 +1232,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
     {
         // BUG HISTORY (12/08/2026): this used to return true WITHOUT assigning `obj`, so every
         // nested-object read (TranzactionInfo/TokenInfo/DocumentInfo/SuspendedInfo) silently got
-        // an empty element — NumberOfPayments/ApprovalNumber/etc. were never parsed from LP results.
+        // an empty element - NumberOfPayments/ApprovalNumber/etc. were never parsed from LP results.
         obj = default;
         if (!SafeTryGetProperty(parent, name, out var el) || el.ValueKind != JsonValueKind.Object)
             return false;
@@ -1334,7 +1334,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         {
             4 => digits,
             6 => digits[^4..],
-            // Cardcom TokenExDate is often YYYYMMDD (e.g. 20281101) — MM from month, YY from year.
+            // Cardcom TokenExDate is often YYYYMMDD (e.g. 20281101) - MM from month, YY from year.
             8 when digits.Length >= 8 => $"{digits.Substring(4, 2)}{digits.Substring(2, 2)}",
             _ => null,
         };

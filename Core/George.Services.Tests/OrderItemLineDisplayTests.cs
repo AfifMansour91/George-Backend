@@ -90,7 +90,7 @@ public class OrderItemLineDisplayTests
         Assert.NotNull(hint);
         Assert.Contains("500 גרם ליח'", hint, StringComparison.Ordinal);
 
-        // Fixed/by-variant lines carry UnitWeightGrams alongside the label — must stay excluded.
+        // Fixed/by-variant lines carry UnitWeightGrams alongside the label - must stay excluded.
         var fixedWeight = new OrderItem
         {
             Title = "מארז קציצות",
@@ -213,7 +213,7 @@ public class OrderItemLineDisplayTests
     [Fact]
     public void Attribute_line_keeps_size_with_cutting_when_OmitOrderLineSizeLabel()
     {
-        // Zano: משקל לפי גודל with explicit cutting — the cutting label occupies the variantTitle-fallback
+        // Zano: משקל לפי גודל with explicit cutting - the cutting label occupies the variantTitle-fallback
         // slot, so omitting size here erased it from the voucher entirely. Size must stay.
         var item = new OrderItem
         {
@@ -259,7 +259,7 @@ public class OrderItemLineDisplayTests
     [Fact]
     public void Variable_choice_detected_without_persisted_label_via_saleTotalWeight()
     {
-        // Woo variable line: no orderLinePerUnitWeightLabel, no unitWeightGrams — per-unit weight
+        // Woo variable line: no orderLinePerUnitWeightLabel, no unitWeightGrams - per-unit weight
         // derivable from saleTotalWeight. Must count as variable-choice so prints keep the weight.
         var item = new OrderItem
         {
@@ -281,7 +281,7 @@ public class OrderItemLineDisplayTests
     [Fact]
     public void Variable_choice_not_detected_for_average_line_with_grams()
     {
-        // by_unit average line always carries unitWeightGrams — not a variable choice; voucher hides its weight.
+        // by_unit average line always carries unitWeightGrams - not a variable choice; voucher hides its weight.
         var item = new OrderItem
         {
             Title = "מוצר לפי יחידה",
@@ -297,7 +297,7 @@ public class OrderItemLineDisplayTests
     public void Voucher_shows_per_unit_weight_for_average_line()
     {
         // Zano order #33: מכירה-לפי-יחידה line (label + grams). Prints now show the weight by default
-        // (card parity) — the old variable-only voucher rule hid it.
+        // (card parity) - the old variable-only voucher rule hid it.
         var item = new OrderItem
         {
             Title = "דניס (כ 600 עד 800 גרם)",
@@ -318,7 +318,7 @@ public class OrderItemLineDisplayTests
     [Fact]
     public void Per_unit_weight_dropped_when_size_segment_shows_same_weight()
     {
-        // משקל לפי גודל: size "(כ 3 ק"ג)" already carries the weight — matching per-unit label is redundant.
+        // משקל לפי גודל: size "(כ 3 ק"ג)" already carries the weight - matching per-unit label is redundant.
         var item = new OrderItem
         {
             Title = "Product",
@@ -340,7 +340,7 @@ public class OrderItemLineDisplayTests
     [Fact]
     public void Per_unit_weight_dropped_when_size_name_contains_other_kg_number()
     {
-        // Zano order #34: size name "בין 5-6 ק״ג" first-match parses to 6kg — the redundancy check must
+        // Zano order #34: size name "בין 5-6 ק״ג" first-match parses to 6kg - the redundancy check must
         // compare against the "(כ 5.5 ק"ג)" approx suffix, not the size name, so per is still dropped.
         var item = new OrderItem
         {
@@ -405,7 +405,7 @@ public class OrderItemLineDisplayTests
     [Fact]
     public void Structured_snapshot_renders_by_variant_line_without_duplication()
     {
-        // Order #34/#35 salmon equivalent: size carries the approx weight — no redundant per-unit segment.
+        // Order #34/#35 salmon equivalent: size carries the approx weight - no redundant per-unit segment.
         var item = new OrderItem
         {
             Title = "דג סלמון שלם טרי",
@@ -455,7 +455,7 @@ public class OrderItemLineDisplayTests
     [Fact]
     public void HideWeightDetails_keeps_customer_chosen_variable_weight()
     {
-        // "בחירת משקל ליחידה": the weight IS the ordered spec — never hidden.
+        // "בחירת משקל ליחידה": the weight IS the ordered spec - never hidden.
         var item = new OrderItem
         {
             Title = "מוצר בחירת משקל ליחידה",
@@ -473,7 +473,7 @@ public class OrderItemLineDisplayTests
     [Fact]
     public void Attribute_line_omits_size_when_variant_title_already_carries_it()
     {
-        // Size-only line: no cutting label, variantTitle fallback shows the size — the size label would duplicate it.
+        // Size-only line: no cutting label, variantTitle fallback shows the size - the size label would duplicate it.
         var item = new OrderItem
         {
             Title = "Product",

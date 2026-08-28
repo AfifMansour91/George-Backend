@@ -34,7 +34,7 @@ namespace George.Services
             dt.Kind == DateTimeKind.Utc ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Utc);
 
         /// <summary>
-        /// נקודת זמן UTC כמו ב־API של הזמנות (מחרוזת ISO עם Z) — ל־<see cref="IncomeReportOrderRowDto.OrderDate"/>.
+        /// נקודת זמן UTC כמו ב־API של הזמנות (מחרוזת ISO עם Z) - ל־<see cref="IncomeReportOrderRowDto.OrderDate"/>.
         /// </summary>
         private static DateTime CreationTimeUtcInstant(Order o)
         {
@@ -48,7 +48,7 @@ namespace George.Services
             TimeZoneInfo.ConvertTimeFromUtc(AssumeUtc(utc), IsraelTimeZone);
 
         /// <summary>
-        /// שעת יצירת הזמנה בשעון ישראל — מיושר ל־SPA (היסטוריית הזמנה משתמשת ב־<c>new Date(creationTime)</c> שמפרש ISO עם Z כ־UTC וממיר לשעון מקומי).
+        /// שעת יצירת הזמנה בשעון ישראל - מיושר ל־SPA (היסטוריית הזמנה משתמשת ב־<c>new Date(creationTime)</c> שמפרש ISO עם Z כ־UTC וממיר לשעון מקומי).
         /// ערך <see cref="DateTimeKind.Unspecified"/> מהמסד מטופל כ־UTC (דפוס נפוץ אחרי EF/SQL).
         /// </summary>
         private static int OrderCreationHourIsrael(Order o)
@@ -70,7 +70,7 @@ namespace George.Services
             if (string.IsNullOrWhiteSpace(deliveryOrPickupTime))
                 return false;
             var t = deliveryOrPickupTime.Trim();
-            foreach (var sep in new[] { " - ", " – ", " — ", "-", "–", "—" })
+            foreach (var sep in new[] { " - ", " – ", " - ", "-", "–", "-" })
             {
                 var idx = t.IndexOf(sep, StringComparison.Ordinal);
                 if (idx > 0)
@@ -96,7 +96,7 @@ namespace George.Services
         }
 
         /// <summary>
-        /// שעת חלון אספקה/איסוף — כמו <see cref="OrderArchiveDetail"/> (איסוף: pickup*; משלוח/אקספרס: delivery*).
+        /// שעת חלון אספקה/איסוף - כמו <see cref="OrderArchiveDetail"/> (איסוף: pickup*; משלוח/אקספרס: delivery*).
         /// עדיפות לתחילת מחרוזת השעה; אחר כך שעה בשדה התאריך אם אינה חצות.
         /// </summary>
         private static bool TryGetScheduledDeliveryHourIsrael(Order o, out int hour)
@@ -310,7 +310,7 @@ namespace George.Services
             CategoryLineMerchSum(o, products, categoryId) > 0m;
 
         /// <summary>
-        /// מספר שורות פריט (לא סכום כמויות) — לפי כל השורות או רק שורות בקטגוריה הנבחרת.
+        /// מספר שורות פריט (לא סכום כמויות) - לפי כל השורות או רק שורות בקטגוריה הנבחרת.
         /// </summary>
         private static int OrderMerchLineCount(Order o, Dictionary<int, Product> products, int? categoryId)
         {
@@ -413,7 +413,7 @@ namespace George.Services
             return rows;
         }
 
-        /// <summary>אפיון: כשפילטר = היום — שורות לפי שעה.</summary>
+        /// <summary>אפיון: כשפילטר = היום - שורות לפי שעה.</summary>
         private static List<IncomeReportDayRowDto> BuildDayRowsByHour(
             List<Order> orders,
             Dictionary<int, Product> products,
@@ -764,14 +764,14 @@ namespace George.Services
             {
                 if (kg > 0m)
                     return $"{Round2(kg)} ק\"ג";
-                return "—";
+                return "-";
             }
 
             if (units > 0m)
                 return units == Math.Floor(units) ? $"{(int)units} יח'" : $"{Round2(units)} יח'";
             if (kg > 0m)
                 return $"{Round2(kg)} ק\"ג";
-            return "—";
+            return "-";
         }
 
         private static string? FirstImageUrl(Product? p)

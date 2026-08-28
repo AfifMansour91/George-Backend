@@ -1,4 +1,4 @@
--- One-time fix for order 6321 (Zano-Dagim site 45, order number 967, Woo 43809) — 2026-08-20.
+-- One-time fix for order 6321 (Zano-Dagim site 45, order number 967, Woo 43809) - 2026-08-20.
 --
 -- Background: the order's Woo-plugin capture never happened (no plugin capture webhook, no
 -- Cardcom document). At 09:54 staff clicked "sync from Cardcom"; Cardcom's GetTransactionInfoById
@@ -10,7 +10,7 @@
 -- order's real pre-sync payment state so it can be charged properly.
 --
 -- BEFORE RUNNING: confirm in the Cardcom dashboard (terminal 191407 / 193477) that no charge of
--- 627.40 exists for this customer on 20/08 — if one exists, do NOT run this; instead set the
+-- 627.40 exists for this customer on 20/08 - if one exists, do NOT run this; instead set the
 -- charge's real transaction id on the order and issue the invoice against it.
 --
 -- Restores the exact field shape of a pre-capture Authorized website order (mirrors sibling

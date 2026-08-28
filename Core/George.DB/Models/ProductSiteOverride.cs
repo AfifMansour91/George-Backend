@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 /// <summary>
-/// MultiSite Phase 2 — per-(product, site) override layer. A sparse row that holds only the
+/// MultiSite Phase 2 - per-(product, site) override layer. A sparse row that holds only the
 /// fields that differ from the canonical Product for a given site, plus exclusion + per-site stock.
 /// Absence of a row means the site fully inherits the canonical product (with default stock).
 /// </summary>

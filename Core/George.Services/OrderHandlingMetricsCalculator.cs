@@ -2,7 +2,7 @@ using George.Services.Response;
 
 namespace George.Services;
 
-/// <summary>Median handling durations (hours) from status timestamps — mirrors shop-manager orderHandlingMetrics.ts.</summary>
+/// <summary>Median handling durations (hours) from status timestamps - mirrors shop-manager orderHandlingMetrics.ts.</summary>
 public static class OrderHandlingMetricsCalculator
 {
     private const double MaxHours = 720;

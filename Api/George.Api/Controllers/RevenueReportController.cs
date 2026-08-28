@@ -20,7 +20,7 @@ namespace George.Api.Controllers
             _revenueReportService = revenueReportService;
         }
 
-        /// <summary>דוח הכנסות — KPIs פיננסיים, מגמה, פילוחים (לפי חיוב / לפי הזמנה).</summary>
+        /// <summary>דוח הכנסות - KPIs פיננסיים, מגמה, פילוחים (לפי חיוב / לפי הזמנה).</summary>
         [HttpGet]
         [ProducesResponseType(typeof(IApiResponse<George.Services.Response.RevenueReportRes>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetAsync(

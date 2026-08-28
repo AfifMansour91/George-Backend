@@ -4,7 +4,7 @@ using George.DB;
 namespace George.Services;
 
 /// <summary>
-/// Option / variant labels for reports — use <see cref="OrderItem.VariantTitle"/> as stored on the line (Woo/manual),
+/// Option / variant labels for reports - use <see cref="OrderItem.VariantTitle"/> as stored on the line (Woo/manual),
 /// without merging computed <see cref="OrderItem.OrderLineSizeLabel"/> (approx weight in גרם duplicates names).
 /// </summary>
 public static class OrderItemReportLineLabel
@@ -30,7 +30,7 @@ public static class OrderItemReportLineLabel
     }
 
     /// <summary>
-    /// Quantity / per-unit weight text from order snapshots — not a catalog option name (no detail row in reports).
+    /// Quantity / per-unit weight text from order snapshots - not a catalog option name (no detail row in reports).
     /// </summary>
     public static bool IsNonOptionDisplayLabel(string? label)
     {
@@ -55,7 +55,7 @@ public static class OrderItemReportLineLabel
         if (sul.Length > 0) return sul;
 
         var title = (line.Title ?? "").Trim();
-        return string.IsNullOrEmpty(title) ? "—" : title;
+        return string.IsNullOrEmpty(title) ? "-" : title;
     }
 
     public static bool IsGenericVariantTitle(string vt)

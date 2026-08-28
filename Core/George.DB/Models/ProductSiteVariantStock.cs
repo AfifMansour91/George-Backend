@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 /// <summary>
-/// MultiSite Phase 2 — per-(variant, site) override row. Originally per-site stock; extended to also hold
+/// MultiSite Phase 2 - per-(variant, site) override row. Originally per-site stock; extended to also hold
 /// the per-site variant price/sale price and an exclusion flag (a variant "deleted" in one branch is hidden
 /// there, not removed from the canonical product). Absence of a row / null field means inherit canonical.
 /// </summary>

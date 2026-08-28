@@ -536,7 +536,7 @@ public class DashboardService : ServiceBase
         };
         if (type == null) return null;
 
-        // New orders are surfaced by GetRecentNewOrdersAsync — skip duplicate status row.
+        // New orders are surfaced by GetRecentNewOrdersAsync - skip duplicate status row.
         if (string.Equals(status, "New", StringComparison.OrdinalIgnoreCase))
             return null;
 
@@ -591,7 +591,7 @@ public class DashboardService : ServiceBase
             "stock_out" => $"אזל מהמלאי: {product.Name}",
             _ => $"עודכן מלאי: {product.Name}",
         };
-        // Numeric "X remaining" only for products that actually track a quantity — a status-only
+        // Numeric "X remaining" only for products that actually track a quantity - a status-only
         // product has no meaningful on-hand number to show.
         string? subtitle = type is "stock_low" or "stock_out"
             && ProductCatalogStockClassification.UsesNumericStockDisplay(product)

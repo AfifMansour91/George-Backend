@@ -21,7 +21,7 @@ namespace George.Services.Request
 
         public int? SortOrder { get; set; }
 
-        /// <summary>Aggregate display only; not authoritative — read from product joins when needed.</summary>
+        /// <summary>Aggregate display only; not authoritative - read from product joins when needed.</summary>
         public int? ProductCount { get; set; }
 
         public string? ImageUrl { get; set; }

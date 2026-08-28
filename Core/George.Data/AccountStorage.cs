@@ -274,7 +274,7 @@ namespace George.Data
         public Task<bool> SiteBelongsToAccountAsync(int accountId, int siteId, CancellationToken cancelToken) =>
             _dbContext.Site.AnyAsync(s => s.Id == siteId && s.AccountId == accountId && !s.IsDeleted, cancelToken);
 
-        /// <summary>Remove a site's notification-settings override so it inherits the account default again. Hard delete — the unique (AccountId, SiteId) index must stay free for a future override.</summary>
+        /// <summary>Remove a site's notification-settings override so it inherits the account default again. Hard delete - the unique (AccountId, SiteId) index must stay free for a future override.</summary>
         public async Task<bool> DeleteNotificationSettingsOverrideAsync(int accountId, int siteId, CancellationToken cancelToken)
         {
             var existing = await _dbContext.AccountNotificationSettings
@@ -317,7 +317,7 @@ namespace George.Data
             return settings;
         }
 
-        /// <summary>Remove the account's SMS credentials row so it goes back to the system-wide SMS account. Hard delete — the unique AccountId index must stay free for a future row.</summary>
+        /// <summary>Remove the account's SMS credentials row so it goes back to the system-wide SMS account. Hard delete - the unique AccountId index must stay free for a future row.</summary>
         public async Task<bool> DeleteSmsSettingsAsync(int accountId, CancellationToken cancelToken)
         {
             var existing = await _dbContext.AccountSmsSettings

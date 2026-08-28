@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 /// <summary>
-/// MultiSite Phase 2 — per-(product, site) image. When a product has any rows here for a given site,
+/// MultiSite Phase 2 - per-(product, site) image. When a product has any rows here for a given site,
 /// they REPLACE the canonical ProductImage list for that site (effective view). Absence = inherit canonical.
 /// </summary>
 [Index("ProductId", "SiteId", Name = "IX_ProductSiteImage_Product_Site")]

@@ -19,15 +19,15 @@ public sealed class OrderLineDisplaySnapshot
     [JsonPropertyName("kind")]
     public string Kind { get; set; } = OrderLineDisplayKinds.Standard;
 
-    /// <summary>Clean size name (e.g. "בין 5-6 ק״ג") — no approx-weight suffix.</summary>
+    /// <summary>Clean size name (e.g. "בין 5-6 ק״ג") - no approx-weight suffix.</summary>
     [JsonPropertyName("sizeName")]
     public string? SizeName { get; set; }
 
-    /// <summary>Informational per-unit weight (grams) — average / by-variant portion.</summary>
+    /// <summary>Informational per-unit weight (grams) - average / by-variant portion.</summary>
     [JsonPropertyName("approxUnitWeightGrams")]
     public int? ApproxUnitWeightGrams { get; set; }
 
-    /// <summary>Customer-chosen per-unit weight (grams) — בחירת משקל ליחידה; always displayed.</summary>
+    /// <summary>Customer-chosen per-unit weight (grams) - בחירת משקל ליחידה; always displayed.</summary>
     [JsonPropertyName("chosenUnitWeightGrams")]
     public int? ChosenUnitWeightGrams { get; set; }
 
@@ -55,7 +55,7 @@ public sealed class OrderLineDisplaySnapshot
 
     public string ToJson() => JsonSerializer.Serialize(this, SerializeOptions);
 
-    /// <summary>Null on missing/invalid JSON or unknown kind — caller falls back to legacy rendering.</summary>
+    /// <summary>Null on missing/invalid JSON or unknown kind - caller falls back to legacy rendering.</summary>
     public static OrderLineDisplaySnapshot? TryParse(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) return null;

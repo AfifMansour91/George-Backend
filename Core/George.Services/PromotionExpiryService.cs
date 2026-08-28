@@ -11,7 +11,7 @@ namespace George.Services;
 /// <summary>
 /// Daily background job that flips <c>IsActive</c> off on promotions whose end-date has passed,
 /// then fires <c>promotion.ended</c> through the webhook dispatcher so storefronts can drop
-/// the row from their cache. Spec: <c>Sprint4/מבצעים.md</c> "סיום מבצע אוטומטי" — runs at
+/// the row from their cache. Spec: <c>Sprint4/מבצעים.md</c> "סיום מבצע אוטומטי" - runs at
 /// midnight UTC. We pad +5 minutes so the job starts cleanly inside the new day even if the
 /// host clock drifts a bit.
 /// </summary>

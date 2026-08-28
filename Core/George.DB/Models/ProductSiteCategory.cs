@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 /// <summary>
-/// MultiSite Phase 2 — per-(product, site) category assignment. When a product has any rows here for a
+/// MultiSite Phase 2 - per-(product, site) category assignment. When a product has any rows here for a
 /// given site, those categories REPLACE the canonical ProductCategory assignment for that site (effective
 /// view). Absence of rows for a (product, site) means the site inherits the canonical categories.
 /// </summary>

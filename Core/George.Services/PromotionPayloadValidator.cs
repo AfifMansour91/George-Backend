@@ -142,7 +142,7 @@ public static class PromotionPayloadValidator
     }
 
     /// <summary>
-    /// Spec-aligned shape (camelCase) — see Sprint4/מבצעים.md.
+    /// Spec-aligned shape (camelCase) - see Sprint4/מבצעים.md.
     /// </summary>
     private static bool ValidateBuyXGetY(JsonElement root, out string? errorMessage)
     {

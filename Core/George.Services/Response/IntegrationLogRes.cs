@@ -3,7 +3,7 @@ using System;
 namespace George.Services.Response;
 
 /// <summary>
-/// One integration-log row for the admin "sync logs" screen — a single external sync call between
+/// One integration-log row for the admin "sync logs" screen - a single external sync call between
 /// George and a store (WooCommerce), or an in-app order-lifecycle event. Mirrors
 /// <see cref="George.DB.IntegrationLog"/> with the full request/response bodies so support can see
 /// exactly what was sent.

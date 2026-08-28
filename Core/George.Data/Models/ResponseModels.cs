@@ -9,7 +9,7 @@ namespace George.Data.Models
         public User? ManagerUser { get; set; }
     }
 
-    /// <summary>Archive KPI summary over a whole filtered period (not paged) — see OrderStorage.GetOrderArchiveSummaryAsync.</summary>
+    /// <summary>Archive KPI summary over a whole filtered period (not paged) - see OrderStorage.GetOrderArchiveSummaryAsync.</summary>
     public class OrderArchiveSummaryDto
     {
         public int Total { get; set; }

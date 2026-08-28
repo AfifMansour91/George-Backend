@@ -132,7 +132,7 @@ namespace George.Data
             dbBrand.IconUrl = updated.IconUrl;
             dbBrand.SeoTitle = updated.SeoTitle;
             dbBrand.SeoDescription = updated.SeoDescription;
-            // API bodies usually omit Woo/source ids — never clear sync metadata accidentally.
+            // API bodies usually omit Woo/source ids - never clear sync metadata accidentally.
             dbBrand.WooCommerceBrandId = updated.WooCommerceBrandId ?? dbBrand.WooCommerceBrandId;
             dbBrand.SourceGlobalBrandId = updated.SourceGlobalBrandId ?? dbBrand.SourceGlobalBrandId;
             dbBrand.UpdatedDate = DateTime.UtcNow;
@@ -306,7 +306,7 @@ namespace George.Data
 
         /// <summary>
         /// Returns the count of (non-deleted) products linked to this brand via the ProductBrand
-        /// join table (NOT the legacy Product.BrandId column — new code goes through the join).
+        /// join table (NOT the legacy Product.BrandId column - new code goes through the join).
         /// </summary>
         public async Task<int> CountProductsAsync(int brandId, CancellationToken cancelToken)
         {

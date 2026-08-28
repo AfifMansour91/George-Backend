@@ -51,7 +51,7 @@ namespace George.Data
                 if (filter.IsEnabled.HasValue)
                 {
                     // NULL = never explicitly disabled (the WooCommerce import historically left it unset),
-                    // so it must count as enabled — otherwise imported categories vanish from every
+                    // so it must count as enabled - otherwise imported categories vanish from every
                     // isEnabled:true consumer (order building, reports, kiosk).
                     query = query.Where(c => (c.IsEnabled ?? true) == filter.IsEnabled.Value);
                 }
@@ -112,7 +112,7 @@ namespace George.Data
 
                 // A category is owned by the account of the sites it lives in. Realign AccountId to those sites so it
                 // never points at the acting user's home account (e.g. a master/admin creating a category for another
-                // account's branch) — otherwise the account-scoped category list hides it from that branch's products.
+                // account's branch) - otherwise the account-scoped category list hides it from that branch's products.
                 var siteAccountId = sites.Select(s => (int?)s.AccountId).FirstOrDefault(a => a.HasValue);
                 if (siteAccountId.HasValue)
                     category.AccountId = siteAccountId;
@@ -161,7 +161,7 @@ namespace George.Data
                         .Where(s => siteIds.Contains(s.Id))
                         .ToListAsync(cancelToken);
 
-                    // Realign ownership to the account of the (new) sites — see CreateCategoryAsync. This also repairs
+                    // Realign ownership to the account of the (new) sites - see CreateCategoryAsync. This also repairs
                     // legacy rows whose AccountId was wrong (e.g. a master's home account) the next time they are saved.
                     var siteAccountId = sites.Select(s => (int?)s.AccountId).FirstOrDefault(a => a.HasValue);
                     if (siteAccountId.HasValue)

@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 /// <summary>CRM: Customer per site. One record per (SiteId, NormalizedPhone). Same person at another site = separate row. Delete = remove from that site only.
-/// The unique index is filtered in SQL (WHERE NormalizedPhone &lt;&gt; '') so multiple phone-less customers can coexist per site — the attribute below can't express the filter.</summary>
+/// The unique index is filtered in SQL (WHERE NormalizedPhone &lt;&gt; '') so multiple phone-less customers can coexist per site - the attribute below can't express the filter.</summary>
 [Index(nameof(SiteId), nameof(NormalizedPhone), IsUnique = true)]
 public partial class Customer
 {

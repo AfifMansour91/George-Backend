@@ -4,7 +4,7 @@ namespace George.Services.Response;
 public class PromotionCatalogBadgeRuleRes
 {
     public int PromotionId { get; set; }
-    /// <summary>Catalog banner text — promotion name (matches WP plugin <c>promeng-banner</c>).</summary>
+    /// <summary>Catalog banner text - promotion name (matches WP plugin <c>promeng-banner</c>).</summary>
     public string Label { get; set; } = string.Empty;
     /// <summary>discount | buy_x_pay_y | buy_x_get_y</summary>
     public string? PromotionType { get; set; }

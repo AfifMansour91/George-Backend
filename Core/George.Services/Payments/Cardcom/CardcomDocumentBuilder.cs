@@ -27,7 +27,7 @@ public static class CardcomDocumentBuilder
                 new()
                 {
                     ProductId = order.OrderNumber,
-                    Description = $"זיכוי חלקי — הזמנה {order.OrderNumber}",
+                    Description = $"זיכוי חלקי - הזמנה {order.OrderNumber}",
                     Quantity = 1,
                     UnitCost = amountOverride.Value,
                 },
@@ -52,7 +52,7 @@ public static class CardcomDocumentBuilder
             }
 
             // Coupon / manual / promotion discounts are not item lines, so Σ lines can exceed the
-            // actually-charged Order.Total — Cardcom then rejects the document ("Total items not
+            // actually-charged Order.Total - Cardcom then rejects the document ("Total items not
             // equal to some form of payment"). Reconcile with an explicit adjustment line so the
             // document always equals the captured payment.
             var orderTotal = order.Total;
@@ -80,7 +80,7 @@ public static class CardcomDocumentBuilder
             var note = order.CustomerNote.Trim();
             if (note.Length > 200)
                 note = note[..200];
-            comments = $"{comments} — {note}";
+            comments = $"{comments} - {note}";
         }
 
         var (addressLine1, addressLine2, addressCity) = BuildDeliveryAddress(order);
@@ -173,7 +173,7 @@ public static class CardcomDocumentBuilder
             if (lineTotal is > 0 && Math.Abs(Math.Round(unitCost.Value * qty, 2, MidpointRounding.AwayFromZero) - lineTotal.Value) >= 0.01m)
                 unitCost = Math.Round(lineTotal.Value / qty, 2, MidpointRounding.AwayFromZero);
 
-            var description = string.Join(" — ", new[]
+            var description = string.Join(" - ", new[]
                 {
                     item.Title,
                     item.VariantTitle,

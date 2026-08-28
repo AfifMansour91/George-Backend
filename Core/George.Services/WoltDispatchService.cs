@@ -40,7 +40,7 @@ public class WoltDispatchService : ServiceBase
     }
 
     /// <summary>
-    /// Probes <c>GET {WooCommerceUrl}/wp-json/ed/v1/wolt</c> — returns whether the Wolt plugin endpoint exists and reports active.
+    /// Probes <c>GET {WooCommerceUrl}/wp-json/ed/v1/wolt</c> - returns whether the Wolt plugin endpoint exists and reports active.
     /// </summary>
     public async Task<IApiResponse<WoltPluginProbeRes>> ProbeWoltPluginAsync(int siteId, CancellationToken cancelToken)
     {
@@ -179,7 +179,7 @@ public class WoltDispatchService : ServiceBase
             response.Data.ErrorCode = code;
             response.Data.ErrorMessage = message;
             response.Description = message;
-            // HTTP to our client is OK — the WP/Wolt business call failed; UI reads data.success / errorMessage.
+            // HTTP to our client is OK - the WP/Wolt business call failed; UI reads data.success / errorMessage.
             response.StatusCode = StatusCode.Ok;
             return response;
         }

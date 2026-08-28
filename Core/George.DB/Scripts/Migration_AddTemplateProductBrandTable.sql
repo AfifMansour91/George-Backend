@@ -4,7 +4,7 @@
 --              (template-level entities link to global, not account-level, taxonomies).
 --
 -- NOTE: Existing TemplateProduct.BrandId points at Brand (account-level), which is a pre-existing
---       inconsistency in the schema. We do NOT backfill from it here — the type mismatch is
+--       inconsistency in the schema. We do NOT backfill from it here - the type mismatch is
 --       deliberate. New code should write to TemplateProductBrand against GlobalBrand IDs;
 --       the legacy TemplateProduct.BrandId column will be retired in a follow-up migration.
 --

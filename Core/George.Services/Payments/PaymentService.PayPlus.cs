@@ -11,12 +11,12 @@ using Microsoft.Extensions.Logging;
 namespace George.Services.Payments;
 
 /// <summary>
-/// PayPlus side of the "Giorgio owns capture" model — sibling implementations of the Cardcom flows in
+/// PayPlus side of the "Giorgio owns capture" model - sibling implementations of the Cardcom flows in
 /// <c>PaymentService.cs</c>, kept in their own methods rather than interleaved into Cardcom's logic (see
-/// the architecture note in PaymentService.cs's Cardcom methods: this is deliberate — Cardcom's capture/void
+/// the architecture note in PaymentService.cs's Cardcom methods: this is deliberate - Cardcom's capture/void
 /// state machine is incident-hardened production code and none of it should change shape to accommodate a
 /// second provider). PayPlus's own model is simpler: a single transaction_uid covers both the authorization
-/// hold and its later capture (Transactions/ChargeByTransactionUID reuses the same id) — no separate
+/// hold and its later capture (Transactions/ChargeByTransactionUID reuses the same id) - no separate
 /// reusable card token or approval-number-to-void-first concept like Cardcom's J5 hold.
 /// </summary>
 public partial class PaymentService
@@ -78,7 +78,7 @@ public partial class PaymentService
             return CreateResponse(response, StatusCode.InvalidRequest, "Order total must be positive.");
 
         // A previous hosted-page session may have been paid without us hearing about it (webhook missed,
-        // customer closed the return page) — sync it before creating a NEW page, or the old approved hold
+        // customer closed the return page) - sync it before creating a NEW page, or the old approved hold
         // is orphaned and the customer can be charged twice. Mirrors Cardcom's stale-session resume.
         if (order.PaymentSettleStatus == PaymentSettleStatus.Initiated
             && !string.IsNullOrWhiteSpace(order.PayPlusPageRequestUid))
@@ -87,7 +87,7 @@ public partial class PaymentService
             order = await _paymentStorage.GetOrderForPaymentAsync(order.Id, cancelToken) ?? order;
         }
 
-        // An already-authorized/captured order has nothing new to do — same short-circuit as Cardcom's
+        // An already-authorized/captured order has nothing new to do - same short-circuit as Cardcom's
         // session creation.
         if (order.PaymentSettleStatus is PaymentSettleStatus.Authorized or PaymentSettleStatus.Captured
             && !(OrderNeedsImmediateCharge(order) && IsUnsettledOrderPayment(order.PaymentStatus)))
@@ -179,7 +179,7 @@ public partial class PaymentService
     }
 
     /// <summary>
-    /// Manual "issue invoice" for a PayPlus order (Invoice+ inv_tax_receipt) — the PayPlus sibling of the
+    /// Manual "issue invoice" for a PayPlus order (Invoice+ inv_tax_receipt) - the PayPlus sibling of the
     /// Cardcom branch in <see cref="IssueOrderInvoiceAsync"/>. Idempotent: an order that already has an
     /// invoice returns it instead of creating a duplicate document.
     /// </summary>
@@ -215,7 +215,7 @@ public partial class PaymentService
         var txId = CoalesceNonEmpty(order.GatewayPaymentTransactionId, order.PayPlusTransactionUid) ?? order.PaymentReference;
         var doc = await _payPlus.CreateDocumentAsync(creds, new CreatePayPlusDocumentRequest
         {
-            // Stable unique_identifier — Invoice+ dedupes on it, so retries never create a second invoice.
+            // Stable unique_identifier - Invoice+ dedupes on it, so retries never create a second invoice.
             Document = BuildPayPlusDocumentForOrder(order, creds, "inv_tax_receipt", txId,
                 $"invoice-{order.Id}", sendByEmail),
         }, cancelToken);
@@ -256,7 +256,7 @@ public partial class PaymentService
         if (string.IsNullOrWhiteSpace(transactionUid))
         {
             _logger.LogWarning(
-                "FinalizePickingPayment (PayPlus) abort: orderId={OrderId} — no stored transaction_uid to capture.",
+                "FinalizePickingPayment (PayPlus) abort: orderId={OrderId} - no stored transaction_uid to capture.",
                 order.Id);
             return CreateResponse(response, StatusCode.InvalidRequest,
                 "No payment authorization for this order. Customer must complete card authorization when ordering.");
@@ -354,7 +354,7 @@ public partial class PaymentService
             await LogEventAsync(order.Id, "Refund", "-1", "no PayPlus transaction_uid on this order",
                 null, null, amount, null, cancelToken, provider: PaymentGatewayProviderId.PayPlus);
             return CreateResponse(response, StatusCode.InvalidRequest,
-                "לא נמצאה עסקת PayPlus לזיכוי בהזמנה זו — אין מזהה עסקה.");
+                "לא נמצאה עסקת PayPlus לזיכוי בהזמנה זו - אין מזהה עסקה.");
         }
 
         var tx = await _payPlus.RefundAsync(creds, new RefundRequest
@@ -470,7 +470,7 @@ public partial class PaymentService
 
     /// <summary>
     /// Store the PayPlus transaction_uid the plugin handed over at checkout, so picking captures it exactly
-    /// like a Cardcom Giorgio-handover order — except there is no separate token/expiry pair to validate:
+    /// like a Cardcom Giorgio-handover order - except there is no separate token/expiry pair to validate:
     /// the SAME transaction_uid used for the hold is later captured directly.
     /// </summary>
     private void ApplyGiorgioCaptureHandoverForPayPlus(Order order, WooCommerceOrderPaymentGatewayDetails payment)
@@ -486,7 +486,7 @@ public partial class PaymentService
     }
 
     /// <summary>Independently re-confirm a website order's PayPlus charge via Transactions/View, exactly like
-    /// the Cardcom path — never trust the plugin's echo alone (mirrors GatewayChargeVerification's discipline,
+    /// the Cardcom path - never trust the plugin's echo alone (mirrors GatewayChargeVerification's discipline,
     /// reused unchanged since PayPlusGateway.InquireTransactionAsync returns the same result shape).</summary>
     private async Task TryVerifyWooGatewayChargeForPayPlusAsync(
         Order order,
@@ -504,7 +504,7 @@ public partial class PaymentService
     }
 
     /// <summary>PayPlus server-to-server callback (mirrors <see cref="ProcessCardcomWebhookAsync"/>): never
-    /// trusts the webhook body for money decisions — re-confirms via Transactions/View before touching state.</summary>
+    /// trusts the webhook body for money decisions - re-confirms via Transactions/View before touching state.</summary>
     public async Task ProcessPayPlusWebhookAsync(
         string payPlusId,
         string? rawBody = null,
@@ -527,7 +527,7 @@ public partial class PaymentService
 
         // Confirmed against docs.payplus.co.il/reference/validate-requests-received-from-payplus:
         // `hash` header = base64(HMAC-SHA256(raw JSON body, secret_key)); `user-agent` header must be
-        // "PayPlus". A mismatch aborts processing (logged, no state change) — every other code path
+        // "PayPlus". A mismatch aborts processing (logged, no state change) - every other code path
         // ALSO independently re-confirms via InquireTransactionAsync before touching money, so this is
         // defense-in-depth on top of that, not the only thing standing between a spoofed request and a
         // false capture.
@@ -536,7 +536,7 @@ public partial class PaymentService
             if (!IsValidPayPlusWebhookSignature(rawBody, creds.ApiPassword, hashHeader))
             {
                 _logger.LogWarning(
-                    "PayPlus webhook: signature mismatch — aborting. orderId={OrderId}, id={Id}, userAgent={UserAgent}",
+                    "PayPlus webhook: signature mismatch - aborting. orderId={OrderId}, id={Id}, userAgent={UserAgent}",
                     order.Id, payPlusId, userAgentHeader);
                 return;
             }
@@ -544,7 +544,7 @@ public partial class PaymentService
         else
         {
             _logger.LogWarning(
-                "PayPlus webhook: signature not verified (missing body or site secret key) — proceeding on independent inquiry alone. orderId={OrderId}, id={Id}",
+                "PayPlus webhook: signature not verified (missing body or site secret key) - proceeding on independent inquiry alone. orderId={OrderId}, id={Id}",
                 order.Id, payPlusId);
         }
 
@@ -565,7 +565,7 @@ public partial class PaymentService
     }
 
     /// <summary>
-    /// Applies an independently-verified PayPlus transaction state to the order — shared by the webhook
+    /// Applies an independently-verified PayPlus transaction state to the order - shared by the webhook
     /// (Transactions/View by transaction_uid) and the customer-return flow (PaymentPages/ipn by
     /// page_request_uid). Website checkout hold vs final charge, mirroring ApplyValidatedCallbackAsync's
     /// Cardcom logic.
@@ -595,7 +595,7 @@ public partial class PaymentService
             ScheduleStorePaymentPush(order, pushReason);
         }
         // Failed is deliberately included: a success verified straight at PayPlus outranks an earlier
-        // failure mark (the Cardcom failed-webhook-race lesson — success can land after "failed").
+        // failure mark (the Cardcom failed-webhook-race lesson - success can land after "failed").
         else if (info.IsAuthorizationHold && order.PaymentSettleStatus is null or PaymentSettleStatus.None
             or PaymentSettleStatus.Initiated or PaymentSettleStatus.Failed)
         {
@@ -611,7 +611,7 @@ public partial class PaymentService
     /// <summary>
     /// PayPlus analogue of the Cardcom return flow (<see cref="ApplyPaymentReturnAsync"/>): the hosted page
     /// redirected the customer back, so ask PayPlus what happened to this page session (PaymentPages/ipn by
-    /// the stored page_request_uid — the redirect itself is never trusted) and apply the verified state.
+    /// the stored page_request_uid - the redirect itself is never trusted) and apply the verified state.
     /// </summary>
     private async Task<IApiResponse<OrderRes>> ApplyPaymentReturnForPayPlusAsync(
         Order order,
@@ -646,7 +646,7 @@ public partial class PaymentService
 
     /// <summary>
     /// Ask PayPlus (PaymentPages/ipn) what happened to the order's hosted-page session and apply the result.
-    /// An inconclusive answer (page not paid yet / lookup error) changes nothing — deliberately NOT marked
+    /// An inconclusive answer (page not paid yet / lookup error) changes nothing - deliberately NOT marked
     /// Failed, since customers legitimately return before paying (mirrors the Cardcom IsPending early-out).
     /// </summary>
     private async Task SyncPayPlusHostedSessionAsync(
@@ -734,7 +734,7 @@ public partial class PaymentService
     /// SavedCard phone/manual orders: place an authorization hold on the customer's saved PayPlus token
     /// (sibling of the Cardcom branch in TryPlaceAuthorizationHoldIfNeededAsync). The hold's
     /// transaction_uid is stored so the existing picking capture path charges it unchanged.
-    /// NOTE: PayPlus's synchronous token flow is not yet sandbox-verified — a failure surfaces clearly
+    /// NOTE: PayPlus's synchronous token flow is not yet sandbox-verified - a failure surfaces clearly
     /// as a Failed settle status with the gateway's message, never as a silent success.
     /// </summary>
     private async Task TryPlaceAuthorizationHoldForPayPlusAsync(
@@ -833,7 +833,7 @@ public partial class PaymentService
     /// <summary>
     /// Manual "sync from gateway" recovery for PayPlus website orders (sibling of the Cardcom body of
     /// SyncWooGatewayPaymentFromCardcomAsync): re-asks PayPlus what actually happened and applies the
-    /// verified state. Falls back to a page-request (IPN) inquiry when no transaction_uid was ever stored —
+    /// verified state. Falls back to a page-request (IPN) inquiry when no transaction_uid was ever stored -
     /// exactly the stuck-Initiated case this button exists to rescue.
     /// </summary>
     private async Task<IApiResponse<SyncGatewayPaymentRes>> SyncWooGatewayPaymentFromPayPlusAsync(
@@ -950,7 +950,7 @@ public partial class PaymentService
             Message = info.IsFinalCharge
                 ? (info.Description ?? "Payment status synced from PayPlus.")
                 : info.IsAuthorizationHold
-                    ? "PayPlus shows an authorization hold — order marked as authorized (not charged yet)."
+                    ? "PayPlus shows an authorization hold - order marked as authorized (not charged yet)."
                     : (info.Description ?? "PayPlus did not confirm a final charge for this transaction."),
             TransactionId = info.TranzactionId ?? txRaw,
             DealType = info.DealType,
@@ -963,7 +963,7 @@ public partial class PaymentService
 
     /// <summary>
     /// Confirmed against docs.payplus.co.il/reference/validate-requests-received-from-payplus:
-    /// hash = base64(HMAC-SHA256(rawBody, secret_key)). Uses a constant-time comparison — the official
+    /// hash = base64(HMAC-SHA256(rawBody, secret_key)). Uses a constant-time comparison - the official
     /// docs' own example uses a plain `===`, which this deliberately does not copy.
     /// </summary>
     private static bool IsValidPayPlusWebhookSignature(string rawBody, string secretKey, string? hashHeader)

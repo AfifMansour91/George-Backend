@@ -1,5 +1,5 @@
 -- Sprint 4: link order lines to the promotion that discounted them.
--- Spec: `Sprint4/מבצעים.md` — "סיכום אחריות" (promotion impact must be persisted on the
+-- Spec: `Sprint4/מבצעים.md` - "סיכום אחריות" (promotion impact must be persisted on the
 -- order so reports + per_customer enforcement can read it later).
 -- Idempotent: each ALTER guarded so the script can be re-run safely.
 

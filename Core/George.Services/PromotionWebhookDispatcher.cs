@@ -16,7 +16,7 @@ namespace George.Services;
 /// <summary>
 /// Fires promotion lifecycle webhooks (created / updated / ended) to the per-site URL
 /// configured under "הגדרות חנות → מבצעים → Webhook URL". Uses fire-and-forget
-/// semantics so a slow downstream never blocks the API response — failures are logged.
+/// semantics so a slow downstream never blocks the API response - failures are logged.
 /// Spec: <c>Sprint4/מבצעים.md</c> "סנכרון מבצעים לאתר ולקיוסק (Webhook)".
 /// </summary>
 public class PromotionWebhookDispatcher
@@ -67,7 +67,7 @@ public class PromotionWebhookDispatcher
         return null;
     }
 
-    /// <summary>Convenience wrapper. <paramref name="site"/> may be null — call is then a no-op.</summary>
+    /// <summary>Convenience wrapper. <paramref name="site"/> may be null - call is then a no-op.</summary>
     public Task FireAsync(string eventName, Promotion promotion, Site? site, CancellationToken cancelToken = default)
     {
         if (site is null) return Task.CompletedTask;
@@ -197,7 +197,7 @@ public class PromotionWebhookDispatcher
 
         // Resolve a fresh DI scope: this runs on a fire-and-forget Task.Run after the request
         // scope (and its GeorgeDBContext) has been disposed, so the request-scoped storages
-        // cannot be reused — doing so throws "Cannot access a disposed context instance".
+        // cannot be reused - doing so throws "Cannot access a disposed context instance".
         using var scope = _scopeFactory.CreateScope();
         var productStorage = scope.ServiceProvider.GetRequiredService<ProductStorage>();
         var categoryStorage = scope.ServiceProvider.GetRequiredService<CategoryStorage>();

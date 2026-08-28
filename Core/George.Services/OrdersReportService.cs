@@ -9,7 +9,7 @@ using AutoMapper;
 namespace George.Services
 {
     /// <summary>
-    /// דוח הזמנות — operational orders/deliveries view for a supply-date (or order-date) window:
+    /// דוח הזמנות - operational orders/deliveries view for a supply-date (or order-date) window:
     /// KPI split of shipping vs pickup with sent/pending counts, and a courier-friendly row per order
     /// (address, phone, time window, payment kind, notes).
     /// </summary>
@@ -43,7 +43,7 @@ namespace George.Services
             if (siteId <= 0)
                 return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required.");
 
-            // Default window: today (Israel calendar) — the field spec's default view.
+            // Default window: today (Israel calendar) - the field spec's default view.
             var todayLocal = IsraelToday();
             var fromD = (from ?? todayLocal).Date;
             var toD = (to ?? fromD).Date;
@@ -227,7 +227,7 @@ namespace George.Services
 
         /// <summary>
         /// In-memory mirror of the orders-list cash/credit heuristic (OrderStorage.ApplyOrderListFilter):
-        /// cash markers win; Cardcom / credit markers → credit (ExternalCredit counts as credit — a card charge).
+        /// cash markers win; Cardcom / credit markers → credit (ExternalCredit counts as credit - a card charge).
         /// </summary>
         private static string ResolvePaymentKind(Order o)
         {

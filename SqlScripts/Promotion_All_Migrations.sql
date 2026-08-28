@@ -1,5 +1,5 @@
 -- =============================================================================
--- Sprint 4 — Promotions feature: all migrations consolidated, ordered, idempotent.
+-- Sprint 4 - Promotions feature: all migrations consolidated, ordered, idempotent.
 -- Run against the George DB. Safe to re-run: every block is guarded.
 --
 -- Order of operations:
@@ -129,7 +129,7 @@ GO
 -- 3. Promotion (SiteId, CouponCode) unique index   [optional but recommended]
 --    Source: SqlScripts/Promotion_CouponUniqueIndex.sql
 -- -----------------------------------------------------------------------------
--- Filtered-index WHERE must use simple comparisons only (no LTRIM/RTRIM — SQL Server error 10735).
+-- Filtered-index WHERE must use simple comparisons only (no LTRIM/RTRIM - SQL Server error 10735).
 -- Whitespace normalization is enforced in PromotionService on create/update.
 IF EXISTS (
     SELECT 1 FROM sys.indexes

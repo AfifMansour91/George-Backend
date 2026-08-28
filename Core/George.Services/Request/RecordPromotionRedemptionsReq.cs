@@ -1,7 +1,7 @@
 namespace George.Services.Request;
 
 /// <summary>
-/// Inbound batch from WordPress Promeng plugin — <c>POST /redemptions</c> (GIORGIO_API §2.1).
+/// Inbound batch from WordPress Promeng plugin - <c>POST /redemptions</c> (GIORGIO_API §2.1).
 /// </summary>
 public class RecordPromotionRedemptionsReq
 {

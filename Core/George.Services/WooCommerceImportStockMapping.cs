@@ -43,7 +43,7 @@ public static class WooCommerceImportStockMapping
     }
 
     /// <summary>
-    /// Matches George <see cref="George.DB.Product.VariationStockByQuantity"/> — only when Woo tracks numeric qty per variation.
+    /// Matches George <see cref="George.DB.Product.VariationStockByQuantity"/> - only when Woo tracks numeric qty per variation.
     /// </summary>
     public static bool VariationTracksQuantity(IReadOnlyList<VariationStockSource> variations) =>
         variations.Any(VariationHasRealQuantityTracking);

@@ -69,7 +69,7 @@ public class CustomerService : ServiceBase
     {
         var orderIds = await _customerStorage.GetActiveOrderIdsByCustomerAsync(customerId, siteId, cancelToken).ConfigureAwait(false);
         if (orderIds.Count == 0) return;
-        // The action filter only sets AuthUser on this service — forward it so cancels record the right actor.
+        // The action filter only sets AuthUser on this service - forward it so cancels record the right actor.
         _orderService.AuthUser = AuthUser;
         foreach (var orderId in orderIds)
             await _orderService.CancelOrderAsync(orderId, softDelete: true, cancelToken).ConfigureAwait(false);

@@ -1,4 +1,4 @@
--- Migration: MultiSite Phase 2 — per-site product images (ProductSiteImage).
+-- Migration: MultiSite Phase 2 - per-site product images (ProductSiteImage).
 -- A product can have different images per branch. When rows exist for a (product, site), they replace
 -- the canonical ProductImage list for that site (effective view). Idempotent.
 

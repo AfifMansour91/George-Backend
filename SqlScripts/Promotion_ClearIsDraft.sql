@@ -1,4 +1,4 @@
--- Promotions: retire IsDraft — visibility is IsActive + schedule only.
+-- Promotions: retire IsDraft - visibility is IsActive + schedule only.
 -- Run once after deploying the IsDraft removal change.
 
 UPDATE dbo.Promotion

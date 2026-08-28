@@ -1,7 +1,7 @@
 -- =============================================================================
 -- PREVIEW (read-only) for Backfill_SingleSiteOverridesToCanonical.sql
 -- Shows exactly which products/variants/images/categories the backfill would
--- touch and the before/after values. Runs NO updates — safe on Prod anytime.
+-- touch and the before/after values. Runs NO updates - safe on Prod anytime.
 -- Same scope logic as the real script: single-site products of non-network accounts.
 -- =============================================================================
 

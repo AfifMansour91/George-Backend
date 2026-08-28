@@ -30,7 +30,7 @@ public static class OrderLineDisplayFieldsBuilder
         var variableKg = InferVariableWeightKg(product, purchaseAsKgLine, req);
         var variantWeightKg = GetVariantWeightKg(product, variantIndex, req);
 
-        // Woo lines never send OrderLineCuttingLabel — derive it from the resolved variant's cutting
+        // Woo lines never send OrderLineCuttingLabel - derive it from the resolved variant's cutting
         // option so prints/reports render like phone orders (size label + cutting, not the raw variantTitle).
         // Decode defensively: catalogs imported before the Woo slug fix still hold percent-encoded
         // option values ("%d7%9c..." = "ללא-עור") which would otherwise persist into order-line labels.
@@ -65,12 +65,12 @@ public static class OrderLineDisplayFieldsBuilder
             && string.IsNullOrWhiteSpace(req.OrderLineQuantityMode))
             item.SaleTotalWeight = null;
 
-        // Typed display snapshot (LineDisplayJson) — written unconditionally for catalog lines so
+        // Typed display snapshot (LineDisplayJson) - written unconditionally for catalog lines so
         // structured rendering (Site.UseStructuredOrderLineDisplay) can take over without re-parsing labels.
         item.LineDisplayJson = BuildLineDisplaySnapshot(product, req, purchaseAsKgLine, variantIndex, variantWeightKg, cuttingValue, variableKg)?.ToJson();
     }
 
-    /// <summary>Typed snapshot from catalog + request — numbers and clean names only (writer-side normalization).</summary>
+    /// <summary>Typed snapshot from catalog + request - numbers and clean names only (writer-side normalization).</summary>
     private static OrderLineDisplaySnapshot? BuildLineDisplaySnapshot(
         Product product,
         CreateOrderItemReq req,
@@ -124,7 +124,7 @@ public static class OrderLineDisplayFieldsBuilder
             }
             else
             {
-                // The chosen weight arrives differently per channel — normalize it to grams HERE
+                // The chosen weight arrives differently per channel - normalize it to grams HERE
                 // (single writer) so renderers never parse text: manual/kiosk send a Hebrew label,
                 // Woo sends unitWeight grams (1000 = by-kg sentinel, not a portion) or a bare-kg saleTotalWeight.
                 var g = OrderItemLineDisplay.ParseGramsFromHebrewWeightLabel(req.OrderLinePerUnitWeightLabel);

@@ -23,7 +23,7 @@ public partial class Order
 
     public int? UpdateUserId { get; set; }
 
-    /// <summary>User id of the staff member who picked (לוקט) the order — set when picking is saved.</summary>
+    /// <summary>User id of the staff member who picked (לוקט) the order - set when picking is saved.</summary>
     public int? PickerUserId { get; set; }
 
     /// <summary>Display name of the picker (denormalized from User.FullName at picking time).</summary>
@@ -31,7 +31,7 @@ public partial class Order
     public string? PickerName { get; set; }
 
     /// <summary>
-    /// המטפל: staff member handling the order — the user who created a manual/phone order, or the
+    /// המטפל: staff member handling the order - the user who created a manual/phone order, or the
     /// first user to take a website order into treatment (also backfilled at picking when still empty).
     /// </summary>
     public int? HandlerUserId { get; set; }
@@ -198,7 +198,7 @@ public partial class Order
     [Column(TypeName = "decimal(18, 2)")]
     public decimal? ManualDiscountAmount { get; set; }
 
-    /// <summary>Phone/manual order: <c>percent</c> or <c>amount</c> — how ManualDiscountValue was entered.</summary>
+    /// <summary>Phone/manual order: <c>percent</c> or <c>amount</c> - how ManualDiscountValue was entered.</summary>
     [StringLength(20)]
     public string? ManualDiscountType { get; set; }
 
@@ -326,7 +326,7 @@ public partial class Order
     public int? CardcomSelectedInstallments { get; set; }
 
     /// <summary>
-    /// Website orders: who charges the card after picking — null/"Plugin" = the store's Cardcom gateway
+    /// Website orders: who charges the card after picking - null/"Plugin" = the store's Cardcom gateway
     /// plugin (webhook reports back), "Giorgio" = the plugin handed us the token at checkout and Giorgio
     /// charges at picking like a phone order. See George.Common.Payment.PaymentCaptureOwner.
     /// </summary>
@@ -340,18 +340,18 @@ public partial class Order
     [StringLength(1000)]
     public string? PayPlusRefundDocumentUrl { get; set; }
 
-    /// <summary>PayPlus page_request_uid (PRUID) from PaymentPages/generateLink — analogue of CardcomLowProfileId.</summary>
+    /// <summary>PayPlus page_request_uid (PRUID) from PaymentPages/generateLink - analogue of CardcomLowProfileId.</summary>
     [StringLength(64)]
     public string? PayPlusPageRequestUid { get; set; }
 
     /// <summary>
     /// PayPlus transaction_uid. Unlike Cardcom, the SAME id is used for both the authorization hold and its
-    /// later capture (Transactions/ChargeByTransactionUID) — no separate reusable token/approval pair needed.
+    /// later capture (Transactions/ChargeByTransactionUID) - no separate reusable token/approval pair needed.
     /// </summary>
     [StringLength(64)]
     public string? PayPlusTransactionUid { get; set; }
 
-    /// <summary>Encrypted Giorgio-owns-capture handover blob (write-once) — analogue of CardcomPaymentJson.</summary>
+    /// <summary>Encrypted Giorgio-owns-capture handover blob (write-once) - analogue of CardcomPaymentJson.</summary>
     [Column(TypeName = "nvarchar(max)")]
     public string? PayPlusPaymentJson { get; set; }
 

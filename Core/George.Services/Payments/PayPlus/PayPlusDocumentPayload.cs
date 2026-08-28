@@ -3,7 +3,7 @@ namespace George.Services.Payments.PayPlus;
 /// <summary>
 /// Maps <see cref="PayPlusTransactionDocument"/> to the "books/docs/new/{doctype}" JSON body, per
 /// https://docs.payplus.co.il/reference/post_books-docs-new-doctype.md (fields confirmed against docs,
-/// not yet exercised against the sandbox — verify field names end-to-end before relying on this in production).
+/// not yet exercised against the sandbox - verify field names end-to-end before relying on this in production).
 /// </summary>
 internal static class PayPlusDocumentPayload
 {

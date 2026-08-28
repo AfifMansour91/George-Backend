@@ -40,7 +40,7 @@ public class WooCommerceOrderPayload
     [JsonPropertyName("shippingAddress")]
     public WooCommerceShippingAddressPayload? ShippingAddress { get; set; }
 
-    /// <summary>Plugin >= 1.7.8: delivery recipient ("ship to another person"). Sent on every order — <c>isOther</c> distinguishes "same person" from "not sent".</summary>
+    /// <summary>Plugin >= 1.7.8: delivery recipient ("ship to another person"). Sent on every order - <c>isOther</c> distinguishes "same person" from "not sent".</summary>
     [JsonPropertyName("recipient")]
     public WooCommerceRecipientPayload? Recipient { get; set; }
 

@@ -86,7 +86,7 @@ namespace George.Data
 
         /// <summary>
         /// Orders not yet charged (pipeline): active, not cancelled, payment unsettled.
-        /// No filter on delivery date — any open unpaid order counts.
+        /// No filter on delivery date - any open unpaid order counts.
         /// </summary>
         public async Task<List<Order>> GetPipelineOrdersAsync(int siteId, CancellationToken cancelToken)
         {

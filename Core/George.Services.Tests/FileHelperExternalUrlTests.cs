@@ -4,7 +4,7 @@ using Xunit;
 namespace George.Services.Tests;
 
 /// <summary>
-/// <see cref="FileHelper.UpgradeInsecureExternalUrl"/> — public file links must come out https even
+/// <see cref="FileHelper.UpgradeInsecureExternalUrl"/> - public file links must come out https even
 /// when the configured storage base path says "http://" (Dubi-Dagim kiosk: home video stored with an
 /// http url → mixed-content HTTPS warning on the kiosk).
 /// </summary>

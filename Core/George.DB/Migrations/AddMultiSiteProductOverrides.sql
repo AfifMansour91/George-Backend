@@ -1,4 +1,4 @@
--- Migration: MultiSite Phase 2 — per-site product override layer.
+-- Migration: MultiSite Phase 2 - per-site product override layer.
 -- Adds: ProductSiteOverride + ProductSiteVariantStock tables, Product.ManagementMode/OwnerSiteId,
 --       Account.ManagementMode. Idempotent; run in SSMS or sqlcmd against your George DB.
 -- See MultiSite/חוזה-בקאנד-מולטיסייט-Phase2-Override.md.
@@ -19,7 +19,7 @@ GO
 -- 3. ProductSiteOverride table
 -- Self-repair: an earlier partial run may have left this table WITHOUT its [Id] PK (the self-heal below cannot
 -- add an IDENTITY PK). Such a table is unusable (EF selects [Id]); drop the malformed leftover so it is recreated
--- correctly. Only triggers when [Id] is missing — a healthy table is untouched. (QA override data is disposable.)
+-- correctly. Only triggers when [Id] is missing - a healthy table is untouched. (QA override data is disposable.)
 IF OBJECT_ID(N'[dbo].[ProductSiteOverride]', N'U') IS NOT NULL AND COL_LENGTH(N'[dbo].[ProductSiteOverride]', N'Id') IS NULL
     DROP TABLE [dbo].[ProductSiteOverride];
 GO
@@ -89,7 +89,7 @@ IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'FK_ProductSiteOverr
 GO
 
 -- 4. ProductSiteVariantStock table
--- Self-repair: same as above — drop a malformed leftover missing its [Id] PK so it is recreated correctly.
+-- Self-repair: same as above - drop a malformed leftover missing its [Id] PK so it is recreated correctly.
 -- (Re-run AddMultiSiteVariantPriceExclusion.sql afterwards to re-add the per-site variant Price/SalePrice/IsExcluded columns.)
 IF OBJECT_ID(N'[dbo].[ProductSiteVariantStock]', N'U') IS NOT NULL AND COL_LENGTH(N'[dbo].[ProductSiteVariantStock]', N'Id') IS NULL
     DROP TABLE [dbo].[ProductSiteVariantStock];

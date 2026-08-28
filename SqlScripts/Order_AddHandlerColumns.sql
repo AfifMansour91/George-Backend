@@ -1,4 +1,4 @@
--- Order handler (מטפל): the staff member handling the order — the user who created a manual/phone
+-- Order handler (מטפל): the staff member handling the order - the user who created a manual/phone
 -- order, or the first user to take a website order into treatment (start-treatment / picking).
 -- HandlerUserId references the staff User; HandlerName is denormalized from User.FullName at stamp
 -- time so cards/printouts can show it without a join. Shown only when Site.ShowOrderHandler is on.

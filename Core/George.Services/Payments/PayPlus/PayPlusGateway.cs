@@ -8,14 +8,14 @@ using Microsoft.Extensions.Logging;
 namespace George.Services.Payments.PayPlus;
 
 /// <summary>
-/// PayPlus gateway — second <see cref="IPaymentGatewayProvider"/> implementation alongside Cardcom, built to
+/// PayPlus gateway - second <see cref="IPaymentGatewayProvider"/> implementation alongside Cardcom, built to
 /// the same "Giorgio owns capture" behavior: the hosted page places an authorization only (charge_method=2,
 /// PayPlus's own J5 terminology), the actual charge happens at picking via
 /// <see cref="CaptureAuthorizationAsync"/>. Unlike Cardcom, PayPlus captures the SAME transaction_uid the
-/// authorization returned — there is no separate reusable token / approval-number pair to track.
+/// authorization returned - there is no separate reusable token / approval-number pair to track.
 ///
 /// Endpoints and field names below are confirmed against https://docs.payplus.co.il (not against a live
-/// sandbox exchange) — see docs/PayPlus-test-site-setup.md for the end-to-end verification this still needs
+/// sandbox exchange) - see docs/PayPlus-test-site-setup.md for the end-to-end verification this still needs
 /// before relying on it in production. Apple Pay / Google Pay are intentionally NOT implemented here: per
 /// the agreed scope they are tabs on PayPlus's own hosted page (dashboard-configured), invisible to this
 /// gateway, exactly like Cardcom's wallet handling today.
@@ -121,7 +121,7 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
         ValidateCallbackRequest request,
         CancellationToken cancelToken = default)
     {
-        // request.LowProfileId is reused across gateways as "the opaque session id to validate" —
+        // request.LowProfileId is reused across gateways as "the opaque session id to validate" -
         // for PayPlus that's the page_request_uid (PRUID) returned by generateLink.
         var body = new Dictionary<string, object?> { ["payment_request_uid"] = request.LowProfileId };
 
@@ -160,7 +160,7 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
             return Fail("Empty response from PayPlus.");
 
         // Unlike Cardcom (which embeds document creation in the same Transactions/Transaction call), PayPlus's
-        // Invoice+ document API is a separate endpoint (books/docs/new/) with its own line-item shape — the
+        // Invoice+ document API is a separate endpoint (books/docs/new/) with its own line-item shape - the
         // caller creates the document explicitly via CreateDocumentAsync after a successful capture, using
         // the full order (line items, address) rather than the CardOwner-only fields available here.
         return MapTransactionalResult(json);
@@ -179,7 +179,7 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
         => await ChargeOrHoldByTokenAsync(credentials, request.Amount, request.Token, chargeMethod: 2,
             request.ExternalUniqTranId, cancelToken).ConfigureAwait(false);
 
-    /// <summary>Same caveat as <see cref="PlaceTokenAuthorizationHoldAsync"/> — verify against the sandbox.</summary>
+    /// <summary>Same caveat as <see cref="PlaceTokenAuthorizationHoldAsync"/> - verify against the sandbox.</summary>
     public async Task<PaymentTransactionResult> ChargeTokenAsync(
         SitePaymentCredentials credentials,
         ChargeTokenRequest request,
@@ -217,10 +217,10 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
 
         // A synchronous charge/hold via token returns transaction data directly; a page link with no
         // transaction_uid means PayPlus still expects a redirect, which this (server-side, no browser)
-        // flow cannot follow — surface that clearly instead of silently reporting success.
+        // flow cannot follow - surface that clearly instead of silently reporting success.
         var txId = GetDataString(json, "transaction_uid");
         if (string.IsNullOrWhiteSpace(txId))
-            return Fail("PayPlus returned a hosted-page link instead of a synchronous result for the saved token — this flow needs sandbox verification.", json);
+            return Fail("PayPlus returned a hosted-page link instead of a synchronous result for the saved token - this flow needs sandbox verification.", json);
 
         return MapTransactionalResult(json);
     }
@@ -256,7 +256,7 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
             return Fail("PayPlus void requires the transaction_uid to cancel.");
 
         // terminal_uid/cashier_uid are documented as part of this call but have no analogue in our
-        // per-site credential model (they're PayPlus POS/device concepts) — omitted here. If PayPlus
+        // per-site credential model (they're PayPlus POS/device concepts) - omitted here. If PayPlus
         // rejects the call without them for a given account, this needs a credential-model addition;
         // verify against the sandbox (see docs/PayPlus-test-site-setup.md).
         var body = new Dictionary<string, object?> { ["transaction_uid"] = request.ProviderTransactionId };
@@ -276,14 +276,14 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
             return new TestConnectionResult { Success = false, Message = "PayPlus API key and secret key are required." };
 
         // Minimal validation: View with a dummy id returns a structured (not transport-level) error if
-        // credentials are valid — mirrors Cardcom's TestConnectionAsync approach.
+        // credentials are valid - mirrors Cardcom's TestConnectionAsync approach.
         var body = new Dictionary<string, object?> { ["transaction_uid"] = "00000000-0000-0000-0000-000000000000" };
         var json = await PostJsonAsync(credentials, "Transactions/View", body, cancelToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(json))
             return new TestConnectionResult { Success = false, Message = "No response from PayPlus." };
 
         // An auth failure (bad api-key/secret-key) surfaces as an HTTP-level rejection before results.code
-        // is even meaningful; PostJsonAsync logs the raw body on non-2xx — a structured results object
+        // is even meaningful; PostJsonAsync logs the raw body on non-2xx - a structured results object
         // (even an error one) here means the request reached PayPlus and was evaluated with these credentials.
         var hasResults = TryGetObjectProperty(json, "results", out _);
         return hasResults
@@ -291,7 +291,7 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
             : new TestConnectionResult { Success = false, Message = "Unexpected response from PayPlus." };
     }
 
-    /// <summary>PayPlus Transactions/View — analogue of Cardcom's GetTransactionInfoById. Not on the shared
+    /// <summary>PayPlus Transactions/View - analogue of Cardcom's GetTransactionInfoById. Not on the shared
     /// interface (mirrors how Cardcom's equivalent is also a gateway-specific extra method); returns the
     /// same <see cref="CardcomTransactionInfoResult"/> shape so <see cref="GatewayChargeVerification"/>'s
     /// comparison rules apply unchanged to either provider.</summary>
@@ -311,7 +311,7 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
         return ParseTransactionInfoResult(json);
     }
 
-    /// <summary>PayPlus PaymentPages/ipn — looks up what happened to a hosted-page session by its
+    /// <summary>PayPlus PaymentPages/ipn - looks up what happened to a hosted-page session by its
     /// page_request_uid (the only id we hold before any webhook/return arrives). Same defensive role as
     /// Cardcom's GetLpResult in the return flow: the redirect back is never trusted by itself.</summary>
     public async Task<CardcomTransactionInfoResult> InquirePageRequestAsync(
@@ -433,7 +433,7 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
         };
     }
 
-    /// <summary>PayPlus Invoice+ document creation — not on the shared interface, mirrors Cardcom's
+    /// <summary>PayPlus Invoice+ document creation - not on the shared interface, mirrors Cardcom's
     /// CreateDocumentAsync (also a gateway-specific extra method).</summary>
     public async Task<PaymentTransactionResult> CreateDocumentAsync(
         SitePaymentCredentials credentials,
@@ -451,7 +451,7 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
             return Fail("Empty response from PayPlus.");
 
         // Failures come back root-level ({"status":"failure","error":"brand-not-found",...}), not wrapped
-        // in the usual {results:{...}} envelope — surface the actual error code, not a generic message.
+        // in the usual {results:{...}} envelope - surface the actual error code, not a generic message.
         if (!TryGetObjectProperty(json, "docUID", out _) && !IsResultsSuccess(json))
             return Fail(GetResultsDescription(json) ?? GetRootString(json, "error") ?? "PayPlus document creation failed.", json);
 
@@ -465,11 +465,11 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
         };
     }
 
-    /// <summary>Re-parses a stored/callback PayPlus JSON payload — analogue of Cardcom's ParseLpResult,
+    /// <summary>Re-parses a stored/callback PayPlus JSON payload - analogue of Cardcom's ParseLpResult,
     /// used to re-interpret webhook/callback bodies without a fresh API call.</summary>
     public ValidateCallbackResult ParsePayPlusResult(string json) => MapTransactionResult(json);
 
-    /// <summary>Extract last4/brand from a stored PayPlus JSON payload — analogue of Cardcom's
+    /// <summary>Extract last4/brand from a stored PayPlus JSON payload - analogue of Cardcom's
     /// ExtractCardDisplayFields; reuses the same provider-neutral <see cref="CardcomCardDisplayFields"/> shape.</summary>
     public CardcomCardDisplayFields ExtractCardDisplayFields(string? json)
     {
@@ -496,7 +496,7 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
 
     /// <summary>
     /// Extract the reusable saved-card token from an IPN/callback payload (token_uid + card display +
-    /// expiry). Transactions/View does NOT return the token — only the checkout IPN/callback does.
+    /// expiry). Transactions/View does NOT return the token - only the checkout IPN/callback does.
     /// NOTE: the sandbox IPN was observed appending the card's last4 to token_uid; stored as-is because
     /// the vendor plugin stores and replays the same value.
     /// </summary>
@@ -601,7 +601,7 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
     }
 
     // --- JSON helpers: PayPlus wraps most responses as { results: { status, code, description }, data: {...} }.
-    // Some endpoints (Invoice+ docs) return fields at the root instead — handled by GetRootString/TryGetObjectProperty.
+    // Some endpoints (Invoice+ docs) return fields at the root instead - handled by GetRootString/TryGetObjectProperty.
 
     private static bool IsResultsSuccess(string json)
     {

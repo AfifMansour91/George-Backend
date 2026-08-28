@@ -85,7 +85,7 @@ namespace George.Services.Response
 
     /// <summary>
     /// Status of the background menu_order push for a site (the push endpoint returns immediately; the UI polls this).
-    /// In-memory only — resets to <c>idle</c> on app restart.
+    /// In-memory only - resets to <c>idle</c> on app restart.
     /// </summary>
     public class ProductOrderPushStatusRes
     {

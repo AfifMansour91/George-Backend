@@ -15,7 +15,7 @@ namespace George.Api.Controllers;
 /// base64(HMAC-SHA256(JSON.stringify(request body), secret_key)), and the `user-agent` header must equal
 /// "PayPlus". Resolving *which site's* secret key applies requires the order first (looked up by the same id
 /// this controller resolves below), so the actual comparison happens in
-/// <see cref="PaymentService.ProcessPayPlusWebhookAsync"/> once the order's site is known — this controller
+/// <see cref="PaymentService.ProcessPayPlusWebhookAsync"/> once the order's site is known - this controller
 /// only captures the raw body and the two headers and passes them through unverified. Every code path also
 /// independently re-confirms the reported state via PayPlusGateway.InquireTransactionAsync before touching
 /// money regardless of signature outcome, so this is defense-in-depth, not the only thing standing between a

@@ -3,7 +3,7 @@ using George.DB;
 namespace George.Services;
 
 /// <summary>
-/// Maps catalog stock to ok | low | out — same rules as the SPA <c>getProductStockFilterBucket</c>
+/// Maps catalog stock to ok | low | out - same rules as the SPA <c>getProductStockFilterBucket</c>
 /// in <c>src/lib/stockLevels.ts</c> (My Products stock filters). Shared by products report and inventory report.
 /// </summary>
 public static class ProductCatalogStockClassification
@@ -24,7 +24,7 @@ public static class ProductCatalogStockClassification
             return IsOutOfStockStatus(p) ? "out" : "ok";
 
         // Unspecified / legacy management with no stored quantity: follow StockStatus (same idea as SPA
-        // isProductInventoryAvailableForSale — do not treat null quantity as 0 units unless quantity mode or a numeric row exists).
+        // isProductInventoryAvailableForSale - do not treat null quantity as 0 units unless quantity mode or a numeric row exists).
         if (!UsesQuantityThresholds(p))
             return IsOutOfStockStatus(p) ? "out" : "ok";
 
@@ -205,7 +205,7 @@ public static class ProductCatalogStockClassification
     }
 
     /// <summary>
-    /// When false, catalog row has no meaningful on-hand number — classify from <see cref="IsOutOfStockStatus"/> only.
+    /// When false, catalog row has no meaningful on-hand number - classify from <see cref="IsOutOfStockStatus"/> only.
     /// </summary>
     public static bool UsesQuantityThresholds(Product p)
     {
@@ -264,7 +264,7 @@ public static class ProductCatalogStockClassification
             .Count(x => x.Length > 0);
     }
 
-    /// <summary>Same rule as SPA <c>stockLevels</c> / products report — not <see cref="Product.IsWeighted"/> alone.</summary>
+    /// <summary>Same rule as SPA <c>stockLevels</c> / products report - not <see cref="Product.IsWeighted"/> alone.</summary>
     public static bool IsWeightedLikeProduct(Product p)
     {
         if (p.IsWeighted == true)

@@ -18,7 +18,7 @@ public sealed class PayPlusTransactionDocument
     public string? TransactionUid { get; init; }
     /// <summary>Idempotency key so a retried request does not create a duplicate document.</summary>
     public string? UniqueIdentifier { get; init; }
-    /// <summary>Invoice+ brand UID (issuing business) — required; PayPlus answers "brand-not-found" without it.</summary>
+    /// <summary>Invoice+ brand UID (issuing business) - required; PayPlus answers "brand-not-found" without it.</summary>
     public string? BrandUid { get; init; }
     public IReadOnlyList<PayPlusDocumentProductLine> Products { get; init; } = Array.Empty<PayPlusDocumentProductLine>();
 }

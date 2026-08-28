@@ -15,7 +15,7 @@ public partial class OrderService
     /// <param name="direction">internal (in-app) | inbound (store → George) | outbound (George → store).</param>
     /// <remarks>
     /// Non-blocking: the log row is built synchronously here (capturing the order's state at call time),
-    /// then enqueued to <see cref="IIntegrationLogQueue"/> for the background batch writer —
+    /// then enqueued to <see cref="IIntegrationLogQueue"/> for the background batch writer -
     /// the order operation does NOT wait for the DB write. Returns a completed task so existing
     /// <c>await</c> call sites stay valid at zero cost. <paramref name="cancelToken"/> is intentionally
     /// not used for the background write (the request token may be cancelled once the response returns).

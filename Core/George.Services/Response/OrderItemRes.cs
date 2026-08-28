@@ -30,7 +30,7 @@ public class OrderItemRes
     public string? SaleUnitsLine { get; set; }
     public string? LinePayloadJson { get; set; }
     public int SortOrder { get; set; }
-    /// <summary>total_weight | per_unit | units_only — for order line display without loading the catalog product.</summary>
+    /// <summary>total_weight | per_unit | units_only - for order line display without loading the catalog product.</summary>
     public string? WeightDisplayMode { get; set; }
 
     public string? OrderLineQuantityMode { get; set; }
@@ -38,7 +38,7 @@ public class OrderItemRes
     public string? OrderLineSizeLabel { get; set; }
     public string? OrderLineCuttingLabel { get; set; }
 
-    /// <summary>Typed display snapshot (JSON) — see <c>OrderLineDisplaySnapshot</c>; null on legacy lines.</summary>
+    /// <summary>Typed display snapshot (JSON) - see <c>OrderLineDisplaySnapshot</c>; null on legacy lines.</summary>
     public string? LineDisplayJson { get; set; }
 
     // Sprint 4: promotion linkage

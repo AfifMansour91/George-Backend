@@ -16,7 +16,7 @@ namespace George.Services;
 /// "הודעות עידוד וחיסכון בסל הקניות" section.
 ///
 /// All payload reads use the camelCase v1 shape that <c>PromotionPayloadValidator</c>
-/// enforces. The evaluator is intentionally side-effect free — load promotions and
+/// enforces. The evaluator is intentionally side-effect free - load promotions and
 /// site defaults outside, then call <see cref="Evaluate"/> with everything it needs.
 /// </summary>
 public static class PromotionEvaluator
@@ -413,7 +413,7 @@ public static class PromotionEvaluator
         var eligibleLines = new List<EvaluateCartLine>();
         if (scope == "product")
         {
-            // Legacy single productId merged with productIds[] — quantity counts across all of them.
+            // Legacy single productId merged with productIds[] - quantity counts across all of them.
             var pids = ReadIntSet(cond, "productIds");
             var pid = ReadInt(cond, "productId");
             if (pid is > 0) pids.Add(pid.Value);
@@ -976,7 +976,7 @@ public static class PromotionEvaluator
         line.IsCatalogDiscounted == true;
 
     /// <summary>
-    /// Cart subtotal for minimum-spend gates — prefers client <see cref="EvaluatePromotionsReq.CartTotal"/>
+    /// Cart subtotal for minimum-spend gates - prefers client <see cref="EvaluatePromotionsReq.CartTotal"/>
     /// (display/checkout total, tax-inclusive when the storefront sends it) over a recomputed line sum.
     /// </summary>
     private static decimal ResolveDisplaySubtotal(EvaluatePromotionsReq req)
@@ -990,7 +990,7 @@ public static class PromotionEvaluator
     private static bool IsPromotionGiftLine(EvaluateCartLine line) =>
         string.Equals(line.Source, "promotion_gift", StringComparison.OrdinalIgnoreCase);
 
-    // ─── Stacking (max discount per product line — matches WP plugin engine) ─────
+    // ─── Stacking (max discount per product line - matches WP plugin engine) ─────
 
     /// <summary>
     /// When multiple coupon-gated promotions match the same cart coupon, keep the best discount only.
@@ -1118,7 +1118,7 @@ public static class PromotionEvaluator
             }
             else if (!IsSignalOnlyPromotion(a) && a.PromotionType == "buy_x_pay_y")
             {
-                // BxPY discount is bundle-level — keep if any trigger product won or no overlap.
+                // BxPY discount is bundle-level - keep if any trigger product won or no overlap.
                 var triggers = a.TriggerProductIds ?? new List<string>();
                 bool ok = triggers.Count == 0 || triggers.Any(t => bestByProduct.ContainsKey(t));
                 if (!ok) continue;

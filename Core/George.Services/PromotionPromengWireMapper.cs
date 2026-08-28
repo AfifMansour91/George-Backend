@@ -115,7 +115,7 @@ public static class PromotionPromengWireMapper
             return new Dictionary<string, object>();
 
         var scope = (ReadString(cond, "scope") ?? "product").ToLowerInvariant();
-        // Payloads carry both the legacy single productId and productIds[] — dedupe before mapping.
+        // Payloads carry both the legacy single productId and productIds[] - dedupe before mapping.
         var productIds = new List<int>();
         var pid = ReadInt(cond, "productId");
         if (pid is > 0) productIds.Add(pid.Value);
@@ -195,7 +195,7 @@ public static class PromotionPromengWireMapper
         }
         catch (JsonException)
         {
-            // ignore malformed payload — mapper will emit empty id arrays
+            // ignore malformed payload - mapper will emit empty id arrays
         }
     }
 

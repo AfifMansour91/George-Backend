@@ -7,7 +7,7 @@ using AutoMapper;
 
 namespace George.Services;
 
-/// <summary>דוח מלאי — מוצרי קטלוג לאתר עם מלאי ווריאציות (תואם SPA <c>InventoryReport</c>).</summary>
+/// <summary>דוח מלאי - מוצרי קטלוג לאתר עם מלאי ווריאציות (תואם SPA <c>InventoryReport</c>).</summary>
 public class InventoryReportService : ServiceBase
 {
     private readonly ProductsReportStorage _productsReportStorage;

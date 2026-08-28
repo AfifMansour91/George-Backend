@@ -301,7 +301,7 @@ public partial class WooCommerceService
         if (kosherMeta != null)
             product.IsKosher = IsMetaYes(kosherMeta);
 
-        // Storefront label flags: Woo REST meta_data — logical keys, ACF field_* ids, ED/v1 names (see WooCommerceService.StoreLabelsAcf).
+        // Storefront label flags: Woo REST meta_data - logical keys, ACF field_* ids, ED/v1 names (see WooCommerceService.StoreLabelsAcf).
         product.LabelFrozen = WooImportMetaBoolTrueFalse(meta, "frozen", "_frozen");
         product.LabelGlutenFree = WooImportMetaBoolTrueFalse(meta, "gluten_free", "_gluten_free", "gluten-free");
         product.LabelNotKosher = WooImportMetaBoolTrueFalse(meta, "not_kosher", "_not_kosher", "not-kosher");
@@ -617,7 +617,7 @@ public partial class WooCommerceService
             await gate.WaitAsync(cancelToken).ConfigureAwait(false);
             try
             {
-                // orderby=id: deterministic pagination — bulk-created variations share one timestamp, and the default date order can drop/duplicate rows across pages.
+                // orderby=id: deterministic pagination - bulk-created variations share one timestamp, and the default date order can drop/duplicate rows across pages.
                 var list = await FetchWooPagedAsync<WooImportVariationItem>(
                     httpClient,
                     $"{baseUrl}/products/{wp.id}/variations?orderby=id&order=asc",

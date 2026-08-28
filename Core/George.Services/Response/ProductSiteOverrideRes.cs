@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace George.Services.Response
 {
-    /// <summary>MultiSite Phase 2 — a per-(product, site) override row.</summary>
+    /// <summary>MultiSite Phase 2 - a per-(product, site) override row.</summary>
     public class ProductSiteOverrideRes
     {
         public int Id { get; set; }

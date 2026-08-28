@@ -1,4 +1,4 @@
--- Migration: MultiSite Phase 2 — per-site WooCommerce product id (ProductSiteWooId).
+-- Migration: MultiSite Phase 2 - per-site WooCommerce product id (ProductSiteWooId).
 -- The same product has a DIFFERENT Woo product id in each site's store; the single Product.WooCommerceId
 -- column can only track one, so syncing a multi-site product to the 2nd store used the wrong id and only
 -- one site actually updated. This table maps (ProductId, SiteId) -> WooCommerceProductId. Idempotent.

@@ -28,7 +28,7 @@ namespace George.Data
             var list = await _dbContext.Order
                 .AsNoTracking()
                 .Where(o => !o.IsDeleted && o.SiteId == siteId)
-                // Exact literals — EF cannot translate string.Equals(..., StringComparison).
+                // Exact literals - EF cannot translate string.Equals(..., StringComparison).
                 .Where(o => o.Status != "Delivered" && o.Status != "Cancelled")
                 .Include(o => o.OrderItem)
                 .ToListAsync(cancelToken)

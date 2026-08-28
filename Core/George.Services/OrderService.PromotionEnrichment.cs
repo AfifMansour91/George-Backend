@@ -99,7 +99,7 @@ public partial class OrderService
     /// re-running George's evaluator on a web order. Lines are matched by WooCommerce product id / sku
     /// for per-line display; the returned tuples carry the authoritative per-promotion discount for
     /// idempotent metric recording (George-linked promotions only). Locally-authored WooCommerce
-    /// promotions (no <c>george-{id}</c> external id — e.g. a registered/guest-targeted discount
+    /// promotions (no <c>george-{id}</c> external id - e.g. a registered/guest-targeted discount
     /// configured in the WP admin) are stamped too, with <c>PromotionId = null</c>, so the discount
     /// shows on the order and survives picking recalculation; they are not recorded as redemptions.
     ///
@@ -133,7 +133,7 @@ public partial class OrderService
                 var georgePromo = await _promotionStorage.GetPromotionAsync(promotionId, cancelToken).ConfigureAwait(false);
                 if (georgePromo == null || georgePromo.IsDeleted || georgePromo.SiteId != siteId)
                 {
-                    // Unknown/foreign George id — keep the money right by stamping unlinked (like a local promo).
+                    // Unknown/foreign George id - keep the money right by stamping unlinked (like a local promo).
                     _logger.LogWarning(
                         "Applied promotion {ExternalId} (george id {PromotionId}) not found for site {SiteId}; stamping unlinked.",
                         promo.ExternalId, promotionId, siteId);
@@ -165,7 +165,7 @@ public partial class OrderService
             else if (promo.DiscountAmount > 0m)
             {
                 // Order-level only (plugin sends lines[] just for single-promotion orders). Split the
-                // discount into the part Woo already took off the order total (fee — lines are gross,
+                // discount into the part Woo already took off the order total (fee - lines are gross,
                 // stamp as-is) and the part baked into the line totals (gross up while distributing).
                 var feePortion = Math.Min(offLinePool, promo.DiscountAmount);
                 offLinePool -= feePortion;
@@ -225,7 +225,7 @@ public partial class OrderService
     /// capped at its own total and at the remaining discount, and the last eligible line takes the remainder so
     /// the stamped discounts sum exactly to <paramref name="discountAmount"/> (bounded by the merchandise total).
     /// <paramref name="promotionId"/> is null for locally-authored Woo promotions (stamp without a link).
-    /// <paramref name="grossUpLineTotals"/> — set when the discount is already baked into the payload line
+    /// <paramref name="grossUpLineTotals"/> - set when the discount is already baked into the payload line
     /// totals: each line is grossed back up by its share so net stays what Woo charged.
     /// Returns the post-discount revenue of the stamped lines (for redemption metrics).
     /// </summary>
@@ -381,9 +381,9 @@ public partial class OrderService
         if (items.Count == 0) return;
 
         // Internal orders (phone/kiosk/manual) always re-evaluate promotions during picking. A WEBSITE order
-        // does too — but only once it carries a George-linked promotion (stamped from the Woo
+        // does too - but only once it carries a George-linked promotion (stamped from the Woo
         // appliedPromotions on ingest). This makes such an order behave like an internal one: products added
-        // during picking join the promotion and the final order is recomputed (spec §2 — George becomes the
+        // during picking join the promotion and the final order is recomputed (spec §2 - George becomes the
         // source of truth at picking). A website order with no promotion is left untouched (trust Woo).
         var hasGeorgePromotion = items.Any(i => i.PromotionId is > 0);
         if (!ShouldReapplyPromotionsDuringPicking(order.Source) && !hasGeorgePromotion) return;
@@ -392,7 +392,7 @@ public partial class OrderService
         {
             // Only George-linked stamps are re-derived by the evaluator below. An unlinked discount
             // (PromotionId == null, e.g. a locally-authored Woo promotion stamped on ingest) has no
-            // evaluator to restore it — keep it, or picking would silently overcharge the customer.
+            // evaluator to restore it - keep it, or picking would silently overcharge the customer.
             if (it.PromotionId is > 0)
             {
                 it.PromotionId = null;

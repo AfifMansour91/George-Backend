@@ -12,7 +12,7 @@ namespace George.Services
     /// <summary>
     /// Per-account SMS accounts: resolves an account's own SMS credentials and sends through them,
     /// falling back to the system-wide SMS account when the account has none configured.
-    /// Fallback happens only when no (valid, enabled) account config exists — never on a send failure.
+    /// Fallback happens only when no (valid, enabled) account config exists - never on a send failure.
     /// </summary>
     public class AccountSmsService : ServiceBase
     {
@@ -44,7 +44,7 @@ namespace George.Services
             return MapToConfig(entity);
         }
 
-        /// <summary>True when an SMS can go out for this account — via its own credentials or the system default.</summary>
+        /// <summary>True when an SMS can go out for this account - via its own credentials or the system default.</summary>
         public async Task<bool> CanSendForAccountAsync(int accountId, CancellationToken cancelToken)
         {
             return SmsProvider.CanSendWith(await GetAccountConfigAsync(accountId, cancelToken).ConfigureAwait(false));
@@ -103,7 +103,7 @@ namespace George.Services
 
             var existing = await _accountStorage.GetSmsSettingsAsync(accountId, cancelToken);
 
-            // Empty token in the request keeps the stored one — the client only ever sees a masked token.
+            // Empty token in the request keeps the stored one - the client only ever sees a masked token.
             var apiToken = string.IsNullOrWhiteSpace(req.ApiToken) ? existing?.ApiToken : req.ApiToken.Trim();
             var fromName = req.FromName?.Trim();
 

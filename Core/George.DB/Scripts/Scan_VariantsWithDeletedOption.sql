@@ -1,5 +1,5 @@
 -- Scan (read-only sections A-C): find ALL products where live variations will be skipped by Woo sync
--- because their option rows are missing/soft-deleted — same defect as product 12690
+-- because their option rows are missing/soft-deleted - same defect as product 12690
 -- ("selected_site edit dropped options" footprint).
 -- A variation is skipped when it has no ProductVariantOptionValue rows, or when its OptionName
 -- has no matching non-deleted ProductOption on the product.
@@ -59,7 +59,7 @@ ORDER BY m.ProductId;
 -- C. Value-coverage check for the candidates from B: variant option VALUES that the candidate
 --    option's ProductOptionValue rows do NOT contain. Rows here = after restoring, either fix
 --    these ProductOptionValue rows or DELETE the option's value rows (sync then derives values
---    from the variants themselves — GetProductOptionValuesForWooSync fallback).
+--    from the variants themselves - GetProductOptionValuesForWooSync fallback).
 ------------------------------------------------------------------------------------------------
 ;WITH Candidate AS (
     SELECT po.ProductId, LTRIM(RTRIM(po.Name)) AS OptionName, MAX(po.Id) AS OptionId
@@ -88,7 +88,7 @@ GROUP BY c.ProductId, c.OptionId, c.OptionName, LTRIM(RTRIM(pvo.OptionValue))
 ORDER BY c.ProductId;
 
 ------------------------------------------------------------------------------------------------
--- D. BULK FIX (commented out — review A-C first, then run inside the transaction):
+-- D. BULK FIX (commented out - review A-C first, then run inside the transaction):
 --    restores the newest deleted option per (product, referenced name) from section B.
 ------------------------------------------------------------------------------------------------
 /*

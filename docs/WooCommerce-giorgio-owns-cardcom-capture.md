@@ -6,7 +6,7 @@ checkout J5 hold and saves the token; giorgio hands the token to Giorgio; Giorgi
 hooks are detached, so nothing on the site ever charges.
 
 Why: every website-charge incident of Aug 2026 (Zano-Dagim 967/1074/1130/1135, Delinka 18326) came from the
-money moving on the site and Giorgio only hearing about it afterwards — through a fragile chain
+money moving on the site and Giorgio only hearing about it afterwards - through a fragile chain
 (Giorgio → Woo REST → gateway plugin (7 s timeout) → Cardcom → webhook → Giorgio). In this mode the chain
 is only used to *display* the result.
 
@@ -22,17 +22,17 @@ is only used to *display* the result.
 The gateway hooks are detached for the whole site, so the plugin would never charge them either.
 Switching the option on therefore schedules `run_giorgio_handover_backfill` (WP-Cron, batches of 25,
 60 days back): every Cardcom order that still holds a token and was never captured re-sends its
-OrderPayment v2 — now with the token — and Giorgio takes ownership (`PaymentCaptureOwner = Giorgio`).
+OrderPayment v2 - now with the token - and Giorgio takes ownership (`PaymentCaptureOwner = Giorgio`).
 Orders the gateway already charged are skipped; orders Giorgio already settled ignore the handover.
 
 * Still in picking → charged at finish like any Giorgio order.
 * Already Ready/Completed and unpaid (e.g. 1074/1130/1135 on 23/08) → the kanban popover / archive show
   **"חייב כרטיס שמור עכשיו"** (`RetryCardcomChargeButton` via `orderCanChargeStoredCardNow`), which runs the
   same POST /Finalize.
-* Orders with no token at all (very old / failed checkout) stay plugin-flow with no capture path — use the
+* Orders with no token at all (very old / failed checkout) stay plugin-flow with no capture path - use the
   payment link / phone charge from the same popover.
 
-## Contract — store → Giorgio (`payment` block of the order payload and OrderPayment v2)
+## Contract - store → Giorgio (`payment` block of the order payload and OrderPayment v2)
 
 | field | source (gateway meta, newest row) | Giorgio |
 |---|---|---|
@@ -47,7 +47,7 @@ Orders the gateway already charged are skipped; orders Giorgio already settled i
 In this mode the store never reports a final capture; `isFinished` is always `false` and the
 "completed" echo webhook is skipped. Giorgio ignores any "captured" claim on a Giorgio-owned order.
 
-## Contract — Giorgio → store (`payment` block of `oc-storeos/v1/orders`, Giorgio-owned orders only)
+## Contract - Giorgio → store (`payment` block of `oc-storeos/v1/orders`, Giorgio-owned orders only)
 
 ```json
 "payment": {
@@ -70,7 +70,7 @@ and with every status sync; the push retries on 502/503/504.
 
 * `Order.PaymentCaptureOwner` (`George.Common.Payment.PaymentCaptureOwner`), exposed on `OrderRes`.
 * Intake: `PaymentService.ApplyWooCommerceGatewayPaymentFields` → `ApplyGiorgioCaptureHandover`.
-* Charge: `FinalizePickingPaymentAsync` (unchanged) — shop-manager routes Giorgio-owned website orders to
+* Charge: `FinalizePickingPaymentAsync` (unchanged) - shop-manager routes Giorgio-owned website orders to
   it (`isGiorgioOwnedCapture` in `orderPaymentDisplay.ts`) instead of polling for a webhook.
 * Push: `PaymentService.ScheduleStorePaymentPush` → `WooCommerceService.SyncOrderToOcStoreosAsync` →
   `BuildOcStoreosGiorgioPaymentBlock`.

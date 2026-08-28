@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace George.Services
 {
     /// <summary>
-    /// On-the-fly product-image thumbnails with a disk cache. Originals are never modified — a resized
+    /// On-the-fly product-image thumbnails with a disk cache. Originals are never modified - a resized
     /// JPEG copy is generated under {storage}/Thumbs/{width}/{sha1(relPath)}.jpg on first request and
     /// served straight from disk afterwards. Only meaningful for local file storage (the /files static
     /// mount); when the original cannot be resolved on disk the caller falls back to the original URL.
@@ -52,7 +52,7 @@ namespace George.Services
             if (!Uri.TryCreate(src.Trim(), UriKind.Absolute, out var uri)) return null;
             if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) return null;
 
-            // The /files static mount serves StorageLocalInternalBasePath — take the path after /files/.
+            // The /files static mount serves StorageLocalInternalBasePath - take the path after /files/.
             var absPath = Uri.UnescapeDataString(uri.AbsolutePath);
             const string marker = "/files/";
             var idx = absPath.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
@@ -86,7 +86,7 @@ namespace George.Services
             var thumbDir = Path.Combine(root, "Thumbs", w.ToString());
             var thumbPath = Path.Combine(thumbDir, hash + ".jpg");
             // Freshness check: normal uploads mint a new GUID filename (new cache key), but a few flows
-            // overwrite an existing file in place (e.g. deterministic woo-sync-*.jpg mirrors) — regenerate
+            // overwrite an existing file in place (e.g. deterministic woo-sync-*.jpg mirrors) - regenerate
             // when the original is newer than the cached thumb.
             if (File.Exists(thumbPath) && File.GetLastWriteTimeUtc(thumbPath) >= File.GetLastWriteTimeUtc(original))
                 return (thumbPath, false);
@@ -123,7 +123,7 @@ namespace George.Services
 
         /// <summary>
         /// Pre-generates thumbnails for every product image URL in the system (canonical, per-site and
-        /// variant images) at the given widths, so first paint never pays the resize cost. Idempotent —
+        /// variant images) at the given widths, so first paint never pays the resize cost. Idempotent -
         /// already-cached thumbs are skipped. Intended to run in the background (own DI scope).
         /// </summary>
         public async Task<ThumbWarmResult> WarmProductImageThumbsAsync(IReadOnlyCollection<int>? widths, CancellationToken cancelToken)

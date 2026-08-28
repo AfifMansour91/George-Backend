@@ -351,7 +351,7 @@ public class QuantityConcentrationReportServiceTests
                 },
             },
         };
-        // No ProductVariantId / Woo id on the line — only the weight-looking title.
+        // No ProductVariantId / Woo id on the line - only the weight-looking title.
         var line = new OrderItem { VariantTitle = "500 גרם", OrderLineSizeLabel = "(כ 500 גרם)" };
         var v = ProductCatalogVariantResolution.FindVariantForOrderLine(p, line);
         Assert.NotNull(v);
@@ -392,7 +392,7 @@ public class QuantityConcentrationReportServiceTests
         Assert.Equal(15566, v!.Id);
     }
 
-    /// <summary>צלעות טלה: weighted no-variation product — parent row shows per-unit weight from order lines.</summary>
+    /// <summary>צלעות טלה: weighted no-variation product - parent row shows per-unit weight from order lines.</summary>
     [Fact]
     public void ResolveNoVariationParentUnitWeightKg_UsesLineWeightWhenConsistent()
     {

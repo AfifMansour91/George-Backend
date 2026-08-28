@@ -1,6 +1,6 @@
 namespace George.Services.Response
 {
-    /// <summary>Per-account SMS settings. The API token is never returned — only a masked hint.</summary>
+    /// <summary>Per-account SMS settings. The API token is never returned - only a masked hint.</summary>
     public class AccountSmsSettingsRes
     {
         public int AccountId { get; set; }

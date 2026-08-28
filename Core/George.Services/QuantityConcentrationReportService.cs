@@ -10,7 +10,7 @@ using AutoMapper;
 
 namespace George.Services
 {
-    /// <summary>דוח ריכוז כמויות — הזמנות פתוחות לפי תאריך אספקה, קיבוץ לפי מוצר+אפשרות+הערה.</summary>
+    /// <summary>דוח ריכוז כמויות - הזמנות פתוחות לפי תאריך אספקה, קיבוץ לפי מוצר+אפשרות+הערה.</summary>
     public class QuantityConcentrationReportService : ServiceBase
     {
         private enum PickedFilterMode
@@ -139,7 +139,7 @@ namespace George.Services
                     var variant = FindVariant(p, line);
                     var optionLabel = OrderItemReportLineLabel.ResolveOptionDisplayLabel(line, p.Name);
                     // Weight-named catalog options ("500 גרם", "1 ק\"ג") read as quantity text and resolve
-                    // to null — when the line still maps to a catalog variant, its catalog label is the
+                    // to null - when the line still maps to a catalog variant, its catalog label is the
                     // real option name and must get its own detail bucket.
                     if (string.IsNullOrEmpty(optionLabel) && variant != null)
                     {
@@ -286,19 +286,19 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Bucket key — real catalog option only; otherwise one bucket per product (units/kg on parent row).
+        /// Bucket key - real catalog option only; otherwise one bucket per product (units/kg on parent row).
         /// </summary>
         private const string NoStructuredOptionKey = "\u001eno_structured_option";
 
         /// <summary>
-        /// מוצר עם וריאציות בקטלוג (חיתוכים/אפשרויות) — בלי קשר לסוג ניהול המלאי (כמות/סטטוס/וריאציה).
+        /// מוצר עם וריאציות בקטלוג (חיתוכים/אפשרויות) - בלי קשר לסוג ניהול המלאי (כמות/סטטוס/וריאציה).
         /// </summary>
         private static bool ProductHasCatalogVariationOptions(Product p) =>
             ProductCatalogStockClassification.ActiveVariants(p).Count > 0;
 
         /// <summary>
         /// משקל ליחידה (ק&quot;ג) לשורת האב של מוצר שקיל בלי וריאציות (למשל צלעות טלה):
-        /// מהשורות בהזמנות כשכולן באותו משקל, אחרת מהגדרת המשקל בקטלוג. מוצר עם וריאציות — null
+        /// מהשורות בהזמנות כשכולן באותו משקל, אחרת מהגדרת המשקל בקטלוג. מוצר עם וריאציות - null
         /// (המשקל מוצג פר וריאציה בשורות הפירוט).
         /// </summary>
         public static decimal? ResolveNoVariationParentUnitWeightKg(
@@ -376,7 +376,7 @@ namespace George.Services
             {
                 if (!string.IsNullOrEmpty(l.Note)) return true;
                 if (IsSyntheticLineLabel(l.LineLabel, pn)) return false;
-                // Variant-linked lines keep weight-looking labels — catalog options may be NAMED as
+                // Variant-linked lines keep weight-looking labels - catalog options may be NAMED as
                 // weights ("500 גרם") and must still show as real option rows.
                 if (p.IsWeighted == true
                     && l.VariantId is not > 0
@@ -467,9 +467,9 @@ namespace George.Services
         }
 
         /// <summary>
-        /// כאשר סכום שורות הפירוט אחרי <see cref="FilterAndMergeDetailLines"/> נמוך מסה&quot;כ המוצר (סיכום מהזמנות) —
+        /// כאשר סכום שורות הפירוט אחרי <see cref="FilterAndMergeDetailLines"/> נמוך מסה&quot;כ המוצר (סיכום מהזמנות) -
         /// מוסיף שורה אחת עם הפרש הק&quot;ג והיחידות.
-        /// רק אם כבר יש לפחות שורת פירוט אחת: בלי פירוט — שורת האב מספיקה ואין לשכפל את כל הסה&quot;כ בשורת יתרה.
+        /// רק אם כבר יש לפחות שורת פירוט אחת: בלי פירוט - שורת האב מספיקה ואין לשכפל את כל הסה&quot;כ בשורת יתרה.
         /// </summary>
         public static List<QuantityConcentrationLineDto> AppendRemainderDetailLineIfNeeded(
             List<QuantityConcentrationLineDto> lines,
@@ -634,7 +634,7 @@ namespace George.Services
         private static bool IsSyntheticLineLabel(string label, string productName)
         {
             var t = label.Trim();
-            if (t is "—" or "-" or "–") return true;
+            if (t is "-" or "-" or "–") return true;
             var pn = productName.Trim();
             if (pn.Length > 0 && string.Equals(t, pn, StringComparison.OrdinalIgnoreCase))
                 return true;
@@ -642,7 +642,7 @@ namespace George.Services
                 t.StartsWith("--", StringComparison.Ordinal) &&
                 t.EndsWith("--", StringComparison.Ordinal))
             {
-                var inner = t.TrimStart('-', '–', '—', ' ').TrimEnd('-', '–', '—', ' ').Trim();
+                var inner = t.TrimStart('-', '–', '-', ' ').TrimEnd('-', '–', '-', ' ').Trim();
                 if (string.Equals(inner, pn, StringComparison.OrdinalIgnoreCase))
                     return true;
             }
@@ -978,12 +978,12 @@ namespace George.Services
             if (p.IsWeighted != true)
                 return true;
 
-            // שקיל לפי יחידה — גם כשמוצג גם ק"ג בדוח
+            // שקיל לפי יחידה - גם כשמוצג גם ק"ג בדוח
             return totalKg > 0m;
         }
 
         /// <summary>
-        /// Live catalog stock for the report row — never infer shortage when stock is status-only or unknown quantity.
+        /// Live catalog stock for the report row - never infer shortage when stock is status-only or unknown quantity.
         /// </summary>
         private static (decimal? stockKg, decimal? stockUnits, decimal? shortageKg, decimal? shortageUnits, string status)
             ComputeStockAndShortage(

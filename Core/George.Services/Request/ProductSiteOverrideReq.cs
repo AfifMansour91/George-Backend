@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace George.Services.Request
 {
     /// <summary>
-    /// MultiSite Phase 2 — upsert a per-(product, site) override. Only the provided fields are written;
+    /// MultiSite Phase 2 - upsert a per-(product, site) override. Only the provided fields are written;
     /// omitted fields keep their current override value (use the reset endpoint to clear back to canonical).
     /// </summary>
     public class ProductSiteOverrideReq

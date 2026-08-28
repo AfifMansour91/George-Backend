@@ -48,7 +48,7 @@ namespace George.Common
 	/// Public file links must be https: storefront/kiosk pages are served over https, and the browser
 	/// treats an http video/image there as mixed content (the Dubi-Dagim kiosk showed an HTTPS warning
 	/// for its home video). The scheme comes from config (StorageLocalExternalBasePath), so a single
-	/// "http://" there stamps every uploaded file's STORED url — upgrade here instead of trusting the
+	/// "http://" there stamps every uploaded file's STORED url - upgrade here instead of trusting the
 	/// config. Loopback hosts are left alone (dev runs without a certificate).
 	/// </summary>
 	public static string UpgradeInsecureExternalUrl(string? url)

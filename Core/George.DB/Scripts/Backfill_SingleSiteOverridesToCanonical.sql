@@ -1,5 +1,5 @@
 -- =============================================================================
--- Backfill canonical Product rows from per-site overrides — SINGLE-SITE products
+-- Backfill canonical Product rows from per-site overrides - SINGLE-SITE products
 -- of NON-network accounts only.
 --
 -- Why: the frontend sends editScope='selected_site' for every save on a
@@ -19,7 +19,7 @@
 -- canonical ones. Deleting them would change nothing visible but would lose the
 -- audit trail; a future selected_site save recreates them regardless.
 --
--- Idempotent — safe to re-run.
+-- Idempotent - safe to re-run.
 -- =============================================================================
 
 SET NOCOUNT ON;
@@ -115,7 +115,7 @@ PRINT CONCAT('Product rows backfilled from ProductSiteOverride: ', @Rows);
 
 -- -----------------------------------------------------------------------------
 -- 2. Variant-level override values -> canonical ProductVariant rows.
---    (ProductVariant has no StockStatusId; excluded variants are left as-is —
+--    (ProductVariant has no StockStatusId; excluded variants are left as-is -
 --    the read side and sync keep hiding them via the override.)
 -- -----------------------------------------------------------------------------
 UPDATE v SET

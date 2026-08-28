@@ -131,7 +131,7 @@ public partial class Product
     [Precision(0)]
     public DateTime? LabelKosherForPassoverEndDate { get; set; }
 
-    /// <summary>Storefront label: חדש — synced via Woo <c>meta_data</c> and ED/v1 <c>product-label</c> (<c>new</c>).</summary>
+    /// <summary>Storefront label: חדש - synced via Woo <c>meta_data</c> and ED/v1 <c>product-label</c> (<c>new</c>).</summary>
     public bool LabelNew { get; set; }
 
     [Precision(0)]

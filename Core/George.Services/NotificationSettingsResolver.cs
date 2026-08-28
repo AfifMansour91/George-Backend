@@ -5,7 +5,7 @@ namespace George.Services;
 /// <summary>
 /// Multi-site notification settings resolution.
 /// A row with SiteId == null is the account default; a row with SiteId set is a FULL per-site
-/// override (whole-row copy) — when it exists it wins entirely, there is no field-level fallback.
+/// override (whole-row copy) - when it exists it wins entirely, there is no field-level fallback.
 /// </summary>
 public static class NotificationSettingsResolver
 {

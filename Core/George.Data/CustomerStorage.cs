@@ -43,7 +43,7 @@ public class CustomerStorage : StorageBase
             .FirstOrDefaultAsync(c => c.SiteId == siteId && c.NormalizedPhone == normalized, cancelToken);
     }
 
-    /// <summary>Find customer for this site by normalized phone (including soft-deleted rows—reactivates if needed), or create if not found. Used when creating an order so every order has a linked customer. When marketingSms is provided, it is set on create or update so the customer record reflects consent. Structured delivery fields are persisted when non-null (same semantics as city/defaultAddress).</summary>
+    /// <summary>Find customer for this site by normalized phone (including soft-deleted rows-reactivates if needed), or create if not found. Used when creating an order so every order has a linked customer. When marketingSms is provided, it is set on create or update so the customer record reflects consent. Structured delivery fields are persisted when non-null (same semantics as city/defaultAddress).</summary>
     public async Task<Customer> GetOrCreateCustomerByPhoneAsync(
         int siteId,
         int accountId,
@@ -490,7 +490,7 @@ public class CustomerStorage : StorageBase
         var aovWindow = ordersAtSite.Where(o => o.CreationTime > t30 && o.CreationTime <= now && o.Total.HasValue).ToList();
         result.Aov = aovWindow.Count > 0 ? aovWindow.Sum(o => o.Total!.Value) / aovWindow.Count : 0m;
 
-        // Trends vs 30 days ago — only when the site has ≥30 days of order history.
+        // Trends vs 30 days ago - only when the site has ≥30 days of order history.
         var earliestOrder = ordersAtSite.Min(o => o.CreationTime);
         result.HasComparison = (now - earliestOrder).TotalDays >= 30;
         if (result.HasComparison)
@@ -575,7 +575,7 @@ public class CustomerStorage : StorageBase
         public List<ImportRowIssue> Issues { get; set; } = new();
     }
 
-    /// <summary>Bulk import spreadsheet rows. Rows with a phone (≥4 digits after canonicalization) are matched by (SiteId, NormalizedPhone); phone-less rows are matched by email. Existing customers are ENRICHED only — empty fields filled, marketing consent OR-ed in — never overwritten. Soft-deleted matches are skipped (import must not resurrect deleted customers). Returns null when the site does not exist.</summary>
+    /// <summary>Bulk import spreadsheet rows. Rows with a phone (≥4 digits after canonicalization) are matched by (SiteId, NormalizedPhone); phone-less rows are matched by email. Existing customers are ENRICHED only - empty fields filled, marketing consent OR-ed in - never overwritten. Soft-deleted matches are skipped (import must not resurrect deleted customers). Returns null when the site does not exist.</summary>
     public async Task<ImportResult?> ImportCustomersAsync(
         int siteId,
         IReadOnlyList<ImportRow> rows,
@@ -698,7 +698,7 @@ public class CustomerStorage : StorageBase
             }
             catch (DbUpdateException)
             {
-                // Batch failed — isolate. First persist the enrichments alone (detach all creates);
+                // Batch failed - isolate. First persist the enrichments alone (detach all creates);
                 // if even that fails, drop the enriched changes too so they can't poison the per-row saves.
                 foreach (var c in createdInBatch)
                     _dbContext.Entry(c).State = EntityState.Detached;
@@ -740,7 +740,7 @@ public class CustomerStorage : StorageBase
 
     private static string? Trimmed(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
-    /// <summary>Trim + cap to the column's max length — spreadsheet cells often carry free text longer than the schema allows (e.g. a note typed into the "floor" column), which would fail the whole batch with a truncation error.</summary>
+    /// <summary>Trim + cap to the column's max length - spreadsheet cells often carry free text longer than the schema allows (e.g. a note typed into the "floor" column), which would fail the whole batch with a truncation error.</summary>
     private static string? Capped(string? s, int max)
     {
         var t = Trimmed(s);
@@ -785,7 +785,7 @@ public class CustomerStorage : StorageBase
     public async Task<Order?> GetLastOrderByCustomerIdAsync(int customerId, int? siteId, CancellationToken cancelToken)
     {
         // Scope to the customer's OWN branch (a Customer row is per-site, so this is the branch the customer
-        // belongs to). We intentionally do NOT use the caller's `siteId` (the globally-selected site filter) —
+        // belongs to). We intentionally do NOT use the caller's `siteId` (the globally-selected site filter) -
         // that caused the "last order empty while count > 0" bug when a different branch was selected.
         var customerSiteId = await _dbContext.Set<Customer>()
             .Where(c => c.Id == customerId)

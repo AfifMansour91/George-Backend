@@ -40,7 +40,7 @@ public partial class Promotion
 
     public bool ShowBadge { get; set; }
 
-    /// <summary>Incomplete required fields — shown under Drafts tab.</summary>
+    /// <summary>Incomplete required fields - shown under Drafts tab.</summary>
     public bool IsDraft { get; set; }
 
     /// <summary>Optional start of validity (UTC date). Denormalized for list tabs; full rules remain in <see cref="PayloadJson"/>.</summary>

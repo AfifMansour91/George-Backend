@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 
 namespace George.Services;
 
-/// <summary>Resolves which site IDs the current (or specified) user may access — shared by dashboard, SignalR hub, etc.</summary>
+/// <summary>Resolves which site IDs the current (or specified) user may access - shared by dashboard, SignalR hub, etc.</summary>
 public class SiteAccessService : ServiceBase
 {
     private readonly UserStorage _userStorage;
@@ -26,7 +26,7 @@ public class SiteAccessService : ServiceBase
 
     /// <summary>
     /// Site-listing scope for the user: null = unrestricted (master/admin may list all sites);
-    /// otherwise the allowed site ids — empty when the user has no account (fail closed).
+    /// otherwise the allowed site ids - empty when the user has no account (fail closed).
     /// </summary>
     public async Task<HashSet<int>?> GetSiteScopeAsync(
         int userId,

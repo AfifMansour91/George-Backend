@@ -5,7 +5,7 @@
 -- Catalog imports before commit b40d9d5 (2026-08-20) stored these raw in ProductVariantOptionValue.OptionValue,
 -- and every Woo order line built from such a variant copied the gibberish into OrderItem.OrderLineCuttingLabel /
 -- OrderLineSizeLabel / VariantTitle and LineDisplayJson ($.cuttingName / $.sizeName). Seen at דגי גת (account 47,
--- order 5832 item 12133) and 4 more accounts — 167 catalog rows, ~14 order lines as of 2026-08-25.
+-- order 5832 item 12133) and 4 more accounts - 167 catalog rows, ~14 order lines as of 2026-08-25.
 -- Backend now decodes defensively on ingest/display (WooPercentEncodedText); this script fixes existing rows.
 --
 -- Safe to re-run: rows without %XX sequences are untouched. Run on George.Prod (and QA if desired).
@@ -79,7 +79,7 @@ WHERE oi.OrderLineCuttingLabel LIKE '%[%]d7[%]%'
    OR oi.LineDisplayJson       LIKE '%[%]d7[%]%';
 
 ------------------------------------------------------------------------------------------------
--- 2. THE FIX (compare counts against the preview, then COMMIT — do not leave the transaction open)
+-- 2. THE FIX (compare counts against the preview, then COMMIT - do not leave the transaction open)
 ------------------------------------------------------------------------------------------------
 BEGIN TRAN;
 

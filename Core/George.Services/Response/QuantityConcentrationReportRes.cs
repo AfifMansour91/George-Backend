@@ -28,7 +28,7 @@ namespace George.Services.Response
         public decimal? StockKg { get; set; }
         /// <summary>Catalog variant id when line maps to a variation (stock row).</summary>
         public int? VariantId { get; set; }
-        /// <summary>variant | weightChoice | noteBucket | remainder — SPA rendering hint.</summary>
+        /// <summary>variant | weightChoice | noteBucket | remainder - SPA rendering hint.</summary>
         public string? LineDisplayKind { get; set; }
         /// <summary>Display suffix for line stock when it differs from the parent group.</summary>
         public string? StockUnitLabel { get; set; }
@@ -45,7 +45,7 @@ namespace George.Services.Response
         public bool ShowUnitsInTotalQuantity { get; set; } = true;
         /// <summary>When true, SPA shows optional unit-weight column for this product group.</summary>
         public bool ShowWeightPerUnitColumn { get; set; }
-        /// <summary>Parent-row unit weight (kg) for weighted no-variation products (e.g. צלעות טלה) — from order lines, else catalog config.</summary>
+        /// <summary>Parent-row unit weight (kg) for weighted no-variation products (e.g. צלעות טלה) - from order lines, else catalog config.</summary>
         public decimal? WeightPerUnitKg { get; set; }
         public decimal? StockKg { get; set; }
         public decimal? StockUnits { get; set; }
@@ -54,9 +54,9 @@ namespace George.Services.Response
         /// <summary>Display suffix for numeric stock, e.g. יח׳ or ק״ג (aligned with My Products).</summary>
         public string? StockUnitLabel { get; set; }
         public string? StockManagementType { get; set; }
-        /// <summary>When <see cref="StockManagementType"/> is variation — per-variant numeric stock vs in/out only.</summary>
+        /// <summary>When <see cref="StockManagementType"/> is variation - per-variant numeric stock vs in/out only.</summary>
         public bool VariationStockByQuantity { get; set; }
-        /// <summary>ok | low | out — aligned with products report / SPA buckets.</summary>
+        /// <summary>ok | low | out - aligned with products report / SPA buckets.</summary>
         public string StockStatus { get; set; } = "ok";
         public decimal? ShortageKg { get; set; }
         public decimal? ShortageUnits { get; set; }

@@ -1,7 +1,7 @@
 namespace George.Services.Response;
 
 /// <summary>
-/// Response shape for <c>POST /Promotion/evaluate</c> — see <c>Sprint4/מבצעים.md</c>.
+/// Response shape for <c>POST /Promotion/evaluate</c> - see <c>Sprint4/מבצעים.md</c>.
 /// Storefront/kiosk reads this to render in-cart messaging and final totals.
 /// </summary>
 public class EvaluatePromotionsRes
@@ -12,7 +12,7 @@ public class EvaluatePromotionsRes
     public decimal TotalDiscount { get; set; }
 
     /// <summary>
-    /// Promotions whose scope matches the cart but whose threshold isn't met yet — used by the
+    /// Promotions whose scope matches the cart but whose threshold isn't met yet - used by the
     /// storefront to render the spec's "הוסף עוד X לקבלת …" encouragement messages
     /// (`Sprint4/מבצעים.md` → "הודעות עידוד וחיסכון בסל הקניות").
     /// </summary>
@@ -25,16 +25,16 @@ public class AppliedPromotion
     public string PromotionType { get; set; } = string.Empty;
     public string PromotionName { get; set; } = string.Empty;
 
-    /// <summary>"percentage" | "amount" | "free" | "fixed_price" — depends on PromotionType.</summary>
+    /// <summary>"percentage" | "amount" | "free" | "fixed_price" - depends on PromotionType.</summary>
     public string? DiscountType { get; set; }
     public decimal? DiscountValue { get; set; }
     public decimal DiscountAmount { get; set; }
 
-    /// <summary>For BxGY: the gift product chosen (or only option) — empty when storefront must prompt.</summary>
+    /// <summary>For BxGY: the gift product chosen (or only option) - empty when storefront must prompt.</summary>
     public int? RewardProductId { get; set; }
     public string? RewardProductName { get; set; }
 
-    /// <summary>For BxGY with multiple gift options — storefront pops the picker. Empty otherwise.</summary>
+    /// <summary>For BxGY with multiple gift options - storefront pops the picker. Empty otherwise.</summary>
     public List<RewardOption>? RewardOptions { get; set; }
 
     /// <summary>For BxPY: helps the storefront render the per-unit "promotion price" with a strike-through.</summary>
@@ -46,7 +46,7 @@ public class AppliedPromotion
     /// <summary>When true, savings/near-miss messaging belongs in the cart header banner (whole-cart discount).</summary>
     public bool WholeCart { get; set; }
 
-    /// <summary>Buy-side product ids (string) — storefront renders per-line hints under these cart rows.</summary>
+    /// <summary>Buy-side product ids (string) - storefront renders per-line hints under these cart rows.</summary>
     public List<string>? TriggerProductIds { get; set; }
 
     /// <summary>
@@ -107,14 +107,14 @@ public class NearbyPromotion
     /// <summary>For BxGY: the gift product the customer would unlock (when single-option).</summary>
     public int? RewardProductId { get; set; }
     public string? RewardProductName { get; set; }
-    /// <summary>"free" | "percentage" | "fixed_price" — same enum as AppliedPromotion.</summary>
+    /// <summary>"free" | "percentage" | "fixed_price" - same enum as AppliedPromotion.</summary>
     public string? RewardDiscountType { get; set; }
     public decimal? RewardDiscountValue { get; set; }
 
     /// <summary>When true, encouragement message belongs in the cart header banner.</summary>
     public bool WholeCart { get; set; }
 
-    /// <summary>Buy-side product ids — storefront renders per-line hints under these cart rows.</summary>
+    /// <summary>Buy-side product ids - storefront renders per-line hints under these cart rows.</summary>
     public List<string>? TriggerProductIds { get; set; }
 }
 

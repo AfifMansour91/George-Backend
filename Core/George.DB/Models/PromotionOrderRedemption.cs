@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 /// <summary>
-/// One row per (site, order, promotion) — the idempotency anchor for promotion redemptions.
+/// One row per (site, order, promotion) - the idempotency anchor for promotion redemptions.
 /// Whether the redemption is learned when the order is created/synced (<c>Source=order</c>) or
 /// from the WooCommerce Promeng <c>/redemptions</c> report (<c>Source=external</c>), it is
 /// counted exactly once: a metric delta is applied only when the row is newly inserted, so a
@@ -20,7 +20,7 @@ public partial class PromotionOrderRedemption
 
     public int SiteId { get; set; }
 
-    /// <summary>George order this redemption belongs to — the dedup anchor (with SiteId + PromotionId).</summary>
+    /// <summary>George order this redemption belongs to - the dedup anchor (with SiteId + PromotionId).</summary>
     public int OrderId { get; set; }
 
     /// <summary>WooCommerce order id/number (matches <c>Order.ExternalOrderId</c>); helper for matching external /redemptions reports to the order. Null for native orders.</summary>
@@ -36,7 +36,7 @@ public partial class PromotionOrderRedemption
     [Column(TypeName = "decimal(18,2)")]
     public decimal RevenueNis { get; set; }
 
-    /// <summary>Redemption channel (web / store / mobile / phone) — mirrors <see cref="PromotionDailyMetric.Channel"/>.</summary>
+    /// <summary>Redemption channel (web / store / mobile / phone) - mirrors <see cref="PromotionDailyMetric.Channel"/>.</summary>
     [StringLength(20)]
     public string Channel { get; set; } = "web";
 

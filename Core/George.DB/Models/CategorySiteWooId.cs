@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 /// <summary>
-/// MultiSite Phase 2 — the WooCommerce category id for a category IN A SPECIFIC SITE's store. A category
+/// MultiSite Phase 2 - the WooCommerce category id for a category IN A SPECIFIC SITE's store. A category
 /// shared across sites (network mode) has a different Woo category id in each store, so it cannot be tracked
 /// by the single Category.WooCommerceId column (which would point at one store and corrupt the other on sync).
 /// One row per (category, site). Only populated/consulted for network-managed accounts.

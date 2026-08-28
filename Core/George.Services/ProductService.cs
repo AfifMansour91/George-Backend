@@ -280,7 +280,7 @@ namespace George.Services
         /// <summary>
         /// Validates that the product SKU and every variant SKU are unique on the sites the product lives on: no
         /// duplicates inside the request itself, and none already taken by another product/variation that shares a
-        /// site (SKU collides only within a single WooCommerce store; the same SKU on other sites is fine — see
+        /// site (SKU collides only within a single WooCommerce store; the same SKU on other sites is fine - see
         /// IsSkuTakenAsync). Returns a user-facing Hebrew error message, or null when all SKUs are free. Empty SKUs
         /// are ignored. Bug #17.
         /// </summary>
@@ -300,7 +300,7 @@ namespace George.Services
             }
 
             // SKUs the product already carries are not "newly introduced", so they are exempt from the store-collision
-            // check — re-validating an UNCHANGED sku falsely trips on a duplicate-sku sibling on the same site (e.g.
+            // check - re-validating an UNCHANGED sku falsely trips on a duplicate-sku sibling on the same site (e.g.
             // imported duplicates) and blocks unrelated edits (a stock-only save was silently skipped). Exempt skus
             // still count in the in-request duplicate check above. Bug #3.
             var exempt = skusExemptFromStoreCheck == null || skusExemptFromStoreCheck.Count == 0
@@ -335,7 +335,7 @@ namespace George.Services
 
             // Block creating a product/variation with a SKU already used on any of its sites. The SKU only collides
             // within a single WooCommerce store (one per site), so scope the check to the sites this product will
-            // live on — an empty request site list means "all of the account's sites" (see CreateProductAsync). Bug #17.
+            // live on - an empty request site list means "all of the account's sites" (see CreateProductAsync). Bug #17.
             var createSiteIds = (req.SiteIds != null && req.SiteIds.Any())
                 ? req.SiteIds
                 : (product.AccountId.HasValue
@@ -430,7 +430,7 @@ namespace George.Services
             var isSelectedSiteEdit = string.Equals(req.EditScope, "selected_site", StringComparison.OrdinalIgnoreCase) && req.SiteId.HasValue;
 
             // A selected_site edit of a product whose ONLY site is the edited one, on a non-network account,
-            // has no "other sites" to protect — write canonically instead. Separate-mode accounts send
+            // has no "other sites" to protect - write canonically instead. Separate-mode accounts send
             // selected_site on EVERY save, which otherwise splits the truth between Product (stale, e.g.
             // price 0 from creation) and ProductSiteOverride forever; direct Product readers then see the
             // stale values. The canonical branch below also clears the product's now-redundant per-site rows
@@ -533,7 +533,7 @@ namespace George.Services
                 }
 
                 // Related / complementary products are product-wide relationships, not per-site values, so persist
-                // them canonically even on a per-branch edit — otherwise linking up-sells/cross-sells to a
+                // them canonically even on a per-branch edit - otherwise linking up-sells/cross-sells to a
                 // site-scoped product (e.g. a WooCommerce-imported one) silently did nothing. Bug #6.
                 if (req.RelatedProductIds != null || req.ComplementaryProductIds != null)
                 {
@@ -541,14 +541,14 @@ namespace George.Services
                         productId, req.RelatedProductIds, req.ComplementaryProductIds, cancelToken);
                 }
 
-                // Brand links + tags are product-wide taxonomy (like related products above) — persist canonically.
+                // Brand links + tags are product-wide taxonomy (like related products above) - persist canonically.
                 if (req.BrandIds != null || req.Tags != null)
                 {
                     await _productStorage.UpdateProductBrandsAndTagsAsync(productId, req.BrandIds, req.Tags, cancelToken);
                 }
 
                 // Product OPTIONS are structural (the variation dimensions + allowed values), not a per-site price/
-                // stock value — they are shared by every site's variant dropdown, exactly like the canonical variants
+                // stock value - they are shared by every site's variant dropdown, exactly like the canonical variants
                 // created below. Persist them canonically here too. Without this, adding variations to a previously
                 // option-less product on a single site leaves ProductOption empty, so the WooCommerce sync registers
                 // no variation attribute and skips every variant (variable product with zero variations in Woo).
@@ -559,7 +559,7 @@ namespace George.Services
                 }
 
                 // Weight SETTINGS (sold-by mode, unit weight, weight-by-size config) are structural, product-wide
-                // data — like ProductOptions above, not a per-site price/stock value. Persist them canonically.
+                // data - like ProductOptions above, not a per-site price/stock value. Persist them canonically.
                 // Without this, a site-manager user (always locked to a branch → every save is a selected-site
                 // edit) could never change a product's weight: the fields were silently dropped here.
                 if (req.IsWeighted != null || req.SetupType.HasValue() || req.WeightConfig != null)
@@ -615,7 +615,7 @@ namespace George.Services
 
                     var variantOverrides = new List<ProductSiteOverrideStorage.VariantSiteOverrideUpsert>();
                     // A variant's WEIGHT / SKU / IMAGE are physical/identity properties of the item (weight-by-size,
-                    // the cut's photo), shared by all sites — persist them canonically. The per-site override only
+                    // the cut's photo), shared by all sites - persist them canonically. The per-site override only
                     // carries price/sale/stock, so without this an existing variant's weight/sku/image change was
                     // silently dropped on a selected-site edit.
                     var variantCanonicalFields = new Dictionary<int, ProductStorage.VariantCanonicalFields>();
@@ -667,7 +667,7 @@ namespace George.Services
 
                 // MultiSite Phase 2: push the per-site effective values to THIS site's WooCommerce store only.
                 // The override path mutates no canonical data and returns here, so the regular assigned-sites sync
-                // (in the canonical branch below) is never reached — without this, per-site edits (name/price/
+                // (in the canonical branch below) is never reached - without this, per-site edits (name/price/
                 // stock/category) never reach WooCommerce. SyncProductAsync overlays the site's override when the
                 // account is network-managed. Fire-and-forget, same pattern as the canonical update path.
                 var productIdForSiteSync = productId;
@@ -694,7 +694,7 @@ namespace George.Services
 
             // Block updating to a SKU already used by another product/variation ON ONE OF THIS PRODUCT'S SITES.
             // Scope to sites (SKU collides only within a single WooCommerce store); a same-account sibling on
-            // ANOTHER site legitimately shares the SKU (MultiSite per-site rows) and must not block the save — this
+            // ANOTHER site legitimately shares the SKU (MultiSite per-site rows) and must not block the save - this
             // was the false positive that broke stock toggles. Variants are only validated when the request actually
             // sends them (partial table edits leave them untouched). The product's OWN current SKUs are exempt from
             // the store-collision check (an unchanged SKU on a stock-only edit must not re-trip on a dup sibling and
@@ -790,7 +790,7 @@ namespace George.Services
                         : (product.Site?.Select(s => s.Id).ToList() ?? new List<int>());
 
                     // Canonicalized single-site edit: the canonical row now holds the truth, so drop the
-                    // product's per-site override rows for this site — left behind they would shadow the
+                    // product's per-site override rows for this site - left behind they would shadow the
                     // fresh canonical values on read and in the Woo sync.
                     if (canonicalizeSingleSiteEdit)
                     {
@@ -808,7 +808,7 @@ namespace George.Services
 
                     // All-sites stock change: clear any stale per-site STOCK overrides so the new canonical stock
                     // wins on every site (list/filter aggregate + WooCommerce). Without this a site keeps its old
-                    // per-site stock value — the "in stock on the product page, but out of stock in the filter and on
+                    // per-site stock value - the "in stock on the product page, but out of stock in the filter and on
                     // the website" mismatch, and a bulk 'set all in stock' that never took on a few products. Only the
                     // stock fields are reset; exclusion / price / name overrides are left untouched. Bug #3.
                     if (canonicalStockChanged)

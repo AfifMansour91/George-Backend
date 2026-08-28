@@ -1,7 +1,7 @@
 ﻿# WhatsApp Ordering Agent ΓÇö Architecture Proposal
 
 **Project:** ShopManager / George Backend
-**Feature:** A multi-tenant conversational-ordering platform — per-account agents, subscription billing, multiple channels (WhatsApp + Web)
+**Feature:** A multi-tenant conversational-ordering platform - per-account agents, subscription billing, multiple channels (WhatsApp + Web)
 **Date:** 2026-06-15 (revised)
 **Status:** Proposal (for review)
 
@@ -9,17 +9,17 @@
 
 ## ╫¬╫º╫ª╫Ö╫¿ ╫₧╫á╫ö╫£╫Ö╫¥ (Hebrew Executive Summary)
 
-הלקוח מעוניין שלכל מנהל חנות יהיה **AGENT (סוכן חכם) בווטסאפ העסקי שלו**, כך שלקוחות הקצה יוכלו לבצע הזמנות ישירות בשיחת ווטסאפ — ובהמשך למכור זאת כמוצר בתשלום, רב-ערוצי ורב-לקוחי.
+הלקוח מעוניין שלכל מנהל חנות יהיה **AGENT (סוכן חכם) בווטסאפ העסקי שלו**, כך שלקוחות הקצה יוכלו לבצע הזמנות ישירות בשיחת ווטסאפ - ובהמשך למכור זאת כמוצר בתשלום, רב-ערוצי ורב-לקוחי.
 
 **האם זה אפשרי? כן, בהחלט.** ההזמנה שנוצרת בווטסאפ עוברת דרך אותו `OrderService.CreateOrderAsync` הקיים, ולכן מקבלת אוטומטית התראות SignalR, הדפסת שובר ב-PrintAgent, וזרימת הסטטוסים.
 
 **החלטות מפתח:**
 
-- **חיבור המספר** — דרך ספק מורשה (BSP). אילוץ: מספר המחובר ל-API לא יכול לשמש במקביל באפליקציית ווטסאפ הרגילה.
-- **סוכן היברידי** — מודל שפה (LLM) להבנת טקסט חופשי + כפתורים מובנים לאישור ותשלום.
-- **רב-ערוצי** — אותו סוכן ירוץ גם באתר (צ'אט) וגם בווטסאפ; המוח זהה, רק הערוץ מתחלף.
-- **מודל מנוי חודשי** — כל חשבון (Account) מקבל סוכן משלו ומשלם חודשית. התשתית כבר רב-לקוחית.
-- **עתידי (שימוש חיצוני)** — באמצעות גבול ממשק (`IOrderSink`) הסוכן הופך לפלטפורמה עצמאית שניתן למכור גם ללקוחות חיצוניים.
+- **חיבור המספר** - דרך ספק מורשה (BSP). אילוץ: מספר המחובר ל-API לא יכול לשמש במקביל באפליקציית ווטסאפ הרגילה.
+- **סוכן היברידי** - מודל שפה (LLM) להבנת טקסט חופשי + כפתורים מובנים לאישור ותשלום.
+- **רב-ערוצי** - אותו סוכן ירוץ גם באתר (צ'אט) וגם בווטסאפ; המוח זהה, רק הערוץ מתחלף.
+- **מודל מנוי חודשי** - כל חשבון (Account) מקבל סוכן משלו ומשלם חודשית. התשתית כבר רב-לקוחית.
+- **עתידי (שימוש חיצוני)** - באמצעות גבול ממשק (`IOrderSink`) הסוכן הופך לפלטפורמה עצמאית שניתן למכור גם ללקוחות חיצוניים.
 
 **מסקנה:** הפיצ'ר ישים ומתבסס ברובו על תשתית קיימת. בנייה נכונה מהיום הופכת אותו מפיצ'ר למוצר SaaS רב-לקוחי הנמכר במנוי.
 
@@ -27,7 +27,7 @@
 
 ## 1. Feasibility & Goal
 
-**Goal:** Give every store manager an AI agent on their business WhatsApp so end-customers can order conversationally — and grow it into a paid, multi-channel, multi-tenant product.
+**Goal:** Give every store manager an AI agent on their business WhatsApp so end-customers can order conversationally - and grow it into a paid, multi-channel, multi-tenant product.
 
 **Verdict: Feasible and well-supported.** Built on Meta's WhatsApp Business Platform (Cloud API). The key insight: an order created by the agent is just another order. Routing it through the existing `OrderService.CreateOrderAsync` inherits the whole downstream pipeline (realtime notifications, voucher printing, status lifecycle) for free.
 

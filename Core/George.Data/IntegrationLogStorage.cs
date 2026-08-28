@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 namespace George.Data;
 
 /// <summary>
-/// Persists + reads <see cref="IntegrationLog"/> rows — the system-wide record of what George sent to /
+/// Persists + reads <see cref="IntegrationLog"/> rows - the system-wide record of what George sent to /
 /// received from a store, across all entity kinds (order / product / category / …). Backs a future admin
 /// "sync logs" screen. Writes must never break the operation they log, so callers wrap <see cref="AddAsync"/>
 /// in try/catch.
@@ -23,7 +23,7 @@ public class IntegrationLogStorage : StorageBase
         await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
     }
 
-    /// <summary>Batch insert (one DB round-trip) — used by the background log writer.</summary>
+    /// <summary>Batch insert (one DB round-trip) - used by the background log writer.</summary>
     public async Task AddRangeAsync(IReadOnlyList<IntegrationLog> logs, CancellationToken cancelToken)
     {
         if (logs == null || logs.Count == 0) return;
@@ -42,7 +42,7 @@ public class IntegrationLogStorage : StorageBase
             .ConfigureAwait(false);
     }
 
-    /// <summary>Recent log rows for a site, optionally filtered by entity type, newest first (paged) — for the logs screen.</summary>
+    /// <summary>Recent log rows for a site, optionally filtered by entity type, newest first (paged) - for the logs screen.</summary>
     public async Task<IReadOnlyList<IntegrationLog>> GetRecentForSiteAsync(int siteId, string? entityType, int skip, int take, CancellationToken cancelToken)
     {
         take = take <= 0 ? 50 : Math.Min(take, 500);

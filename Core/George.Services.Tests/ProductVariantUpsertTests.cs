@@ -79,7 +79,7 @@ public class ProductVariantUpsertTests
         await storage.UpdateProductVariantsAsync(ProductId, new() { Dto("בינוני", "שלם", 95), Dto("גדול", "שלם", 105) }, null, default);
         var ids = Live(ctx).Select(v => v.Id).ToList();
 
-        // Import/CSV path: no ids, same option sets, different spacing/case — still the same variants.
+        // Import/CSV path: no ids, same option sets, different spacing/case - still the same variants.
         await storage.UpdateProductVariantsAsync(ProductId, new()
         {
             new ProductVariantDto { Price = 99, OptionValues = new() { ["גודל"] = " בינוני", ["צורת חיתוך"] = "שלם " } },

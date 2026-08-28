@@ -125,7 +125,7 @@ namespace George.Services
             return response;
         }
 
-        /// <summary>Archive KPI summary over the whole filtered period (not paged) — order counts, credited totals and city options.</summary>
+        /// <summary>Archive KPI summary over the whole filtered period (not paged) - order counts, credited totals and city options.</summary>
         public async Task<IApiResponse<OrderArchiveSummaryRes>> GetOrderArchiveSummaryAsync(
             OrderFilter filter,
             CancellationToken cancelToken = default)
@@ -170,7 +170,7 @@ namespace George.Services
             if (string.IsNullOrWhiteSpace(req.CustomerPhone))
                 return CreateResponse(response, StatusCode.InvalidRequest, "CustomerPhone is required.");
             // Manual (phone) orders must carry an explicitly chosen supply date (Zano 10/08: the UI used
-            // to default silently and orders landed on the wrong day). Only Phone-source — kiosk and
+            // to default silently and orders landed on the wrong day). Only Phone-source - kiosk and
             // website ingest have their own date semantics.
             if (string.Equals(req.Source?.Trim(), "Phone", StringComparison.OrdinalIgnoreCase))
             {
@@ -508,7 +508,7 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.InvalidRequest, "Order has no customer phone.");
             var account = await _accountStorage.GetAccountAsync(order.AccountId, cancelToken).ConfigureAwait(false);
             var settings = NotificationSettingsResolver.Resolve(account, order.SiteId);
-            // Manual "send reminder" is an explicit user action — it always sends an SMS regardless of the
+            // Manual "send reminder" is an explicit user action - it always sends an SMS regardless of the
             // auto-reminder channel setting (which only governs automatic Ready-order notifications). Bug #10.
             var template = settings != null ? ResolveOrderReadyCustomerMessageTemplate(settings, order) : null;
             if (string.IsNullOrWhiteSpace(template))
@@ -607,7 +607,7 @@ namespace George.Services
                 // When the delivery type actually changes (e.g. איסוף → משלוח), clear the stale metadata of the
                 // previous mode so the order stops looking like the old type. Without this, a pickup→shipping
                 // switch left ShippingLabel="איסוף", ShippingInfoJson type=pickup, PickupDate/Time and the pickup
-                // branch name behind — so vouchers/displays still treated it as pickup.
+                // branch name behind - so vouchers/displays still treated it as pickup.
                 if (req.DeliveryType != null)
                 {
                     var prevType = (previousDeliveryType ?? "").Trim();
@@ -1016,7 +1016,7 @@ namespace George.Services
         }
 
         /// <summary>
-        /// WooCommerce website orders: push to the store only when picking finishes (Ready/Completed) or on cancel — not on InTreatment or intermediate picking saves.
+        /// WooCommerce website orders: push to the store only when picking finishes (Ready/Completed) or on cancel - not on InTreatment or intermediate picking saves.
         /// </summary>
         private static bool ShouldSyncWooCommerceOrderAfterStatusChange(string? previousStatus, string? newStatus)
         {
@@ -1167,7 +1167,7 @@ namespace George.Services
             order.DeliveryDate = delivery;
         }
 
-        /// <summary>Calendar date (date-only, Unspecified kind) in Israel — aligns default delivery/pickup with Hebrew storefront day boundary.</summary>
+        /// <summary>Calendar date (date-only, Unspecified kind) in Israel - aligns default delivery/pickup with Hebrew storefront day boundary.</summary>
         private static DateTime GetIsraelCalendarTodayUnspecified()
         {
             try
@@ -1264,7 +1264,7 @@ namespace George.Services
         private static string? NullIfWhiteSpace(string? s) =>
             string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
-        /// <summary>Main delivery line: רחוב, עיר, מיקוד (ללא דירה/קומה/קוד — נשמרים בעמודות נפרדות).</summary>
+        /// <summary>Main delivery line: רחוב, עיר, מיקוד (ללא דירה/קומה/קוד - נשמרים בעמודות נפרדות).</summary>
         private static string? JoinMainDeliveryLine(string? street, string? city, string? zip = null)
         {
             var parts = new List<string>();
@@ -1279,7 +1279,7 @@ namespace George.Services
             return parts.Count == 0 ? null : string.Join(", ", parts);
         }
 
-        /// <summary>אם נשלחו רחוב/עיר — מעדכן את <see cref="Order.DeliveryAddress"/> לשורה אחת. בעדכון, אם שניהם ריקים אחרי עריכה — מנקה את השורה המשולבת.</summary>
+        /// <summary>אם נשלחו רחוב/עיר - מעדכן את <see cref="Order.DeliveryAddress"/> לשורה אחת. בעדכון, אם שניהם ריקים אחרי עריכה - מנקה את השורה המשולבת.</summary>
         private static void RebuildDeliveryAddressFromStreetAndCity(Order o, bool clearCombinedLineWhenBothEmpty = false)
         {
             var line = JoinMainDeliveryLine(o.DeliveryStreet, o.DeliveryCity);
@@ -1370,7 +1370,7 @@ namespace George.Services
                 return;
             }
             if (order.DeliveryNote.Contains(name, StringComparison.Ordinal)) return;
-            order.DeliveryNote = $"{name} — {order.DeliveryNote}";
+            order.DeliveryNote = $"{name} - {order.DeliveryNote}";
         }
 
         /// <summary>Map Woo payment code/title/label to internal payment method (e.g. Cash for cod or מזומן).</summary>
@@ -1488,7 +1488,7 @@ namespace George.Services
         /// <summary>
         /// Sets <see cref="OrderItem.OrderLineQuantityMode"/> from Woo <c>quantityType</c> so shop-manager badges match the storefront (kg total vs יח').
         /// Runs after <see cref="OrderLineDisplayFieldsBuilder.MergeComputedDisplayFields"/> so it overrides wrong heuristics when <c>saleUnits</c>/<c>saleTotalWeight</c> are empty.
-        /// When <c>quantityType=kg</c> but <c>saleUnits</c> indicates piece-based sale (e.g. "2 יח'"), the display unit is pieces — quantity was stored in kg by the plugin, but the item is sold by piece count.
+        /// When <c>quantityType=kg</c> but <c>saleUnits</c> indicates piece-based sale (e.g. "2 יח'"), the display unit is pieces - quantity was stored in kg by the plugin, but the item is sold by piece count.
         /// </summary>
         private static void ApplyWooCommerceQuantityTypeToLineDisplay(OrderItem oi, WooCommerceOrderItemPayload it)
         {
@@ -1514,7 +1514,7 @@ namespace George.Services
                 oi.OrderLineQuantityMode = "units";
         }
 
-        /// <summary>Resolves WooCommerce order item to our Product.Id: parent Woo product id (per-site map, then legacy <see cref="Product.WooCommerceId"/>), then explicit variation id, then SKU, and only last the guess that WC sent a variation id as product_id — legacy ids from another store can collide, so id-guessing must not preempt an exact SKU match. Returns null if not found (the line then stays unlinked; the raw Woo id lives in OrderItem.WooCommerceProductId).</summary>
+        /// <summary>Resolves WooCommerce order item to our Product.Id: parent Woo product id (per-site map, then legacy <see cref="Product.WooCommerceId"/>), then explicit variation id, then SKU, and only last the guess that WC sent a variation id as product_id - legacy ids from another store can collide, so id-guessing must not preempt an exact SKU match. Returns null if not found (the line then stays unlinked; the raw Woo id lives in OrderItem.WooCommerceProductId).</summary>
         private async Task<int?> ResolveWooCommerceItemProductIdAsync(int siteId, int accountId, int? wooCommerceProductId, string? sku, int? wooCommerceVariationId, CancellationToken cancelToken)
         {
             if (wooCommerceProductId.HasValue && wooCommerceProductId.Value > 0)
@@ -1544,7 +1544,7 @@ namespace George.Services
         private static string? GetVariantTitleFromPayload(WooCommerceOrderItemPayload it)
         {
             // Woo sends percent-encoded Hebrew term slugs when it fails to resolve a taxonomy term
-            // ("%d7%9c..." = "ללא-עור") — decode so VariantTitle never stores gibberish.
+            // ("%d7%9c..." = "ללא-עור") - decode so VariantTitle never stores gibberish.
             if (it.Variants != null && it.Variants.Count > 0)
             {
                 var names = it.Variants
@@ -1581,7 +1581,7 @@ namespace George.Services
             return null;
         }
 
-        /// <summary>Resolve WooCommerce order item to our ProductVariant for this product (site product already resolved). First by variationId — the ordering site's per-site map (ProductSiteVariantWooId), then the legacy WooCommerceVariationId column — then by variant names joined with " | ". Used only when processing WooCommerce orders.</summary>
+        /// <summary>Resolve WooCommerce order item to our ProductVariant for this product (site product already resolved). First by variationId - the ordering site's per-site map (ProductSiteVariantWooId), then the legacy WooCommerceVariationId column - then by variant names joined with " | ". Used only when processing WooCommerce orders.</summary>
         private static ProductVariant? GetVariantFromPayloadItem(WooCommerceOrderItemPayload it, Product? product, IReadOnlyDictionary<int, int>? siteVariantWooIds = null)
         {
             if (product?.ProductVariant == null || !product.ProductVariant.Any(v => !v.IsDeleted))
@@ -1615,7 +1615,7 @@ namespace George.Services
             var payloadNorm = payloadTitle.Trim();
             foreach (var v in product.ProductVariant.Where(v => !v.IsDeleted))
             {
-                // Decode catalog side too — legacy imports may still hold percent-encoded slugs.
+                // Decode catalog side too - legacy imports may still hold percent-encoded slugs.
                 var optionValues = (v.ProductVariantOptionValue?
                     .OrderBy(ov => ov.OptionName)
                     .Select(ov => WooPercentEncodedText.Decode(ov.OptionValue?.Trim()))
@@ -1683,7 +1683,7 @@ namespace George.Services
                 if (variantToUse?.Weight.HasValue == true)
                     unitWeightGrams = (decimal)(variantToUse.Weight!.Value * 1000);
 
-                // Plugin sends explicit units + total kg (e.g. 1 יח' + 0.8 kg) — align with manual order (whole units + per-unit grams).
+                // Plugin sends explicit units + total kg (e.g. 1 יח' + 0.8 kg) - align with manual order (whole units + per-unit grams).
                 if (saleUnits.HasValue && saleWeightKg.HasValue && saleUnits.Value > 0)
                 {
                     var qty = decimal.Round(saleUnits.Value, 3, MidpointRounding.AwayFromZero);
@@ -1848,7 +1848,7 @@ namespace George.Services
                             : null;
                         var matchedVariant = GetVariantFromPayloadItem(it, product, updateSiteVariantWooIds);
                         var (qty, unitWeightGrams, variantTitle) = GetWooCommerceItemQuantityAndUnitWeight(it, product);
-                        // Unresolved lines keep ProductId null — the raw Woo id is NOT a local Product.Id, and
+                        // Unresolved lines keep ProductId null - the raw Woo id is NOT a local Product.Id, and
                         // storing it links the line to whatever product happens to own that id (wrong image/price
                         // on the order screen, stock deducted from the wrong product). Raw id stays in WooCommerceProductId.
                         var oi = new OrderItem
@@ -1941,7 +1941,7 @@ namespace George.Services
                         : null;
                     var matchedVariant = GetVariantFromPayloadItem(it, product, createSiteVariantWooIds);
                     var (qty, unitWeightGrams, variantTitle) = GetWooCommerceItemQuantityAndUnitWeight(it, product);
-                    // Unresolved lines keep ProductId null (see the update path above) — never the raw Woo id.
+                    // Unresolved lines keep ProductId null (see the update path above) - never the raw Woo id.
                     createItems.Add(new CreateOrderItemReq
                     {
                         ProductId = ourProductId,
@@ -2119,7 +2119,7 @@ namespace George.Services
 
             // A4 mode (Site.VoucherPrintA4): full-page order printout instead of the thermal voucher.
             // The ":A4" JobType suffix makes PrintJobService deliver the payload as an A4 PDF (existing
-            // agents print PDFs via Sumatra onto the printer's paper — no agent update needed).
+            // agents print PDFs via Sumatra onto the printer's paper - no agent update needed).
             var useA4 = site.VoucherPrintA4 == true;
             var hideDeliveryTime = site.VoucherHideDeliveryTime == true;
             var hideUnitWeight = site.HideUnitWeightInOrders == true;
@@ -2141,7 +2141,7 @@ namespace George.Services
 
             // Future orders share the kanban's job key ("VoucherAuto:FutureImmediate") so the backend
             // enqueue and the open-kanban frontend enqueue dedupe to ONE job via the (siteId, orderId,
-            // jobType) idempotency — with distinct keys a future Woo order printed twice.
+            // jobType) idempotency - with distinct keys a future Woo order printed twice.
             var baseJobType = isFutureOrder ? "VoucherAuto:FutureImmediate" : "VoucherAuto:NewImmediate";
             var req = new CreatePrintJobReq
             {
@@ -2164,7 +2164,7 @@ namespace George.Services
         }
 
         /// <summary>
-        /// A4 order printout (Site.VoucherPrintA4) — full-page layout modeled on the order-confirmation
+        /// A4 order printout (Site.VoucherPrintA4) - full-page layout modeled on the order-confirmation
         /// email: customer + delivery boxes side by side, ordered-items table (product | qty | price),
         /// then subtotal / shipping / payment / grand-total rows. Delivered to the agent as an A4 PDF.
         /// </summary>
@@ -2190,7 +2190,7 @@ namespace George.Services
             var customerBox = new StringBuilder();
             customerBox.Append("<div style=\"flex:1;min-width:220px;\">");
             customerBox.Append("<div style=\"font-size:16px;font-weight:800;margin-bottom:8px;\">פרטי לקוח:</div>");
-            customerBox.Append($"<div style=\"line-height:1.7;\"><b>שם:</b> {EscapeHtml(order.CustomerName ?? "—")}</div>");
+            customerBox.Append($"<div style=\"line-height:1.7;\"><b>שם:</b> {EscapeHtml(order.CustomerName ?? "-")}</div>");
             if (!string.IsNullOrWhiteSpace(order.CustomerPhone))
                 customerBox.Append($"<div style=\"line-height:1.7;\"><b>טלפון:</b> <span dir=\"ltr\">{EscapeHtml(order.CustomerPhone!)}</span></div>");
             if (!string.IsNullOrWhiteSpace(order.CustomerEmail))
@@ -2204,7 +2204,7 @@ namespace George.Services
             // Delivery / pickup box
             var deliveryBox = new StringBuilder();
             deliveryBox.Append("<div style=\"flex:1;min-width:220px;\">");
-            // Box title states the delivery method directly — "משלוח עד הבית"/"איסוף עצמי" — instead
+            // Box title states the delivery method directly - "משלוח עד הבית"/"איסוף עצמי" - instead
             // of the generic "אופן אספקה" (Zano request 06/08); the old labeled row became redundant.
             deliveryBox.Append($"<div style=\"font-size:16px;font-weight:800;margin-bottom:8px;\">{EscapeHtml(deliveryLabel)}</div>");
             if (deliveryDate.HasValue)
@@ -2331,8 +2331,8 @@ namespace George.Services
         {
             var sb = new StringBuilder();
             var items = order.OrderItem?.OrderBy(i => i.SortOrder).ToList() ?? new List<OrderItem>();
-            var customerName = order.CustomerName ?? "—";
-            var customerPhone = order.CustomerPhone ?? "—";
+            var customerName = order.CustomerName ?? "-";
+            var customerPhone = order.CustomerPhone ?? "-";
             var orderNo = order.OrderNumber ?? order.Id.ToString(CultureInfo.InvariantCulture);
             var created = FormatOrderDateTime(order.CreationTime);
             var sourceLabel = VoucherSourceLabels.TryGetValue(order.Source ?? "", out var label) ? label : (order.Source ?? "");
@@ -2417,7 +2417,7 @@ namespace George.Services
             sb.AppendLine("</div>");
 
             var headerCityBlock = showHeaderCity
-                ? $"<div style=\"margin-top:8px;font-size:28px;font-weight:900;line-height:31px;letter-spacing:-0.5px;\">{EscapeHtml(string.IsNullOrEmpty(headerCity) ? "—" : headerCity)}</div>"
+                ? $"<div style=\"margin-top:8px;font-size:28px;font-weight:900;line-height:31px;letter-spacing:-0.5px;\">{EscapeHtml(string.IsNullOrEmpty(headerCity) ? "-" : headerCity)}</div>"
                 : "";
             var headerCore =
                 $"<div style=\"font-size:28px;font-weight:900;line-height:32px;\">#{EscapeHtml(orderNo)}</div>" +
@@ -2450,12 +2450,12 @@ namespace George.Services
                 sb.Append("<div style=\"display:flex;justify-content:space-between;align-items:center;gap:8px;\">");
                 sb.Append(deliveryDate.HasValue
                     ? $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\">{EscapeHtml(FormatVoucherDateWithWeekday(deliveryDate.Value))}</span>"
-                    : $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\">—</span>");
+                    : $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\">-</span>");
                 if (!hideDeliveryTime)
                 {
                     sb.Append(!string.IsNullOrWhiteSpace(deliveryTime)
                         ? $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\" dir=\"ltr\">{EscapeHtml(deliveryTime!)}</span>"
-                        : $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\">—</span>");
+                        : $"<span style=\"{VoucherDeliveryDatetimeValueStyle}\">-</span>");
                 }
                 sb.AppendLine("</div></div>");
             }
@@ -2611,7 +2611,7 @@ namespace George.Services
                 if (string.IsNullOrEmpty(mainLine) && string.IsNullOrEmpty(apt) && string.IsNullOrEmpty(fl) && string.IsNullOrEmpty(code))
                     return null;
                 // When street/city are empty, mainLine falls back to the raw legacy string which may
-                // already embed "…, דירה, קומה, קוד" — strip trailing segments that duplicate the
+                // already embed "…, דירה, קומה, קוד" - strip trailing segments that duplicate the
                 // structured fields so they only appear on the labeled line.
                 var main = mainLine;
                 if (!string.IsNullOrEmpty(main)
@@ -2765,7 +2765,7 @@ namespace George.Services
             if (string.IsNullOrEmpty(m)) return settled ? "שולם" : "לתשלום";
             if (string.Equals(m, "Cash", StringComparison.OrdinalIgnoreCase) || m == "מזומן")
                 return settled ? "שולם במזומן" : "תשלום במזומן";
-            // External terminal — keep in sync with frontend voucherFigmaLayout.voucherPaymentHeadline.
+            // External terminal - keep in sync with frontend voucherFigmaLayout.voucherPaymentHeadline.
             if (string.Equals(m, "ExternalCredit", StringComparison.OrdinalIgnoreCase))
                 return settled ? "שולם באשראי חיצוני" : "תשלום באשראי חיצוני";
             if (string.Equals(m, "OnAccount", StringComparison.OrdinalIgnoreCase))
@@ -2796,7 +2796,7 @@ namespace George.Services
 
         private static string VoucherPriceValueHtml(string label, string valStyle)
         {
-            if (label == "—") return $"<div style=\"{valStyle}\">{EscapeHtml(label)}</div>";
+            if (label == "-") return $"<div style=\"{valStyle}\">{EscapeHtml(label)}</div>";
             var m = System.Text.RegularExpressions.Regex.Match(label, @"^(₪[\d.]+)\s*(\/\s*.+)$");
             if (!m.Success) return $"<div style=\"{valStyle}white-space:nowrap;\">{EscapeHtml(label)}</div>";
             var amount = m.Groups[1].Value;
@@ -2823,10 +2823,10 @@ namespace George.Services
             if (!OrderItemLineDisplay.OrderMeaningfulPick(it)) return null;
             var qty = OrderItemLineDisplay.FormatVoucherPickedDisplay(it);
             var priceLabel = OrderItemLineDisplay.FormatOrderLinePricePerKgForPicking(it);
-            var price = string.IsNullOrWhiteSpace(priceLabel) ? "—" : priceLabel;
+            var price = string.IsNullOrWhiteSpace(priceLabel) ? "-" : priceLabel;
             var total = lineAmt.HasValue
                 ? $"₪{lineAmt.Value.ToString("0.00", CultureInfo.InvariantCulture)}"
-                : "—";
+                : "-";
             const string grid =
                 "display:grid;grid-template-columns:1fr 1fr 1fr;direction:rtl;gap:2px 4px;margin-top:4px;padding-right:12px;text-align:center;width:100%;box-sizing:border-box;";
             const string head =
@@ -3055,7 +3055,7 @@ namespace George.Services
                     cancelToken).ConfigureAwait(false);
                 // Checkout-paid website order: send the invoice SMS like a StoreOS capture (no-op unless Paid+Captured; deduped).
                 await _paymentService.TrySendInvoiceSmsForWooCapturedOrderAsync(loaded, cancelToken).ConfigureAwait(false);
-                // Verify the reported charge directly against Cardcom (amount + final/hold/refund) — best-effort.
+                // Verify the reported charge directly against Cardcom (amount + final/hold/refund) - best-effort.
                 await _paymentService.TryVerifyWooGatewayChargeAsync(loaded, cancelToken).ConfigureAwait(false);
                 loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken).ConfigureAwait(false);
             }

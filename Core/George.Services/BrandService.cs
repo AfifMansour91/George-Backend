@@ -82,7 +82,7 @@ namespace George.Services
             var response = new ApiResponse<BrandRes>();
 
             // De-duplicate by name within (account, parent). Per spec §7, the API "doesn't block"
-            // duplicate names — we do that here. If a same-named brand already exists in scope,
+            // duplicate names - we do that here. If a same-named brand already exists in scope,
             // we treat the request as a no-op create and return the existing brand instead of
             // inserting a duplicate.
             var trimmedName = (req.Name ?? string.Empty).Trim();
@@ -98,7 +98,7 @@ namespace George.Services
 
             if (existing != null)
             {
-                // If the existing brand is missing any of the requested sites, link them now —
+                // If the existing brand is missing any of the requested sites, link them now -
                 // mirrors CategoryStorage.EnsureCategoryHasSitesAsync behaviour.
                 if (req.SiteIds != null && req.SiteIds.Any())
                 {
@@ -145,7 +145,7 @@ namespace George.Services
             model.Id = brandId;
             model.Name = (req.Name ?? string.Empty).Trim();
             model.Slug = NormalizeSlug(req.Slug, fallbackName: model.Name);
-            // Client updates omit Woo/source IDs — never wipe sync metadata already stored.
+            // Client updates omit Woo/source IDs - never wipe sync metadata already stored.
             model.WooCommerceBrandId = req.WooCommerceBrandId ?? existingBrand.WooCommerceBrandId;
             model.SourceGlobalBrandId = req.SourceGlobalBrandId ?? existingBrand.SourceGlobalBrandId;
             model.UpdateUserId = AuthUser.Id;
@@ -287,9 +287,9 @@ namespace George.Services
 
         /// <summary>
         /// If the caller provided a slug, normalize whitespace & lowercase but preserve characters
-        /// (incl. Hebrew). If they didn't, derive a best-effort slug from the brand name —
+        /// (incl. Hebrew). If they didn't, derive a best-effort slug from the brand name -
         /// lowercase, replace whitespace with '-', strip punctuation. Returns null if the result
-        /// would be empty (e.g. all-symbol input) — let the DB hold null and let WooCommerce
+        /// would be empty (e.g. all-symbol input) - let the DB hold null and let WooCommerce
         /// auto-generate one when we sync.
         /// </summary>
         internal static string? NormalizeSlug(string? providedSlug, string fallbackName)

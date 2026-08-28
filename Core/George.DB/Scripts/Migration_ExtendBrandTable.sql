@@ -101,7 +101,7 @@ BEGIN
 END
 GO
 
--- Index on WooCommerceBrandId — fast lookup when syncing.
+-- Index on WooCommerceBrandId - fast lookup when syncing.
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Brand_WooCommerceBrandId' AND object_id = OBJECT_ID(N'[dbo].[Brand]'))
 BEGIN
     CREATE NONCLUSTERED INDEX [IX_Brand_WooCommerceBrandId] ON [dbo].[Brand]([WooCommerceBrandId] ASC)

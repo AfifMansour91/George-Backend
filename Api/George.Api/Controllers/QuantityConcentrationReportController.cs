@@ -20,7 +20,7 @@ namespace George.Api.Controllers
             _service = service;
         }
 
-        /// <summary>דוח ריכוז כמויות — הזמנות שאינן Delivered/Cancelled, לפי תאריך אספקה/איסוף בטווח.</summary>
+        /// <summary>דוח ריכוז כמויות - הזמנות שאינן Delivered/Cancelled, לפי תאריך אספקה/איסוף בטווח.</summary>
         [HttpGet]
         [ProducesResponseType(typeof(IApiResponse<George.Services.Response.QuantityConcentrationReportRes>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetAsync(

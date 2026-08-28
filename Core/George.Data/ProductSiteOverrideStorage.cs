@@ -52,7 +52,7 @@ namespace George.Data
     }
 
     /// <summary>
-    /// MultiSite Phase 2 — data access for the per-site product override layer
+    /// MultiSite Phase 2 - data access for the per-site product override layer
     /// (ProductSiteOverride + ProductSiteVariantStock).
     /// </summary>
     public class ProductSiteOverrideStorage : StorageBase
@@ -171,7 +171,7 @@ namespace George.Data
         /// <summary>
         /// For a batch of products: whether price / sku / stock actually DIFFER across the branches the product is
         /// on. Drives the "הצג" affordance. Bug #13: this must reflect a real difference between branches, NOT merely
-        /// "an override row exists" — otherwise setting the same value on every branch (an override that equals the
+        /// "an override row exists" - otherwise setting the same value on every branch (an override that equals the
         /// canonical) left the badge on. The effective value per site = its override when set, else the canonical
         /// product value; the flag is true only when more than one distinct effective value exists across the sites.
         /// </summary>
@@ -579,7 +579,7 @@ namespace George.Data
         /// <summary>
         /// External price pull (Woo → George), network-managed site: write the store's current prices into this
         /// site's per-site override. Unlike <see cref="UpsertOverrideAsync"/> (sparse), sale fields are ASSIGNED
-        /// as given — a sale removed at the POS clears the override's sale (note: a null override sale still
+        /// as given - a sale removed at the POS clears the override's sale (note: a null override sale still
         /// inherits the canonical sale at sync/display time; that inherit semantics is a known limitation).
         /// A missing override row is only materialized when the store's price actually differs from canonical,
         /// so one pull does not mark every product on the site as price-overridden.
@@ -599,7 +599,7 @@ namespace George.Data
             if (row == null)
             {
                 // All-null incoming values (e.g. a Woo variable parent reports no own prices) would only
-                // materialize an empty override row that inherits canonical anyway — skip.
+                // materialize an empty override row that inherits canonical anyway - skip.
                 if (!price.HasValue && !salePrice.HasValue && !salePriceStartDate.HasValue && !salePriceEndDate.HasValue)
                     return false;
                 var canonical = await _dbContext.Product.AsNoTracking()
@@ -663,7 +663,7 @@ namespace George.Data
                 byVariant.TryGetValue(variantId, out var row);
                 if (row == null)
                 {
-                    // Nothing concrete to write — an all-null row just inherits the canonical variant.
+                    // Nothing concrete to write - an all-null row just inherits the canonical variant.
                     if (!price.HasValue && !salePrice.HasValue) continue;
                     if (!canonical.TryGetValue(variantId, out var can)) continue;
                     var differs = (price.HasValue && can.Price != price) || can.SalePrice != salePrice;
@@ -857,7 +857,7 @@ namespace George.Data
                 // Keep the per-site quantity consistent with an explicit status change when the caller didn't send a
                 // quantity of its own (e.g. a status-only toggle from the list). A quantity-managed product derives
                 // its Woo stock_status from quantity, so a stale per-site StockQuantity (e.g. a leftover 0) makes Woo
-                // re-derive "out of stock" right after the site was toggled back in — the per-branch flip that only a
+                // re-derive "out of stock" right after the site was toggled back in - the per-branch flip that only a
                 // second toggle "fixed". Bug #5.
                 if (!stockQuantity.HasValue)
                 {
@@ -978,7 +978,7 @@ namespace George.Data
 
         /// <summary>
         /// Removes every per-site override VALUE artifact for (product, site): the override row, the per-site
-        /// variant rows, and — only when the canonical product has its own rows to fall back to — the per-site
+        /// variant rows, and - only when the canonical product has its own rows to fall back to - the per-site
         /// image and category rows. Used when a single-site product of a non-network account is written
         /// canonically: the canonical row is now the source of truth, and a stale override left behind would
         /// shadow the fresh canonical values on read and in the Woo sync. A variant excluded on the product's
@@ -1097,7 +1097,7 @@ namespace George.Data
         {
             var result = new List<(int, string, int, string)>();
 
-            // Excluded overrides — filter by the product's account (robust even if the override's
+            // Excluded overrides - filter by the product's account (robust even if the override's
             // denormalized AccountId was not set).
             var excludedQuery = _dbContext.ProductSiteOverride
                 .Where(o => o.IsExcluded)

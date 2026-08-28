@@ -10,7 +10,7 @@ public readonly record struct OrderItemAttributeDisplayOptions
 {
     /// <summary>
     /// Compact surfaces (voucher / A4): drop <see cref="OrderItem.OrderLineSizeLabel"/> only when another segment
-    /// already carries the size (e.g. variantTitle fallback) — an explicit cutting label must not erase the size.
+    /// already carries the size (e.g. variantTitle fallback) - an explicit cutting label must not erase the size.
     /// </summary>
     public bool OmitOrderLineSizeLabel { get; init; }
 
@@ -18,7 +18,7 @@ public readonly record struct OrderItemAttributeDisplayOptions
     public bool VoucherPerUnitWeightVariableOnly { get; init; }
 
     /// <summary>
-    /// Site.HideUnitWeightInOrders: hide the informational per-unit / size approximate weight —
+    /// Site.HideUnitWeightInOrders: hide the informational per-unit / size approximate weight -
     /// drops the per-unit weight segment (except "בחירת משקל ליחידה", where the weight is the ordered
     /// spec) and strips the "(כ X ק"ג)" suffix from the size label.
     /// </summary>
@@ -519,7 +519,7 @@ public static class OrderItemLineDisplay
         var size = sizeRaw;
         if (options.OmitOrderLineSizeLabel && !string.IsNullOrEmpty(size))
         {
-            // Size name without the "(כ X ק"ג)" approx suffix — the form other segments would carry.
+            // Size name without the "(כ X ק"ג)" approx suffix - the form other segments would carry.
             var sizeName = Regex.Replace(size, @"\s*\(כ[^)]*\)\s*$", "").Trim();
             if (sizeName.Length == 0) sizeName = size;
             var key = OrderItemAttrDedupeKey(sizeName);
@@ -554,7 +554,7 @@ public static class OrderItemLineDisplay
     }
 
     /// <summary>
-    /// Structured rendering from the typed snapshot — pure formatting, no text heuristics.
+    /// Structured rendering from the typed snapshot - pure formatting, no text heuristics.
     /// Rules: size (+approx unless hidden), per-unit weight (chosen weight ALWAYS; informational only when
     /// no size carries it and not hidden), cutting. Null when the line has no valid snapshot → legacy path.
     /// </summary>
@@ -576,7 +576,7 @@ public static class OrderItemLineDisplay
 
         if (snap.Kind == OrderLineDisplayKinds.ByUnitVariable && snap.ChosenUnitWeightGrams is > 0)
         {
-            // Customer-chosen weight is the ordered spec — always shown, even when weights are hidden.
+            // Customer-chosen weight is the ordered spec - always shown, even when weights are hidden.
             segments.Add(FormatPerUnitHebrewFromGrams(snap.ChosenUnitWeightGrams.Value));
         }
         else if (showWeights && snap.ApproxUnitWeightGrams is > 0 && string.IsNullOrWhiteSpace(snap.SizeName)
@@ -603,8 +603,8 @@ public static class OrderItemLineDisplay
     }
 
     /// <summary>
-    /// Weight (grams) a display segment carries: the "(כ X ק"ג)" approx suffix when present — size names
-    /// like "בין 5-6 ק״ג" would otherwise first-match parse to the wrong value — else the whole string.
+    /// Weight (grams) a display segment carries: the "(כ X ק"ג)" approx suffix when present - size names
+    /// like "בין 5-6 ק״ג" would otherwise first-match parse to the wrong value - else the whole string.
     /// </summary>
     private static int SegmentCarriedApproxGrams(string s)
     {
@@ -628,10 +628,10 @@ public static class OrderItemLineDisplay
         return line.Length > 0 ? line : null;
     }
 
-    /// <summary>Matches TS <c>orderItemIsPickedForUi</c> — ליקוט אמיתי בלבד, לא baseline מלאי.</summary>
+    /// <summary>Matches TS <c>orderItemIsPickedForUi</c> - ליקוט אמיתי בלבד, לא baseline מלאי.</summary>
     public static bool OrderItemIsPickedForUi(OrderItem item) => item.PickingUserConfirmed;
 
-    /// <summary>Matches TS <c>orderMeaningfulPick</c> — שורת "לוקט" בבון רק אחרי אישור ליקוט.</summary>
+    /// <summary>Matches TS <c>orderMeaningfulPick</c> - שורת "לוקט" בבון רק אחרי אישור ליקוט.</summary>
     public static bool OrderMeaningfulPick(OrderItem item) => OrderItemIsPickedForUi(item);
 
     /// <summary>True when ליקוט changed billing: at least one confirmed pick, or a line explicitly zeroed (unpicked).</summary>
@@ -670,14 +670,14 @@ public static class OrderItemLineDisplay
         return FormatPieceCountBadge(q);
     }
 
-    /// <summary>מוצר "בחירת משקל ליחידה" — לפי כותרת שורה (בון ללא קטלוג).</summary>
+    /// <summary>מוצר "בחירת משקל ליחידה" - לפי כותרת שורה (בון ללא קטלוג).</summary>
     public static bool IsOrderItemVariableWeightPerUnitChoice(OrderItem item)
     {
         var title = item.Title ?? "";
         if (Regex.IsMatch(title, @"בחירת\s*משקל\s*ליחידה", RegexOptions.IgnoreCase)) return true;
         if (Regex.IsMatch(title, @"בחר\s*משקל\s*יח", RegexOptions.IgnoreCase)) return true;
         // Line-field signature: only by_unit+variable lines carry a derivable per-unit weight (explicit label,
-        // or Woo saleTotalWeight/line economics) WITHOUT UnitWeightGrams — fixed/by_variant/by_unit_and_weight
+        // or Woo saleTotalWeight/line economics) WITHOUT UnitWeightGrams - fixed/by_variant/by_unit_and_weight
         // all carry grams. So a units-mode line matching it is a "בחר משקל ליח'" choice even when the title
         // lacks the phrase and the label was never persisted (website orders).
         if (string.Equals(item.OrderLineQuantityMode?.Trim(), "units", StringComparison.OrdinalIgnoreCase)
@@ -704,7 +704,7 @@ public static class OrderItemLineDisplay
         return 0;
     }
 
-    /// <summary>משקל מוזמן משוער (ק"ג) — לתמחור ₪/ק"ג בבון.</summary>
+    /// <summary>משקל מוזמן משוער (ק"ג) - לתמחור ₪/ק"ג בבון.</summary>
     public static double GetOrderLineOrderedWeightKg(OrderItem item)
     {
         var mode = NormMode(item);

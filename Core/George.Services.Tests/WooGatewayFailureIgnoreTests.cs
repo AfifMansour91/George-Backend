@@ -5,7 +5,7 @@ using Xunit;
 namespace George.Services.Tests;
 
 /// <summary>
-/// <see cref="WooCommerceGatewayPaymentInterpreter.ShouldIgnoreGatewayFailure"/> — a transient/stale
+/// <see cref="WooCommerceGatewayPaymentInterpreter.ShouldIgnoreGatewayFailure"/> - a transient/stale
 /// gateway "failed" report must not flip an authorized/settled order (order 6042: "failed" webhook
 /// arrived one second before the capture success and showed "charge failed" for a paid order).
 /// </summary>
@@ -26,7 +26,7 @@ public class WooGatewayFailureIgnoreTests
     [InlineData(PaymentSettleStatus.PartiallyRefunded)]
     public void Any_failed_on_settled_order_is_ignored(string settleStatus)
     {
-        // Late/racing failure after the money moved — even with tx or explicit reason.
+        // Late/racing failure after the money moved - even with tx or explicit reason.
         Assert.True(WooCommerceGatewayPaymentInterpreter.ShouldIgnoreGatewayFailure(
             settleStatus, "failed", "259180772", "cardcom_capture_not_confirmed"));
         Assert.True(WooCommerceGatewayPaymentInterpreter.ShouldIgnoreGatewayFailure(
@@ -36,7 +36,7 @@ public class WooGatewayFailureIgnoreTests
     [Fact]
     public void Explicit_capture_failure_on_authorized_hold_is_applied()
     {
-        // New plugin genuine capture failure: failureReason present — must NOT be ignored.
+        // New plugin genuine capture failure: failureReason present - must NOT be ignored.
         Assert.False(WooCommerceGatewayPaymentInterpreter.ShouldIgnoreGatewayFailure(
             PaymentSettleStatus.Authorized, "failed", null, "cardcom_capture_not_confirmed"));
     }

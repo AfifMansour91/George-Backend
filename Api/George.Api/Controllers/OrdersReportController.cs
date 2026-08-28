@@ -21,9 +21,9 @@ namespace George.Api.Controllers
         }
 
         /// <summary>
-        /// דוח הזמנות — הזמנות שאינן Cancelled בטווח תאריכים (ברירת מחדל: היום), לפי תאריך אספקה או תאריך הזמנה.
+        /// דוח הזמנות - הזמנות שאינן Cancelled בטווח תאריכים (ברירת מחדל: היום), לפי תאריך אספקה או תאריך הזמנה.
         /// </summary>
-        /// <param name="dateBasis"><c>supply</c> (default) — effective delivery/pickup date; <c>order</c> — creation date.</param>
+        /// <param name="dateBasis"><c>supply</c> (default) - effective delivery/pickup date; <c>order</c> - creation date.</param>
         /// <param name="fulfillment"><c>all</c> (default), <c>supplied</c>, or <c>notSupplied</c>.</param>
         /// <param name="deliveryType"><c>all</c> (default), <c>shipping</c>, or <c>pickup</c>.</param>
         /// <param name="paymentKind"><c>all</c> (default), <c>cash</c>, or <c>credit</c>.</param>

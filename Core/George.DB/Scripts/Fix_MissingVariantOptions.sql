@@ -62,7 +62,7 @@ SELECT @@ROWCOUNT AS OptionsCreated;      -- expect 5
 -- ROLLBACK;
 
 ------------------------------------------------------------------------------------------------
--- 2. Verify: re-run the skip check for the fixed products — should return ZERO rows after COMMIT
+-- 2. Verify: re-run the skip check for the fixed products - should return ZERO rows after COMMIT
 ------------------------------------------------------------------------------------------------
 SELECT pv.ProductId, pv.Id AS VariantId
 FROM ProductVariant pv

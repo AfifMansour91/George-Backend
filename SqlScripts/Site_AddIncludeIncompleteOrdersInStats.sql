@@ -1,4 +1,4 @@
--- Customer KPI refresh: per-site setting — whether customer statistics include
+-- Customer KPI refresh: per-site setting - whether customer statistics include
 -- orders that haven't been completed yet. Default 1 (true) = preserve current behavior.
 -- Idempotent: guarded by COL_LENGTH so the script can be re-run safely.
 

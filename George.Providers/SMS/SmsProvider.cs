@@ -18,7 +18,7 @@ namespace George.Providers
         private static string _username = string.Empty;
         private static string _sourcePhone = string.Empty;
         private static string _displayName = string.Empty;
-        /// <summary>Host only (e.g. app.example.com), no scheme. Last line of login OTP SMS becomes <c>@host #code</c> for Chrome Web OTP — must match the site origin.</summary>
+        /// <summary>Host only (e.g. app.example.com), no scheme. Last line of login OTP SMS becomes <c>@host #code</c> for Chrome Web OTP - must match the site origin.</summary>
         private static string _otpWebOriginHost = string.Empty;
         protected readonly ILogger<SmsProvider> _logger;
         protected readonly HttpHelper _httpHelper;

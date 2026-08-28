@@ -22,7 +22,7 @@ TypeScript helpers that depend on **live product catalog** (`Product`, `getCatal
 
 - `resolveOrderItemPickingRatePerKg`, picking-column pricing, etc.
 
-Voucher HTML uses quantity badge, product name, attribute summary, picked display, and legacy unit-weight hint — all covered by the port.
+Voucher HTML uses quantity badge, product name, attribute summary, picked display, and legacy unit-weight hint - all covered by the port.
 
 ## When you change TS
 

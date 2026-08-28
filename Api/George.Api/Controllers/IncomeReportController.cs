@@ -29,7 +29,7 @@ namespace George.Api.Controllers
             _configuration = configuration;
         }
 
-        /// <summary>דוח הכנסות — נתונים מחושבים בשרת לפי פילטרים (תקופה, קטגוריה, קופון, השוואת KPI).</summary>
+        /// <summary>דוח הכנסות - נתונים מחושבים בשרת לפי פילטרים (תקופה, קטגוריה, קופון, השוואת KPI).</summary>
         [HttpGet]
         [ProducesResponseType(typeof(IApiResponse<George.Services.Response.IncomeReportRes>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetAsync(

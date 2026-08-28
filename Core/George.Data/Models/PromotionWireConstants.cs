@@ -25,7 +25,7 @@ public static class PromotionWire
             if (string.IsNullOrWhiteSpace(value)) return null;
             var v = value.Trim().ToLowerInvariant();
             if (IsKnown(v)) return v;
-            // Legacy / UI names from older samples — map to wire values.
+            // Legacy / UI names from older samples - map to wire values.
             return v switch
             {
                 "percentdiscount" or "amountdiscount" => Discount,

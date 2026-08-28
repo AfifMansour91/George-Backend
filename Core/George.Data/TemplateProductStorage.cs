@@ -573,7 +573,7 @@ namespace George.Data
                     await _dbContext.SaveChangesAsync(cancelToken);
                 }
 
-                // "גודל" (Size) is a variation dimension (e.g. weight-by-size), not a reusable template feature — do not create TemplateAttribute for it
+                // "גודל" (Size) is a variation dimension (e.g. weight-by-size), not a reusable template feature - do not create TemplateAttribute for it
                 var isVariationOnlyOption = opt.Name == "גודל" || string.Equals(opt.Name, "Size", StringComparison.OrdinalIgnoreCase);
                 if (!isVariationOnlyOption)
                 {

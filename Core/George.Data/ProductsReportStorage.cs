@@ -33,7 +33,7 @@ namespace George.Data
                 .ConfigureAwait(false);
         }
 
-        /// <summary>Catalog products for inventory report — includes supplier, brand, variant option labels.</summary>
+        /// <summary>Catalog products for inventory report - includes supplier, brand, variant option labels.</summary>
         public async Task<List<Product>> GetSiteCatalogProductsForInventoryReportAsync(int siteId, CancellationToken cancelToken)
         {
             return await _dbContext.Product

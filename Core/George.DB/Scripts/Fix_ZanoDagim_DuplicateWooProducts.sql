@@ -1,4 +1,4 @@
--- Zano Dagim (site 45, account 42) — 23/08/2026 incident: picking charged 190 ₪/kg for לברק instead of 95.
+-- Zano Dagim (site 45, account 42) - 23/08/2026 incident: picking charged 190 ₪/kg for לברק instead of 95.
 --
 -- Root cause chain:
 --   1. Woo product sync: PUT /products/{id} failed (site returned 502s on 20/8 ~09:20) and the code fell
@@ -18,7 +18,7 @@
 --   C. Only THEN trash the duplicate Woo products in WP admin: 43933 (lavrak-2), 43932 (bar-yam-2),
 --      44123 (dennis-2). Trashing them before step A would make the next sync get a 404 on the copy and
 --      create yet another duplicate.
---   D. Refund the overcharged paid orders (section 4 lists the amounts) — Cardcom partial refund per order.
+--   D. Refund the overcharged paid orders (section 4 lists the amounts) - Cardcom partial refund per order.
 
 ------------------------------------------------------------------------------------------------
 -- 0. Preview
@@ -28,7 +28,7 @@ FROM ProductSiteWooId x JOIN Product p ON p.Id = x.ProductId
 WHERE x.SiteId = 45 AND x.ProductId IN (11921, 11922, 11941);
 
 -- Unlinked lines and the variant each will be linked to (by VariantTitle = option values joined " | ",
--- ordered by option name — same order the Woo payload attributes were joined in).
+-- ordered by option name - same order the Woo payload attributes were joined in).
 SELECT oi.Id AS LineId, o.OrderNumber, oi.Title, oi.VariantTitle, oi.WooCommerceProductId,
        p.Id AS ProductId,
        (SELECT TOP 1 pv.Id FROM ProductVariant pv
@@ -96,7 +96,7 @@ WHERE o.SiteId = 45 AND oi.ProductId IS NULL AND oi.WooCommerceProductId IN (161
 
 ------------------------------------------------------------------------------------------------
 -- 3. Open (unpaid) orders whose lines were already picked at the wrong rate: recompute the line and the order
---    totals so they are charged correctly. Unpicked open orders (1073, 1144, 1149) need nothing — picking
+--    totals so they are charged correctly. Unpicked open orders (1073, 1144, 1149) need nothing - picking
 --    after the deploy computes the right rate. (Run inside the same transaction or a new one.)
 ------------------------------------------------------------------------------------------------
 BEGIN TRAN;
@@ -124,7 +124,7 @@ SELECT @@ROWCOUNT AS OpenLinesRecomputed;      -- expect 1
 -- ROLLBACK;
 
 ------------------------------------------------------------------------------------------------
--- 4. PAID orders overcharged (for refunds — NOT modified here; the charge already happened in Cardcom).
+-- 4. PAID orders overcharged (for refunds - NOT modified here; the charge already happened in Cardcom).
 --    Overcharge = charged line − picked kg × ₪/kg.
 ------------------------------------------------------------------------------------------------
 SELECT o.OrderNumber, o.CustomerName, o.CustomerPhone, o.Total AS ChargedTotal,
@@ -141,7 +141,7 @@ ORDER BY o.OrderNumber;
 -- Expected (23/08 12:45): 1076 195.70 | 1091 32.40 | 1125 99.75 | 1128 1017.45 | 1138 200.45 | 1141 44.89+95.00 → total ≈ 1,685.64 ₪
 
 ------------------------------------------------------------------------------------------------
--- 5. ADDENDUM 23/08 14:00 — product 12113 (פילה אנטיאס טרי – לוין – נתח לסשימי) is the SAME bug.
+-- 5. ADDENDUM 23/08 14:00 - product 12113 (פילה אנטיאס טרי – לוין – נתח לסשימי) is the SAME bug.
 --    Its Woo slug is "טונה-אדומה-...-עותק" (created in George as a copy of the tuna product, renamed later;
 --    Woo keeps the original slug), which is why it was first mistaken for a legitimate George copy.
 --    Original = 41831 (in stock, stale since 23/8 10:30); duplicate = 44147 (receives all syncs, closed).

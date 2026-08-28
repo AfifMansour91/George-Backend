@@ -106,7 +106,7 @@ namespace George.Services.Utils
         }
 
         /// <summary>
-        /// Standard A4 PDF (multi-page allowed) — for A4 order printouts (Site.VoucherPrintA4).
+        /// Standard A4 PDF (multi-page allowed) - for A4 order printouts (Site.VoucherPrintA4).
         /// Unlike the receipt path, no 72mm CSS is injected and the page keeps natural A4 pagination;
         /// the payload HTML carries its own A4 layout (@page size A4).
         /// </summary>

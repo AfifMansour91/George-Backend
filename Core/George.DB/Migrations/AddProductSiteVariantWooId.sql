@@ -1,8 +1,8 @@
--- Migration: MultiSite Phase 2 — per-site WooCommerce VARIATION id (ProductSiteVariantWooId).
+-- Migration: MultiSite Phase 2 - per-site WooCommerce VARIATION id (ProductSiteVariantWooId).
 -- A variant of a product shared across sites (network mode) has a DIFFERENT Woo variation id in each store; the
 -- single ProductVariant.WooCommerceVariationId column can only track one, so syncing a shared variable product to
 -- the 2nd store reused the 1st store's variation ids. The PUT to those ids 404'd, the variation was recreated, and
--- then the orphan-cleanup deleted the recreation (it tracked the OLD id) — leaving the 2nd store with ZERO
+-- then the orphan-cleanup deleted the recreation (it tracked the OLD id) - leaving the 2nd store with ZERO
 -- variations, i.e. a variable product that WooCommerce reports as out of stock. This table maps
 -- (ProductVariantId, SiteId) -> WooCommerceVariationId. Consulted only for network-managed accounts. Idempotent.
 -- Mirrors ProductSiteWooId (parent) / CategorySiteWooId.

@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 namespace George.Services
 {
     /// <summary>
-    /// MultiSite Phase 2 — per-site override operations: upsert/reset a site override, exclude/include a
+    /// MultiSite Phase 2 - per-site override operations: upsert/reset a site override, exclude/include a
     /// product from network management at a site, list local/excluded products, and per-site variant stock.
     /// </summary>
     public class ProductSiteOverrideService : ServiceBase
@@ -35,7 +35,7 @@ namespace George.Services
         /// <summary>
         /// Fire-and-forget WooCommerce sync of one product to ONE site after a per-site override change.
         /// Every write in this service (override upsert/reset, variant stock, exclude/include) must push the
-        /// site's new effective values to that site's Woo store — without this, per-branch stock/price edits
+        /// site's new effective values to that site's Woo store - without this, per-branch stock/price edits
         /// from the "הצג" dialog saved to the DB but the website never updated (until an unrelated edit
         /// happened to re-sync the product). Resolves its OWN scope: the request scope is disposed by the
         /// time the task runs (same lesson as the promotion webhook dispatcher).
@@ -68,7 +68,7 @@ namespace George.Services
                 }
                 catch (Exception ex)
                 {
-                    // Log but never throw — Woo sync failures must not surface into the override save.
+                    // Log but never throw - Woo sync failures must not surface into the override save.
                     _logger.LogError(ex,
                         "Per-site override change: error syncing product {ProductId} to WooCommerce for site {SiteId}",
                         productId, siteId);
@@ -132,7 +132,7 @@ namespace George.Services
             await _overrideStorage.ResetOverrideAsync(productId, siteId, fields, cancelToken);
             response.Data = true;
 
-            // The site now inherits the canonical values again — push them to its Woo store.
+            // The site now inherits the canonical values again - push them to its Woo store.
             QueueSiteSync(productId, siteId);
             return CreateResponse(response);
         }
@@ -162,7 +162,7 @@ namespace George.Services
             await _overrideStorage.SetExcludedAsync(productId, req.SiteId, product.AccountId, excluded: false, resetFields: req.ResetFields, cancelToken);
             response.Data = true;
 
-            // The product is back under network management at this site — push its effective values to Woo.
+            // The product is back under network management at this site - push its effective values to Woo.
             QueueSiteSync(productId, req.SiteId);
             return CreateResponse(response);
         }

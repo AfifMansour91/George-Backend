@@ -115,7 +115,7 @@ public class SitePaymentSettingsRes
     /// <summary>Encrypted secret key exists but cannot be decrypted (e.g. after server restart before keys were persisted).</summary>
     public bool PayPlusSecretKeyNeedsResave { get; set; }
     public bool PayPlusTestMode { get; set; }
-    /// <summary>Invoice+ brand UID (issuing business) — required for invoice creation.</summary>
+    /// <summary>Invoice+ brand UID (issuing business) - required for invoice creation.</summary>
     public string? PayPlusInvoiceBrandUid { get; set; }
     public int PayPlusMaxInstallments { get; set; } = 1;
     public string? PayPlusCssUrl { get; set; }

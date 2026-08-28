@@ -2,11 +2,11 @@
 --
 -- Background: capturing a suspended/J5 Cardcom deal creates a NEW transaction id, but the Woo
 -- plugin keeps reporting the original hold's id. Verification then saw "hold" on a captured order
--- and wrote GatewayAmountMismatch = 1 with GatewayVerifiedAmount = 0 — even though the charge ran
+-- and wrote GatewayAmountMismatch = 1 with GatewayVerifiedAmount = 0 - even though the charge ran
 -- (its Cardcom document is on the order). The code now recognizes this (HoldWithCaptureEvidence)
 -- and clears the flag on the next verify; this script clears the already-flagged orders in bulk.
 --
--- Signature targeted: mismatch flag raised with verified amount 0 (the hold-but-captured path —
+-- Signature targeted: mismatch flag raised with verified amount 0 (the hold-but-captured path -
 -- a genuine amount mismatch stores the actual nonzero charged amount) AND a Cardcom charge
 -- document present on the order. Genuine Delinka-style false successes have no document and are
 -- left flagged. Idempotent: re-running affects no additional rows.

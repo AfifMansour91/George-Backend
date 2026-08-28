@@ -19,7 +19,7 @@ namespace George.Services
     /// Brand-specific methods for the WooCommerce REST integration.
     ///
     /// WooCommerce REST API v3 (products): for writes, <c>brands</c> must be an array of objects with an <c>id</c>
-    /// property — same pattern as read responses. Example:
+    /// property - same pattern as read responses. Example:
     ///   <c>{"brands":[{"id":16},{"id":21}]}</c>
     /// A flat array of integers is rejected with an invalid-parameter error (e.g. Hebrew message mentioning brands).
     /// <see cref="WooProductBrandsAssignmentBody"/> pins this shape; tests assert serialized JSON.
@@ -74,7 +74,7 @@ namespace George.Services
 
         /// <summary>
         /// Lists brands from a site's WooCommerce. Pages through results 100 at a time.
-        /// Returns null when WooCommerce returns 404 for /products/brands — that means the
+        /// Returns null when WooCommerce returns 404 for /products/brands - that means the
         /// store is on a pre-9.6 WooCommerce that doesn't have Brands as a core taxonomy.
         /// Callers should fall back to the legacy `_brand` meta-key path in that case.
         ///
@@ -322,7 +322,7 @@ namespace George.Services
 
                 if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
                 {
-                    _logger.LogInformation("WooCommerce /products/brands returned 404 — store is on a pre-9.6 WooCommerce; skipping brand sync.");
+                    _logger.LogInformation("WooCommerce /products/brands returned 404 - store is on a pre-9.6 WooCommerce; skipping brand sync.");
                     return all;
                 }
 
@@ -551,7 +551,7 @@ namespace George.Services
                 name = brand.Name,
                 slug = string.IsNullOrWhiteSpace(brand.Slug) ? null : brand.Slug,
                 description = brand.Description ?? string.Empty,
-                parent = parentWooId, // null means "no parent" — Woo accepts this
+                parent = parentWooId, // null means "no parent" - Woo accepts this
                 image = string.IsNullOrWhiteSpace(brand.ImageUrl) ? null : new WooBrandImage { src = brand.ImageUrl },
             };
 
@@ -613,7 +613,7 @@ namespace George.Services
             return updated?.id;
         }
 
-        // Don't send "image": null when the brand has no logo — Woo treats null as "remove the existing one".
+        // Don't send "image": null when the brand has no logo - Woo treats null as "remove the existing one".
         private static readonly JsonSerializerOptions JsonOptionsIgnoreNulls = new()
         {
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

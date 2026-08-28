@@ -4,7 +4,7 @@ using Xunit;
 namespace George.Services.Tests;
 
 /// <summary>
-/// Unlinked (WP-local) promotion stamps must follow the picked line gross proportionally —
+/// Unlinked (WP-local) promotion stamps must follow the picked line gross proportionally -
 /// the client scenario: 5% discount stamped on 500g (₪124.50 → ₪6.23), picked at 0.55kg.
 /// </summary>
 public class OrderDiscountScalingTests
@@ -46,7 +46,7 @@ public class OrderDiscountScalingTests
         // ליקוט ראשון: 124.50 → 136.95.
         var first = OrderDiscountTotals.ScaleStampedLineDiscount(6.23m, null, 124.50m, 136.95m);
         Assert.Equal(6.85m, first);
-        // ליקוט חוזר: 136.95 → 149.40 — היחס מצטבר נכון (בקירוב עיגול אגורה).
+        // ליקוט חוזר: 136.95 → 149.40 - היחס מצטבר נכון (בקירוב עיגול אגורה).
         var second = OrderDiscountTotals.ScaleStampedLineDiscount(first, null, 136.95m, 149.40m);
         Assert.Equal(7.47m, second);
     }

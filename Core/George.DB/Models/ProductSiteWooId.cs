@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 /// <summary>
-/// MultiSite Phase 2 — the WooCommerce product id for a product IN A SPECIFIC SITE's store. The same
+/// MultiSite Phase 2 - the WooCommerce product id for a product IN A SPECIFIC SITE's store. The same
 /// product has a different Woo product id in each store, so it cannot be tracked by the single
 /// Product.WooCommerceId column. One row per (product, site).
 /// </summary>

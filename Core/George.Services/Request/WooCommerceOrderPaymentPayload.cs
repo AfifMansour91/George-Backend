@@ -54,7 +54,7 @@ public class WooCommerceOrderPaymentGatewayDetails
 
     /// <summary>
     /// PayPlus transaction_uid the gateway plugin placed the authorization under. Unlike Cardcom's
-    /// token+expiry pair, PayPlus captures the SAME id later — no separate reusable token to track.
+    /// token+expiry pair, PayPlus captures the SAME id later - no separate reusable token to track.
     /// </summary>
     [JsonProperty("transactionUid")]
     public string? TransactionUid { get; set; }
@@ -66,7 +66,7 @@ public class WooCommerceOrderPaymentGatewayDetails
 
     /// <summary>
     /// Normalizes MM/YY, MMYY, MM/YYYY, MMYYYY to MMYY; null when unparseable. Also accepts a
-    /// single-digit month with a separator (e.g. "3 29", "3/29" — QA order 1982: the gateway's
+    /// single-digit month with a separator (e.g. "3 29", "3/29" - QA order 1982: the gateway's
     /// cardcom_Tokef carried an unpadded month) by treating a 3-digit digit-only remainder as M+YY.
     /// </summary>
     public string? ResolveTokenExpiryMMYY()
@@ -140,7 +140,7 @@ public class WooCommerceOrderPaymentPayload
     public WooCommerceOrderPaymentGatewayDetails? Payment { get; set; }
 
     // -------------------------------------------------------------------------
-    // Populated during normalize from payment.* — not deserialized from JSON.
+    // Populated during normalize from payment.* - not deserialized from JSON.
     // -------------------------------------------------------------------------
     [JsonIgnore]
     public string? InvoiceNumber { get; set; }
@@ -230,14 +230,14 @@ public static class WooCommerceGatewayPaymentInterpreter
     /// <summary>
     /// True when an incoming gateway "failed" report must NOT change the order's payment state.
     /// Two cases:
-    /// (1) The order's payment is already settled (captured/refunded) — a late or racing "failed"
+    /// (1) The order's payment is already settled (captured/refunded) - a late or racing "failed"
     ///     webhook can never undo money that actually moved.
     /// (2) The order holds a live authorization (J5) and the failure carries no transaction id and no
-    ///     explicit <c>failureReason</c> — older plugin builds emit exactly this shape during the 1-2s
+    ///     explicit <c>failureReason</c> - older plugin builds emit exactly this shape during the 1-2s
     ///     window while the picking capture runs and the Cardcom deal meta is momentarily missing
     ///     (order 6042: "failed" arrived one second before the capture success). A REAL capture
     ///     failure from newer builds always carries <c>failureReason</c>, and checkout declines happen
-    ///     before any hold exists — neither is suppressed here.
+    ///     before any hold exists - neither is suppressed here.
     /// </summary>
     public static bool ShouldIgnoreGatewayFailure(
         string? currentSettleStatus,

@@ -102,7 +102,7 @@ public class PrintJobService : ServiceBase
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // One unrenderable job (e.g. ":A4" PDF render when Playwright browsers are
-                // missing on the server) must not fail the whole Pending response — the agent
+                // missing on the server) must not fail the whole Pending response - the agent
                 // then sees an error envelope as "no jobs" and EVERY job for the site is
                 // starved, plain vouchers included. Fail the poisoned job explicitly and keep
                 // serving the rest.
@@ -145,7 +145,7 @@ public class PrintJobService : ServiceBase
         var payloadType = _payloadType;
 
         // A4 order printouts (Site.VoucherPrintA4; JobType suffix ":A4"): ALWAYS delivered as an A4 PDF,
-        // regardless of the configured payload type — deployed agents print html payloads at receipt width
+        // regardless of the configured payload type - deployed agents print html payloads at receipt width
         // (72mm), so an A4 html payload would come out as a narrow strip. PDFs go through Sumatra, which
         // fits the A4 page onto the printer's paper; no agent update needed.
         if (!string.IsNullOrWhiteSpace(payload) &&

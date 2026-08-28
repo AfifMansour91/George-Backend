@@ -1,4 +1,4 @@
--- Adds per-site manual-order payment method toggles (הזמנה חדשה — אמצעי תשלום):
+-- Adds per-site manual-order payment method toggles (הזמנה חדשה - אמצעי תשלום):
 --   PaymentCashEnabled           מזומן             NULL = enabled (legacy default)
 --   PaymentCreditSmsEnabled      אשראי ב-SMS       NULL = enabled when Cardcom is configured
 --   PaymentCreditPhoneEnabled    אשראי טלפוני       NULL = enabled when Cardcom is configured

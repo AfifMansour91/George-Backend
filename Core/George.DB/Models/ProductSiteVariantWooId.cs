@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace George.DB;
 
 /// <summary>
-/// MultiSite Phase 2 — the WooCommerce VARIATION id for a product variant IN A SPECIFIC SITE's store. The same
+/// MultiSite Phase 2 - the WooCommerce VARIATION id for a product variant IN A SPECIFIC SITE's store. The same
 /// variant has a different Woo variation id in each store, so it cannot be tracked by the single
 /// ProductVariant.WooCommerceVariationId column: a multi-site variable product's second site reused the first
 /// site's variation ids → PUT 404 → recreate → the recreated variation was then wrongly deleted as an orphan,

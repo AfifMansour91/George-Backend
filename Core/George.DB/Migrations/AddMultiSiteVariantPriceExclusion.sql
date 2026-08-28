@@ -1,4 +1,4 @@
--- Migration: MultiSite Phase 2 — per-site variant price + exclusion.
+-- Migration: MultiSite Phase 2 - per-site variant price + exclusion.
 -- Extends ProductSiteVariantStock (already per-(variant,site) stock) with per-site variant Price/SalePrice and
 -- an IsExcluded flag, so a network product's variations can be priced per branch and a variation can be
 -- "removed" in one branch (hidden there) without deleting it from the canonical product. Idempotent.

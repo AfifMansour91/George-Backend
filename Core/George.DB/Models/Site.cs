@@ -113,7 +113,7 @@ public partial class Site
     /// </summary>
     public bool? VoucherPrintA4 { get; set; }
 
-    /// <summary>When true, order printouts (thermal voucher + A4, manual + auto) omit the delivery/pickup time — only the date is printed.</summary>
+    /// <summary>When true, order printouts (thermal voucher + A4, manual + auto) omit the delivery/pickup time - only the date is printed.</summary>
     public bool? VoucherHideDeliveryTime { get; set; }
 
     /// <summary>When true, the manual customer sticker (LabelCustomer) uses the wide 120mm pre-printed branded label layout (order info beside the branding column) instead of the default 58x40mm sticker. Off by default.</summary>
@@ -154,7 +154,7 @@ public partial class Site
     public bool? PrintLabelsAfterPicking { get; set; }
 
     /// <summary>
-    /// Promotion settings (Sprint 4 — `Sprint4/מבצעים.md` "הגדרות מבצעים").
+    /// Promotion settings (Sprint 4 - `Sprint4/מבצעים.md` "הגדרות מבצעים").
     /// Default for BxPY over-quantity pricing: "same_price" (pro-rated) | "full_price" (regular). Null = "full_price".
     /// </summary>
     [StringLength(20)]
@@ -221,7 +221,7 @@ public partial class Site
     public bool? ShowCustomerProfileNoteInPrints { get; set; }
 
     /// <summary>
-    /// When true, the handler name (מטפל — Order.HandlerName) shows under the order source on the
+    /// When true, the handler name (מטפל - Order.HandlerName) shows under the order source on the
     /// order card and on printouts (voucher/A4). NULL/0 = hidden (default).
     /// </summary>
     public bool? ShowOrderHandler { get; set; }
@@ -271,7 +271,7 @@ public partial class Site
     public int? CardcomTerminalNumber { get; set; }
 
     /// <summary>
-    /// Optional SECOND Cardcom terminal — configured at Cardcom WITHOUT a CVV requirement — used ONLY for the
+    /// Optional SECOND Cardcom terminal - configured at Cardcom WITHOUT a CVV requirement - used ONLY for the
     /// actual charge (J4 capture / direct token charge) and its refund. Token creation, authorization holds
     /// (J5) and their voids, and the hosted payment page all stay on the primary
     /// <see cref="CardcomTerminalNumber"/>. Null/0 = single-terminal setup, everything on the primary.
@@ -310,12 +310,12 @@ public partial class Site
     public string? CardcomLogoUrl { get; set; }
 
     /// <summary>
-    /// PayPlus Payment Page UID — its per-site identifier (no int terminal number concept like Cardcom).
+    /// PayPlus Payment Page UID - its per-site identifier (no int terminal number concept like Cardcom).
     /// </summary>
     [StringLength(100)]
     public string? PayPlusPaymentPageUid { get; set; }
 
-    /// <summary>PayPlus api_key (account identifier — reuses the same role as Cardcom's ApiName).</summary>
+    /// <summary>PayPlus api_key (account identifier - reuses the same role as Cardcom's ApiName).</summary>
     [StringLength(100)]
     public string? PayPlusApiKey { get; set; }
 
@@ -330,7 +330,7 @@ public partial class Site
     public int PayPlusMaxInstallments { get; set; } = 1;
 
     /// <summary>
-    /// Invoice+ brand UID (the business entity issuing documents) — required by books/docs/* or PayPlus
+    /// Invoice+ brand UID (the business entity issuing documents) - required by books/docs/* or PayPlus
     /// returns "brand-not-found". Taken from the Invoice+ dashboard; sandbox and production have different
     /// brand UIDs, which works per-site here because PayPlusTestMode is per-site too.
     /// </summary>

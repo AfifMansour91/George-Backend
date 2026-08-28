@@ -83,5 +83,5 @@ Helpers in `WooCommerceService.cs`:
 ## Related code
 
 - Attribute model: `WooImportProductAttributeItem` (`name`, `variation`, `options`) in `WooCommerceService.cs`
-- Variable product detection still uses `wp.attributes?.Any(a => a.variation)` in `ApplyWooImportProductExtensionsAsync` — unchanged
+- Variable product detection still uses `wp.attributes?.Any(a => a.variation)` in `ApplyWooImportProductExtensionsAsync` - unchanged
 - Export/sync **to** WooCommerce: variation attrs from `ProductOption`; non-variation attrs preserved from existing Woo product on update (see above)
