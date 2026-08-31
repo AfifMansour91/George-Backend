@@ -2628,7 +2628,7 @@ namespace George.Services
 
                     try
                     {
-                        await SyncProductOcwsuFixedUnitPriceDisplayAsync(baseUrl, wooCommerceId.Value, product, cancelToken);
+                        await SyncProductOcwsuFixedUnitPriceDisplayAsync(baseUrl, siteId, wooCommerceId.Value, product, cancelToken);
                     }
                     catch (Exception ex)
                     {
@@ -2746,8 +2746,11 @@ namespace George.Services
         /// <summary>
         /// POSTs <c>display_price_per_fixed_unit</c> and label to
         /// <c>{site}/wp-json/ed/v1/product-ocwsu-fixed-unit-price-display</c>.
+        /// Uses site <see cref="Site.InternalApiKey"/> as Giorgio API token (<c>X-Api-Key</c>),
+        /// same as <see cref="SyncProductEdAcfStoreLabelsAsync"/> — the ed/v1 routes share one
+        /// <c>permission_callback</c>, so an unauthenticated call is a guaranteed 401.
         /// </summary>
-        private async Task SyncProductOcwsuFixedUnitPriceDisplayAsync(string wcV3BaseUrl, int wooProductId, Product product, CancellationToken cancelToken)
+        private async Task SyncProductOcwsuFixedUnitPriceDisplayAsync(string wcV3BaseUrl, int siteId, int wooProductId, Product product, CancellationToken cancelToken)
         {
             var setupTypeName = product.SetupType?.Name ?? "";
             var isWeightedBySetup = setupTypeName is "by_weight" or "by_unit" or "by_unit_and_weight";
@@ -2759,6 +2762,16 @@ namespace George.Services
             if (!soldByUnits)
                 return;
 
+            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken).ConfigureAwait(false);
+            var apiToken = site?.InternalApiKey?.Trim();
+            if (string.IsNullOrEmpty(apiToken))
+            {
+                _logger.LogWarning(
+                    "ED/v1 OCWSU fixed-unit-price-display sync skipped for site {SiteId}: InternalApiKey (Giorgio token) is not configured.",
+                    siteId);
+                return;
+            }
+
             var wc = product.WeightConfig;
             var showUnitPrice = wc.ShowUnitPrice == true;
 
@@ -2768,6 +2781,7 @@ namespace George.Services
             using var http = _httpClientFactory.CreateClient();
             http.Timeout = TimeSpan.FromSeconds(60);
             http.DefaultRequestHeaders.Clear();
+            http.DefaultRequestHeaders.Add("X-Api-Key", apiToken);
 
             var url = $"{siteRoot}/wp-json/ed/v1/product-ocwsu-fixed-unit-price-display";
             var payload = new Dictionary<string, object>
@@ -2821,6 +2835,10 @@ namespace George.Services
                 ?? product.WeightConfig?.SoldByLabel
                 ?? OcwsuSoldByLabel.DefaultKey;
 
+            var apiToken = site.InternalApiKey?.Trim();
+            if (string.IsNullOrEmpty(apiToken))
+                return CreateResponse(response, StatusCode.InvalidRequest, "Site InternalApiKey (Giorgio token) is not configured; the ed/v1 endpoint requires it.");
+
             var siteRoot = site.WooCommerceUrl.TrimEnd('/');
             var idx = siteRoot.IndexOf("/wp-json", StringComparison.OrdinalIgnoreCase);
             if (idx > 0)
@@ -2828,6 +2846,8 @@ namespace George.Services
 
             using var http = _httpClientFactory.CreateClient();
             http.Timeout = TimeSpan.FromSeconds(60);
+            http.DefaultRequestHeaders.Clear();
+            http.DefaultRequestHeaders.Add("X-Api-Key", apiToken);
 
             var url = $"{siteRoot}/wp-json/ed/v1/product-ocwsu-fixed-unit-price-display";
             var payload = new Dictionary<string, object>
