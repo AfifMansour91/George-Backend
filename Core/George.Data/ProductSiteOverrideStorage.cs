@@ -505,9 +505,15 @@ namespace George.Data
         /// </summary>
         public async Task<int?> GetProductIdBySiteWooProductIdAsync(int siteId, int wooProductId, CancellationToken cancelToken)
         {
+            // Active products only: a claim left behind by a soft-deleted product (catalog re-imports
+            // replace whole generations) must not block a live product from adopting its Woo id.
             var bySiteMap = await _dbContext.ProductSiteWooId
                 .Where(x => x.SiteId == siteId && x.WooCommerceProductId == wooProductId)
-                .Select(x => (int?)x.ProductId)
+                .Join(
+                    _dbContext.Product.Where(p => !p.IsDeleted),
+                    x => x.ProductId,
+                    p => p.Id,
+                    (x, p) => (int?)p.Id)
                 .FirstOrDefaultAsync(cancelToken);
             if (bySiteMap.HasValue) return bySiteMap;
 
@@ -520,6 +526,21 @@ namespace George.Data
         /// <summary>Upsert the per-site WooCommerce product id for a (product, site).</summary>
         public async Task SetSiteWooProductIdAsync(int productId, int siteId, int wooProductId, CancellationToken cancelToken)
         {
+            // A Woo product has at most ONE George owner per site. Stale claims by soft-deleted products
+            // are removed here (self-heal after re-imports) so this write cannot create a duplicate claim;
+            // a conflicting claim by an ACTIVE product is a real fault and is left for the unique index
+            // (UX_ProductSiteWooId_Site_WooProduct) to reject loudly instead of poisoning order resolution.
+            var staleClaims = await _dbContext.ProductSiteWooId
+                .Where(x => x.SiteId == siteId && x.WooCommerceProductId == wooProductId && x.ProductId != productId)
+                .Join(
+                    _dbContext.Product.Where(p => p.IsDeleted),
+                    x => x.ProductId,
+                    p => p.Id,
+                    (x, p) => x)
+                .ToListAsync(cancelToken);
+            if (staleClaims.Count > 0)
+                _dbContext.ProductSiteWooId.RemoveRange(staleClaims);
+
             var row = await _dbContext.ProductSiteWooId
                 .FirstOrDefaultAsync(x => x.ProductId == productId && x.SiteId == siteId, cancelToken);
             if (row == null)

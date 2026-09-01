@@ -2048,8 +2048,27 @@ namespace George.Services
                         }
                     }
                 }
-                if (!existingWooId.HasValue)
-                    existingWooId = product.WooCommerceId;
+                if (!existingWooId.HasValue && product.WooCommerceId.HasValue)
+                {
+                    // The legacy single-id column cannot say WHICH store its id belongs to; on accounts with
+                    // a second store (or a second WordPress install on the same domain - Meshek Basar 1/9,
+                    // near-parallel post-id counters) adopting it blindly PUTs over whatever product happens
+                    // to sit at that id in THIS store. Same guard as the SKU path above: adopt only when the
+                    // id is unclaimed or already ours on this site; otherwise create a new Woo product.
+                    var legacyOwnerId = await _overrideStorage
+                        .GetProductIdBySiteWooProductIdAsync(siteId, product.WooCommerceId.Value, cancelToken)
+                        .ConfigureAwait(false);
+                    if (legacyOwnerId.HasValue && legacyOwnerId.Value != product.Id)
+                    {
+                        _logger.LogWarning(
+                            "Woo sync: legacy Woo id {WooId} of product {ProductId} is owned by product {OwnerProductId} on site {SiteId}; creating a new Woo product instead of overwriting it.",
+                            product.WooCommerceId.Value, product.Id, legacyOwnerId.Value, siteId);
+                    }
+                    else
+                    {
+                        existingWooId = product.WooCommerceId;
+                    }
+                }
 
                 List<(int id, string? src, string? name)>? existingWooImages = null;
                 List<WooCommerceProductAttributeReadItem>? existingWooNonVariationAttributes = null;
@@ -2541,11 +2560,17 @@ namespace George.Services
                     else
                     {
                         var errorContent = await updateResponse.Content.ReadAsStringAsync(cancelToken);
-                        // Fall through to CREATE only when the Woo product is genuinely gone (404). Any other failure
+                        // Fall through to CREATE only when the Woo product is genuinely gone. Any other failure
                         // (502/timeout/validation) used to create a DUPLICATE Woo product: the store then sold both,
                         // the per-site map pointed at the copy, and orders for the original no longer resolved to a
                         // George product (Zano Dagim 20/8: lavrak → lavrak-2, picking charged 190 ₪/kg instead of 95).
-                        if (updateResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+                        // "Gone" is 404, or 400 with woocommerce_rest_product_invalid_id - Woo answers the latter for
+                        // an id that never existed on this store (Meshek Basar 1/9: two Woo installs share the domain,
+                        // so a legacy id from one store is simply absent on the other and the product must be created).
+                        var wooProductGone = updateResponse.StatusCode == System.Net.HttpStatusCode.NotFound ||
+                            (updateResponse.StatusCode == System.Net.HttpStatusCode.BadRequest &&
+                             errorContent.Contains("woocommerce_rest_product_invalid_id", StringComparison.OrdinalIgnoreCase));
+                        if (wooProductGone)
                         {
                             _logger.LogWarning("Woo product {WooId} for product {ProductId} no longer exists on site {SiteId}; creating it. {Error}", existingWooId.Value, product.Id, siteId, errorContent);
                         }
