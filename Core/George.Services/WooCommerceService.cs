@@ -1941,6 +1941,8 @@ namespace George.Services
                 }
 
                 // Map stock status
+                // NOTE: the stock fields computed here (and in SyncProductVariantsAsync) are mirrored by the
+                // lean order-driven push in WooCommerceService.CatalogStockPush.cs — change both together.
                 var stockStatus = "instock";
                 if (product.StockStatus?.Name == "out_of_stock" || product.Status?.Name == "outOfStock")
                     stockStatus = "outofstock";
@@ -3590,6 +3592,7 @@ namespace George.Services
 
             // Per-variation stock in Woo only when George tracks numeric quantity per variation.
             // Binary in/out per variation uses stock_status only (no manage_stock / stock_quantity in Woo).
+            // NOTE: mirrored by the lean stock push in WooCommerceService.CatalogStockPush.cs — change both together.
             var stockManagedPerVariation = string.Equals(product.StockManagementType?.Name, "variation", StringComparison.OrdinalIgnoreCase);
             var variationTrackQuantity = stockManagedPerVariation && product.VariationStockByQuantity == true;
             var manageVariationStockInWoo = variationTrackQuantity;

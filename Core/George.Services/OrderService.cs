@@ -1063,7 +1063,7 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Pushes Store catalog stock for the given products to WooCommerce (REST product sync). Best-effort background work.
+        /// Pushes Store catalog stock for the given products to WooCommerce (lean stock-only batch push). Best-effort background work.
         /// Use after picking / completion / line removal so Woo reflects the same quantities as StoreOS.
         /// </summary>
         private async Task ScheduleWooCommerceCatalogStockPushForProductsAsync(
@@ -1087,8 +1087,9 @@ namespace George.Services
                 {
                     await using var scope = _serviceScopeFactory.CreateAsyncScope();
                     var wooCommerceService = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
-                    var req = new WooCommerceSyncReq { SiteId = siteIdCapture, ProductIds = idsCapture };
-                    await wooCommerceService.SyncToWooCommerceAsync(req, CancellationToken.None).ConfigureAwait(false);
+                    // Lean stock-only batch push (not the full product sync): order flows fire this for every
+                    // picked/edited line, and a full PUT per product purged the store cache all day (Zano 502).
+                    await wooCommerceService.PushCatalogStockToWooCommerceAsync(siteIdCapture, idsCapture, CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
