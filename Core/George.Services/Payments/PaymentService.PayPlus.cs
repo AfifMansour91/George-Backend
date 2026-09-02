@@ -278,9 +278,15 @@ public partial class PaymentService
         if (!txCapture.Success)
         {
             order.PaymentSettleStatus = PaymentSettleStatus.Failed;
-            order.ExternalPaymentStatus = txCapture.Description;
+            order.ExternalPaymentStatus = TruncatePaymentStatusMessage(txCapture.Description);
             await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
-            response.Data = new FinalizePickingPaymentRes { Outcome = "GatewayDeclined", FinalAmount = finalAmount };
+            response.Data = new FinalizePickingPaymentRes
+            {
+                Outcome = "GatewayDeclined",
+                FinalAmount = finalAmount,
+                Message = txCapture.Description,
+                GatewayResponseCode = txCapture.ResponseCode.ToString(),
+            };
             return response;
         }
 

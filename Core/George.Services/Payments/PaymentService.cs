@@ -546,7 +546,7 @@ public partial class PaymentService : ServiceBase
             cancelToken, provider: provider);
     }
 
-    private static string TruncatePaymentStatusMessage(string message)
+    private static string TruncatePaymentStatusMessage(string? message)
     {
         const int max = 100;
         var trimmed = (message ?? "").Trim();
@@ -699,7 +699,7 @@ public partial class PaymentService : ServiceBase
 
             if (string.IsNullOrWhiteSpace(approval))
                 return CreateResponse(response, StatusCode.InvalidRequest,
-                    "No payment token for this order. Customer must complete card authorization when ordering.");
+                    BuildMissingChargeCredentialsMessage(order));
 
             var txCapture = await _cardcom.CaptureAuthorizationAsync(creds, new CaptureAuthorizationRequest
             {
@@ -717,9 +717,15 @@ public partial class PaymentService : ServiceBase
             if (!txCapture.Success)
             {
                 order.PaymentSettleStatus = PaymentSettleStatus.Failed;
-                order.ExternalPaymentStatus = txCapture.Description;
+                order.ExternalPaymentStatus = TruncatePaymentStatusMessage(txCapture.Description);
                 await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
-                response.Data = new FinalizePickingPaymentRes { Outcome = "GatewayDeclined", FinalAmount = finalAmount };
+                response.Data = new FinalizePickingPaymentRes
+                {
+                    Outcome = "GatewayDeclined",
+                    FinalAmount = finalAmount,
+                    Message = txCapture.Description,
+                    GatewayResponseCode = txCapture.ResponseCode.ToString(),
+                };
                 return response;
             }
 
@@ -787,9 +793,15 @@ public partial class PaymentService : ServiceBase
                 tx.ResponseCode,
                 TruncatePaymentStatusMessage(tx.Description));
             order.PaymentSettleStatus = PaymentSettleStatus.Failed;
-            order.ExternalPaymentStatus = tx.Description;
+            order.ExternalPaymentStatus = TruncatePaymentStatusMessage(tx.Description);
             await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
-            response.Data = new FinalizePickingPaymentRes { Outcome = "GatewayDeclined", FinalAmount = finalAmount };
+            response.Data = new FinalizePickingPaymentRes
+            {
+                Outcome = "GatewayDeclined",
+                FinalAmount = finalAmount,
+                Message = tx.Description,
+                GatewayResponseCode = tx.ResponseCode.ToString(),
+            };
             return response;
         }
 
@@ -2988,6 +3000,46 @@ public partial class PaymentService : ServiceBase
     }
 
     /// <summary>Re-fetch GetLpResult and persist token (e.g. order authorized before token was stored).</summary>
+    /// <summary>
+    /// True when the order carries none of the credentials any automatic Cardcom charge path needs:
+    /// no token payload (CardcomPaymentJson), no saved card, no low-profile id to re-fetch from
+    /// Cardcom, and no J5 approval number. Typical for Woo orders created before the giorgio plugin
+    /// started handing over token/approval ("giorgio_owns_cardcom_capture").
+    /// </summary>
+    private static bool OrderHasNoStoredChargeCredentials(Order order) =>
+        string.IsNullOrWhiteSpace(order.CardcomPaymentJson)
+        && string.IsNullOrWhiteSpace(order.CardcomLowProfileId)
+        && string.IsNullOrWhiteSpace(order.CardcomApprovalNumber)
+        && order.CustomerPaymentMethodId is not > 0;
+
+    /// <summary>
+    /// User-facing (Hebrew) explanation for a charge that cannot even be attempted because the order
+    /// has no token and no approval number. Spells out the exact state - including the orphan J5 hold
+    /// when one exists - instead of a generic "no payment token" line.
+    /// </summary>
+    private static string BuildMissingChargeCredentialsMessage(Order order)
+    {
+        var txId = (order.GatewayPaymentTransactionId ?? order.PaymentReference)?.Trim();
+        var holdPart = string.IsNullOrWhiteSpace(txId)
+            ? "לא נמצאה גם עסקת תפיסת מסגרת."
+            : order.PaymentAuthorizedAmount is decimal auth && auth > 0
+                ? $"ב-Cardcom קיימת תפיסת מסגרת בלבד על {auth:0.##} ₪ (עסקה {txId}) - ללא מספר אישור לא ניתן לממש אותה, וייתכן שכבר פגה."
+                : $"ב-Cardcom קיימת תפיסת מסגרת בלבד (עסקה {txId}) - ללא מספר אישור לא ניתן לממש אותה, וייתכן שכבר פגה.";
+
+        return "לא ניתן לחייב אוטומטית: ההזמנה הגיעה מהאתר ללא פרטי חיוב (טוקן ומספר אישור) - " +
+            "ככל הנראה נוצרה לפני עדכון הפלאגין באתר. " + holdPart +
+            " לחיוב ההזמנה: הזנת אשראי ידנית, שליחת קישור תשלום ב-SMS או חיוב טלפוני.";
+    }
+
+    /// <summary>Appends the gateway's own description (when it adds information) to a user-facing message.</summary>
+    private static string AppendGatewayDescription(string message, string? gatewayDescription)
+    {
+        var descr = gatewayDescription?.Trim();
+        if (string.IsNullOrEmpty(descr))
+            return message;
+        return $"{message} (תשובת Cardcom: {descr})";
+    }
+
     private async Task<string?> TryRecoverJ5ApprovalAsync(Order order, CancellationToken cancelToken)
     {
         if (!string.IsNullOrWhiteSpace(order.CardcomApprovalNumber))
@@ -3264,7 +3316,9 @@ public partial class PaymentService : ServiceBase
             EventType = eventType,
             Provider = provider,
             StatusCode = statusCode,
-            Description = description,
+            // Column is NVARCHAR(500); Cardcom can echo huge blobs into Description on bad tokens,
+            // and an overflow here turns a plain decline into a save exception (generic error to the user).
+            Description = description is { Length: > 500 } ? description[..500] : description,
             GatewayTransactionId = gatewayTxId,
             MaskedToken = maskedToken,
             Amount = amount,
@@ -3753,7 +3807,7 @@ public partial class PaymentService : ServiceBase
         if (!isWooChannel)
         {
             return CreateResponse(response, StatusCode.InvalidRequest,
-                "Gateway payment sync is only available for website/WooCommerce orders.");
+                "בדיקת תשלום מול Cardcom זמינה רק להזמנות שהגיעו מהאתר.");
         }
 
         // Keyed on the ORDER's own gateway (not just the site's current provider) so a PayPlus order can
@@ -3780,8 +3834,8 @@ public partial class PaymentService : ServiceBase
             {
                 Outcome = "AlreadyPaid",
                 Message = verifiedMismatch
-                    ? $"Order is marked paid, but Cardcom reports {order.GatewayVerifiedAmount:0.##} ₪ (order total {order.Total:0.##} ₪)."
-                    : "Order is already marked as paid.",
+                    ? $"ההזמנה מסומנת כמשולמת, אך Cardcom מדווחת על חיוב של {order.GatewayVerifiedAmount:0.##} ₪ (סכום ההזמנה {order.Total:0.##} ₪)."
+                    : "ההזמנה כבר מסומנת כמשולמת.",
                 TransactionId = order.GatewayPaymentTransactionId ?? order.PaymentReference,
                 Amount = order.GatewayVerifiedAmount,
                 PaymentStatus = order.PaymentStatus,
@@ -3796,7 +3850,8 @@ public partial class PaymentService : ServiceBase
             response.Data = new SyncGatewayPaymentRes
             {
                 Outcome = "MissingTransactionId",
-                Message = "No gateway transaction id on the order. Cannot query Cardcom.",
+                Message = "להזמנה אין מזהה עסקה של Cardcom, ולכן אין מה לבדוק מולה. " +
+                    "ככל הנראה התשלום לא הושלם באתר - יש לגבות באמצעי אחר (הזנת אשראי ידנית, קישור SMS או חיוב טלפוני).",
                 PaymentStatus = order.PaymentStatus,
                 PaymentSettleStatus = order.PaymentSettleStatus,
             };
@@ -3808,7 +3863,7 @@ public partial class PaymentService : ServiceBase
             response.Data = new SyncGatewayPaymentRes
             {
                 Outcome = "MissingTransactionId",
-                Message = "Gateway transaction id is not a valid Cardcom deal number.",
+                Message = $"מזהה העסקה שנשמר להזמנה (\"{txRaw}\") אינו מספר עסקה תקין של Cardcom, ולכן לא ניתן לבדוק מולה.",
                 TransactionId = txRaw,
                 PaymentStatus = order.PaymentStatus,
                 PaymentSettleStatus = order.PaymentSettleStatus,
@@ -3822,7 +3877,7 @@ public partial class PaymentService : ServiceBase
             response.Data = new SyncGatewayPaymentRes
             {
                 Outcome = "GatewayNotConfigured",
-                Message = "Cardcom is not configured for this site.",
+                Message = "Cardcom אינה מוגדרת כספק הסליקה של אתר זה, ולכן לא ניתן לבדוק את התשלום מולה.",
                 TransactionId = txRaw,
                 PaymentStatus = order.PaymentStatus,
                 PaymentSettleStatus = order.PaymentSettleStatus,
@@ -3838,7 +3893,7 @@ public partial class PaymentService : ServiceBase
             response.Data = new SyncGatewayPaymentRes
             {
                 Outcome = "GatewayNotConfigured",
-                Message = "Cardcom API password is required to sync payment status.",
+                Message = "חסרה סיסמת ה-API של Cardcom בהגדרות האתר - לא ניתן לבדוק את סטטוס התשלום.",
                 TransactionId = txRaw,
                 PaymentStatus = order.PaymentStatus,
                 PaymentSettleStatus = order.PaymentSettleStatus,
@@ -3861,7 +3916,8 @@ public partial class PaymentService : ServiceBase
             response.Data = new SyncGatewayPaymentRes
             {
                 Outcome = "NotCharged",
-                Message = info.Description ?? "Transaction was refunded at Cardcom.",
+                Message = AppendGatewayDescription(
+                    $"העסקה {txRaw} זוכתה ב-Cardcom - ההזמנה אינה מחויבת.", info.Description),
                 TransactionId = txRaw,
                 DealType = info.DealType,
                 Amount = info.Amount,
@@ -3880,10 +3936,19 @@ public partial class PaymentService : ServiceBase
 
         if (info.IsAuthorizationHold && !shouldMarkPaid)
         {
+            // The Cardcom description here is typically "עסקה תקינה" - technically true for a J5
+            // authorization, but read by users as "the charge went through". Spell out the real state.
+            var holdMessage = info.Amount is decimal holdAmount && holdAmount > 0
+                ? $"ההזמנה לא חויבה: Cardcom מדווחת על תפיסת מסגרת בלבד של {holdAmount:0.##} ₪ (עסקה {txRaw}) - זו אינה עסקת חיוב."
+                : $"ההזמנה לא חויבה: Cardcom מדווחת על תפיסת מסגרת בלבד (עסקה {txRaw}) - זו אינה עסקת חיוב.";
+            if (OrderHasNoStoredChargeCredentials(order))
+                holdMessage += " להזמנה אין טוקן או מספר אישור שמורים (הגיעה מהאתר לפני עדכון הפלאגין), ולכן לא ניתן לחייב אותה אוטומטית - " +
+                    "יש לחייב בהזנת אשראי ידנית, קישור תשלום ב-SMS או חיוב טלפוני.";
+
             response.Data = new SyncGatewayPaymentRes
             {
                 Outcome = "AuthorizationHoldOnly",
-                Message = info.Description ?? "Cardcom shows an authorization hold only - not a final charge.",
+                Message = holdMessage,
                 TransactionId = txRaw,
                 DealType = info.DealType,
                 Amount = info.Amount,
@@ -3898,7 +3963,9 @@ public partial class PaymentService : ServiceBase
             response.Data = new SyncGatewayPaymentRes
             {
                 Outcome = info.Success ? "NotCharged" : "GatewayError",
-                Message = info.Description ?? "Cardcom did not confirm a final charge for this transaction.",
+                Message = info.Success
+                    ? AppendGatewayDescription($"Cardcom לא אישרה חיוב סופי לעסקה {txRaw} - ההזמנה לא חויבה.", info.Description)
+                    : AppendGatewayDescription($"שגיאה בבדיקת העסקה {txRaw} מול Cardcom.", info.Description),
                 TransactionId = txRaw,
                 DealType = info.DealType,
                 Amount = info.Amount,
@@ -3906,7 +3973,7 @@ public partial class PaymentService : ServiceBase
                 PaymentSettleStatus = order.PaymentSettleStatus,
             };
             if (!info.Success)
-                return CreateResponse(response, StatusCode.InvalidRequest, response.Data.Message ?? "Cardcom inquiry failed.");
+                return CreateResponse(response, StatusCode.InvalidRequest, response.Data.Message);
             return response;
         }
 

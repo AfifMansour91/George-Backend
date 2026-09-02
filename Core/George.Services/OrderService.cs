@@ -540,12 +540,36 @@ namespace George.Services
             }
         }
 
+        /// <summary>Money already moved for the order (paid / captured / refunded) - Ready may not return to picking.</summary>
+        private static bool IsOrderPaymentChargedOrPaid(Order? order)
+        {
+            if (order == null) return false;
+            var payment = (order.PaymentStatus ?? "").Trim();
+            if (payment.Equals("Paid", StringComparison.OrdinalIgnoreCase)
+                || payment.Equals("Refunded", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (order.PaidAt != null) return true;
+            var settle = (order.PaymentSettleStatus ?? "").Trim();
+            return settle.Equals(PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase)
+                || settle.Equals(PaymentSettleStatus.PartiallyCaptured, StringComparison.OrdinalIgnoreCase)
+                || settle.Equals(PaymentSettleStatus.Refunded, StringComparison.OrdinalIgnoreCase)
+                || settle.Equals(PaymentSettleStatus.PartiallyRefunded, StringComparison.OrdinalIgnoreCase);
+        }
+
         public async Task<IApiResponse<OrderRes>> UpdateOrderAsync(int orderId, UpdateOrderReq req, CancellationToken cancelToken = default)
         {
             var response = new ApiResponse<OrderRes>();
             var beforeUpdate = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
             var previousStatus = beforeUpdate?.Status;
             var previousDeliveryType = beforeUpdate?.DeliveryType;
+            // A paid/charged order must never return from Ready to picking: the charge already matches
+            // the picked totals, and re-finishing picking re-runs the charge/invoice flow on moved money.
+            if (string.Equals(previousStatus, "Ready", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(req.Status, "InTreatment", StringComparison.OrdinalIgnoreCase)
+                && IsOrderPaymentChargedOrPaid(beforeUpdate))
+            {
+                return CreateResponse(response, StatusCode.InvalidRequest, "ההזמנה כבר שולמה - לא ניתן להחזיר לליקוט הזמנה ששולמה.");
+            }
             // המטפל: the first user to take the order into treatment (fills website orders, which have
             // no creating user). Never overwrites a handler stamped at manual-order creation.
             var stampHandler = string.Equals(req.Status, "InTreatment", StringComparison.OrdinalIgnoreCase)

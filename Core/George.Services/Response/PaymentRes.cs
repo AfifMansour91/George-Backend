@@ -24,6 +24,9 @@ public class FinalizePickingPaymentRes
     public string? TransactionId { get; set; }
     public string? InvoiceNumber { get; set; }
     public string? DocumentUrl { get; set; }
+    /// <summary>Gateway decline reason verbatim (e.g. Cardcom Description) so the UI can show the real problem.</summary>
+    public string? Message { get; set; }
+    public string? GatewayResponseCode { get; set; }
 }
 
 public class OrderInvoiceRes
