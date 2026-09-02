@@ -690,6 +690,11 @@ namespace George.Services
                 !string.Equals(beforeUpdate.PaymentMethod, updated.PaymentMethod, StringComparison.OrdinalIgnoreCase))
             {
                 await _paymentService.ClearCardcomOnCashPaymentAsync(updated, cancelToken).ConfigureAwait(false);
+                // Woo orders: mirror the new payment method to the store (the oc-storeos full POST
+                // carries paymentMethod/paymentMethodTitle/payment_label). Skip when a status change
+                // in this same update already scheduled the sync.
+                if (req.Status == null || !ShouldSyncWooCommerceOrderAfterStatusChange(previousStatus, updated.Status))
+                    await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "payment method", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             }
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             if (loaded != null && loaded.CustomerId is int customerId && customerId > 0)
@@ -2298,9 +2303,10 @@ namespace George.Services
                 SummaryRow("הנחת מבצע:", $"<span dir=\"ltr\" style=\"color:#DC2626;\">- {EscapeHtml(Money(summary.PromotionDiscount))}</span>");
             if (summary.ManualDiscount > 0)
                 SummaryRow($"{summary.ManualDiscountLabel}:", $"<span dir=\"ltr\" style=\"color:#DC2626;\">- {EscapeHtml(Money(summary.ManualDiscount))}</span>");
-            SummaryRow("משלוח:", summary.Shipping > 0
+            // Pickup orders: label the row itself "איסוף עצמי" - "משלוח: איסוף עצמי" read like a mistake.
+            SummaryRow(isShipping ? "משלוח:" : "איסוף עצמי:", summary.Shipping > 0
                 ? $"<span dir=\"ltr\">{EscapeHtml(Money(summary.Shipping))}</span>"
-                : $"<span style=\"color:#6B7280;\">{EscapeHtml(deliveryLabel)}</span>");
+                : $"<span style=\"color:#6B7280;\">{EscapeHtml(isShipping ? deliveryLabel : "-")}</span>");
             if (!string.IsNullOrWhiteSpace(payLine))
                 SummaryRow("אמצעי תשלום:", $"<span style=\"color:#6B7280;\">{EscapeHtml(payLine)}</span>");
             SummaryRow("סך הכל:", $"<span dir=\"ltr\">{EscapeHtml(Money(summary.GrandTotal))}</span>", bold: true);
