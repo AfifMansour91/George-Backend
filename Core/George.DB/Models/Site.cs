@@ -189,6 +189,9 @@ public partial class Site
     /// <summary>When true, show the product SKU (מק"ט) on picking-screen lines. Off by default.</summary>
     public bool? ShowSkuInPicking { get; set; }
 
+    /// <summary>When true, the picking screen lists items in the order they appear on the order (like the printed voucher) instead of grouped by category. Off by default.</summary>
+    public bool? PickingSortByOrderLines { get; set; }
+
     /// <summary>Manual-order payment option: מזומן. NULL = enabled (legacy default).</summary>
     public bool? PaymentCashEnabled { get; set; }
 

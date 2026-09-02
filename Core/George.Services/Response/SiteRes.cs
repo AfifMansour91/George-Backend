@@ -83,6 +83,9 @@ namespace George.Services.Response
         /// <summary>When true, show the product SKU (מק"ט) on picking-screen lines. Off by default.</summary>
         public bool? ShowSkuInPicking { get; set; }
 
+        /// <summary>When true, picking lists items in order-line order instead of grouped by category. Off by default.</summary>
+        public bool? PickingSortByOrderLines { get; set; }
+
         /// <summary>Manual-order payment option: מזומן. NULL = enabled.</summary>
         public bool? PaymentCashEnabled { get; set; }
 
