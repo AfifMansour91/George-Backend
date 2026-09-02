@@ -167,8 +167,12 @@ namespace George.Services
             {
                 var brand = await _brandStorage.GetBrandAsync(bid, cancelToken).ConfigureAwait(false);
                 if (brand == null || !BrandAppliesToWooSite(brand, siteId)) continue;
-                if (brand.WooCommerceBrandId.HasValue) continue;
 
+                // Always upsert (even when WooCommerceBrandId is already set): a stored term id can be
+                // stale after the store was rebuilt (Deliz 2026-09-02: local brands held term ids 261-263
+                // while the store's brands taxonomy was empty, so product pushes carried dead ids and the
+                // brand never appeared in WordPress). SyncBrandAsync PUTs the existing id and falls back
+                // to POST + local-id update when the term is gone, healing the mapping.
                 await SyncBrandToWooCommerceAsync(bid, siteId, cancelToken).ConfigureAwait(false);
             }
         }
