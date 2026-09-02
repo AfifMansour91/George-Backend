@@ -201,6 +201,7 @@ namespace George.Data
             if (updated.ShowPickingDeviation.HasValue) dbSite.ShowPickingDeviation = updated.ShowPickingDeviation;
             if (updated.ShowSkuInPicking.HasValue) dbSite.ShowSkuInPicking = updated.ShowSkuInPicking;
             if (updated.PickingSortByOrderLines.HasValue) dbSite.PickingSortByOrderLines = updated.PickingSortByOrderLines;
+            if (updated.ManualOrderRequireSupplyDate.HasValue) dbSite.ManualOrderRequireSupplyDate = updated.ManualOrderRequireSupplyDate;
             if (updated.PaymentCashEnabled.HasValue) dbSite.PaymentCashEnabled = updated.PaymentCashEnabled;
             if (updated.PaymentCreditSmsEnabled.HasValue) dbSite.PaymentCreditSmsEnabled = updated.PaymentCreditSmsEnabled;
             if (updated.PaymentCreditPhoneEnabled.HasValue) dbSite.PaymentCreditPhoneEnabled = updated.PaymentCreditPhoneEnabled;

@@ -192,6 +192,9 @@ public partial class Site
     /// <summary>When true, the picking screen lists items in the order they appear on the order (like the printed voucher) instead of grouped by category. Off by default.</summary>
     public bool? PickingSortByOrderLines { get; set; }
 
+    /// <summary>When true, the new-manual-order screen does not auto-select a supply date and staff must pick one. NULL/0 = auto-default to today.</summary>
+    public bool? ManualOrderRequireSupplyDate { get; set; }
+
     /// <summary>Manual-order payment option: מזומן. NULL = enabled (legacy default).</summary>
     public bool? PaymentCashEnabled { get; set; }
 

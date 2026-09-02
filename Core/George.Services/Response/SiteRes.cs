@@ -86,6 +86,9 @@ namespace George.Services.Response
         /// <summary>When true, picking lists items in order-line order instead of grouped by category. Off by default.</summary>
         public bool? PickingSortByOrderLines { get; set; }
 
+        /// <summary>When true, new-manual-order screen requires staff to pick a supply date (no auto "today"). NULL/0 = auto-default.</summary>
+        public bool? ManualOrderRequireSupplyDate { get; set; }
+
         /// <summary>Manual-order payment option: מזומן. NULL = enabled.</summary>
         public bool? PaymentCashEnabled { get; set; }
 
