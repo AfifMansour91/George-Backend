@@ -150,6 +150,8 @@ namespace George.Data
             dbAcc.Zip = updated.Zip;
             dbAcc.Phone = updated.Phone;
             dbAcc.Website = updated.Website;
+            dbAcc.ManagerName = updated.ManagerName;
+            dbAcc.ManagerEmail = updated.ManagerEmail;
 
             // Update low-stock threshold defaults (null = keep existing, already resolved in service)
             dbAcc.DefaultLowStockThresholdWeighted = updated.DefaultLowStockThresholdWeighted;

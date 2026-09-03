@@ -247,6 +247,12 @@ namespace George.Common.Request
         public string? Phone { get; set; }
         public string? Website { get; set; }
 
+        /// <summary>Manager display name on the account. Null = keep existing.</summary>
+        public string? ManagerName { get; set; }
+
+        /// <summary>Manager email on the account record (does not move the linked user). Null/empty = keep existing.</summary>
+        public string? ManagerEmail { get; set; }
+
         public KioskSettingsReq? KioskSettings { get; set; }
 
         /// <summary>Sprint 2: Notification settings (התראות). When provided, replaces existing.</summary>

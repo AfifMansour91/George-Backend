@@ -240,6 +240,8 @@ namespace George.Services
                 Zip = req.Zip ?? existingAccount.Zip,
                 Phone = req.Phone ?? existingAccount.Phone,
                 Website = req.Website ?? existingAccount.Website,
+                ManagerName = req.ManagerName ?? existingAccount.ManagerName,
+                ManagerEmail = string.IsNullOrWhiteSpace(req.ManagerEmail) ? existingAccount.ManagerEmail : req.ManagerEmail,
                 UpdatedDate = DateTime.UtcNow,
                 DefaultLowStockThresholdWeighted = req.DefaultLowStockThresholdWeighted ?? existingAccount.DefaultLowStockThresholdWeighted,
                 DefaultLowStockThresholdUnits = req.DefaultLowStockThresholdUnits ?? existingAccount.DefaultLowStockThresholdUnits,
