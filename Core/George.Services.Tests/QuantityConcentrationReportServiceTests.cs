@@ -523,4 +523,141 @@ public class QuantityConcentrationReportServiceTests
         Assert.Null(result[0].StockUnits);
         Assert.Equal("ק״ג", result[0].StockUnitLabel);
     }
+
+    /// <summary>
+    /// דוגמת הלקוח: בשר טחון שנמכר לפי 0.5 ק"ג עם וריאציית מגשים -
+    /// כל שילוב מגש+משקל+הערה נשאר שורת הכנה נפרדת עם ספירת הזמנות.
+    /// </summary>
+    [Fact]
+    public void ApplyDetailLineDisplayRules_TrayVariants_KeepsWeightNoteAndOrderCountRowsSeparate()
+    {
+        var p = new Product
+        {
+            Id = 1,
+            Name = "בשר טחון",
+            IsWeighted = true,
+            StockManagementType = new StockManagementType { Name = "quantity" },
+            ProductVariant = new List<ProductVariant>
+            {
+                new()
+                {
+                    Id = 1,
+                    IsDeleted = false,
+                    ProductVariantOptionValue = new List<ProductVariantOptionValue>
+                    {
+                        new() { OptionValue = "מגש 1" },
+                    },
+                },
+                new()
+                {
+                    Id = 2,
+                    IsDeleted = false,
+                    ProductVariantOptionValue = new List<ProductVariantOptionValue>
+                    {
+                        new() { OptionValue = "2 מגשים" },
+                    },
+                },
+            },
+        };
+
+        var lines = new List<QuantityConcentrationLineDto>
+        {
+            new()
+            {
+                LineLabel = "מגש 1",
+                VariantId = 1,
+                WeightPerUnitKg = 0.5m,
+                QuantityKg = 1.5m,
+                QuantityUnits = 3m,
+                OrderCount = 3,
+            },
+            new()
+            {
+                LineLabel = "מגש 1",
+                VariantId = 1,
+                WeightPerUnitKg = 0.5m,
+                QuantityKg = 0.5m,
+                QuantityUnits = 1m,
+                Note = "ללא שומן",
+                OrderCount = 1,
+            },
+            new()
+            {
+                LineLabel = "2 מגשים",
+                VariantId = 2,
+                WeightPerUnitKg = 0.5m,
+                QuantityKg = 0.5m,
+                QuantityUnits = 1m,
+                OrderCount = 1,
+            },
+        };
+
+        var result = QuantityConcentrationReportService.ApplyDetailLineDisplayRules(lines, p);
+
+        Assert.Equal(3, result.Count);
+        Assert.Contains(result, r =>
+            r.LineLabel == "מגש 1" && r.Note == null && r.QuantityKg == 1.5m
+            && r.QuantityUnits == 3m && r.OrderCount == 3 && r.WeightPerUnitKg == 0.5m
+            && r.LineDisplayKind == "variant");
+        Assert.Contains(result, r =>
+            r.LineLabel == "מגש 1" && r.Note == "ללא שומן" && r.QuantityKg == 0.5m
+            && r.QuantityUnits == 1m && r.OrderCount == 1);
+        Assert.Contains(result, r =>
+            r.LineLabel == "2 מגשים" && r.QuantityKg == 0.5m && r.OrderCount == 1);
+    }
+
+    /// <summary>
+    /// אותה וריאציה בשתי בחירות משקל שונות (0.5 מול 1 ק"ג) - שתי שורות הכנה נפרדות, לא מיזוג.
+    /// </summary>
+    [Fact]
+    public void ApplyDetailLineDisplayRules_SameVariantDifferentWeightChoices_StaySeparate()
+    {
+        var p = new Product
+        {
+            Id = 1,
+            Name = "בשר טחון",
+            IsWeighted = true,
+            StockManagementType = new StockManagementType { Name = "quantity" },
+            ProductVariant = new List<ProductVariant>
+            {
+                new()
+                {
+                    Id = 1,
+                    IsDeleted = false,
+                    ProductVariantOptionValue = new List<ProductVariantOptionValue>
+                    {
+                        new() { OptionValue = "מגש 1" },
+                    },
+                },
+            },
+        };
+
+        var lines = new List<QuantityConcentrationLineDto>
+        {
+            new()
+            {
+                LineLabel = "מגש 1",
+                VariantId = 1,
+                WeightPerUnitKg = 0.5m,
+                QuantityKg = 1m,
+                QuantityUnits = 2m,
+                OrderCount = 2,
+            },
+            new()
+            {
+                LineLabel = "מגש 1",
+                VariantId = 1,
+                WeightPerUnitKg = 1m,
+                QuantityKg = 2m,
+                QuantityUnits = 2m,
+                OrderCount = 2,
+            },
+        };
+
+        var result = QuantityConcentrationReportService.ApplyDetailLineDisplayRules(lines, p);
+
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, r => r.WeightPerUnitKg == 0.5m && r.QuantityKg == 1m && r.QuantityUnits == 2m);
+        Assert.Contains(result, r => r.WeightPerUnitKg == 1m && r.QuantityKg == 2m && r.QuantityUnits == 2m);
+    }
 }

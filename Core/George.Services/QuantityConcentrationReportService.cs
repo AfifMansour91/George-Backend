@@ -119,7 +119,7 @@ namespace George.Services
                     .ToList(),
             };
 
-            var buckets = new Dictionary<(int pid, string cutKey, string note), LineBucket>(new LineBucketComparer());
+            var buckets = new Dictionary<(int pid, string cutKey, string note, decimal unitWeightKey), LineBucket>(new LineBucketComparer());
 
             foreach (var o in orders)
             {
@@ -149,7 +149,12 @@ namespace George.Services
                     }
 
                     var cutKey = !string.IsNullOrEmpty(optionLabel) ? AttrDedupeKey(optionLabel) : NoStructuredOptionKey;
-                    var key = (line.ProductId.Value, cutKey, note);
+                    // Weighted lines sold by units split further per weight choice (0.5kg vs 1kg packs of the
+                    // same variant must stay separate prep rows), so the per-unit weight joins the bucket key.
+                    var soldByUnits = IsWeightedSoldByUnits(line);
+                    var gramsPerUnit = soldByUnits ? GramsPerUnitFromOrderItem(line) : 0m;
+                    var unitWeightKey = gramsPerUnit > 0m ? Math.Round(gramsPerUnit / 1000m, 3) : 0m;
+                    var key = (line.ProductId.Value, cutKey, note, unitWeightKey);
                     if (!buckets.TryGetValue(key, out var b))
                     {
                         b = new LineBucket { LineLabel = optionLabel ?? "" };
@@ -159,11 +164,14 @@ namespace George.Services
                     if (variant != null)
                         b.VariantIds.Add(variant.Id);
 
+                    b.OrderIds.Add(o.Id);
                     b.Kg += kg;
                     b.Units += units;
-                    if (IsWeightedSoldByUnits(line))
+                    if (soldByUnits)
                     {
-                        if (b.UnitWeightKg == null && line.LineUnitWeightKg is > 0m)
+                        if (b.UnitWeightKg == null && unitWeightKey > 0m)
+                            b.UnitWeightKg = unitWeightKey;
+                        else if (b.UnitWeightKg == null && line.LineUnitWeightKg is > 0m)
                             b.UnitWeightKg = line.LineUnitWeightKg;
                         else if (b.UnitWeightKg == null && line.UnitWeightGrams is > 0m)
                             b.UnitWeightKg = line.UnitWeightGrams.Value / 1000m;
@@ -186,7 +194,9 @@ namespace George.Services
 
                 decimal sumKg = 0m, sumUnits = 0m;
                 var lines = new List<QuantityConcentrationLineDto>();
-                foreach (var kv in g.OrderBy(x => x.Value.LineLabel, StringComparer.OrdinalIgnoreCase))
+                foreach (var kv in g
+                    .OrderBy(x => x.Value.LineLabel, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(x => x.Key.unitWeightKey))
                 {
                     var b = kv.Value;
                     if (b.Kg > 0m) sumKg += b.Kg;
@@ -202,6 +212,7 @@ namespace George.Services
                         QuantityKg = b.Kg > 0m ? Round2(b.Kg) : null,
                         QuantityUnits = b.Units > 0m ? Round2(b.Units) : null,
                         Note = noteText,
+                        OrderCount = b.OrderIds.Count > 0 ? b.OrderIds.Count : null,
                         ShowUnitsInTotalQuantity = ShowUnitsInTotalQuantityForTotalQtyColumn(p, b.Units),
                         StockKg = lineSk,
                         StockUnits = lineSu,
@@ -262,16 +273,18 @@ namespace George.Services
             public decimal Units;
             public decimal? UnitWeightKg;
             public readonly HashSet<int> VariantIds = new();
+            public readonly HashSet<int> OrderIds = new();
         }
 
-        private sealed class LineBucketComparer : IEqualityComparer<(int pid, string cutKey, string note)>
+        private sealed class LineBucketComparer : IEqualityComparer<(int pid, string cutKey, string note, decimal unitWeightKey)>
         {
-            public bool Equals((int pid, string cutKey, string note) x, (int pid, string cutKey, string note) y) =>
+            public bool Equals((int pid, string cutKey, string note, decimal unitWeightKey) x, (int pid, string cutKey, string note, decimal unitWeightKey) y) =>
                 x.pid == y.pid && string.Equals(x.cutKey, y.cutKey, StringComparison.Ordinal)
-                && string.Equals(x.note, y.note, StringComparison.Ordinal);
+                && string.Equals(x.note, y.note, StringComparison.Ordinal)
+                && x.unitWeightKey == y.unitWeightKey;
 
-            public int GetHashCode((int pid, string cutKey, string note) obj) =>
-                HashCode.Combine(obj.pid, obj.cutKey, obj.note);
+            public int GetHashCode((int pid, string cutKey, string note, decimal unitWeightKey) obj) =>
+                HashCode.Combine(obj.pid, obj.cutKey, obj.note, obj.unitWeightKey);
         }
 
         private static bool LineHasQuantity(OrderItem line)
@@ -408,6 +421,7 @@ namespace George.Services
                         WeightPerUnitKg = wpu is > 0m ? wpu : null,
                         QuantityKg = kg > 0m ? Round2(kg) : null,
                         QuantityUnits = u > 0m ? Round2(u) : null,
+                        OrderCount = MergeOrderCount(list),
                         VariantId = list.Select(x => x.VariantId).FirstOrDefault(x => x is > 0),
                         StockKg = MergeStockField(list, l => l.StockKg),
                         StockUnits = MergeStockField(list, l => l.StockUnits),
@@ -418,33 +432,63 @@ namespace George.Services
                 .ThenBy(x => x.Note ?? "", StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
+        /// <summary>
+        /// Canonical-label merge keeps distinct weight choices apart - a 0.5kg pack and a 1kg pack of the
+        /// same variant are different prep rows (the customer prepares them separately). Lines without a
+        /// known per-unit weight only stand alone when the label really has multiple weight choices -
+        /// with a single (or no) known weight they merge in as before.
+        /// </summary>
         private static List<QuantityConcentrationLineDto> MergeLinesByCanonicalLabel(List<QuantityConcentrationLineDto> lines) =>
             lines
                 .GroupBy(l => (l.Note ?? "", AttrDedupeKey(l.LineLabel.Trim())))
-                .Select(g =>
+                .SelectMany(g =>
                 {
                     var list = g.ToList();
-                    if (list.Count == 1)
-                        return list[0];
-
-                    var kg = list.Sum(x => x.QuantityKg ?? 0m);
-                    var u = list.Sum(x => x.QuantityUnits ?? 0m);
-                    var wpu = list.Select(x => x.WeightPerUnitKg).FirstOrDefault(x => x is > 0m);
-                    var bestLabel = list.OrderByDescending(x => x.LineLabel.Length).First().LineLabel;
-                    return new QuantityConcentrationLineDto
-                    {
-                        LineLabel = bestLabel,
-                        Note = list[0].Note,
-                        WeightPerUnitKg = wpu is > 0m ? wpu : null,
-                        QuantityKg = kg > 0m ? Round2(kg) : null,
-                        QuantityUnits = u > 0m ? Round2(u) : null,
-                        VariantId = list.Select(x => x.VariantId).FirstOrDefault(x => x is > 0),
-                        StockKg = MergeStockField(list, l => l.StockKg),
-                        StockUnits = MergeStockField(list, l => l.StockUnits),
-                    };
+                    var knownWeights = list
+                        .Select(x => x.WeightPerUnitKg)
+                        .Where(w => w is > 0m)
+                        .Distinct()
+                        .ToList();
+                    if (knownWeights.Count <= 1)
+                        return new[] { MergeLineGroup(list) };
+                    return list
+                        .GroupBy(x => x.WeightPerUnitKg is > 0m ? x.WeightPerUnitKg : null)
+                        .Select(sub => MergeLineGroup(sub.ToList()));
                 })
                 .OrderBy(x => x.LineLabel, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(x => x.WeightPerUnitKg ?? 0m)
                 .ToList();
+
+        private static QuantityConcentrationLineDto MergeLineGroup(List<QuantityConcentrationLineDto> list)
+        {
+            if (list.Count == 1)
+                return list[0];
+
+            var kg = list.Sum(x => x.QuantityKg ?? 0m);
+            var u = list.Sum(x => x.QuantityUnits ?? 0m);
+            var wpu = list.Select(x => x.WeightPerUnitKg).FirstOrDefault(x => x is > 0m);
+            var bestLabel = list.OrderByDescending(x => x.LineLabel.Length).First().LineLabel;
+            return new QuantityConcentrationLineDto
+            {
+                LineLabel = bestLabel,
+                Note = list[0].Note,
+                WeightPerUnitKg = wpu is > 0m ? wpu : null,
+                QuantityKg = kg > 0m ? Round2(kg) : null,
+                QuantityUnits = u > 0m ? Round2(u) : null,
+                OrderCount = MergeOrderCount(list),
+                VariantId = list.Select(x => x.VariantId).FirstOrDefault(x => x is > 0),
+                StockKg = MergeStockField(list, l => l.StockKg),
+                StockUnits = MergeStockField(list, l => l.StockUnits),
+            };
+        }
+
+        /// <summary>Upper bound - the same order may appear in more than one merged bucket.</summary>
+        private static int? MergeOrderCount(List<QuantityConcentrationLineDto> list)
+        {
+            if (!list.Any(x => x.OrderCount is > 0))
+                return null;
+            return list.Sum(x => x.OrderCount ?? 0);
+        }
 
         /// <summary>For tests: variation stock enrichment step only.</summary>
         public static List<QuantityConcentrationLineDto> EnrichDetailLinesWithVariationStock(

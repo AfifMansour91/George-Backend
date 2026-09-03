@@ -23,6 +23,8 @@ namespace George.Services.Response
         public decimal? QuantityUnits { get; set; }
         public bool ShowUnitsInTotalQuantity { get; set; } = true;
         public string? Note { get; set; }
+        /// <summary>Distinct orders contributing to this line (prep breakdown: "3 הזמנות").</summary>
+        public int? OrderCount { get; set; }
         /// <summary>Live variant stock (units) when parent uses variation quantity management.</summary>
         public decimal? StockUnits { get; set; }
         public decimal? StockKg { get; set; }
