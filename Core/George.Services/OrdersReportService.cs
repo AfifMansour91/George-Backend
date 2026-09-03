@@ -162,6 +162,7 @@ namespace George.Services
             {
                 TotalOrders = orders.Count,
                 TotalRevenue = orders.Sum(o => o.Total ?? 0m),
+                TotalShippingCost = orders.Sum(o => o.ShippingCost ?? 0m),
             };
 
             foreach (var o in orders)

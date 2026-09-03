@@ -96,6 +96,7 @@ namespace George.Services.Response
     {
         public List<RevenueReportSliceDto> Top { get; set; } = new();
         public int MoreCount { get; set; }
+        public List<RevenueReportSliceDto> All { get; set; } = new();
     }
 
     public class RevenueReportSegmentsDto

@@ -13,6 +13,7 @@ namespace George.Services.Response
     {
         public int TotalOrders { get; set; }
         public decimal TotalRevenue { get; set; }
+        public decimal TotalShippingCost { get; set; }
         public int DeliveriesTotal { get; set; }
         /// <summary>Shipping orders already handed over / delivered (Completed or Delivered).</summary>
         public int DeliveriesFulfilled { get; set; }

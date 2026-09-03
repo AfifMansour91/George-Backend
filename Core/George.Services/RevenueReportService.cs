@@ -675,6 +675,7 @@ namespace George.Services
                 {
                     Top = cityGroups.Take(5).ToList(),
                     MoreCount = Math.Max(0, cityGroups.Count - 5),
+                    All = cityGroups,
                 },
                 CategorySlices = catSorted,
                 CategoryMoreCount = Math.Max(0, catSorted.Count - 5),
