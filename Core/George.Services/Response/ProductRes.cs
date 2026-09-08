@@ -83,6 +83,9 @@ namespace George.Services.Response
         public string? WeightUnit { get; set; } // "kg" | "g" | "ml"
         public List<int> SiteIds { get; set; } = new(); // Empty = all sites
 
+        /// <summary>Last WooCommerce sync outcome per site (only sites with at least one attempt). Single-product GET only.</summary>
+        public List<ProductSiteWooSyncStatusRes>? WooSyncStatuses { get; set; }
+
         // --- MultiSite Phase 2 (override model) ---
         /// <summary>'network' (canonical, shared) or 'local' (managed only on OwnerSiteId).</summary>
         public string? ManagementMode { get; set; }
@@ -135,6 +138,20 @@ namespace George.Services.Response
         public bool LabelSugarFree { get; set; }
 
         public bool LabelLactoseFree { get; set; }
+    }
+
+    /// <summary>Outcome of the last WooCommerce sync of a product to one site's store.</summary>
+    public class ProductSiteWooSyncStatusRes
+    {
+        public int SiteId { get; set; }
+        public string? SiteName { get; set; }
+        public DateTime LastSyncAt { get; set; }
+        public bool Success { get; set; }
+        /// <summary>"created" | "updated" | "adopted" on success.</summary>
+        public string? Action { get; set; }
+        public int? WooCommerceProductId { get; set; }
+        /// <summary>User-facing error of the last failed attempt; null after a success.</summary>
+        public string? Error { get; set; }
     }
 }
 

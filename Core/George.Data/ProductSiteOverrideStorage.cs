@@ -6,6 +6,18 @@ using Microsoft.Extensions.Logging;
 namespace George.Data
 {
     /// <summary>Resolved per-site override values for a product (lookup ids already mapped to names).</summary>
+    /// <summary>Read model of <see cref="ProductSiteWooSyncStatus"/> joined with the site name.</summary>
+    public sealed class ProductSiteWooSyncStatusRow
+    {
+        public int SiteId { get; set; }
+        public string? SiteName { get; set; }
+        public DateTime LastSyncAt { get; set; }
+        public bool Success { get; set; }
+        public string? Action { get; set; }
+        public int? WooCommerceProductId { get; set; }
+        public string? Error { get; set; }
+    }
+
     public sealed class SiteOverrideValues
     {
         public int ProductId { get; set; }
@@ -553,6 +565,85 @@ namespace George.Data
                 row.WooCommerceProductId = wooProductId;
             }
             await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
+        /// <summary>
+        /// Hands this site's claim on a Woo product to <paramref name="toProductId"/>, removing any other
+        /// product's claim on it first. Used by the sync when Woo rejects a CREATE for a duplicate SKU and
+        /// the existing post carries THIS product's name and SKU - i.e. the post is ours, and whoever holds
+        /// the map row no longer matches it (Meshek Basar PT 8/9: post 4047 'עוף טחון' mapped to the asado).
+        /// </summary>
+        public async Task TransferSiteWooProductIdAsync(int siteId, int wooProductId, int toProductId, CancellationToken cancelToken)
+        {
+            var otherClaims = await _dbContext.ProductSiteWooId
+                .Where(x => x.SiteId == siteId && x.WooCommerceProductId == wooProductId && x.ProductId != toProductId)
+                .ToListAsync(cancelToken);
+            if (otherClaims.Count > 0)
+                _dbContext.ProductSiteWooId.RemoveRange(otherClaims);
+
+            var row = await _dbContext.ProductSiteWooId
+                .FirstOrDefaultAsync(x => x.ProductId == toProductId && x.SiteId == siteId, cancelToken);
+            if (row == null)
+                _dbContext.ProductSiteWooId.Add(new ProductSiteWooId { ProductId = toProductId, SiteId = siteId, WooCommerceProductId = wooProductId });
+            else
+                row.WooCommerceProductId = wooProductId;
+            await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
+        /// <summary>Effective SKU of a product on a site: the site override's SKU when set, else the canonical one.</summary>
+        public async Task<string?> GetEffectiveSkuForSiteAsync(int productId, int siteId, CancellationToken cancelToken)
+        {
+            var overrideSku = await _dbContext.ProductSiteOverride
+                .Where(o => o.ProductId == productId && o.SiteId == siteId && !o.IsDeleted)
+                .Select(o => o.Sku)
+                .FirstOrDefaultAsync(cancelToken);
+            if (!string.IsNullOrWhiteSpace(overrideSku))
+                return overrideSku;
+            return await _dbContext.Product
+                .Where(p => p.Id == productId)
+                .Select(p => p.Sku)
+                .FirstOrDefaultAsync(cancelToken);
+        }
+
+        /// <summary>Upsert the outcome of the last Woo sync of (product, site) - see <see cref="ProductSiteWooSyncStatus"/>.</summary>
+        public async Task RecordSiteWooSyncResultAsync(int productId, int siteId, bool success, int? wooProductId, string? action, string? error, CancellationToken cancelToken)
+        {
+            var row = await _dbContext.ProductSiteWooSyncStatus
+                .FirstOrDefaultAsync(x => x.ProductId == productId && x.SiteId == siteId, cancelToken);
+            if (row == null)
+            {
+                row = new ProductSiteWooSyncStatus { ProductId = productId, SiteId = siteId };
+                _dbContext.ProductSiteWooSyncStatus.Add(row);
+            }
+            row.LastSyncAt = DateTime.UtcNow;
+            row.Success = success;
+            row.Action = success ? action : null;
+            if (wooProductId.HasValue)
+                row.WooCommerceProductId = wooProductId;
+            var trimmedError = error?.Trim();
+            row.Error = success || string.IsNullOrEmpty(trimmedError)
+                ? null
+                : (trimmedError.Length > 1000 ? trimmedError[..1000] : trimmedError);
+            await _dbContext.SaveChangesAsync(cancelToken);
+        }
+
+        /// <summary>Last Woo sync outcome per site for a product (sites with no attempt yet are absent).</summary>
+        public async Task<List<ProductSiteWooSyncStatusRow>> GetSiteWooSyncStatusesAsync(int productId, CancellationToken cancelToken)
+        {
+            return await _dbContext.ProductSiteWooSyncStatus
+                .Where(x => x.ProductId == productId)
+                .Join(_dbContext.Site, x => x.SiteId, s => s.Id, (x, s) => new ProductSiteWooSyncStatusRow
+                {
+                    SiteId = x.SiteId,
+                    SiteName = s.SiteName,
+                    LastSyncAt = x.LastSyncAt,
+                    Success = x.Success,
+                    Action = x.Action,
+                    WooCommerceProductId = x.WooCommerceProductId,
+                    Error = x.Error,
+                })
+                .OrderBy(r => r.SiteId)
+                .ToListAsync(cancelToken);
         }
 
         /// <summary>

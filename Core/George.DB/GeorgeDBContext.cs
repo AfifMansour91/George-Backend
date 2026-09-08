@@ -51,6 +51,7 @@ namespace George.DB
 		public virtual DbSet<ProductSiteCategory> ProductSiteCategory { get; set; }
 		public virtual DbSet<ProductSiteImage> ProductSiteImage { get; set; }
 		public virtual DbSet<ProductSiteWooId> ProductSiteWooId { get; set; }
+		public virtual DbSet<ProductSiteWooSyncStatus> ProductSiteWooSyncStatus { get; set; }
 		public virtual DbSet<ProductSiteVariantWooId> ProductSiteVariantWooId { get; set; }
 
 		public virtual DbSet<CategorySiteWooId> CategorySiteWooId { get; set; }
@@ -312,6 +313,19 @@ namespace George.DB
 					.HasForeignKey(d => d.SiteId)
 					.OnDelete(DeleteBehavior.NoAction)
 					.HasConstraintName("FK_ProductSiteWooId_Site");
+			});
+
+			modelBuilder.Entity<ProductSiteWooSyncStatus>(entity =>
+			{
+				entity.ToTable("ProductSiteWooSyncStatus");
+				entity.HasOne(d => d.Product).WithMany()
+					.HasForeignKey(d => d.ProductId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductSiteWooSyncStatus_Product");
+				entity.HasOne(d => d.Site).WithMany()
+					.HasForeignKey(d => d.SiteId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductSiteWooSyncStatus_Site");
 			});
 
 			modelBuilder.Entity<ProductSiteVariantWooId>(entity =>

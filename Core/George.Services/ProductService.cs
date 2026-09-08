@@ -274,6 +274,26 @@ namespace George.Services
                 await ApplyEffectiveSiteValuesAsync(new List<ProductRes> { response.Data }, sid, cancelToken);
             }
 
+            // Last Woo sync outcome per site - the edit page warns the shop when a change never reached the store.
+            try
+            {
+                var syncRows = await _overrideStorage.GetSiteWooSyncStatusesAsync(productId, cancelToken).ConfigureAwait(false);
+                response.Data.WooSyncStatuses = syncRows.Select(r => new ProductSiteWooSyncStatusRes
+                {
+                    SiteId = r.SiteId,
+                    SiteName = r.SiteName,
+                    LastSyncAt = r.LastSyncAt,
+                    Success = r.Success,
+                    Action = r.Action,
+                    WooCommerceProductId = r.WooCommerceProductId,
+                    Error = r.Error,
+                }).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load Woo sync statuses for product {ProductId}", productId);
+            }
+
             return response;
         }
 
@@ -1813,6 +1833,13 @@ namespace George.Services
                         _logger.LogWarning(
                             "Failed to sync product {ProductId} to WooCommerce for site {SiteId}: {Message}",
                             productId, siteId, syncResponse.Data?.Message ?? "Unknown error");
+                        // Per-product failures were already recorded by the products batch; a run that never
+                        // reached the product (category sync, store config) has no row yet - record it here.
+                        if (syncResponse.Data?.Failed == null || !syncResponse.Data.Failed.Any(f => f.ProductId == productId))
+                        {
+                            await RecordWooSyncFailureBestEffortAsync(scope, productId, siteId,
+                                syncResponse.Data?.Message ?? syncResponse.Description ?? "Sync did not run", cancelToken);
+                        }
                     }
                     else
                     {
@@ -1827,7 +1854,21 @@ namespace George.Services
                     _logger.LogError(ex,
                         "Error syncing product {ProductId} to WooCommerce for site {SiteId}",
                         productId, siteId);
+                    await RecordWooSyncFailureBestEffortAsync(scope, productId, siteId, ex.Message, cancelToken);
                 }
+            }
+        }
+
+        private async Task RecordWooSyncFailureBestEffortAsync(IServiceScope scope, int productId, int siteId, string error, CancellationToken cancelToken)
+        {
+            try
+            {
+                var overrideStorage = scope.ServiceProvider.GetRequiredService<ProductSiteOverrideStorage>();
+                await overrideStorage.RecordSiteWooSyncResultAsync(productId, siteId, success: false, wooProductId: null, action: null, error, cancelToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to record Woo sync failure for product {ProductId} site {SiteId}", productId, siteId);
             }
         }
 

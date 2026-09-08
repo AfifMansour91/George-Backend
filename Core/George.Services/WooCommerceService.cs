@@ -1865,6 +1865,20 @@ namespace George.Services
                 });
                 var batchResults = await Task.WhenAll(batchTasks);
                 results.AddRange(batchResults);
+                // Remember each outcome per (product, site) so the product page can show a failed sync
+                // to the shop - a log line alone left "עוף טחון" unsynced for a week (Meshek Basar PT 8/9).
+                foreach (var r in batchResults)
+                {
+                    try
+                    {
+                        await _overrideStorage.RecordSiteWooSyncResultAsync(
+                            r.ProductId, siteId, r.Success, r.WooCommerceId, r.Action, r.Error, cancelToken).ConfigureAwait(false);
+                    }
+                    catch (Exception statusEx)
+                    {
+                        _logger.LogWarning(statusEx, "Woo sync: failed to record sync status for product {ProductId} site {SiteId}", r.ProductId, siteId);
+                    }
+                }
                 progress?.Report(new WooCommerceSyncProgress
                 {
                     Total = idsToSync.Count,
@@ -2597,16 +2611,50 @@ namespace George.Services
                     var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
 
                     var createResponse = await httpClient.PostAsync(createUrl, createContent, cancelToken);
-                    if (!createResponse.IsSuccessStatusCode)
+                    if (createResponse.IsSuccessStatusCode)
+                    {
+                        var created = await JsonSerializer.DeserializeAsync<WooCommerceProductResponse>(
+                            await createResponse.Content.ReadAsStreamAsync(cancelToken),
+                            cancellationToken: cancelToken);
+                        wooCommerceId = created?.id;
+                    }
+                    else
                     {
                         var errorContent = await createResponse.Content.ReadAsStringAsync(cancelToken);
-                        throw new Exception(GetUserFriendlyWooCommerceError((int)createResponse.StatusCode, errorContent));
-                    }
+                        // Duplicate SKU: the store already has a post with our SKU. When that post also carries
+                        // our NAME it is this product - a claim the map lost, or one held by a product whose own
+                        // SKU no longer matches the post (Meshek Basar PT 8/9: post 4047 'עוף טחון' was mapped to
+                        // the asado, so 'עוף טחון' failed with "מק"ט לא תקף או כפול" on every save for a week).
+                        // Adopt it and update in place; a same-SKU post with a different name stays untouched.
+                        int? adoptedWooId = null;
+                        if (createResponse.StatusCode == System.Net.HttpStatusCode.BadRequest &&
+                            errorContent.Contains("product_invalid_sku", StringComparison.OrdinalIgnoreCase))
+                        {
+                            adoptedWooId = await TryAdoptWooProductWithOurSkuAsync(baseUrl, siteId, product, wooProduct, httpClient, cancelToken);
+                        }
+                        if (!adoptedWooId.HasValue)
+                            throw new Exception(GetUserFriendlyWooCommerceError((int)createResponse.StatusCode, errorContent));
 
-                    var created = await JsonSerializer.DeserializeAsync<WooCommerceProductResponse>(
-                        await createResponse.Content.ReadAsStreamAsync(cancelToken),
-                        cancellationToken: cancelToken);
-                    wooCommerceId = created?.id;
+                        // An adopted post is an UPDATE: externally managed prices must not be seeded over it.
+                        if (priceFieldsHeldForCreate != null)
+                            foreach (var pf in priceFieldsHeldForCreate) wooProduct.Remove(pf.Key);
+                        var adoptUrl = $"{baseUrl}/products/{adoptedWooId.Value}";
+                        var adoptContent = new StringContent(JsonSerializer.Serialize(wooProduct), Encoding.UTF8, "application/json");
+                        var adoptResponse = await httpClient.PutAsync(adoptUrl, adoptContent, cancelToken);
+                        if (!adoptResponse.IsSuccessStatusCode)
+                        {
+                            var adoptError = await adoptResponse.Content.ReadAsStringAsync(cancelToken);
+                            _logger.LogError("Woo sync: update of adopted Woo product {WooId} for product {ProductId} on site {SiteId} failed: {Status} {Error}",
+                                adoptedWooId.Value, product.Id, siteId, (int)adoptResponse.StatusCode, adoptError);
+                            throw new Exception(GetUserFriendlyWooCommerceError((int)adoptResponse.StatusCode, adoptError));
+                        }
+                        var adopted = await JsonSerializer.DeserializeAsync<WooCommerceProductResponse>(
+                            await adoptResponse.Content.ReadAsStreamAsync(cancelToken),
+                            cancellationToken: cancelToken);
+                        wooCommerceId = adopted?.id ?? adoptedWooId;
+                        action = "adopted";
+                        updatedExistingWooProduct = true;
+                    }
                 }
 
                 // Persist this store's Woo id PER SITE (so each branch keeps its own id and the next sync targets
@@ -4177,6 +4225,113 @@ namespace George.Services
         /// Images: send id instead of src on update to avoid duplicating in the media library.
         /// Non-variation attributes: re-included on PUT because George does not model them locally (TEMPORARY).
         /// </summary>
+        /// <summary>
+        /// Duplicate-SKU CREATE rescue. Finds the store's post with our SKU and returns its id when the post
+        /// is recognisably THIS product (same SKU and same name), after moving this site's map claim to us.
+        /// A post owned by another George product is taken over only when that owner's own SKU on this site
+        /// no longer matches the post - a stale/crossed claim - never from an owner that still matches.
+        /// Returns null (caller keeps the original error) in every other case.
+        /// </summary>
+        private async Task<int?> TryAdoptWooProductWithOurSkuAsync(
+            string baseUrl,
+            int siteId,
+            Product product,
+            Dictionary<string, object> wooProduct,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            try
+            {
+                var ourSku = (wooProduct.TryGetValue("sku", out var skuObj) ? skuObj?.ToString() : null) ?? product.Sku;
+                ourSku = ourSku?.Trim();
+                if (string.IsNullOrWhiteSpace(ourSku))
+                    return null;
+
+                var wooId = await FindProductIdBySkuAsync(baseUrl, siteId, ourSku, httpClient, cancelToken).ConfigureAwait(false);
+                if (!wooId.HasValue)
+                    return null;
+
+                var live = await GetWooProductNameAndSkuAsync(baseUrl, wooId.Value, httpClient, cancelToken).ConfigureAwait(false);
+                if (live == null || !string.Equals(live.Value.Sku?.Trim(), ourSku, StringComparison.OrdinalIgnoreCase))
+                    return null;
+
+                var ourName = (wooProduct.TryGetValue("name", out var nameObj) ? nameObj?.ToString() : null) ?? product.Name;
+                if (!WooNamesMatchForAdoption(live.Value.Name, ourName) && !WooNamesMatchForAdoption(live.Value.Name, product.Name))
+                {
+                    _logger.LogWarning(
+                        "Woo sync: SKU '{Sku}' of product {ProductId} is on Woo product {WooId} named '{WooName}' (ours: '{OurName}') on site {SiteId}; not adopting a differently named post.",
+                        ourSku, product.Id, wooId.Value, live.Value.Name, ourName, siteId);
+                    return null;
+                }
+
+                var ownerId = await _overrideStorage.GetProductIdBySiteWooProductIdAsync(siteId, wooId.Value, cancelToken).ConfigureAwait(false);
+                if (ownerId.HasValue && ownerId.Value != product.Id)
+                {
+                    var ownerSku = await _overrideStorage.GetEffectiveSkuForSiteAsync(ownerId.Value, siteId, cancelToken).ConfigureAwait(false);
+                    if (string.Equals(ownerSku?.Trim(), ourSku, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogWarning(
+                            "Woo sync: Woo product {WooId} (SKU '{Sku}') on site {SiteId} is owned by product {OwnerId} whose SKU still matches it; product {ProductId} shares that SKU - not adopting.",
+                            wooId.Value, ourSku, siteId, ownerId.Value, product.Id);
+                        return null;
+                    }
+                    _logger.LogWarning(
+                        "Woo sync: adopting Woo product {WooId} '{WooName}' (SKU '{Sku}') on site {SiteId} for product {ProductId}; previous owner {OwnerId} (SKU '{OwnerSku}') no longer matches it.",
+                        wooId.Value, live.Value.Name, ourSku, siteId, product.Id, ownerId.Value, ownerSku);
+                    await _overrideStorage.TransferSiteWooProductIdAsync(siteId, wooId.Value, product.Id, cancelToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "Woo sync: adopting unclaimed Woo product {WooId} '{WooName}' (SKU '{Sku}') on site {SiteId} for product {ProductId}.",
+                        wooId.Value, live.Value.Name, ourSku, siteId, product.Id);
+                    await _overrideStorage.SetSiteWooProductIdAsync(product.Id, siteId, wooId.Value, cancelToken).ConfigureAwait(false);
+                }
+                return wooId;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Woo sync: duplicate-SKU adoption attempt failed for product {ProductId} on site {SiteId}", product.Id, siteId);
+                return null;
+            }
+        }
+
+        /// <summary>Name equality for adoption: whitespace/case-insensitive, and a " | brand" suffix on either side is ignored.</summary>
+        private static bool WooNamesMatchForAdoption(string? wooName, string? ourName)
+        {
+            static string Norm(string? s)
+            {
+                var t = (s ?? string.Empty).Normalize(NormalizationForm.FormKC).Trim();
+                var bar = t.IndexOf(" | ", StringComparison.Ordinal);
+                if (bar > 0) t = t[..bar];
+                return System.Text.RegularExpressions.Regex.Replace(t, @"\s+", " ").Trim().ToLowerInvariant();
+            }
+            var a = Norm(wooName);
+            var b = Norm(ourName);
+            return a.Length > 0 && a == b;
+        }
+
+        private static async Task<(string? Name, string? Sku)?> GetWooProductNameAndSkuAsync(
+            string baseUrl,
+            int wooProductId,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            try
+            {
+                var response = await httpClient.GetAsync($"{baseUrl}/products/{wooProductId}?_fields=id,name,sku", cancelToken);
+                if (!response.IsSuccessStatusCode) return null;
+                var body = await response.Content.ReadAsStringAsync(cancelToken);
+                var product = TryDeserialize<WooCommerceProductGetResponse>(body);
+                if (product == null) return null;
+                return (product.name, product.sku);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private static async Task<WooExistingProductForSync?> GetWooCommerceExistingProductForSyncAsync(
             string baseUrl,
             int wooProductId,
@@ -4732,6 +4887,8 @@ namespace George.Services
         /// <summary>GET product response - includes images with id and src to avoid duplicating on update.</summary>
         private class WooCommerceProductGetResponse
         {
+            public string? name { get; set; }
+            public string? sku { get; set; }
             public List<WooCommerceImageItem>? images { get; set; }
             public List<WooCommerceProductAttributeReadItem>? attributes { get; set; }
         }
