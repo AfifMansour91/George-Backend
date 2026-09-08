@@ -1,6 +1,7 @@
-using George.Api.Core;
+﻿using George.Api.Core;
 using George.Common;
 using George.Services;
+using George.Services.Delivery;
 using George.Services.Request;
 using George.Services.Response;
 using Microsoft.AspNetCore.Authorization;
@@ -15,14 +16,37 @@ namespace George.Api.Controllers
     {
         private readonly SiteService _siteSvc;
         private readonly WoltDispatchService _woltDispatchSvc;
+        private readonly DeliveryDispatchService _deliveryDispatchSvc;
 
         public SiteController(
             SiteService siteSvc,
             WoltDispatchService woltDispatchSvc,
+            DeliveryDispatchService deliveryDispatchSvc,
             ILogger<SiteController> logger) : base(logger)
         {
             _siteSvc = siteSvc;
             _woltDispatchSvc = woltDispatchSvc;
+            _deliveryDispatchSvc = deliveryDispatchSvc;
+        }
+
+        /// <summary>Delivery-provider configs for the site (Integrations page). API keys are masked.</summary>
+        [HttpGet("{siteId:int}/delivery-providers")]
+        [ProducesResponseType(typeof(IApiResponse<List<DeliveryProviderConfigRes>>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetDeliveryProvidersAsync([FromRoute] int siteId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _deliveryDispatchSvc.GetSiteProviderConfigsAsync(siteId, cancelToken));
+        }
+
+        /// <summary>Create-or-update a delivery-provider config. Empty ApiKey keeps the stored key.</summary>
+        [HttpPut("{siteId:int}/delivery-providers/{providerKey}")]
+        [ProducesResponseType(typeof(IApiResponse<DeliveryProviderConfigRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> UpsertDeliveryProviderAsync(
+            [FromRoute] int siteId,
+            [FromRoute] string providerKey,
+            [FromBody] DeliveryProviderConfigReq req,
+            CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _deliveryDispatchSvc.UpsertSiteProviderConfigAsync(siteId, providerKey, req, cancelToken));
         }
 
         [HttpGet]

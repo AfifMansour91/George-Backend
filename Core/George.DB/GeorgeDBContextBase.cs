@@ -38,6 +38,8 @@ public partial class GeorgeDBContextBase : DbContext
 
     public virtual DbSet<ContentOwner> ContentOwner { get; set; }
 
+    public virtual DbSet<DeliveryProviderConfig> DeliveryProviderConfig { get; set; }
+
     public virtual DbSet<GlobalBrand> GlobalBrand { get; set; }
 
     public virtual DbSet<GlobalCategory> GlobalCategory { get; set; }
@@ -53,6 +55,8 @@ public partial class GeorgeDBContextBase : DbContext
     public virtual DbSet<Order> Order { get; set; }
 
     public virtual DbSet<OrderItem> OrderItem { get; set; }
+
+    public virtual DbSet<OrderDeliveryDispatch> OrderDeliveryDispatch { get; set; }
 
     public virtual DbSet<Promotion> Promotion { get; set; }
 

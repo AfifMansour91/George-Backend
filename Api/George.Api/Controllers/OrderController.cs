@@ -1,6 +1,7 @@
-using George.Api.Core;
+﻿using George.Api.Core;
 using George.Common;
 using George.Services;
+using George.Services.Delivery;
 using George.Services.Request;
 using George.Services.Response;
 using Microsoft.AspNetCore.Mvc;
@@ -14,14 +15,36 @@ namespace George.Api.Controllers
     {
         private readonly OrderService _orderSvc;
         private readonly WoltDispatchService _woltDispatchSvc;
+        private readonly DeliveryDispatchService _deliveryDispatchSvc;
 
         public OrderController(
             OrderService orderSvc,
             WoltDispatchService woltDispatchSvc,
+            DeliveryDispatchService deliveryDispatchSvc,
             ILogger<OrderController> logger) : base(logger)
         {
             _orderSvc = orderSvc;
             _woltDispatchSvc = woltDispatchSvc;
+            _deliveryDispatchSvc = deliveryDispatchSvc;
+        }
+
+        /// <summary>Delivery-provider dispatch rows of the order (status, tracking, errors).</summary>
+        [HttpGet("{orderId:int}/delivery-dispatches")]
+        [ProducesResponseType(typeof(IApiResponse<List<OrderDeliveryDispatchRes>>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetDeliveryDispatchesAsync([FromRoute] int orderId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _deliveryDispatchSvc.GetDispatchesForOrderAsync(orderId, cancelToken));
+        }
+
+        /// <summary>Manual retry of a failed delivery dispatch (courier task create).</summary>
+        [HttpPost("{orderId:int}/delivery-dispatches/{providerKey}/retry")]
+        [ProducesResponseType(typeof(IApiResponse<OrderDeliveryDispatchRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> RetryDeliveryDispatchAsync(
+            [FromRoute] int orderId,
+            [FromRoute] string providerKey,
+            CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _deliveryDispatchSvc.RetryDispatchAsync(orderId, providerKey, cancelToken));
         }
 
         [HttpGet]

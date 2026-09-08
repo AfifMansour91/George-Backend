@@ -394,6 +394,7 @@ namespace George.Api.Core
 			services.AddScoped<AttributeStorage>();
 			services.AddScoped<MediaStorage>();
 			services.AddScoped<OrderStorage>();
+			services.AddScoped<DeliveryDispatchStorage>();
 			services.AddScoped<PromotionStorage>();
 			services.AddScoped<IntegrationLogStorage>();
 			services.AddSingleton<George.Services.IntegrationLogQueue>();
@@ -459,6 +460,9 @@ namespace George.Api.Core
 			services.AddScoped<TemplateProductService>();
 			services.AddScoped<WooCommerceService>();
 			services.AddScoped<WoltDispatchService>();
+			// Delivery-provider abstraction: orchestrator + one registration per courier company.
+			services.AddScoped<George.Services.Delivery.DeliveryDispatchService>();
+			services.AddScoped<George.Services.Delivery.IDeliveryProvider, George.Services.Delivery.LionWheelDeliveryProvider>();
 			services.AddScoped<KioskCustomerService>();
 
 			// Let the derived add its own dependencies.

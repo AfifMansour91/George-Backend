@@ -392,6 +392,29 @@ public partial class Order
     [Column(TypeName = "nvarchar(max)")]
     public string? WoltDeliveryJson { get; set; }
 
+    /// <summary>Delivery-provider abstraction: latest dispatch state, denormalized for list views.
+    /// Full per-attempt history lives in OrderDeliveryDispatch.</summary>
+    [StringLength(30)]
+    public string? DeliveryProviderKey { get; set; }
+
+    /// <summary>External task/delivery id at the provider.</summary>
+    [StringLength(64)]
+    public string? DeliveryProviderTaskId { get; set; }
+
+    [StringLength(500)]
+    public string? DeliveryProviderTrackingLink { get; set; }
+
+    /// <summary>dispatched | failed | cancelled | courier statuses from webhooks (assigned/active/completed/...).</summary>
+    [StringLength(30)]
+    public string? DeliveryProviderStatus { get; set; }
+
+    /// <summary>Last dispatch error (visible in UI when status is failed).</summary>
+    [StringLength(500)]
+    public string? DeliveryProviderError { get; set; }
+
+    [Precision(0)]
+    public DateTime? DeliveryProviderDispatchedAt { get; set; }
+
     [ForeignKey(nameof(CustomerPaymentMethodId))]
     public virtual CustomerPaymentMethod? CustomerPaymentMethod { get; set; }
 

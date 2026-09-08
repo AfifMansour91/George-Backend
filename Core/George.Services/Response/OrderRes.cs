@@ -151,6 +151,15 @@ public class OrderRes
     public string? WoltDeliveryId { get; set; }
     public DateTime? WoltDispatchedAt { get; set; }
 
+    /// <summary>Delivery-provider abstraction: latest dispatch state (LionWheel etc.).</summary>
+    public string? DeliveryProviderKey { get; set; }
+    public string? DeliveryProviderTaskId { get; set; }
+    public string? DeliveryProviderTrackingLink { get; set; }
+    /// <summary>dispatched | failed | cancelled | courier statuses from webhooks.</summary>
+    public string? DeliveryProviderStatus { get; set; }
+    public string? DeliveryProviderError { get; set; }
+    public DateTime? DeliveryProviderDispatchedAt { get; set; }
+
     /// <summary>Sum of line-level promotion discounts (NIS).</summary>
     public decimal? PromotionDiscountTotal { get; set; }
 

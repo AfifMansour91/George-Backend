@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
@@ -302,6 +302,8 @@ namespace George.Services
                 newStatus: created.Status,
                 occurredAtUtc: created.CreationTime,
                 cancelToken).ConfigureAwait(false);
+            // LionWheel courier: "on order entry" trigger fires here (manual order creation).
+            ScheduleDeliveryDispatch(created.Id, created.Status);
             var loaded = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken);
             await TryApplyCompletionInventoryWhenOrderCompletedAsync(created.Id, previousStatus: null, loaded, cancelToken).ConfigureAwait(false);
             await TryApplyInternalOrderCatalogOnCreateAsync(loaded!, cancelToken).ConfigureAwait(false);
@@ -685,6 +687,11 @@ namespace George.Services
                 }
                 if (ShouldSyncWooCommerceOrderAfterStatusChange(previousStatus, updated.Status))
                     await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "order status", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
+                // LionWheel courier: dispatch when reaching the configured trigger status; cancel the task on cancel.
+                if (string.Equals(updated.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+                    ScheduleDeliveryCancel(orderId);
+                else
+                    ScheduleDeliveryDispatch(orderId, updated.Status);
             }
             if (req.PaymentMethod != null && beforeUpdate != null &&
                 !string.Equals(beforeUpdate.PaymentMethod, updated.PaymentMethod, StringComparison.OrdinalIgnoreCase))
@@ -789,6 +796,8 @@ namespace George.Services
                 DateTime.UtcNow,
                 cancelToken).ConfigureAwait(false);
             await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, order, "order cancel", statusOverrideForWcRest: "cancelled", cancelToken).ConfigureAwait(false);
+            // LionWheel courier: cancel the delivery task when the order is cancelled.
+            ScheduleDeliveryCancel(orderId);
             await LogOrderEventAsync(IntegrationLogOperation.Cancel, IntegrationLogDirection.Internal, order.SiteId, order.Id, order.ExternalOrderId, true,
                 requestJson: OrderLogSnapshot(order), cancelToken: cancelToken).ConfigureAwait(false);
             response.Data = _mapper.Map<OrderRes>(order);
@@ -1087,6 +1096,44 @@ namespace George.Services
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "WooCommerce/oc-storeos order sync failed for order {OrderId}", orderIdCapture);
+                }
+            }, CancellationToken.None);
+        }
+
+        /// <summary>
+        /// Delivery-provider dispatch/cancel runs in the background (same pattern as the Woo store sync)
+        /// so a slow or down courier API never delays order creation, status changes, or cancellation.
+        /// </summary>
+        private void ScheduleDeliveryDispatch(int orderId, string? newStatus)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await using var scope = _serviceScopeFactory.CreateAsyncScope();
+                    var dispatch = scope.ServiceProvider.GetRequiredService<Delivery.DeliveryDispatchService>();
+                    await dispatch.TryDispatchOnStatusAsync(orderId, newStatus, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Delivery background dispatch failed for order {OrderId}", orderId);
+                }
+            }, CancellationToken.None);
+        }
+
+        private void ScheduleDeliveryCancel(int orderId)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await using var scope = _serviceScopeFactory.CreateAsyncScope();
+                    var dispatch = scope.ServiceProvider.GetRequiredService<Delivery.DeliveryDispatchService>();
+                    await dispatch.TryCancelForOrderAsync(orderId, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Delivery background cancel failed for order {OrderId}", orderId);
                 }
             }, CancellationToken.None);
         }
@@ -2097,6 +2144,8 @@ namespace George.Services
                 newStatus: created.Status,
                 occurredAtUtc: created.CreationTime,
                 cancelToken).ConfigureAwait(false);
+            // LionWheel courier: "on order entry" trigger fires here (incoming website order).
+            ScheduleDeliveryDispatch(created.Id, created.Status);
             var loadedOrder = await _orderStorage.GetOrderByIdAsync(created.Id, cancelToken).ConfigureAwait(false);
             if (loadedOrder != null)
                 await TryApplyEmbeddedWooCommerceGatewayPaymentAsync(loadedOrder, payload, cancelToken).ConfigureAwait(false);
