@@ -18,6 +18,8 @@ public class OrderItemRes
 
     /// <summary>True after ליקוט explicitly saved this line; false when quantity is only DB baseline for inventory.</summary>
     public bool PickingUserConfirmed { get; set; }
+    /// <summary>פחת (%) folded into <see cref="TotalPrice"/> at picking; null when none.</summary>
+    public decimal? DepreciationPercent { get; set; }
     public string? Notes { get; set; }
     public string? SaleUnits { get; set; }
     public string? SaleTotalWeight { get; set; }

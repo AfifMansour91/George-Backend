@@ -503,7 +503,7 @@ namespace George.Data
         /// <summary>Save picked quantity (and optional line total) for order items (שמור וצא).</summary>
         public async Task<Order?> UpdatePickingAsync(
             int orderId,
-            List<(int OrderItemId, decimal? PickedQuantity, decimal? TotalPrice, bool? PickingUserConfirmed, string? Notes)> updates,
+            List<(int OrderItemId, decimal? PickedQuantity, decimal? TotalPrice, bool? PickingUserConfirmed, string? Notes, decimal? DepreciationPercent)> updates,
             CancellationToken cancelToken,
             int? pickerUserId = null,
             string? pickerName = null)
@@ -528,7 +528,7 @@ namespace George.Data
                 }
             }
             var itemMap = db.OrderItem?.ToDictionary(i => i.Id) ?? new Dictionary<int, OrderItem>();
-            foreach (var (orderItemId, pickedQty, totalPrice, confirmFromClient, notes) in updates)
+            foreach (var (orderItemId, pickedQty, totalPrice, confirmFromClient, notes, depreciationPercent) in updates)
             {
                 if (!itemMap.TryGetValue(orderItemId, out var item)) continue;
                 var prevPicked = item.PickedQuantity;
@@ -551,6 +551,8 @@ namespace George.Data
 
                 item.PickedQuantity = pickedQty;
                 item.TotalPrice = totalPrice;
+                // פחת travels with the total it was folded into: a re-pick without it clears the stamp.
+                item.DepreciationPercent = depreciationPercent is > 0m ? depreciationPercent : null;
 
                 // Per-line note edited during picking. Null = leave existing untouched; "" clears it. Bug #7.
                 if (notes != null)

@@ -81,6 +81,8 @@ public class CreateOrderItemReq
     public decimal? UnitWeightGrams { get; set; }
     public decimal? PricePerUnit { get; set; }
     public decimal? TotalPrice { get; set; }
+    /// <summary>פחת (%) already folded into <see cref="TotalPrice"/> by the shop UI. Null = none.</summary>
+    public decimal? DepreciationPercent { get; set; }
     public string? Notes { get; set; }
     /// <summary>WooCommerce line snapshot.</summary>
     public string? SaleUnits { get; set; }
@@ -113,6 +115,8 @@ public class UpdatePickingItemReq
     public int OrderItemId { get; set; }
     public decimal? PickedQuantity { get; set; }
     public decimal? TotalPrice { get; set; }
+    /// <summary>פחת (%) the picker applied - already included in <see cref="TotalPrice"/>. Persisted as sent (null clears).</summary>
+    public decimal? DepreciationPercent { get; set; }
     /// <summary>When set from shop picking UI, persisted as-is. When null, server sets confirmed only if picked/total changed vs DB (legacy clients).</summary>
     public bool? PickingUserConfirmed { get; set; }
     /// <summary>Per-line note edited during picking. Null = leave existing note untouched; "" clears it. Bug #7.</summary>

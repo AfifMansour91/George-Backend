@@ -123,6 +123,14 @@ public partial class OrderItem
     /// </summary>
     public bool PickingUserConfirmed { get; set; }
 
+    /// <summary>
+    /// פחת (%) the picker applied to this line's charged total (weighed-after-cleaning lines,
+    /// <c>Site.DepreciationEnabled</c>). <see cref="TotalPrice"/> already includes it; kept so
+    /// invoices/UI can explain why total ÷ picked weight exceeds the catalog ₪/kg. Null = none.
+    /// </summary>
+    [Column(TypeName = "decimal(5, 2)")]
+    public decimal? DepreciationPercent { get; set; }
+
     // ─── Sprint 4: promotion linkage ────────────────────────────────────────
     /// <summary>
     /// Promotion that discounted this line at order finalize time. Null when no promo

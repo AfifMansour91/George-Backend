@@ -180,6 +180,10 @@ public static class CardcomDocumentBuilder
                 }.Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
             if (string.IsNullOrWhiteSpace(description))
                 description = "פריט";
+            // The unit price above is re-derived from the charged total, so a line picked with פחת
+            // prints a ₪/kg above the catalog price (3.21 kg × ₪150 for a ₪120 fish). Say why.
+            if (item.DepreciationPercent is > 0m)
+                description += $" (כולל פחת {item.DepreciationPercent.Value:0.##}%)";
 
             if (description.Length > 250)
                 description = description[..250];

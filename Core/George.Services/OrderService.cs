@@ -1004,7 +1004,7 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.InvalidRequest, "Cannot update picking for a cancelled order.");
             var updates = req.Items
                 .Where(i => i.OrderItemId > 0)
-                .Select(i => (i.OrderItemId, i.PickedQuantity, i.TotalPrice, i.PickingUserConfirmed, i.Notes))
+                .Select(i => (i.OrderItemId, i.PickedQuantity, i.TotalPrice, i.PickingUserConfirmed, i.Notes, i.DepreciationPercent))
                 .ToList();
             // Record who picked (לוקט): the staff member saving picking.
             var pickerUserId = AuthUser.Id.IsValidID() ? AuthUser.Id : (int?)null;
@@ -1015,7 +1015,7 @@ namespace George.Services
             if (updated == null) return CreateResponse(response, StatusCode.ItemNotFound);
 
             var stockPushProductIds = new List<int>();
-            foreach (var (orderItemId, newPicked, _, _, _) in updates)
+            foreach (var (orderItemId, newPicked, _, _, _, _) in updates)
             {
                 var line = orderCheck.OrderItem?.FirstOrDefault(i => i.Id == orderItemId && !i.IsDeleted);
                 if (line == null || line.ProductId is not > 0) continue;
@@ -3192,6 +3192,7 @@ namespace George.Services
                 }
                 line.PickedQuantity = prev.PickedQuantity;
                 line.TotalPrice = prev.TotalPrice;
+                line.DepreciationPercent = prev.DepreciationPercent;
                 line.PickingUserConfirmed = prev.PickingUserConfirmed;
             }
         }
