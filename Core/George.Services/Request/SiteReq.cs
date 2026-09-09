@@ -73,6 +73,10 @@ namespace George.Services.Request
 
         /// <summary>When true, print bag labels automatically after picking completes.</summary>
         public bool? PrintLabelsAfterPicking { get; set; }
+        /// <summary>When true, the customer sticker prints automatically when a new order arrives.</summary>
+        public bool? PrintCustomerLabelOnNewOrder { get; set; }
+        /// <summary>When true, unpaid credit orders are hidden from the treatment board until payment is authorized.</summary>
+        public bool? HideUnpaidCreditOrdersInTreatment { get; set; }
 
         // Promotion settings (Sprint 4)
         /// <summary>"same_price" | "full_price" (default). Default for BxPY over-quantity pricing.</summary>

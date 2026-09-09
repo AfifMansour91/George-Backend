@@ -153,6 +153,12 @@ public partial class Site
     /// <summary>When true, print bag labels automatically when picking is completed.</summary>
     public bool? PrintLabelsAfterPicking { get; set; }
 
+    /// <summary>When true, the customer sticker (LabelCustomer) prints automatically when a new order arrives (Zano 2026-09-10).</summary>
+    public bool? PrintCustomerLabelOnNewOrder { get; set; }
+
+    /// <summary>When true, credit orders whose payment is not yet authorized/captured stay off the treatment board (Zano 2026-09-10).</summary>
+    public bool? HideUnpaidCreditOrdersInTreatment { get; set; }
+
     /// <summary>
     /// Promotion settings (Sprint 4 - `Sprint4/מבצעים.md` "הגדרות מבצעים").
     /// Default for BxPY over-quantity pricing: "same_price" (pro-rated) | "full_price" (regular). Null = "full_price".

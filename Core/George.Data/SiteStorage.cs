@@ -206,6 +206,8 @@ namespace George.Data
             if (updated.LabelPrinterName != null) dbSite.LabelPrinterName = updated.LabelPrinterName;
             dbSite.LabelPrinterUseAgent = updated.LabelPrinterUseAgent;
             if (updated.PrintLabelsAfterPicking.HasValue) dbSite.PrintLabelsAfterPicking = updated.PrintLabelsAfterPicking;
+            if (updated.PrintCustomerLabelOnNewOrder.HasValue) dbSite.PrintCustomerLabelOnNewOrder = updated.PrintCustomerLabelOnNewOrder;
+            if (updated.HideUnpaidCreditOrdersInTreatment.HasValue) dbSite.HideUnpaidCreditOrdersInTreatment = updated.HideUnpaidCreditOrdersInTreatment;
             if (updated.AskBagsCountAtPickingFinish.HasValue) dbSite.AskBagsCountAtPickingFinish = updated.AskBagsCountAtPickingFinish;
             if (updated.ConfirmPickingAfterScan.HasValue) dbSite.ConfirmPickingAfterScan = updated.ConfirmPickingAfterScan;
             if (updated.ShowPickingDeviation.HasValue) dbSite.ShowPickingDeviation = updated.ShowPickingDeviation;

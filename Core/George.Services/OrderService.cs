@@ -2202,16 +2202,47 @@ namespace George.Services
             var immediatePrintEnabled = isFutureOrder
                 ? site.PrintFutureImmediate == true
                 : site.PrintNewOrderImmediate == true;
-            if (!immediatePrintEnabled)
-                return;
+            if (immediatePrintEnabled)
+            {
+                // Future orders share the kanban's job key ("VoucherAuto:FutureImmediate") so the backend
+                // enqueue and the open-kanban frontend enqueue dedupe to ONE job via the (siteId, orderId,
+                // jobType) idempotency - with distinct keys a future Woo order printed twice.
+                await EnqueueAutoVoucherPrintAsync(site, order,
+                    isFutureOrder ? "VoucherAuto:FutureImmediate" : "VoucherAuto:NewImmediate",
+                    isFutureOrder ? "FutureImmediate" : "NewImmediate",
+                    "Backend:OrderService", cancelToken).ConfigureAwait(false);
+            }
 
-            // Future orders share the kanban's job key ("VoucherAuto:FutureImmediate") so the backend
-            // enqueue and the open-kanban frontend enqueue dedupe to ONE job via the (siteId, orderId,
-            // jobType) idempotency - with distinct keys a future Woo order printed twice.
-            await EnqueueAutoVoucherPrintAsync(site, order,
-                isFutureOrder ? "VoucherAuto:FutureImmediate" : "VoucherAuto:NewImmediate",
-                isFutureOrder ? "FutureImmediate" : "NewImmediate",
-                "Backend:OrderService", cancelToken).ConfigureAwait(false);
+            // Site.PrintCustomerLabelOnNewOrder (Zano): the customer sticker prints on arrival, independent
+            // of the voucher toggles. "Label*" job types are routed by the agent to the label printer.
+            if (site.PrintCustomerLabelOnNewOrder == true)
+                await EnqueueNewOrderCustomerLabelPrintAsync(site, order, cancelToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Enqueues the customer sticker (server-side twin of the frontend LabelCustomer print) under the
+        /// idempotent job type <c>LabelAuto:NewOrderCustomer</c>; wide layout when Site.CustomerLabelWideFormat.
+        /// </summary>
+        private async Task EnqueueNewOrderCustomerLabelPrintAsync(Site site, Order order, CancellationToken cancelToken)
+        {
+            const string jobType = "LabelAuto:NewOrderCustomer";
+            try
+            {
+                var payload = CustomerLabelHtml.Build(order, site.CustomerLabelWideFormat == true);
+                await _printJobService.CreateAsync(new CreatePrintJobReq
+                {
+                    SiteId = order.SiteId,
+                    OrderId = order.Id,
+                    JobType = jobType,
+                    Trigger = "NewOrder",
+                    ClientSource = "Backend:OrderService",
+                    Payload = payload
+                }, cancelToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to enqueue auto label print job ({JobType}) for order {OrderId}.", jobType, order.Id);
+            }
         }
 
         /// <summary>Backend twin of the kanban's "VoucherAuto:MovedToTreatment" print (Site.PrintMovedToTreatment).</summary>

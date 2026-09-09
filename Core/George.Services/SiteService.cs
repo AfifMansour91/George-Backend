@@ -151,6 +151,8 @@ namespace George.Services
                 ? req.LabelPrinterUseAgent.Value
                 : existingSite.LabelPrinterUseAgent;
             if (req.PrintLabelsAfterPicking.HasValue) model.PrintLabelsAfterPicking = req.PrintLabelsAfterPicking;
+            if (req.PrintCustomerLabelOnNewOrder.HasValue) model.PrintCustomerLabelOnNewOrder = req.PrintCustomerLabelOnNewOrder;
+            if (req.HideUnpaidCreditOrdersInTreatment.HasValue) model.HideUnpaidCreditOrdersInTreatment = req.HideUnpaidCreditOrdersInTreatment;
             model = await _siteStorage.UpdateSiteAsync(model, req.BusinessTypeIds, cancelToken).ConfigureAwait(false);
             if (model != null)
             {

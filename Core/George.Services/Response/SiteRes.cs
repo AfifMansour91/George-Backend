@@ -61,6 +61,8 @@ namespace George.Services.Response
         public string? LabelPrinterName { get; set; }
         public bool? LabelPrinterUseAgent { get; set; }
         public bool? PrintLabelsAfterPicking { get; set; }
+        public bool? PrintCustomerLabelOnNewOrder { get; set; }
+        public bool? HideUnpaidCreditOrdersInTreatment { get; set; }
 
         // Promotion settings (Sprint 4)
         /// <summary>"same_price" | "full_price" (default). Default for BxPY over-quantity pricing.</summary>
