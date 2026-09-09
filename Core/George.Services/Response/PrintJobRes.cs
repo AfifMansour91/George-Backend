@@ -17,4 +17,7 @@ public class PrintJobRes
     public DateTime? PrintedAt { get; set; }
     public string? AgentId { get; set; }
     public string? ErrorMessage { get; set; }
+
+    /// <summary>True when the create request matched a job already in the queue (nothing new was enqueued).</summary>
+    public bool AlreadyQueued { get; set; }
 }

@@ -14,6 +14,7 @@ public class PaymentStorage : StorageBase
     public async Task<Order?> GetOrderForPaymentAsync(int orderId, CancellationToken cancelToken) =>
         await _dbContext.Order
             .Include(o => o.Site)
+            .Include(o => o.Customer)
             .Include(o => o.CustomerPaymentMethod)
             .Include(o => o.OrderItem.Where(i => !i.IsDeleted))
             .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);

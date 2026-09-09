@@ -272,6 +272,27 @@ namespace George.Data
                 .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
         }
 
+        /// <summary>
+        /// Open orders (New / InTreatment) of a site scheduled for <paramref name="calendarDate"/> - pickup date
+        /// for pickup orders, delivery date otherwise - that were created BEFORE that day (same-day orders were
+        /// already printed on arrival). Feeds the "print future orders at HH:mm" scheduler.
+        /// </summary>
+        public async Task<List<Order>> GetOpenOrdersScheduledForDateAsync(int siteId, DateTime calendarDate, CancellationToken cancelToken)
+        {
+            var dayStart = calendarDate.Date;
+            var dayEnd = dayStart.AddDays(1);
+            return await _dbContext.Order
+                .Include(o => o.Site)
+                .Include(o => o.OrderItem.OrderBy(i => i.SortOrder))
+                .AsNoTracking()
+                .Where(o => !o.IsDeleted && o.SiteId == siteId
+                    && (o.Status == "New" || o.Status == "InTreatment")
+                    && ((o.DeliveryType == "Pickup" && o.PickupDate != null && o.PickupDate >= dayStart && o.PickupDate < dayEnd)
+                        || (o.DeliveryType != "Pickup" && o.DeliveryDate != null && o.DeliveryDate >= dayStart && o.DeliveryDate < dayEnd)))
+                .OrderBy(o => o.Id)
+                .ToListAsync(cancelToken);
+        }
+
         /// <summary>Tracked load for in-place promotion recalc during picking.</summary>
         public async Task<Order?> GetOrderByIdTrackedAsync(int orderId, CancellationToken cancelToken)
         {

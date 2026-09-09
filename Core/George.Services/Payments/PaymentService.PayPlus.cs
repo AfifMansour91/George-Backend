@@ -303,21 +303,33 @@ public partial class PaymentService
             if (unit is null or <= 0 && lineTotal is > 0)
                 unit = Math.Round(lineTotal.Value / qty, 2, MidpointRounding.AwayFromZero);
             if (unit is null or <= 0) continue;
-            if (lineTotal is > 0 && Math.Abs(Math.Round(unit.Value * qty, 2, MidpointRounding.AwayFromZero) - lineTotal.Value) >= 0.01m)
+            // פחת = gross weight at the catalog rate (see CardcomDocumentBuilder): 4.0125 kg × ₪120, not 3.21 × ₪150.
+            var depreciationNet = (decimal?)null;
+            if (i.DepreciationPercent is > 0m && i.PricePerUnit is > 0m && lineTotal is > 0m)
+            {
+                depreciationNet = qty;
+                qty = Math.Round(lineTotal.Value / i.PricePerUnit.Value, 4, MidpointRounding.AwayFromZero);
+                unit = i.PricePerUnit.Value;
+            }
+            else if (lineTotal is > 0 && Math.Abs(Math.Round(unit.Value * qty, 2, MidpointRounding.AwayFromZero) - lineTotal.Value) >= 0.01m)
                 unit = Math.Round(lineTotal.Value / qty, 2, MidpointRounding.AwayFromZero);
             var description = string.Join(" - ", new[] { i.Title, i.VariantTitle }.Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
             if (string.IsNullOrWhiteSpace(description)) description = "פריט";
             if (i.DepreciationPercent is > 0m)
-                description += $" (כולל פחת {i.DepreciationPercent.Value:0.##}%)";
+                description += depreciationNet.HasValue
+                    ? $" (כולל פחת {i.DepreciationPercent.Value:0.##}%, משקל נטו {depreciationNet.Value:0.###} ק\"ג)"
+                    : $" (כולל פחת {i.DepreciationPercent.Value:0.##}%)";
             items.Add(new PayPlusDocumentProductLine { Description = description, Quantity = qty, UnitCost = unit.Value });
         }
         if (order.ShippingCost is > 0m)
             items.Add(new PayPlusDocumentProductLine { Description = "משלוח", Quantity = 1, UnitCost = order.ShippingCost.Value });
 
+        var (recipientName, recipientTaxId) = InvoiceRecipient.Resolve(order);
         return new PayPlusTransactionDocument
         {
             DocType = docType,
-            Name = order.CustomerName,
+            Name = recipientName ?? order.CustomerName,
+            TaxId = recipientTaxId,
             Email = order.CustomerEmail,
             Phone = order.CustomerPhone,
             AddressLine1 = order.DeliveryAddress,

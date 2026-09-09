@@ -756,6 +756,15 @@ namespace George.Services
             {
                 await TrySendOrderReadyCustomerSmsAsync(loaded, cancelToken).ConfigureAwait(false);
             }
+            // Site.PrintMovedToTreatment ("הדפס במעבר לטיפול") server-side: the kanban only printed when the
+            // move was made from its own screen - a move from the picking page, another device or the API
+            // printed nothing (Hinnawi 2026-09-09). Same idempotent job key as the kanban, so no double print.
+            if (loaded != null &&
+                string.Equals(previousStatus, "New", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(loaded.Status, "InTreatment", StringComparison.OrdinalIgnoreCase))
+            {
+                await TryEnqueueMovedToTreatmentAutoPrintAsync(loaded, cancelToken).ConfigureAwait(false);
+            }
             response.Data = _mapper.Map<OrderRes>(loaded);
             if (loaded != null)
             {
@@ -817,6 +826,15 @@ namespace George.Services
             response.Data.CustomerPhone = profile.CustomerPhone;
             var crmCustomer = await _customerStorage.GetCustomerByPhoneAsync(siteId, phone, cancelToken)
                 .ConfigureAwait(false);
+            // The CRM record wins over the last order's snapshot: a customer renamed in the Customers page
+            // used to come back under the old name on the next phone order (Zano Dagim 2026-09-09).
+            if (!string.IsNullOrWhiteSpace(crmCustomer?.Name))
+            {
+                response.Data.CustomerName = crmCustomer.Name.Trim();
+                response.Data.Found = true;
+                if (string.IsNullOrWhiteSpace(response.Data.CustomerPhone))
+                    response.Data.CustomerPhone = crmCustomer.Phone;
+            }
             response.Data.ManagerNote = crmCustomer?.Notes;
             response.Data.LastOrderDate = profile.LastOrderDate;
             response.Data.OrderCount = profile.OrderCount;
@@ -2187,6 +2205,31 @@ namespace George.Services
             if (!immediatePrintEnabled)
                 return;
 
+            // Future orders share the kanban's job key ("VoucherAuto:FutureImmediate") so the backend
+            // enqueue and the open-kanban frontend enqueue dedupe to ONE job via the (siteId, orderId,
+            // jobType) idempotency - with distinct keys a future Woo order printed twice.
+            await EnqueueAutoVoucherPrintAsync(site, order,
+                isFutureOrder ? "VoucherAuto:FutureImmediate" : "VoucherAuto:NewImmediate",
+                isFutureOrder ? "FutureImmediate" : "NewImmediate",
+                "Backend:OrderService", cancelToken).ConfigureAwait(false);
+        }
+
+        /// <summary>Backend twin of the kanban's "VoucherAuto:MovedToTreatment" print (Site.PrintMovedToTreatment).</summary>
+        private async Task TryEnqueueMovedToTreatmentAutoPrintAsync(Order order, CancellationToken cancelToken)
+        {
+            var site = await _siteStorage.GetSiteAsync(order.SiteId, cancelToken).ConfigureAwait(false);
+            if (site == null || site.AutoPrintEnabled != true || site.PrintMovedToTreatment != true)
+                return;
+            await EnqueueAutoVoucherPrintAsync(site, order, "VoucherAuto:MovedToTreatment", "MovedToTreatment",
+                "Backend:OrderService", cancelToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Builds the site's voucher (thermal or A4) for the order and enqueues it under an idempotent
+        /// <c>VoucherAuto:*</c> job type. Shared by the new-order hook and the future-orders scheduler.
+        /// </summary>
+        private async Task<bool> EnqueueAutoVoucherPrintAsync(Site site, Order order, string baseJobType, string trigger, string clientSource, CancellationToken cancelToken)
+        {
             // Ensure voucher is generated from a fully loaded order (including OrderItem rows).
             var orderForPrint = order;
             if (order.OrderItem == null || order.OrderItem.Count == 0)
@@ -2216,29 +2259,109 @@ namespace George.Services
                 ? BuildAutoVoucherA4Html(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines, site.ShowOrderHandler == true)
                 : BuildAutoVoucherHtml(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines, site.ShowOrderHandler == true);
             if (string.IsNullOrWhiteSpace(payload))
-                return;
+                return false;
 
-            // Future orders share the kanban's job key ("VoucherAuto:FutureImmediate") so the backend
-            // enqueue and the open-kanban frontend enqueue dedupe to ONE job via the (siteId, orderId,
-            // jobType) idempotency - with distinct keys a future Woo order printed twice.
-            var baseJobType = isFutureOrder ? "VoucherAuto:FutureImmediate" : "VoucherAuto:NewImmediate";
             var req = new CreatePrintJobReq
             {
                 SiteId = order.SiteId,
                 OrderId = order.Id,
                 JobType = useA4 ? baseJobType + ":A4" : baseJobType,
-                Trigger = isFutureOrder ? "FutureImmediate" : "NewImmediate",
-                ClientSource = "Backend:OrderService",
+                Trigger = trigger,
+                ClientSource = clientSource,
                 Payload = payload
             };
 
             try
             {
                 await _printJobService.CreateAsync(req, cancelToken).ConfigureAwait(false);
+                return true;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to enqueue auto print job for new order {OrderId}.", order.Id);
+                _logger.LogError(ex, "Failed to enqueue auto print job ({JobType}) for order {OrderId}.", baseJobType, order.Id);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// "Print future orders at HH:mm" (Site.PrintFutureAtTimeEnabled / PrintFutureAtTime), server-side.
+        /// Until now this ran only inside the Orders kanban page in the browser, so it fired only when someone
+        /// happened to have that page open at that minute - Hinnawi's 08:00 print fired once in two weeks and
+        /// the shop printed by hand every morning (2026-09-09). Called every minute by
+        /// <see cref="FutureOrdersAtTimePrintHostedService"/>; enqueues the same idempotent job key the kanban
+        /// uses ("VoucherAuto:FutureAtTime"), so an open kanban and the server never print twice.
+        /// Returns the number of jobs enqueued.
+        /// </summary>
+        public async Task<int> EnqueueFutureOrdersAtTimePrintsAsync(CancellationToken cancelToken = default)
+        {
+            if (!TryGetIsraelNow(out var israelNow))
+                return 0;
+            var today = DateTime.SpecifyKind(israelNow.Date, DateTimeKind.Unspecified);
+
+            var sites = await _siteStorage.GetSitesWithFutureAtTimePrintAsync(cancelToken).ConfigureAwait(false);
+            var enqueued = 0;
+            foreach (var site in sites)
+            {
+                if (!TimeSpan.TryParseExact((site.PrintFutureAtTime ?? "").Trim(), new[] { @"h\:mm", @"hh\:mm", @"h\:mm\:ss", @"hh\:mm\:ss" },
+                        CultureInfo.InvariantCulture, out var printAt))
+                    continue;
+                if (israelNow.TimeOfDay < printAt)
+                    continue;
+
+                List<Order> due;
+                try
+                {
+                    due = await _orderStorage.GetOpenOrdersScheduledForDateAsync(site.Id, today, cancelToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "FutureAtTime print: failed to load orders for site {SiteId}", site.Id);
+                    continue;
+                }
+
+                foreach (var order in due)
+                {
+                    // Same-day orders were already printed on arrival (NewImmediate) - the kanban applies the same rule.
+                    if (TryToIsraelCalendarDate(order.CreationTime, out var createdDay) && createdDay >= today)
+                        continue;
+                    if (await EnqueueAutoVoucherPrintAsync(site, order, "VoucherAuto:FutureAtTime", "FutureAtTime",
+                            "Backend:FutureAtTimeScheduler", cancelToken).ConfigureAwait(false))
+                        enqueued++;
+                }
+            }
+            return enqueued;
+        }
+
+        private static bool TryGetIsraelNow(out DateTime israelNow)
+        {
+            try
+            {
+                var tzId = OperatingSystem.IsWindows() ? "Israel Standard Time" : "Asia/Jerusalem";
+                var tz = TimeZoneInfo.FindSystemTimeZoneById(tzId);
+                israelNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
+                return true;
+            }
+            catch
+            {
+                israelNow = DateTime.UtcNow;
+                return false;
+            }
+        }
+
+        private static bool TryToIsraelCalendarDate(DateTime utc, out DateTime calendarDate)
+        {
+            try
+            {
+                var tzId = OperatingSystem.IsWindows() ? "Israel Standard Time" : "Asia/Jerusalem";
+                var tz = TimeZoneInfo.FindSystemTimeZoneById(tzId);
+                var local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), tz);
+                calendarDate = DateTime.SpecifyKind(local.Date, DateTimeKind.Unspecified);
+                return true;
+            }
+            catch
+            {
+                calendarDate = DateTime.SpecifyKind(utc.Date, DateTimeKind.Unspecified);
+                return false;
             }
         }
 
@@ -2321,6 +2444,9 @@ namespace George.Services
                     meta.Append($"<div style=\"color:#374151;font-size:13px;line-height:1.6;\">{EscapeHtml(legacyHint)}</div>");
                 if (!string.IsNullOrWhiteSpace(it.Notes))
                     meta.Append($"<div style=\"color:#111827;font-size:16px;font-weight:800;line-height:1.5;\">הערות למוצר: {EscapeHtml(it.Notes!)}</div>");
+                var depreciationNote = OrderItemLineDisplay.FormatVoucherDepreciationNote(it);
+                if (!string.IsNullOrWhiteSpace(depreciationNote))
+                    meta.Append($"<div style=\"color:#B45309;font-size:13px;line-height:1.6;\">{EscapeHtml(depreciationNote)}</div>");
 
                 rows.Append("<tr style=\"border-bottom:1px solid #E5E7EB;\">");
                 rows.Append($"<td style=\"padding:12px 10px;vertical-align:top;\"><div style=\"font-weight:600;color:#6B7280;\">{title}</div>{meta}</td>");
@@ -2914,13 +3040,20 @@ namespace George.Services
             const string val = "font-size:11px;font-weight:700;line-height:14px;padding-top:2px;";
             var priceCell = VoucherPriceValueHtml(price, val);
             var totalCell = VoucherReceiptLayout.PickedTotalCellHtml(linePricing, total, val, EscapeHtml);
+            // פחת: the total is net weight × ₪/kg × (1 + %), so print the billed (gross) weight too -
+            // otherwise "3.21 ק"ג" next to "₪120/ק"ג" and "₪481.50" reads as a wrong price.
+            var depreciationNote = OrderItemLineDisplay.FormatVoucherDepreciationNote(it);
+            var depreciationHtml = string.IsNullOrWhiteSpace(depreciationNote)
+                ? ""
+                : $"<div style=\"font-size:10px;line-height:13px;margin-top:2px;padding-right:12px;direction:rtl;text-align:right;\">{EscapeHtml(depreciationNote)}</div>";
             return
                 $"<div style=\"{grid}\">" +
                 $"<div style=\"{head}\">מחיר</div><div style=\"{head}\">לוקט</div><div style=\"{head}\">סה\"כ</div>" +
                 priceCell +
                 $"<div style=\"{val}\">{EscapeHtml(qty)}</div>" +
                 totalCell +
-                "</div>";
+                "</div>" +
+                depreciationHtml;
         }
 
         private static string EscapeHtmlAttr(string? s)

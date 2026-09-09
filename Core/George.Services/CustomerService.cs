@@ -156,6 +156,8 @@ public class CustomerService : ServiceBase
             Activity = new List<CustomerActivityItem>(),
             PermanentDiscountType = c.PermanentDiscountType,
             PermanentDiscountValue = c.PermanentDiscountValue,
+            InvoiceName = c.InvoiceName,
+            InvoiceTaxId = c.InvoiceTaxId,
         };
     }
 
@@ -337,7 +339,8 @@ public class CustomerService : ServiceBase
         var (updated, phoneConflict) = await _customerStorage.UpdateCustomerAsync(
             id, siteId, req.Name.Trim(), req.Notes, req.Email, req.Phone, req.City,
             req.DeliveryStreet, req.DeliveryApartment, req.DeliveryFloor, req.DeliveryEntranceCode,
-            req.MarketingEmail, req.MarketingSms, cancelToken).ConfigureAwait(false);
+            req.MarketingEmail, req.MarketingSms, cancelToken,
+            invoiceName: req.InvoiceName, invoiceTaxId: req.InvoiceTaxId).ConfigureAwait(false);
         if (phoneConflict)
             return CreateResponse(response, StatusCode.InvalidRequest, "Phone number already in use by another customer");
         if (updated == null)

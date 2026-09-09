@@ -56,6 +56,25 @@ public class PrintJobService : ServiceBase
             if (existing != null)
             {
                 response.Data = await MapToResAsync(existing, cancelToken).ConfigureAwait(false);
+                response.Data.AlreadyQueued = true;
+                return response;
+            }
+        }
+        // Manual prints: a second click while the SAME voucher/label is still waiting for the agent is a
+        // repeat, not a reprint - return the queued job instead of printing twice. Once it has printed, a
+        // new click prints again as before.
+        else if (req.OrderId.HasValue && req.OrderId.Value > 0)
+        {
+            var pending = await _printJobStorage
+                .FindPendingBySiteOrderAndJobTypeAsync(req.SiteId, req.OrderId.Value, normalizedJobType, cancelToken)
+                .ConfigureAwait(false);
+            if (pending != null)
+            {
+                _logger.LogInformation(
+                    "Print job dedupe: {JobType} for order {OrderId} on site {SiteId} is already pending (job {JobId}); not enqueuing again.",
+                    normalizedJobType, req.OrderId.Value, req.SiteId, pending.Id);
+                response.Data = await MapToResAsync(pending, cancelToken).ConfigureAwait(false);
+                response.Data.AlreadyQueued = true;
                 return response;
             }
         }

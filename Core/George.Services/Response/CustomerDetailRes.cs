@@ -22,6 +22,9 @@ public class CustomerDetailRes : CustomerRes
     /// <summary>Phone order: default manual discount type (<c>percent</c> | <c>amount</c>).</summary>
     public string? PermanentDiscountType { get; set; }
     public decimal? PermanentDiscountValue { get; set; }
+    /// <summary>"חשבונית על שם אחר": business name printed on invoices instead of the customer name (null = off).</summary>
+    public string? InvoiceName { get; set; }
+    public string? InvoiceTaxId { get; set; }
 }
 
 /// <summary>CRM: Activity timeline item.</summary>

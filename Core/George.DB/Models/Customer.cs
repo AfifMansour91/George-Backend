@@ -25,6 +25,17 @@ public partial class Customer
     [StringLength(200)]
     public string Name { get; set; } = null!;
 
+    /// <summary>
+    /// "חשבונית על שם אחר": business name printed on invoices instead of <see cref="Name"/> (Zano Dagim
+    /// 2026-09-09). Null/empty = invoices carry the customer's current name.
+    /// </summary>
+    [StringLength(200)]
+    public string? InvoiceName { get; set; }
+
+    /// <summary>ח.פ / ע.מ printed next to <see cref="InvoiceName"/>.</summary>
+    [StringLength(32)]
+    public string? InvoiceTaxId { get; set; }
+
     [StringLength(200)]
     public string? Email { get; set; }
 

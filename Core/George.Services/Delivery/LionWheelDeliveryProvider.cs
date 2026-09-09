@@ -182,6 +182,24 @@ public class LionWheelDeliveryProvider : IDeliveryProvider
         }
     }
 
+    /// <summary>
+    /// LionWheel cod_type: 0=cash, 1=cheque, 2=card, 3=bank transfer. George payment methods map to card for
+    /// every credit variant (SavedCard / CreditSms / CreditPhone / CreditCard / ExternalCredit) and to bank
+    /// transfer for on-account customers (settled by transfer); unknown methods send no type.
+    /// </summary>
+    public static int? MapPaymentMethodToCodType(string? paymentMethod)
+    {
+        var m = (paymentMethod ?? "").Trim().ToLowerInvariant();
+        return m switch
+        {
+            "cash" => 0,
+            "cheque" or "check" => 1,
+            "creditcard" or "creditsms" or "creditphone" or "savedcard" or "externalcredit" or "credit" => 2,
+            "banktransfer" or "onaccount" => 3,
+            _ => null,
+        };
+    }
+
     /// <summary>Public for tests - pure payload construction.</summary>
     public static Dictionary<string, object?> BuildCreateTaskPayload(Order order, DeliveryProviderConfig config)
     {
@@ -211,6 +229,16 @@ public class LionWheelDeliveryProvider : IDeliveryProvider
         AddIfNotEmpty(payload, "notes", FirstNonEmpty(order.DeliveryNote, order.CustomerNote));
         if (order.BagsCount is > 0)
             payload["packages_quantity"] = order.BagsCount.Value;
+
+        // Order value + payment method for the courier sheet ("גובינה" / "גובינה סוג", 2026-09-09):
+        // money_collect is the amount in agorot (docs: "amount in cents, $3 should be 300"), cod_type is
+        // 0=cash, 1=cheque, 2=card, 3=bank transfer.
+        var total = order.Total ?? order.SubTotal;
+        if (total is > 0m)
+            payload["money_collect"] = (long)Math.Round(total.Value * 100m, 0, MidpointRounding.AwayFromZero);
+        var codType = MapPaymentMethodToCodType(order.PaymentMethod);
+        if (codType.HasValue)
+            payload["cod_type"] = codType.Value;
 
         // Shipping-company tokens (not c_key customer tokens) require company_id on every task -
         // "This account requires every delivery to belong to a company." Configured per site in Settings.

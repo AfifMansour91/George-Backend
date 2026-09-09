@@ -655,6 +655,22 @@ public static class OrderItemLineDisplay
         return item.PickedQuantity!.Value * (item.PricePerUnit ?? 0m);
     }
 
+    /// <summary>
+    /// Print note for a line picked with פחת: the billed (gross) weight at the catalog rate and the net weight
+    /// that was weighed - "כולל פחת 25% · לחיוב 4.013 ק"ג (נטו 3.21 ק"ג)". Null when the line carries no פחת.
+    /// Mirrors TS <c>formatVoucherDepreciationNote</c>.
+    /// </summary>
+    public static string? FormatVoucherDepreciationNote(OrderItem item)
+    {
+        if (item.DepreciationPercent is not > 0m) return null;
+        var pct = item.DepreciationPercent.Value.ToString("0.##", CultureInfo.InvariantCulture);
+        var net = item.PickedQuantity ?? 0m;
+        if (net <= 0m)
+            return $"כולל פחת {pct}%";
+        var gross = Math.Round(net * (1 + item.DepreciationPercent.Value / 100m), 3, MidpointRounding.AwayFromZero);
+        return $"כולל פחת {pct}% · לחיוב {gross.ToString("0.###", CultureInfo.InvariantCulture)} ק\"ג (נטו {net.ToString("0.###", CultureInfo.InvariantCulture)} ק\"ג)";
+    }
+
     /// <summary>Matches TS voucher <c>formatPickedQuantity</c> (unitWeightGrams &gt; 0 ⇒ kg).</summary>
     public static string FormatVoucherPickedDisplay(OrderItem item)
     {

@@ -16,4 +16,8 @@ public class CustomerUpdateReq
     public string? DeliveryEntranceCode { get; set; }
     public bool? MarketingEmail { get; set; }
     public bool? MarketingSms { get; set; }
+    /// <summary>"חשבונית על שם אחר": business name for invoices. Null = unchanged; "" = clear (invoices use the customer name).</summary>
+    public string? InvoiceName { get; set; }
+    /// <summary>ח.פ / ע.מ printed with <see cref="InvoiceName"/>. Null = unchanged; "" = clear.</summary>
+    public string? InvoiceTaxId { get; set; }
 }

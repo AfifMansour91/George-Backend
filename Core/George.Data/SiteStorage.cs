@@ -92,6 +92,16 @@ namespace George.Data
                 .ToListAsync(cancelToken);
         }
 
+        /// <summary>Sites that auto-print future orders at a set time of day (all accounts) - for the backend scheduler.</summary>
+        public async Task<List<Site>> GetSitesWithFutureAtTimePrintAsync(CancellationToken cancelToken)
+        {
+            return await _dbContext.Site
+                .AsNoTracking()
+                .Where(s => !s.IsDeleted && s.AutoPrintEnabled == true && s.PrintFutureAtTimeEnabled == true
+                    && s.PrintFutureAtTime != null && s.PrintFutureAtTime != "")
+                .ToListAsync(cancelToken);
+        }
+
         public async Task<List<Site>> GetSitesByAccountAsync(int accountId, CancellationToken cancelToken)
         {
             return await _dbContext.Site

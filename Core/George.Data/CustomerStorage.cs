@@ -172,7 +172,10 @@ public class CustomerStorage : StorageBase
             existing.IsDeleted = false;
             updated = true;
         }
-        if (!string.IsNullOrWhiteSpace(name) && existing.Name != name) { existing.Name = name; updated = true; }
+        // The CRM name is authoritative once set: an incoming order only FILLS an empty name. Overwriting it
+        // undid every rename the shop made - the next phone order (pre-filled from the last order) or Woo
+        // order simply wrote the old name back (Zano Dagim 2026-09-09).
+        if (!string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(existing.Name)) { existing.Name = name; updated = true; }
         if (email != null && existing.Email != email) { existing.Email = email; updated = true; }
         if (city != null && existing.City != city) { existing.City = city; updated = true; }
         if (defaultAddress != null && existing.DefaultAddress != defaultAddress) { existing.DefaultAddress = defaultAddress; updated = true; }
@@ -841,7 +844,8 @@ public class CustomerStorage : StorageBase
         string name, string? notes, string? email, string? phone, string? city,
         string? deliveryStreet, string? deliveryApartment, string? deliveryFloor, string? deliveryEntranceCode,
         bool? marketingEmail, bool? marketingSms,
-        CancellationToken cancelToken)
+        CancellationToken cancelToken,
+        string? invoiceName = null, string? invoiceTaxId = null)
     {
         var query = _dbContext.Set<Customer>().Where(x => x.Id == customerId && !x.IsDeleted);
         if (siteId.HasValue && siteId.Value > 0)
@@ -850,6 +854,8 @@ public class CustomerStorage : StorageBase
         if (c == null) return (null, false);
 
         c.Name = string.IsNullOrWhiteSpace(name) ? "" : name.Trim();
+        if (invoiceName != null) c.InvoiceName = string.IsNullOrWhiteSpace(invoiceName) ? null : invoiceName.Trim();
+        if (invoiceTaxId != null) c.InvoiceTaxId = string.IsNullOrWhiteSpace(invoiceTaxId) ? null : invoiceTaxId.Trim();
         if (notes != null) c.Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
         if (email != null) c.Email = string.IsNullOrWhiteSpace(email) ? null : email.Trim();
         if (city != null) c.City = string.IsNullOrWhiteSpace(city) ? null : city.Trim();

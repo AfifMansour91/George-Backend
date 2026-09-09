@@ -53,6 +53,25 @@ public class PrintJobStorage : StorageBase
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// A job for the same (site, order, job type) that the agent has not printed yet. Used to collapse a
+    /// repeated manual "print" click while the first copy is still in the queue (Meatbrain 2026-09-09: the
+    /// agent needs ~35 s per voucher, the shop clicked again after a few seconds and got two vouchers).
+    /// </summary>
+    public async Task<PrintJob?> FindPendingBySiteOrderAndJobTypeAsync(
+        int siteId,
+        int orderId,
+        string jobType,
+        CancellationToken cancelToken = default)
+    {
+        return await _dbContext.PrintJob
+            .AsNoTracking()
+            .Where(j => j.SiteId == siteId && j.OrderId == orderId && j.JobType == jobType && j.Status == "Pending")
+            .OrderByDescending(j => j.Id)
+            .FirstOrDefaultAsync(cancelToken)
+            .ConfigureAwait(false);
+    }
+
     public async Task<bool> UpdateStatusAsync(int id, string status, string? agentId = null, string? errorMessage = null, CancellationToken cancelToken = default)
     {
         var job = await _dbContext.PrintJob.FirstOrDefaultAsync(j => j.Id == id, cancelToken).ConfigureAwait(false);

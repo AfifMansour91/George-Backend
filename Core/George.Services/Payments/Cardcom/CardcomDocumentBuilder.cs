@@ -84,13 +84,15 @@ public static class CardcomDocumentBuilder
         }
 
         var (addressLine1, addressLine2, addressCity) = BuildDeliveryAddress(order);
+        var (recipientName, recipientTaxId) = InvoiceRecipient.Resolve(order);
 
         return new CardcomTransactionDocument
         {
             DocumentTypeToCreate = string.IsNullOrWhiteSpace(documentTypeToCreate)
                 ? DefaultDocumentType
                 : documentTypeToCreate.Trim(),
-            Name = string.IsNullOrWhiteSpace(order.CustomerName) ? "לקוח" : order.CustomerName.Trim(),
+            Name = string.IsNullOrWhiteSpace(recipientName) ? "לקוח" : recipientName,
+            TaxId = recipientTaxId,
             Email = order.CustomerEmail?.Trim(),
             Phone = order.CustomerPhone?.Trim(),
             AddressLine1 = addressLine1,
@@ -165,12 +167,24 @@ public static class CardcomDocumentBuilder
             if (unitCost is null or <= 0)
                 continue;
 
+            // פחת is MORE weight billed at the catalog rate, never a higher rate: a line picked with פחת
+            // is invoiced as the gross weight (charged total ÷ catalog ₪/kg) × the catalog price, so the
+            // customer reads 4.0125 kg × ₪120, not 3.21 kg × ₪150 (Dagei Gat order 7710). The net weight
+            // that was actually weighed is spelled out in the description.
+            var depreciationNet = (decimal?)null;
+            if (item.DepreciationPercent is > 0m && item.PricePerUnit is > 0m && lineTotal is > 0m)
+            {
+                depreciationNet = qty;
+                qty = Math.Round(lineTotal.Value / item.PricePerUnit.Value, 4, MidpointRounding.AwayFromZero);
+                unitCost = item.PricePerUnit.Value;
+            }
             // Weight items: PricePerUnit is the sale-unit price, not per picked-quantity unit, so
             // qty×unit can be far off the actually-charged TotalPrice (e.g. picked 0.5 × ₪77.50
             // while the line charged ₪77.50). Cardcom validates document total = Σ qty×unit against
             // the linked transaction (TotalLineCost only absorbs rounding), so re-derive the unit
-            // price from the charged line total whenever they disagree beyond rounding.
-            if (lineTotal is > 0 && Math.Abs(Math.Round(unitCost.Value * qty, 2, MidpointRounding.AwayFromZero) - lineTotal.Value) >= 0.01m)
+            // price from the charged line total whenever they disagree beyond rounding. (A פחת line
+            // differs only by the 4th-decimal rounding of its gross weight - TotalLineCost absorbs it.)
+            else if (lineTotal is > 0 && Math.Abs(Math.Round(unitCost.Value * qty, 2, MidpointRounding.AwayFromZero) - lineTotal.Value) >= 0.01m)
                 unitCost = Math.Round(lineTotal.Value / qty, 2, MidpointRounding.AwayFromZero);
 
             var description = string.Join(" - ", new[]
@@ -180,10 +194,10 @@ public static class CardcomDocumentBuilder
                 }.Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
             if (string.IsNullOrWhiteSpace(description))
                 description = "פריט";
-            // The unit price above is re-derived from the charged total, so a line picked with פחת
-            // prints a ₪/kg above the catalog price (3.21 kg × ₪150 for a ₪120 fish). Say why.
             if (item.DepreciationPercent is > 0m)
-                description += $" (כולל פחת {item.DepreciationPercent.Value:0.##}%)";
+                description += depreciationNet.HasValue
+                    ? $" (כולל פחת {item.DepreciationPercent.Value:0.##}%, משקל נטו {depreciationNet.Value:0.###} ק\"ג)"
+                    : $" (כולל פחת {item.DepreciationPercent.Value:0.##}%)";
 
             if (description.Length > 250)
                 description = description[..250];

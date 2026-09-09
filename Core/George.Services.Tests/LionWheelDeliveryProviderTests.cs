@@ -114,5 +114,41 @@ public class LionWheelDeliveryProviderTests
 
         Assert.False(payload.ContainsKey("company_id"));
         Assert.Equal("02/01/2026", payload["pickup_at"]);
+        Assert.False(payload.ContainsKey("money_collect"));
+        Assert.False(payload.ContainsKey("cod_type"));
+    }
+
+    [Fact]
+    public void BuildCreateTaskPayload_SendsOrderValueInAgorotAndPaymentType()
+    {
+        var order = new George.DB.Order
+        {
+            Id = 7,
+            DeliveryDate = new DateTime(2026, 9, 9),
+            Total = 123.45m,
+            PaymentMethod = "Cash",
+        };
+        var config = new George.DB.DeliveryProviderConfig { SiteId = 1, ProviderKey = "lionwheel" };
+
+        var payload = LionWheelDeliveryProvider.BuildCreateTaskPayload(order, config);
+
+        Assert.Equal(12345L, payload["money_collect"]);
+        Assert.Equal(0, payload["cod_type"]);
+    }
+
+    [Theory]
+    [InlineData("Cash", 0)]
+    [InlineData("CreditSms", 2)]
+    [InlineData("CreditPhone", 2)]
+    [InlineData("SavedCard", 2)]
+    [InlineData("CreditCard", 2)]
+    [InlineData("ExternalCredit", 2)]
+    [InlineData("BankTransfer", 3)]
+    [InlineData("OnAccount", 3)]
+    [InlineData("", null)]
+    [InlineData("Something", null)]
+    public void MapPaymentMethodToCodType_MapsGeorgeMethods(string method, int? expected)
+    {
+        Assert.Equal(expected, LionWheelDeliveryProvider.MapPaymentMethodToCodType(method));
     }
 }
