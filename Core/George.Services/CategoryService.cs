@@ -110,6 +110,7 @@ namespace George.Services
             model.IsActive = true;
             model.IsDeleted = false;
             model.ShowInKiosk = req.ShowInKiosk ?? true;
+            model.ShowInManualOrder = req.ShowInManualOrder ?? true;
 
             // The category client doesn't send AccountId, so derive it from the signed-in user. Without this the row
             // is saved with AccountId = NULL, which makes it invisible to the account-scoped category list (see the
@@ -149,6 +150,7 @@ namespace George.Services
             Category? model = _mapper.Map<Category>(req);
             model.Id = categoryId;
             model.UpdateUserId = AuthUser.Id;
+            model.ShowInManualOrder = req.ShowInManualOrder ?? true;
 
             // UpdateCategoryAsync overwrites AccountId with the mapped value, but the client doesn't send it. Keep the
             // existing account scope (and repair legacy rows that were saved with AccountId = NULL by falling back to
@@ -249,7 +251,9 @@ namespace George.Services
                 ImageUrl = category.ImageUrl,
                 IconUrl = category.IconUrl,
                 ShowInKiosk = category.ShowInKiosk,
-                KioskDisplayOrder = category.KioskDisplayOrder
+                KioskDisplayOrder = category.KioskDisplayOrder,
+                ShowInManualOrder = category.ShowInManualOrder,
+                ManualOrderDisplayOrder = category.ManualOrderDisplayOrder
             };
 
             // Map sites

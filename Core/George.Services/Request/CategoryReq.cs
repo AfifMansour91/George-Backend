@@ -34,6 +34,12 @@ namespace George.Services.Request
 
         /// <summary>Display order in kiosk sidebar (lower = first). Null = use default.</summary>
         public int? KioskDisplayOrder { get; set; }
+
+        /// <summary>When false, hidden from the staff new-order / picking category chips (default true).</summary>
+        public bool? ShowInManualOrder { get; set; }
+
+        /// <summary>Chip order in the staff new-order / picking screens (lower = first). Null = default.</summary>
+        public int? ManualOrderDisplayOrder { get; set; }
     }
 
     public class CreateCategoryReq : CategoryReq

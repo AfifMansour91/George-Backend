@@ -148,6 +148,8 @@ namespace George.Data
             dbCategory.IconUrl = updated.IconUrl;
             dbCategory.ShowInKiosk = updated.ShowInKiosk;
             dbCategory.KioskDisplayOrder = updated.KioskDisplayOrder;
+            dbCategory.ShowInManualOrder = updated.ShowInManualOrder;
+            dbCategory.ManualOrderDisplayOrder = updated.ManualOrderDisplayOrder;
             dbCategory.UpdatedDate = DateTime.UtcNow;
             dbCategory.UpdateUserId = updated.UpdateUserId;
 

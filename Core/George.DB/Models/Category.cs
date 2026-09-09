@@ -58,6 +58,12 @@ public partial class Category
     /// <summary>Display order in kiosk sidebar (lower = first). Null = use default order.</summary>
     public int? KioskDisplayOrder { get; set; }
 
+    /// <summary>When false, hidden from the staff new-order / picking category chips (default true). Hinnawi + PEPE 2026-09-10.</summary>
+    public bool ShowInManualOrder { get; set; } = true;
+
+    /// <summary>Chip order in the staff new-order / picking screens (lower = first). Null = fall back to kiosk order, then SortOrder.</summary>
+    public int? ManualOrderDisplayOrder { get; set; }
+
     [StringLength(1000)]
     public string? ImageUrl { get; set; }
 

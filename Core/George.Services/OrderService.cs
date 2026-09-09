@@ -712,6 +712,12 @@ namespace George.Services
                 if (req.Status == null || !ShouldSyncWooCommerceOrderAfterStatusChange(previousStatus, updated.Status))
                     await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "payment method", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
             }
+            // Hinnawi 2026-09-10: the after-picking voucher is printed by the backend for the cases the picking
+            // page never sees - the order reached Ready but the charge failed, and later the charge was retried
+            // (PaymentService hook), the order was switched to cash / on-account, or marked paid by hand. Same
+            // idempotent job key as the picking page, so a voucher already printed at finish is never repeated.
+            if (ShouldAutoPrintAfterPickingOnUpdate(previousStatus, beforeUpdate, updated, req))
+                ScheduleAfterPickingAutoPrint(orderId);
             var loaded = await _orderStorage.GetOrderByIdAsync(updated.Id, cancelToken);
             if (loaded != null && loaded.CustomerId is int customerId && customerId > 0)
             {
@@ -1165,6 +1171,74 @@ namespace George.Services
                 N(o.CustomerName), N(o.CustomerPhone), N(o.CustomerEmail), N(o.DeliveryNote), N(o.CustomerNote), o.BagsCount);
 
             private static string N(string? s) => (s ?? "").Trim();
+        }
+
+        /// <summary>
+        /// Credit order that still waits for its money: a card method (or a gateway session) with nothing
+        /// charged yet. Such orders do not get the after-picking voucher until the charge lands.
+        /// </summary>
+        private static bool IsCreditAwaitingPayment(Order o)
+        {
+            var m = (o.PaymentMethod ?? "").Trim();
+            var credit = m.Equals("CreditCard", StringComparison.OrdinalIgnoreCase)
+                || m.Equals("CreditSms", StringComparison.OrdinalIgnoreCase)
+                || m.Equals("CreditPhone", StringComparison.OrdinalIgnoreCase)
+                || m.Equals("SavedCard", StringComparison.OrdinalIgnoreCase)
+                || !string.IsNullOrWhiteSpace(o.PaymentGateway)
+                || !string.IsNullOrWhiteSpace(o.CardcomLowProfileId);
+            return credit && !IsOrderPaymentChargedOrPaid(o);
+        }
+
+        private static bool ShouldAutoPrintAfterPickingOnUpdate(string? previousStatus, Order? before, Order updated, UpdateOrderReq req)
+        {
+            if (!string.Equals(updated.Status, "Ready", StringComparison.OrdinalIgnoreCase)) return false;
+            if (IsCreditAwaitingPayment(updated)) return false;
+            var becameReady = !string.Equals(previousStatus, "Ready", StringComparison.OrdinalIgnoreCase);
+            var methodChanged = before != null && req.PaymentMethod != null
+                && !string.Equals(before.PaymentMethod, updated.PaymentMethod, StringComparison.OrdinalIgnoreCase);
+            var markedPaid = string.Equals(req.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase)
+                && before != null && !string.Equals(before.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase);
+            return becameReady || methodChanged || markedPaid;
+        }
+
+        /// <summary>
+        /// Backend twin of the picking page's "VoucherAuto:AfterPicking" print (Site.PrintAfterPicking). Idempotent
+        /// per (site, order, jobType) through PrintJobService, so it is safe to call from several triggers.
+        /// </summary>
+        public async Task TryEnqueueAfterPickingAutoPrintAsync(int orderId, CancellationToken cancelToken = default)
+        {
+            try
+            {
+                var order = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken).ConfigureAwait(false);
+                if (order == null || !string.Equals(order.Status, "Ready", StringComparison.OrdinalIgnoreCase))
+                    return;
+                var site = await _siteStorage.GetSiteAsync(order.SiteId, cancelToken).ConfigureAwait(false);
+                if (site == null || site.AutoPrintEnabled != true || site.PrintAfterPicking != true)
+                    return;
+                await EnqueueAutoVoucherPrintAsync(site, order, "VoucherAuto:AfterPicking", "AfterPicking",
+                    "Backend:OrderService", cancelToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "After-picking auto print failed for order {OrderId}", orderId);
+            }
+        }
+
+        private void ScheduleAfterPickingAutoPrint(int orderId)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await using var scope = _serviceScopeFactory.CreateAsyncScope();
+                    var orders = scope.ServiceProvider.GetRequiredService<OrderService>();
+                    await orders.TryEnqueueAfterPickingAutoPrintAsync(orderId, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "After-picking auto print background job failed for order {OrderId}", orderId);
+                }
+            }, CancellationToken.None);
         }
 
         private void ScheduleDeliverySync(int orderId)

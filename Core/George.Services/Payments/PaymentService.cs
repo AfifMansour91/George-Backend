@@ -832,6 +832,7 @@ public partial class PaymentService : ServiceBase
         await TryPatchLinkedPaymentMethodFromOrderAsync(order, cancelToken);
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
         ScheduleStorePaymentPush(order, "capture");
+        ScheduleAfterPickingAutoPrint(order);
         await TrySendInvoiceSmsAfterCaptureAsync(order, creds, cancelToken);
 
         // Customer activity timeline: "charged".
@@ -1663,6 +1664,7 @@ public partial class PaymentService : ServiceBase
             order.PaidAt = DateTime.UtcNow;
             order.ExternalPaymentStatus = "success";
             await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            ScheduleAfterPickingAutoPrint(order);
 
             try
             {
@@ -2105,6 +2107,31 @@ public partial class PaymentService : ServiceBase
     /// to the store, which no longer charges anything itself. Background + own DI scope, like the
     /// status sync in OrderService; the push carries its own retry and integration log.
     /// </summary>
+    /// <summary>
+    /// A charge that landed on an order already in Ready (retry after a failed finish, SMS payment, gateway
+    /// sync) prints the after-picking voucher the picking page could not print (Site.PrintAfterPicking).
+    /// Runs in the background; idempotent per order through PrintJobService.
+    /// </summary>
+    private void ScheduleAfterPickingAutoPrint(Order order)
+    {
+        if (!string.Equals(order.Status, "Ready", StringComparison.OrdinalIgnoreCase)) return;
+        if (!string.Equals(order.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase)) return;
+        var orderId = order.Id;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await using var scope = _serviceScopeFactory.CreateAsyncScope();
+                var orders = scope.ServiceProvider.GetRequiredService<OrderService>();
+                await orders.TryEnqueueAfterPickingAutoPrintAsync(orderId, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "After-picking auto print after charge failed for order {OrderId}", orderId);
+            }
+        }, CancellationToken.None);
+    }
+
     private void ScheduleStorePaymentPush(Order order, string reason)
     {
         if (!PaymentCaptureOwner.IsGiorgio(order.PaymentCaptureOwner))
@@ -3997,6 +4024,7 @@ public partial class PaymentService : ServiceBase
             gatewaySiteId: order.GatewayPaymentSiteId);
 
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken).ConfigureAwait(false);
+        ScheduleAfterPickingAutoPrint(order);
 
         await LogEventAsync(
             order.Id,

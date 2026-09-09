@@ -497,6 +497,7 @@ public partial class PaymentService
         }
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
         ScheduleStorePaymentPush(order, "capture");
+        ScheduleAfterPickingAutoPrint(order);
         await TrySendInvoiceSmsAfterCaptureAsync(order, creds, cancelToken);
 
         if (order.CustomerId is int chargedCustomerId)
@@ -780,6 +781,7 @@ public partial class PaymentService
             order.ExternalPaymentStatus = "success";
             await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
             ScheduleStorePaymentPush(order, pushReason);
+            ScheduleAfterPickingAutoPrint(order);
         }
         // Failed is deliberately included: a success verified straight at PayPlus outranks an earlier
         // failure mark (the Cardcom failed-webhook-race lesson - success can land after "failed").
