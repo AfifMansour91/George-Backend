@@ -1225,6 +1225,24 @@ namespace George.Data
                 .Where(po => po.ProductId == productId && !po.IsDeleted)
                 .ToListAsync(cancelToken);
 
+            // An EMPTY list must not wipe the options of a product that still has variants built on them: a save
+            // from a form that simply did not carry product_options would soft-delete every option, and the Woo
+            // sync then pushes a variable product with no attributes and skips all its variations - the store shows
+            // it "out of stock" no matter what stock is pushed (Meshek Basar PT "צלעות טלה", 2026-09-09). Options
+            // are only cleared together with the variants (a variant-less product, or a request that clears them).
+            if (options.Count == 0 && live.Count > 0)
+            {
+                var variantsStillUseOptions = await _dbContext.ProductVariantOptionValue
+                    .AnyAsync(ov => ov.ProductVariant.ProductId == productId && !ov.ProductVariant.IsDeleted, cancelToken);
+                if (variantsStillUseOptions)
+                {
+                    _logger.LogWarning(
+                        "UpdateProductOptions: ignoring empty options list for product {ProductId} - {Count} active variant option(s) still depend on them.",
+                        productId, live.Count);
+                    return;
+                }
+            }
+
             static string NormName(string? s) => Regex.Replace((s ?? "").Trim(), @"\s+", " ").ToLowerInvariant();
             var liveByName = new Dictionary<string, ProductOption>(StringComparer.Ordinal);
             foreach (var po in live)
