@@ -126,7 +126,8 @@ public partial class PaymentService : ServiceBase
     public async Task<IApiResponse<PaymentSessionRes>> CreatePaymentSessionAsync(
         int orderId,
         string? channel,
-        CancellationToken cancelToken = default)
+        CancellationToken cancelToken = default,
+        bool saveCard = true)
     {
         var response = new ApiResponse<PaymentSessionRes>();
         var order = await _paymentStorage.GetOrderForPaymentAsync(orderId, cancelToken);
@@ -145,7 +146,7 @@ public partial class PaymentService : ServiceBase
         if (creds == null || creds.ProviderId == PaymentGatewayProviderId.None)
             return CreateResponse(response, StatusCode.InvalidRequest, "Payment gateway is not configured for this site.");
         if (creds.ProviderId == PaymentGatewayProviderId.PayPlus)
-            return await CreatePaymentSessionForPayPlusAsync(order, creds, channel, cancelToken);
+            return await CreatePaymentSessionForPayPlusAsync(order, creds, channel, saveCard, cancelToken);
         if (creds.ProviderId != PaymentGatewayProviderId.Cardcom)
             return CreateResponse(response, StatusCode.InvalidRequest, "Unsupported payment gateway.");
 
@@ -279,9 +280,10 @@ public partial class PaymentService : ServiceBase
     public async Task<IApiResponse<SendPaymentSmsRes>> SendPaymentSmsAsync(
         int orderId,
         string? overridePhone,
-        CancellationToken cancelToken = default)
+        CancellationToken cancelToken = default,
+        bool saveCard = true)
     {
-        var session = await CreatePaymentSessionAsync(orderId, "sms", cancelToken);
+        var session = await CreatePaymentSessionAsync(orderId, "sms", cancelToken, saveCard);
         if (!session.IsSuccessful || session.Data?.PaymentUrl == null)
             return CreateResponse(new ApiResponse<SendPaymentSmsRes>(), StatusCode.InvalidRequest,
                 session.DisplayMessage ?? "Could not create payment link.");

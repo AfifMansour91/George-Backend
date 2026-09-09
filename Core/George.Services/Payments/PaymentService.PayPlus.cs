@@ -52,15 +52,147 @@ public partial class PaymentService
             LogoUrl = site.PayPlusLogoUrl,
             ProviderExtrasJson = site.PayPlusProviderExtrasJson,
             InvoiceBrandUid = site.PayPlusInvoiceBrandUid,
+            TerminalUid = ReadPayPlusExtra(site.PayPlusProviderExtrasJson, "terminalUid"),
+            CashierUid = ReadPayPlusExtra(site.PayPlusProviderExtrasJson, "cashierUid"),
             SendInvoiceSmsAfterCapture = true,
             Currency = site.Currency,
         };
+    }
+
+    private static string? ReadPayPlusExtra(string? extrasJson, string key)
+    {
+        if (string.IsNullOrWhiteSpace(extrasJson)) return null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(extrasJson);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+            foreach (var p in doc.RootElement.EnumerateObject())
+            {
+                if (string.Equals(p.Name, key, StringComparison.OrdinalIgnoreCase)
+                    && p.Value.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    var v = p.Value.GetString();
+                    return string.IsNullOrWhiteSpace(v) ? null : v.Trim();
+                }
+            }
+        }
+        catch (System.Text.Json.JsonException) { }
+        return null;
+    }
+
+    private static string MergePayPlusExtrasJson(string? extrasJson, IReadOnlyDictionary<string, string> values)
+    {
+        var merged = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(extrasJson))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(extrasJson);
+                if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object)
+                    foreach (var p in doc.RootElement.EnumerateObject())
+                        merged[p.Name] = p.Value.ValueKind switch
+                        {
+                            System.Text.Json.JsonValueKind.String => p.Value.GetString(),
+                            System.Text.Json.JsonValueKind.Number => p.Value.GetRawText(),
+                            System.Text.Json.JsonValueKind.True => true,
+                            System.Text.Json.JsonValueKind.False => false,
+                            _ => p.Value.GetRawText(),
+                        };
+            }
+            catch (System.Text.Json.JsonException) { }
+        }
+        foreach (var kv in values)
+            merged[kv.Key] = kv.Value;
+        return System.Text.Json.JsonSerializer.Serialize(merged);
+    }
+
+    /// <summary>
+    /// PayPlus never shows terminal_uid / cashier_uid in its settings UI, but every IPN and transaction
+    /// response echoes them - and Transactions/Cancel plus the token endpoints refuse to work without them.
+    /// Learn them from the first verified payment and keep them in Site.PayPlusProviderExtrasJson.
+    /// </summary>
+    private async Task TryRememberPayPlusTerminalAsync(SitePaymentCredentials creds, string? json, CancellationToken cancelToken)
+    {
+        if (!string.IsNullOrWhiteSpace(creds.TerminalUid) && !string.IsNullOrWhiteSpace(creds.CashierUid))
+            return;
+        try
+        {
+            var (terminal, cashier) = _payPlus.ExtractTerminalIdentifiers(json);
+            if (string.IsNullOrWhiteSpace(terminal) && string.IsNullOrWhiteSpace(cashier))
+                return;
+            var values = new Dictionary<string, string>();
+            if (!string.IsNullOrWhiteSpace(terminal)) values["terminalUid"] = terminal;
+            if (!string.IsNullOrWhiteSpace(cashier)) values["cashierUid"] = cashier;
+            var merged = MergePayPlusExtrasJson(creds.ProviderExtrasJson, values);
+            await _paymentStorage.UpdateSitePayPlusExtrasAsync(creds.SiteId, merged, cancelToken).ConfigureAwait(false);
+            _logger.LogInformation("PayPlus terminal ids learned for site {SiteId}: terminal={Terminal}, cashier={Cashier}",
+                creds.SiteId, terminal, cashier);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not store PayPlus terminal ids for site {SiteId}", creds.SiteId);
+        }
+    }
+
+    /// <summary>
+    /// A J5 approval captured for LESS than its amount keeps the difference blocked on the customer's card
+    /// until PayPlus's deposit cut-off (PEPE 9/8: hold 3.13 ₪, charge 2.80 ₪, the whole 3.13 stayed).
+    /// Cardcom's flow releases its hold explicitly before charging; the PayPlus analogue is cancelling
+    /// the approval AFTER the charge (ChargeByTransactionUID needs the approval alive). Best-effort - the
+    /// capture already succeeded, so a failed release only leaves the hold to expire as before.
+    /// </summary>
+    private async Task TryReleaseRemainingPayPlusHoldAsync(
+        Order order, SitePaymentCredentials creds, string approvalUid, decimal releasedAmount, CancellationToken cancelToken)
+    {
+        try
+        {
+            var tx = await _payPlus.VoidAuthorizationAsync(creds, new VoidAuthorizationRequest
+            {
+                Amount = releasedAmount,
+                ProviderTransactionId = approvalUid,
+                ExternalUniqTranId = $"release-{order.Id}",
+            }, cancelToken).ConfigureAwait(false);
+            await LogEventAsync(order.Id, "ReleaseHold", tx.ResponseCode.ToString(), tx.Description,
+                approvalUid, null, releasedAmount, tx.RawJson, cancelToken,
+                provider: PaymentGatewayProviderId.PayPlus).ConfigureAwait(false);
+            if (!tx.Success)
+                _logger.LogWarning("Order {OrderId}: PayPlus approval {ApprovalUid} not released after partial capture: {Description}",
+                    order.Id, MaskToken(approvalUid), tx.Description);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Order {OrderId}: PayPlus hold release threw.", order.Id);
+        }
+    }
+
+    /// <summary>Order lines for the hosted page's order summary (every line, generic ones included).</summary>
+    private static List<HostedSessionLineItem> BuildPayPlusHostedLineItems(Order order)
+    {
+        var items = new List<HostedSessionLineItem>();
+        foreach (var i in (order.OrderItem ?? new List<OrderItem>()).Where(i => !i.IsDeleted).OrderBy(i => i.SortOrder).ThenBy(i => i.Id))
+        {
+            var name = string.Join(" - ", new[] { i.Title, i.VariantTitle }.Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
+            if (string.IsNullOrWhiteSpace(name)) name = "פריט";
+            var lineTotal = i.TotalPrice ?? i.Quantity * (i.PricePerUnit ?? 0m);
+            if (lineTotal < 0) continue;
+            // Weighed lines price per kg while Quantity counts pieces, so the line is shown as one item at its
+            // total; whole-unit lines keep their piece count.
+            var isWholeUnits = i.Quantity > 0 && i.Quantity == Math.Truncate(i.Quantity)
+                && i.PricePerUnit is > 0m && Math.Abs(Math.Round(i.Quantity * i.PricePerUnit.Value, 2) - Math.Round(lineTotal, 2)) < 0.01m;
+            items.Add(isWholeUnits
+                ? new HostedSessionLineItem { Name = name, Quantity = i.Quantity, Price = i.PricePerUnit!.Value }
+                : new HostedSessionLineItem { Name = name, Quantity = 1, Price = Math.Round(lineTotal, 2) });
+        }
+        if (order.ShippingCost is > 0m)
+            items.Add(new HostedSessionLineItem { Name = "משלוח", Quantity = 1, Price = order.ShippingCost.Value, IsShipping = true });
+        return items;
     }
 
     private async Task<IApiResponse<PaymentSessionRes>> CreatePaymentSessionForPayPlusAsync(
         Order order,
         SitePaymentCredentials creds,
         string? channel,
+        bool saveCard,
         CancellationToken cancelToken)
     {
         var response = new ApiResponse<PaymentSessionRes>();
@@ -110,7 +242,7 @@ public partial class PaymentService
             ReturnValue = order.Id.ToString(),
             ProductName = $"הזמנה {order.OrderNumber}",
             Language = "he",
-            SaveCard = true,
+            SaveCard = saveCard,
             MaxInstallments = creds.MaxInstallments,
             UseAuthorizationHold = !chargeNow,
             SuccessRedirectUrl = $"{appBase}/customer/pay/{order.Id}/return?status=success",
@@ -119,10 +251,14 @@ public partial class PaymentService
             CustomerName = order.CustomerName,
             CustomerPhone = order.CustomerPhone,
             CustomerEmail = order.CustomerEmail,
+            Items = BuildPayPlusHostedLineItems(order),
         }, cancelToken);
 
+        // The callback URL is recorded so a missing webhook can be traced to configuration
+        // (PublicApiBaseUrl) from the payment journal alone.
         await LogEventAsync(order.Id, "InitHostedSession", create.Success ? "0" : create.ErrorCode,
-            create.ErrorDescription, null, null, sessionAmount, create.RawJson, cancelToken,
+            create.Success ? $"callback={apiBase}/Webhooks/PayPlus; saveCard={saveCard}" : create.ErrorDescription,
+            null, null, sessionAmount, create.RawJson, cancelToken,
             provider: PaymentGatewayProviderId.PayPlus);
 
         if (!create.Success)
@@ -151,16 +287,32 @@ public partial class PaymentService
         string docType,
         string? transactionUid = null,
         string? uniqueIdentifier = null,
-        bool? sendByEmail = null)
+        bool? sendByEmail = null,
+        decimal? paymentAmount = null)
     {
-        var items = (order.OrderItem?.Where(i => !i.IsDeleted) ?? Enumerable.Empty<OrderItem>())
-            .Select(i => new PayPlusDocumentProductLine
-            {
-                Description = i.Title ?? "פריט",
-                Quantity = i.Quantity,
-                UnitCost = i.PricePerUnit ?? 0m,
-            })
-            .ToList();
+        // Same line discipline as the Cardcom document builder: picked quantity, and a unit price re-derived
+        // from the charged line total when qty × unit disagrees with it (weighed lines, פחת), so the
+        // document's items add up to the payment it records.
+        var items = new List<PayPlusDocumentProductLine>();
+        foreach (var i in (order.OrderItem?.Where(x => !x.IsDeleted) ?? Enumerable.Empty<OrderItem>()).OrderBy(x => x.SortOrder).ThenBy(x => x.Id))
+        {
+            var qty = i.PickedQuantity ?? i.Quantity;
+            if (qty <= 0) continue;
+            var lineTotal = i.TotalPrice;
+            var unit = i.PricePerUnit;
+            if (unit is null or <= 0 && lineTotal is > 0)
+                unit = Math.Round(lineTotal.Value / qty, 2, MidpointRounding.AwayFromZero);
+            if (unit is null or <= 0) continue;
+            if (lineTotal is > 0 && Math.Abs(Math.Round(unit.Value * qty, 2, MidpointRounding.AwayFromZero) - lineTotal.Value) >= 0.01m)
+                unit = Math.Round(lineTotal.Value / qty, 2, MidpointRounding.AwayFromZero);
+            var description = string.Join(" - ", new[] { i.Title, i.VariantTitle }.Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
+            if (string.IsNullOrWhiteSpace(description)) description = "פריט";
+            if (i.DepreciationPercent is > 0m)
+                description += $" (כולל פחת {i.DepreciationPercent.Value:0.##}%)";
+            items.Add(new PayPlusDocumentProductLine { Description = description, Quantity = qty, UnitCost = unit.Value });
+        }
+        if (order.ShippingCost is > 0m)
+            items.Add(new PayPlusDocumentProductLine { Description = "משלוח", Quantity = 1, UnitCost = order.ShippingCost.Value });
 
         return new PayPlusTransactionDocument
         {
@@ -175,6 +327,11 @@ public partial class PaymentService
             UniqueIdentifier = uniqueIdentifier,
             BrandUid = creds.InvoiceBrandUid,
             Products = items,
+            PaymentAmount = paymentAmount ?? order.Total,
+            PaymentDate = order.PaidAt ?? DateTime.UtcNow,
+            CardBrand = order.PayPlusCardBrand,
+            CardLast4 = order.PayPlusCardLast4,
+            Installments = order.PayPlusSelectedInstallments is int n and > 1 and <= 36 ? n : 1,
         };
     }
 
@@ -217,7 +374,7 @@ public partial class PaymentService
         {
             // Stable unique_identifier - Invoice+ dedupes on it, so retries never create a second invoice.
             Document = BuildPayPlusDocumentForOrder(order, creds, "inv_tax_receipt", txId,
-                $"invoice-{order.Id}", sendByEmail),
+                $"invoice-{order.Id}", sendByEmail, paymentAmount: order.Total),
         }, cancelToken);
 
         await LogEventAsync(order.Id, "CreateDocument", doc.Success ? "0" : doc.ResponseCode.ToString(),
@@ -290,19 +447,25 @@ public partial class PaymentService
             return response;
         }
 
+        // ChargeByTransactionUID creates a NEW charge transaction (data.transaction.uid); refunds, invoices
+        // and verification must reference it, not the approval it drew on.
+        var chargeTxId = CoalesceNonEmpty(txCapture.TranzactionId, transactionUid) ?? transactionUid;
         order.PaymentStatus = "Paid";
         order.PaymentSettleStatus = PaymentSettleStatus.Captured;
         order.PaidAt = DateTime.UtcNow;
-        order.PaymentReference = txCapture.TranzactionId ?? transactionUid;
-        order.GatewayPaymentTransactionId = txCapture.TranzactionId ?? transactionUid;
+        order.PaymentReference = chargeTxId;
+        order.GatewayPaymentTransactionId = chargeTxId;
         order.ExternalPaymentStatus = "success";
+
+        if (finalAmount < authAmount && !string.Equals(chargeTxId, transactionUid, StringComparison.OrdinalIgnoreCase))
+            await TryReleaseRemainingPayPlusHoldAsync(order, creds, transactionUid, authAmount - finalAmount, cancelToken);
 
         try
         {
             var doc = await _payPlus.CreateDocumentAsync(creds, new CreatePayPlusDocumentRequest
             {
                 Document = BuildPayPlusDocumentForOrder(order, creds, "inv_tax_receipt",
-                    txCapture.TranzactionId ?? transactionUid, externalUniqTranId),
+                    chargeTxId, externalUniqTranId, paymentAmount: finalAmount),
             }, cancelToken);
             await LogEventAsync(order.Id, "CreateDocument", doc.Success ? "0" : doc.ResponseCode.ToString(),
                 doc.Success ? doc.DocumentNumber : doc.Description, doc.TranzactionId, null, finalAmount,
@@ -559,6 +722,11 @@ public partial class PaymentService
             return;
 
         var info = await _payPlus.InquireTransactionAsync(creds, transactionUid, cancelToken).ConfigureAwait(false);
+        await LogEventAsync(order.Id, "Webhook", info.Success ? "0" : info.ResponseCode.ToString(),
+            info.Success ? (info.IsAuthorizationHold ? "hold verified" : info.IsFinalCharge ? "charge verified" : "verified")
+                         : info.Description,
+            info.TranzactionId ?? transactionUid, null, info.Amount, info.RawJson, cancelToken,
+            provider: PaymentGatewayProviderId.PayPlus).ConfigureAwait(false);
         if (!info.Success)
         {
             _logger.LogInformation(
@@ -567,6 +735,7 @@ public partial class PaymentService
             return;
         }
 
+        await TryRememberPayPlusTerminalAsync(creds, info.RawJson, cancelToken).ConfigureAwait(false);
         await ApplyVerifiedPayPlusInfoAsync(order, info, transactionUid, "webhook capture", cancelToken).ConfigureAwait(false);
     }
 
@@ -685,6 +854,7 @@ public partial class PaymentService
         order.PayPlusCardBrand = CoalesceNonEmpty(display.CardBrand, order.PayPlusCardBrand);
         order.PayPlusPaymentJson = info.RawJson ?? order.PayPlusPaymentJson;
 
+        await TryRememberPayPlusTerminalAsync(creds, info.RawJson, cancelToken).ConfigureAwait(false);
         await TryPersistPayPlusTokenAsync(order, info.RawJson, cancelToken).ConfigureAwait(false);
 
         await ApplyVerifiedPayPlusInfoAsync(order, info, fallbackTransactionUid: null, "hosted-page charge", cancelToken)
@@ -721,6 +891,7 @@ public partial class PaymentService
                 CardExpirationMMYY = fields.CardExpirationMMYY,
                 Last4Digits = fields.Last4Digits,
                 CardBrand = fields.CardBrand,
+                GatewayCustomerId = fields.CustomerUid,
             }, cancelToken);
             order.CustomerPaymentMethodId = pm.Id;
 
@@ -803,11 +974,27 @@ public partial class PaymentService
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(pm.GatewayCustomerId))
+        {
+            await MarkSavedCardHoldFailedAsync(order,
+                "הכרטיס השמור נשמר לפני העדכון ואין לו מזהה לקוח ב-PayPlus. יש לבצע תשלום אחד דרך דף התשלום כדי לשמור אותו מחדש.",
+                cancelToken, PaymentGatewayProviderId.PayPlus);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(creds.TerminalUid) || string.IsNullOrWhiteSpace(creds.CashierUid))
+        {
+            await MarkSavedCardHoldFailedAsync(order,
+                "מזהי המסוף של PayPlus עדיין לא נלמדו לאתר זה. יש להשלים תשלום אחד דרך דף התשלום ואז לנסות שוב.",
+                cancelToken, PaymentGatewayProviderId.PayPlus);
+            return;
+        }
+
         var authAmount = ComputeAuthorizationAmount(order, creds);
         var hold = await _payPlus.PlaceTokenAuthorizationHoldAsync(creds, new PlaceTokenAuthorizationHoldRequest
         {
             Amount = authAmount,
             Token = token,
+            GatewayCustomerId = pm.GatewayCustomerId,
             ExternalUniqTranId = $"hold-{order.Id}-{DateTime.UtcNow:yyyyMMddHHmmss}",
         }, cancelToken);
 

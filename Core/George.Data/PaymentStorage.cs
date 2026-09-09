@@ -31,6 +31,16 @@ public class PaymentStorage : StorageBase
         await _dbContext.Site.AsNoTracking()
             .FirstOrDefaultAsync(s => s.Id == siteId && !s.IsDeleted, cancelToken);
 
+    /// <summary>Writes only Site.PayPlusProviderExtrasJson (terminal/cashier ids learned from a PayPlus IPN).</summary>
+    public async Task UpdateSitePayPlusExtrasAsync(int siteId, string? extrasJson, CancellationToken cancelToken)
+    {
+        var tracked = await _dbContext.Site.FirstOrDefaultAsync(s => s.Id == siteId, cancelToken);
+        if (tracked == null) return;
+        tracked.PayPlusProviderExtrasJson = extrasJson;
+        tracked.UpdatedDate = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync(cancelToken);
+    }
+
     public async Task UpdateSitePaymentConfigAsync(Site site, CancellationToken cancelToken)
     {
         var tracked = await _dbContext.Site.FirstOrDefaultAsync(s => s.Id == site.Id, cancelToken);
@@ -272,6 +282,8 @@ public class PaymentStorage : StorageBase
                 sameLast4.TokenExDate = method.TokenExDate;
                 sameLast4.CardExpirationMMYY = method.CardExpirationMMYY;
                 sameLast4.EncryptedApprovalNumber = method.EncryptedApprovalNumber;
+                if (!string.IsNullOrWhiteSpace(method.GatewayCustomerId))
+                    sameLast4.GatewayCustomerId = method.GatewayCustomerId;
                 if (!string.IsNullOrWhiteSpace(method.CardBrand))
                     sameLast4.CardBrand = method.CardBrand.Trim();
                 await _dbContext.SaveChangesAsync(cancelToken);

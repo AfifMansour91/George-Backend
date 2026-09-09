@@ -39,6 +39,13 @@ public partial class CustomerPaymentMethod
     [StringLength(500)]
     public string? EncryptedApprovalNumber { get; set; }
 
+    /// <summary>
+    /// Gateway-side customer id the token is bound to. PayPlus: customer_uid from the checkout IPN -
+    /// mandatory next to the token on Transactions/Charge|Approval (use_token). Null for Cardcom.
+    /// </summary>
+    [StringLength(64)]
+    public string? GatewayCustomerId { get; set; }
+
     public bool IsDefault { get; set; }
 
     public bool IsRetired { get; set; }

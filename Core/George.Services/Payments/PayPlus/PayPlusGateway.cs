@@ -27,6 +27,8 @@ public sealed class PayPlusSavedTokenFields
     public string? CardExpirationMMYY { get; init; }
     public string? Last4Digits { get; init; }
     public string? CardBrand { get; init; }
+    /// <summary>PayPlus customer_uid the token belongs to - mandatory alongside the token on Transactions/Charge|Approval.</summary>
+    public string? CustomerUid { get; init; }
 }
 
 public sealed class PayPlusGateway : IPaymentGatewayProvider
@@ -100,7 +102,24 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
         if (!request.UseAuthorizationHold && request.MaxInstallments > 1)
             body["payments"] = Math.Clamp(request.MaxInstallments, 1, 36);
 
+        // Order summary on the hosted page: PayPlus renders `items` (name/qty/price) above the card form,
+        // so the customer sees what they pay for - without it the page showed only "הזמנה N" (PEPE 9/9:
+        // "the SMS summary shows no products"). Generic lines have no product id and are plain names here.
+        // The sum need not equal `amount` for a hold (amount carries the auth buffer) - documented as free-form,
+        // but should PayPlus ever reject the combination, the page is created again without items.
+        var items = BuildHostedPageItems(request.Items);
+        if (items.Count > 0)
+            body["items"] = items;
+
         var json = await PostJsonAsync(credentials, "PaymentPages/generateLink", body, cancelToken).ConfigureAwait(false);
+        if (json != null && !IsResultsSuccess(json) && items.Count > 0)
+        {
+            _logger.LogWarning(
+                "PayPlus generateLink rejected the request with items for order {OrderId} ({Description}); retrying without items.",
+                request.OrderId, GetResultsDescription(json));
+            body.Remove("items");
+            json = await PostJsonAsync(credentials, "PaymentPages/generateLink", body, cancelToken).ConfigureAwait(false);
+        }
         if (json == null)
             return FailCreate("http", "Empty response from PayPlus.");
 
@@ -176,54 +195,78 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
         SitePaymentCredentials credentials,
         PlaceTokenAuthorizationHoldRequest request,
         CancellationToken cancelToken = default)
-        => await ChargeOrHoldByTokenAsync(credentials, request.Amount, request.Token, chargeMethod: 2,
-            request.ExternalUniqTranId, cancelToken).ConfigureAwait(false);
+        => await ChargeOrHoldByTokenAsync(credentials, request.Amount, request.Token, request.GatewayCustomerId,
+            approvalOnly: true, request.ExternalUniqTranId, cancelToken).ConfigureAwait(false);
 
-    /// <summary>Same caveat as <see cref="PlaceTokenAuthorizationHoldAsync"/> - verify against the sandbox.</summary>
     public async Task<PaymentTransactionResult> ChargeTokenAsync(
         SitePaymentCredentials credentials,
         ChargeTokenRequest request,
         CancellationToken cancelToken = default)
-        => await ChargeOrHoldByTokenAsync(credentials, request.Amount, request.Token, chargeMethod: 1,
-            request.ExternalUniqTranId, cancelToken).ConfigureAwait(false);
+        => await ChargeOrHoldByTokenAsync(credentials, request.Amount, request.Token, request.GatewayCustomerId,
+            approvalOnly: false, request.ExternalUniqTranId, cancelToken).ConfigureAwait(false);
 
+    /// <summary>
+    /// Server-side saved-token charge/hold. PaymentPages/generateLink has NO token input (docs) - it always
+    /// answers with a page link, which is why the earlier attempt failed with "hosted-page link instead of a
+    /// synchronous result". The synchronous endpoints are Transactions/Approval (J5) and Transactions/Charge
+    /// (J4) with use_token=true, which need the token's customer_uid plus the account's terminal_uid and
+    /// cashier_uid (both learned from the first hosted-page IPN and kept in the site's PayPlus extras).
+    /// </summary>
     private async Task<PaymentTransactionResult> ChargeOrHoldByTokenAsync(
         SitePaymentCredentials credentials,
         decimal amount,
         string token,
-        int chargeMethod,
+        string? customerUid,
+        bool approvalOnly,
         string externalUniqTranId,
         CancellationToken cancelToken)
     {
-        if (string.IsNullOrWhiteSpace(credentials.PaymentPageUid))
-            return Fail("PayPlus payment page UID is not configured.");
+        if (string.IsNullOrWhiteSpace(credentials.TerminalUid) || string.IsNullOrWhiteSpace(credentials.CashierUid))
+            return Fail("PayPlus terminal is not known for this site yet - complete one card payment through the payment page first (the terminal ids are learned from it).");
+        if (string.IsNullOrWhiteSpace(customerUid))
+            return Fail("Saved card has no PayPlus customer id - the card must be saved again through the payment page.");
 
-        var body = new Dictionary<string, object?>
+        var path = approvalOnly ? "Transactions/Approval" : "Transactions/Charge";
+        async Task<string?> PostAsync(string tokenValue)
         {
-            ["payment_page_uid"] = credentials.PaymentPageUid,
-            ["charge_method"] = chargeMethod,
-            ["amount"] = amount,
-            ["currency_code"] = credentials.Currency,
-            ["more_info"] = externalUniqTranId,
-            ["token"] = token,
-        };
+            var body = new Dictionary<string, object?>
+            {
+                ["terminal_uid"] = credentials.TerminalUid,
+                ["cashier_uid"] = credentials.CashierUid,
+                ["amount"] = amount,
+                ["currency_code"] = credentials.Currency,
+                ["credit_terms"] = 1,
+                ["use_token"] = true,
+                ["token"] = tokenValue,
+                ["customer_uid"] = customerUid,
+                ["more_info"] = externalUniqTranId,
+            };
+            return await PostJsonAsync(credentials, path, body, cancelToken).ConfigureAwait(false);
+        }
 
-        var json = await PostJsonAsync(credentials, "PaymentPages/generateLink", body, cancelToken).ConfigureAwait(false);
+        var json = await PostAsync(token).ConfigureAwait(false);
+        // The checkout IPN hands back token_uid with the card's last4 glued on ("<uuid>0142"); the vendor
+        // plugin replays it as-is, so that is tried first, and the bare uuid second.
+        if (json != null && !IsResultsSuccess(json) && LooksLikeUuidWithSuffix(token))
+        {
+            _logger.LogInformation("PayPlus {Path} rejected the stored token ({Description}); retrying with the bare uuid.",
+                path, GetResultsDescription(json));
+            json = await PostAsync(token[..36]).ConfigureAwait(false);
+        }
         if (json == null)
             return Fail("Empty response from PayPlus.");
 
         if (!IsResultsSuccess(json))
             return Fail(GetResultsDescription(json) ?? "PayPlus token charge failed.", json);
 
-        // A synchronous charge/hold via token returns transaction data directly; a page link with no
-        // transaction_uid means PayPlus still expects a redirect, which this (server-side, no browser)
-        // flow cannot follow - surface that clearly instead of silently reporting success.
-        var txId = GetDataString(json, "transaction_uid");
-        if (string.IsNullOrWhiteSpace(txId))
-            return Fail("PayPlus returned a hosted-page link instead of a synchronous result for the saved token - this flow needs sandbox verification.", json);
-
-        return MapTransactionalResult(json);
+        var result = MapTransactionalResult(json);
+        if (string.IsNullOrWhiteSpace(result.TranzactionId))
+            return Fail("PayPlus accepted the token request but returned no transaction uid.", json);
+        return result;
     }
+
+    private static bool LooksLikeUuidWithSuffix(string token) =>
+        token.Length > 36 && Guid.TryParse(token[..36], out _);
 
     public async Task<PaymentTransactionResult> RefundAsync(
         SitePaymentCredentials credentials,
@@ -255,11 +298,14 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
         if (string.IsNullOrWhiteSpace(request.ProviderTransactionId))
             return Fail("PayPlus void requires the transaction_uid to cancel.");
 
-        // terminal_uid/cashier_uid are documented as part of this call but have no analogue in our
-        // per-site credential model (they're PayPlus POS/device concepts) - omitted here. If PayPlus
-        // rejects the call without them for a given account, this needs a credential-model addition;
-        // verify against the sandbox (see docs/PayPlus-test-site-setup.md).
+        // Transactions/Cancel requires terminal_uid + cashier_uid (docs) - learned from the first hosted-page
+        // IPN and kept in the site's PayPlus extras. Without them PayPlus answered 400 {} and the J5 hold
+        // stayed on the customer's card after an order cancel (PEPE 9/9).
         var body = new Dictionary<string, object?> { ["transaction_uid"] = request.ProviderTransactionId };
+        if (!string.IsNullOrWhiteSpace(credentials.TerminalUid))
+            body["terminal_uid"] = credentials.TerminalUid;
+        if (!string.IsNullOrWhiteSpace(credentials.CashierUid))
+            body["cashier_uid"] = credentials.CashierUid;
 
         var json = await PostJsonAsync(credentials, "Transactions/Cancel", body, cancelToken).ConfigureAwait(false);
         if (json == null)
@@ -518,7 +564,53 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
             CardExpirationMMYY = exp,
             Last4Digits = display.Last4Digits,
             CardBrand = display.CardBrand,
+            CustomerUid = GetDataString(json, "customer_uid"),
         };
+    }
+
+    /// <summary>
+    /// terminal_uid / cashier_uid of the account, as echoed by the IPN (flat under data) or by charge /
+    /// Transactions/View responses (nested under data.data / data[0].data). Needed by Transactions/Cancel
+    /// and the token endpoints; PayPlus exposes them nowhere in its settings UI, so they are learned here.
+    /// </summary>
+    public (string? TerminalUid, string? CashierUid) ExtractTerminalIdentifiers(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return (null, null);
+
+        var terminal = GetDataString(json, "terminal_uid");
+        var cashier = GetDataString(json, "cashier_uid");
+        if ((terminal == null || cashier == null) && TryResolveTransactionNodes(json, out _, out var extra))
+        {
+            var node = extra;
+            if (node.ValueKind == JsonValueKind.Object
+                && node.TryGetProperty("data", out var inner) && inner.ValueKind == JsonValueKind.Object)
+                node = inner;
+            terminal ??= TryGetStringProperty(node, "terminal_uid", out var t) ? t : null;
+            cashier ??= TryGetStringProperty(node, "cashier_uid", out var c) ? c : null;
+        }
+        return (terminal, cashier);
+    }
+
+    private static List<Dictionary<string, object?>> BuildHostedPageItems(IReadOnlyList<HostedSessionLineItem>? lines)
+    {
+        var items = new List<Dictionary<string, object?>>();
+        if (lines == null) return items;
+        foreach (var line in lines)
+        {
+            if (line.Price < 0 || string.IsNullOrWhiteSpace(line.Name)) continue;
+            var item = new Dictionary<string, object?>
+            {
+                ["name"] = line.Name.Length > 100 ? line.Name[..100] : line.Name,
+                ["quantity"] = line.Quantity <= 0 ? 1 : line.Quantity,
+                ["price"] = line.Price,
+                ["vat_type"] = line.VatExempt ? 2 : 0,
+            };
+            if (line.IsShipping)
+                item["shipping"] = true;
+            items.Add(item);
+        }
+        return items;
     }
 
     private static ValidateCallbackResult MapTransactionResult(string json)
@@ -544,15 +636,25 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
     private static PaymentTransactionResult MapTransactionalResult(string json)
     {
         var success = IsResultsSuccess(json);
+        // Charge / Approval / ChargeByTransactionUID answer {data:{transaction:{uid, approval_number,...}}},
+        // while IPN-style bodies carry transaction_uid flat under data. Reading only the flat name lost the
+        // NEW charge uid on capture (order kept the approval uid → refunds and invoices targeted the hold).
         return new PaymentTransactionResult
         {
             Success = success,
             ResponseCode = GetResultsCode(json) ?? (success ? 0 : -1),
             Description = GetResultsDescription(json),
-            TranzactionId = GetDataString(json, "transaction_uid"),
-            ApprovalNumber = GetDataString(json, "approval_num"),
+            TranzactionId = GetDataString(json, "transaction_uid") ?? GetNestedDataString(json, "transaction", "uid"),
+            ApprovalNumber = GetDataString(json, "approval_num") ?? GetNestedDataString(json, "transaction", "approval_number"),
             RawJson = json,
         };
+    }
+
+    private static string? GetNestedDataString(string json, string objectName, string name)
+    {
+        if (!TryGetObjectProperty(json, "data", out var data)) return null;
+        if (!data.TryGetProperty(objectName, out var obj) || obj.ValueKind != JsonValueKind.Object) return null;
+        return TryGetStringProperty(obj, name, out var value) ? value : null;
     }
 
     private static PaymentTransactionResult Fail(string description, string? raw = null) =>

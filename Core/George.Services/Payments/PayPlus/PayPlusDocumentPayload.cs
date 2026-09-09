@@ -54,6 +54,48 @@ internal static class PayPlusDocumentPayload
         if (!string.IsNullOrWhiteSpace(doc.BrandUid))
             body["brand_uuid"] = doc.BrandUid;
 
+        // Receipt-type documents must carry the payment they record (`payments`), else 162 missing-payment-information.
+        if (doc.PaymentAmount is > 0m && !string.Equals(doc.DocType, "inv_tax", StringComparison.OrdinalIgnoreCase))
+        {
+            var payment = new Dictionary<string, object?>
+            {
+                ["payment_type"] = "credit-card",
+                ["amount"] = doc.PaymentAmount.Value,
+                ["payment_date"] = (doc.PaymentDate ?? DateTime.UtcNow).ToString("yyyy-MM-dd"),
+                ["currency_code"] = doc.CurrencyCode,
+                ["card_type"] = MapCardType(doc.CardBrand),
+            };
+            if (!string.IsNullOrWhiteSpace(doc.CardLast4))
+                payment["four_digits"] = doc.CardLast4;
+            if (doc.Installments > 1)
+            {
+                var first = Math.Round(doc.PaymentAmount.Value / doc.Installments, 2, MidpointRounding.AwayFromZero);
+                payment["transaction_type"] = "payments";
+                payment["payments"] = doc.Installments;
+                payment["first_payment"] = Math.Round(doc.PaymentAmount.Value - first * (doc.Installments - 1), 2, MidpointRounding.AwayFromZero);
+                payment["subsequent_payments"] = first;
+            }
+            else
+            {
+                payment["transaction_type"] = "normal";
+            }
+            body["payments"] = new List<Dictionary<string, object?>> { payment };
+        }
+
         return body;
+    }
+
+    /// <summary>Invoice+ card_type enum from the brand names PayPlus itself reports (brand_name / clearing_name).</summary>
+    private static string MapCardType(string? brand)
+    {
+        var b = (brand ?? "").Trim().ToLowerInvariant();
+        if (b.Contains("master")) return "mastercard";
+        if (b.Contains("visa")) return "visa";
+        if (b.Contains("amex") || b.Contains("american")) return "american-express";
+        if (b.Contains("diners")) return "diners";
+        if (b.Contains("discover")) return "discover";
+        if (b.Contains("jcb")) return "jcb";
+        if (b.Contains("maestro")) return "maestro";
+        return "other";
     }
 }

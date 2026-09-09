@@ -25,9 +25,11 @@ public class PaymentController : GeorgeControllerBase, IAuthUserProvider
     public async Task<IActionResult> CreateSessionAsync(
         [FromRoute] int orderId,
         [FromQuery] string? channel,
+        [FromQuery] bool? saveCard,
         CancellationToken cancelToken = default)
     {
-        return await SafeCallWithErrorCatchingAsync(() => _paymentSvc.CreatePaymentSessionAsync(orderId, channel, cancelToken));
+        return await SafeCallWithErrorCatchingAsync(() =>
+            _paymentSvc.CreatePaymentSessionAsync(orderId, channel, cancelToken, saveCard ?? true));
     }
 
     [HttpPost("Order/{orderId:int}/SendSms")]
@@ -38,7 +40,7 @@ public class PaymentController : GeorgeControllerBase, IAuthUserProvider
         CancellationToken cancelToken = default)
     {
         return await SafeCallWithErrorCatchingAsync(() =>
-            _paymentSvc.SendPaymentSmsAsync(orderId, req?.OverridePhone, cancelToken));
+            _paymentSvc.SendPaymentSmsAsync(orderId, req?.OverridePhone, cancelToken, req?.SaveCard ?? true));
     }
 
     [HttpPost("Order/{orderId:int}/Finalize")]

@@ -32,6 +32,19 @@ public sealed class CreateHostedSessionRequest
     public string? CustomerName { get; init; }
     public string? CustomerPhone { get; init; }
     public string? CustomerEmail { get; init; }
+    /// <summary>Order lines shown on the hosted page as the order summary (PayPlus `items`; ignored by Cardcom).</summary>
+    public IReadOnlyList<HostedSessionLineItem>? Items { get; init; }
+}
+
+/// <summary>One display line of the hosted-page order summary.</summary>
+public sealed class HostedSessionLineItem
+{
+    public required string Name { get; init; }
+    public decimal Quantity { get; init; } = 1;
+    /// <summary>Line price as the customer sees it (unit price × quantity already applied when quantity is 1).</summary>
+    public decimal Price { get; init; }
+    public bool IsShipping { get; init; }
+    public bool VatExempt { get; init; }
 }
 
 public sealed class CreateHostedSessionResult
@@ -121,6 +134,8 @@ public sealed class PlaceTokenAuthorizationHoldRequest
     public required string Token { get; init; }
     /// <summary>Cardcom only - PayPlus has no separate expiry pair for a saved token.</summary>
     public string? CardExpirationMMYY { get; init; }
+    /// <summary>PayPlus only - customer_uid the token was issued to (mandatory with use_token).</summary>
+    public string? GatewayCustomerId { get; init; }
     public string ExternalUniqTranId { get; init; } = Guid.NewGuid().ToString("N");
 }
 
@@ -130,6 +145,8 @@ public sealed class ChargeTokenRequest
     public required string Token { get; init; }
     /// <summary>Cardcom only - PayPlus has no separate expiry pair for a saved token.</summary>
     public string? CardExpirationMMYY { get; init; }
+    /// <summary>PayPlus only - customer_uid the token was issued to (mandatory with use_token).</summary>
+    public string? GatewayCustomerId { get; init; }
     public string? ApprovalNumber { get; init; }
     public string ExternalUniqTranId { get; init; } = Guid.NewGuid().ToString("N");
     public bool CreateDocument { get; init; } = true;
@@ -212,6 +229,14 @@ public sealed class SitePaymentCredentials
 
     /// <summary>PayPlus: selects the sandbox (restapidev) vs production (restapi) base URL. Unused by Cardcom.</summary>
     public bool TestMode { get; init; }
+
+    /// <summary>
+    /// PayPlus terminal_uid / cashier_uid - required by Transactions/Cancel and the token endpoints. Not
+    /// configurable anywhere in PayPlus's UI; learned from the first hosted-page IPN and stored in
+    /// Site.PayPlusProviderExtrasJson (keys terminalUid / cashierUid).
+    /// </summary>
+    public string? TerminalUid { get; init; }
+    public string? CashierUid { get; init; }
 
     /// <summary>
     /// Optional second Cardcom terminal (configured WITHOUT a CVV requirement) used ONLY for the actual charge

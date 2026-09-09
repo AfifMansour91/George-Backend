@@ -21,6 +21,16 @@ public sealed class PayPlusTransactionDocument
     /// <summary>Invoice+ brand UID (issuing business) - required; PayPlus answers "brand-not-found" without it.</summary>
     public string? BrandUid { get; init; }
     public IReadOnlyList<PayPlusDocumentProductLine> Products { get; init; } = Array.Empty<PayPlusDocumentProductLine>();
+
+    /// <summary>
+    /// The payment the receipt half of an inv_tax_receipt records. Without a `payments` entry PayPlus
+    /// rejects the document with error 162 "missing-payment-information" (PEPE 9/8: every capture logged it).
+    /// </summary>
+    public decimal? PaymentAmount { get; init; }
+    public DateTime? PaymentDate { get; init; }
+    public string? CardBrand { get; init; }
+    public string? CardLast4 { get; init; }
+    public int Installments { get; init; } = 1;
 }
 
 public sealed class PayPlusDocumentProductLine

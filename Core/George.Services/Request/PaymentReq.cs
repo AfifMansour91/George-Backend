@@ -3,6 +3,8 @@ namespace George.Services.Request;
 public class SendPaymentSmsReq
 {
     public string? OverridePhone { get; set; }
+    /// <summary>Offer "save this card for future purchases" on the hosted page (PayPlus create_token). Default true.</summary>
+    public bool? SaveCard { get; set; }
 }
 
 public class RefundPaymentReq
