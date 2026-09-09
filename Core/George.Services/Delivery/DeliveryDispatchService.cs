@@ -77,6 +77,60 @@ public class DeliveryDispatchService : ServiceBase
         }
     }
 
+    /// <summary>
+    /// Order-edit entry point (delivery type / supply date / address / recipient changed). Never throws.
+    /// Shipping → pickup cancels the open courier task; an open task gets the new details pushed;
+    /// no open task (e.g. pickup → shipping after the trigger status) falls through to the normal
+    /// status-driven dispatch so a task is created when the order is already past the trigger.
+    /// </summary>
+    public async Task TrySyncOrderChangesAsync(int orderId, CancellationToken cancelToken = default)
+    {
+        try
+        {
+            var order = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken).ConfigureAwait(false);
+            if (order == null) return;
+            if (string.Equals(order.Status, "Cancelled", StringComparison.OrdinalIgnoreCase)) return;
+
+            var isShipping = string.Equals(order.DeliveryType?.Trim(), "Shipping", StringComparison.OrdinalIgnoreCase);
+            if (!isShipping)
+            {
+                await TryCancelForOrderAsync(orderId, cancelToken).ConfigureAwait(false);
+                return;
+            }
+
+            var dispatches = await _dispatchStorage.GetDispatchesForOrderAsync(orderId, cancelToken).ConfigureAwait(false);
+            var updatedAny = false;
+            foreach (var d in dispatches)
+            {
+                if (string.IsNullOrWhiteSpace(d.ExternalTaskId)) continue;
+                if (string.Equals(d.Status, StatusCancelled, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!_providers.TryGetValue(d.ProviderKey, out var provider)) continue;
+                var config = await _dispatchStorage.GetConfigAsync(d.SiteId, d.ProviderKey, cancelToken).ConfigureAwait(false);
+                if (config == null) continue;
+
+                updatedAny = true;
+                var result = await provider.UpdateTaskAsync(order, d.ExternalTaskId!, config, cancelToken).ConfigureAwait(false);
+                var row = await _dispatchStorage.UpsertDispatchAsync(orderId, d.SiteId, d.ProviderKey, x =>
+                {
+                    // Keep the dispatched status - the task still exists; surface a failed push in the error text.
+                    x.ErrorMessage = result.Success ? null : $"עדכון פרטי המשלוח אצל השליח נכשל: {result.ErrorMessage}";
+                }, cancelToken).ConfigureAwait(false);
+                await DenormalizeOntoOrderAsync(orderId, row, cancelToken).ConfigureAwait(false);
+                if (result.Success)
+                    _logger.LogInformation("Delivery task {TaskId} ({Provider}) updated for order {OrderId}", d.ExternalTaskId, d.ProviderKey, orderId);
+                else
+                    _logger.LogWarning("Delivery task {TaskId} ({Provider}) update failed for order {OrderId}: {Error}", d.ExternalTaskId, d.ProviderKey, orderId, result.ErrorMessage);
+            }
+
+            if (!updatedAny)
+                await TryDispatchOnStatusAsync(orderId, order.Status, cancelToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Delivery sync-order-changes failed for order {OrderId}", orderId);
+        }
+    }
+
     /// <summary>Manual retry from the order UI. Returns the dispatch outcome for display.</summary>
     public async Task<IApiResponse<OrderDeliveryDispatchRes>> RetryDispatchAsync(
         int orderId,

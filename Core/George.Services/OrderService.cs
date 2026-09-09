@@ -564,6 +564,8 @@ namespace George.Services
             var beforeUpdate = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken);
             var previousStatus = beforeUpdate?.Status;
             var previousDeliveryType = beforeUpdate?.DeliveryType;
+            // Snapshot (not the tracked entity) of what the courier sees, compared after the save.
+            var courierBefore = beforeUpdate == null ? null : CourierDeliverySnapshot.From(beforeUpdate);
             // A paid/charged order must never return from Ready to picking: the charge already matches
             // the picked totals, and re-finishing picking re-runs the charge/invoice flow on moved money.
             if (string.Equals(previousStatus, "Ready", StringComparison.OrdinalIgnoreCase)
@@ -671,6 +673,7 @@ namespace George.Services
             }, cancelToken);
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
+            var courierDetailsChanged = courierBefore != null && !courierBefore.Equals(CourierDeliverySnapshot.From(updated));
             if (req.Status != null)
             {
                 await RecordOrderStatusChangeAsync(
@@ -690,9 +693,15 @@ namespace George.Services
                 // LionWheel courier: dispatch when reaching the configured trigger status; cancel the task on cancel.
                 if (string.Equals(updated.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
                     ScheduleDeliveryCancel(orderId);
-                else
+                else if (!courierDetailsChanged)
                     ScheduleDeliveryDispatch(orderId, updated.Status);
             }
+            // LionWheel courier: edits that change what the courier sees (delivery type, supply date, address,
+            // recipient, notes) update the open task, cancel it (→ pickup) or create it (→ shipping past the
+            // trigger status). One background job - never both this and the status dispatch - so two
+            // concurrent creates cannot race.
+            if (courierDetailsChanged && !string.Equals(updated.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+                ScheduleDeliverySync(orderId);
             if (req.PaymentMethod != null && beforeUpdate != null &&
                 !string.Equals(beforeUpdate.PaymentMethod, updated.PaymentMethod, StringComparison.OrdinalIgnoreCase))
             {
@@ -1135,6 +1144,42 @@ namespace George.Services
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Delivery background dispatch failed for order {OrderId}", orderId);
+                }
+            }, CancellationToken.None);
+        }
+
+        /// <summary>
+        /// The order fields that reach the courier task (LionWheelDeliveryProvider.BuildCreateTaskPayload).
+        /// Record equality = "nothing the courier cares about changed".
+        /// </summary>
+        private sealed record CourierDeliverySnapshot(
+            string DeliveryType, string SupplyDate, string Street, string Address, string City, string Floor,
+            string Apartment, string EntranceCode, string RecipientName, string RecipientPhone, string CustomerName,
+            string CustomerPhone, string CustomerEmail, string DeliveryNote, string CustomerNote, int? BagsCount)
+        {
+            public static CourierDeliverySnapshot From(Order o) => new(
+                N(o.DeliveryType),
+                (o.DeliveryDate ?? o.PickupDate)?.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "",
+                N(o.DeliveryStreet), N(o.DeliveryAddress), N(o.DeliveryCity), N(o.DeliveryFloor),
+                N(o.DeliveryApartment), N(o.DeliveryEntranceCode), N(o.DeliveryRecipientName), N(o.DeliveryRecipientPhone),
+                N(o.CustomerName), N(o.CustomerPhone), N(o.CustomerEmail), N(o.DeliveryNote), N(o.CustomerNote), o.BagsCount);
+
+            private static string N(string? s) => (s ?? "").Trim();
+        }
+
+        private void ScheduleDeliverySync(int orderId)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await using var scope = _serviceScopeFactory.CreateAsyncScope();
+                    var dispatch = scope.ServiceProvider.GetRequiredService<Delivery.DeliveryDispatchService>();
+                    await dispatch.TrySyncOrderChangesAsync(orderId, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Delivery background sync failed for order {OrderId}", orderId);
                 }
             }, CancellationToken.None);
         }

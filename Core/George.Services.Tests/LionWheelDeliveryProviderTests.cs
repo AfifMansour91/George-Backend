@@ -151,4 +151,37 @@ public class LionWheelDeliveryProviderTests
     {
         Assert.Equal(expected, LionWheelDeliveryProvider.MapPaymentMethodToCodType(method));
     }
+
+    [Fact]
+    public void BuildUpdateTaskPayload_DropsCreationOnlyFields_KeepsDestinationAndDate()
+    {
+        var order = new George.DB.Order
+        {
+            Id = 77,
+            OrderNumber = "5005",
+            DeliveryType = "Shipping",
+            DeliveryDate = new DateTime(2026, 9, 12),
+            DeliveryStreet = "הרצל 12",
+            DeliveryCity = "תל אביב",
+            CustomerName = "דנה",
+            CustomerPhone = "0501111111",
+        };
+        var config = new George.DB.DeliveryProviderConfig
+        {
+            ProviderKey = "lionwheel",
+            PickupCity = "חיפה",
+            PickupStreet = "הנמל",
+            PickupNumber = "3",
+            SettingsJson = "{\"company_id\":\"172387\"}",
+        };
+
+        var payload = LionWheelDeliveryProvider.BuildUpdateTaskPayload(order, config);
+
+        Assert.Equal("12/09/2026", payload["pickup_at"]);
+        Assert.Equal("תל אביב", payload["destination_city"]);
+        Assert.Equal("הרצל", payload["destination_street"]);
+        Assert.Equal("12", payload["destination_number"]);
+        Assert.False(payload.ContainsKey("company_id"));
+        Assert.DoesNotContain(payload.Keys, k => k.StartsWith("source_", StringComparison.Ordinal));
+    }
 }

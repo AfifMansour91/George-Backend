@@ -132,6 +132,53 @@ public class LionWheelDeliveryProvider : IDeliveryProvider
         }
     }
 
+    /// <summary>
+    /// PUT tasks/{id}/update with the same destination/date/notes fields as create (2026-09-10: order
+    /// edits - supply date, address, recipient - must reach the courier). company_id / source_* are
+    /// creation-only and left out.
+    /// </summary>
+    public async Task<DeliveryUpdateResult> UpdateTaskAsync(Order order, string externalTaskId, DeliveryProviderConfig config, CancellationToken cancelToken)
+    {
+        var apiKey = config.ApiKey?.Trim();
+        if (string.IsNullOrEmpty(apiKey))
+            return new DeliveryUpdateResult(false, "LionWheel API key is not configured.");
+
+        try
+        {
+            var payload = BuildUpdateTaskPayload(order, config);
+            var url = $"{ApiBaseUrl}/tasks/{Uri.EscapeDataString(externalTaskId)}/update?key={Uri.EscapeDataString(apiKey)}";
+            using var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            using var httpClient = _httpClientFactory.CreateClient();
+            httpClient.Timeout = HttpTimeout;
+
+            var httpResponse = await httpClient.PutAsync(url, content, cancelToken).ConfigureAwait(false);
+            if (!httpResponse.IsSuccessStatusCode)
+            {
+                var responseText = await httpResponse.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+                _logger.LogWarning(
+                    "LionWheel task update rejected for order {OrderId} task {TaskId}: HTTP {Status} {Body}",
+                    order.Id, externalTaskId, (int)httpResponse.StatusCode, Truncate(responseText));
+                return new DeliveryUpdateResult(false, $"HTTP {(int)httpResponse.StatusCode}: {Truncate(responseText, 300)}");
+            }
+            return new DeliveryUpdateResult(true, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "LionWheel task update failed for order {OrderId} task {TaskId}", order.Id, externalTaskId);
+            return new DeliveryUpdateResult(false, ex.Message);
+        }
+    }
+
+    /// <summary>Public for tests - the create payload without the creation-only company/source fields.</summary>
+    public static Dictionary<string, object?> BuildUpdateTaskPayload(Order order, DeliveryProviderConfig config)
+    {
+        var payload = BuildCreateTaskPayload(order, config);
+        payload.Remove("company_id");
+        foreach (var key in payload.Keys.Where(k => k.StartsWith("source_", StringComparison.Ordinal)).ToList())
+            payload.Remove(key);
+        return payload;
+    }
+
     public (string TaskId, string CourierStatus)? ParseWebhookStatus(string payloadJson)
     {
         try
