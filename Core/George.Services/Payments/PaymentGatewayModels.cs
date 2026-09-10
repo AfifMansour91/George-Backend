@@ -55,6 +55,8 @@ public sealed class CreateHostedSessionResult
     public string? ErrorCode { get; init; }
     public string? ErrorDescription { get; init; }
     public string? RawJson { get; init; }
+    /// <summary>Diagnostic note for the payment journal (e.g. the hosted page was created without items).</summary>
+    public string? Notes { get; init; }
 }
 
 public sealed class ValidateCallbackRequest

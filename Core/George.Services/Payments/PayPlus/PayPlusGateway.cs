@@ -92,6 +92,10 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
             ["more_info"] = request.ReturnValue,
             ["language_code"] = string.IsNullOrWhiteSpace(request.Language) ? "he" : request.Language.Trim(),
             ["create_token"] = request.SaveCard,
+            // Giorgio issues the Invoice+ document itself (books/docs/new with the order lines + shipping).
+            // Left at the default PayPlus also issued one from the capture with a single "capture-<id>" line
+            // (PEPE 9/9, doc 4002) and the order carried neither.
+            ["initial_invoice"] = false,
             ["refURL_success"] = request.SuccessRedirectUrl,
             ["refURL_failure"] = request.FailedRedirectUrl,
             ["refURL_callback"] = request.WebHookUrl,
@@ -107,18 +111,27 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
         // "the SMS summary shows no products"). Generic lines have no product id and are plain names here.
         // The sum need not equal `amount` for a hold (amount carries the auth buffer) - documented as free-form,
         // but should PayPlus ever reject the combination, the page is created again without items.
-        var items = BuildHostedPageItems(request.Items);
+        var items = BuildHostedPageItems(request.Items, request.Amount);
         if (items.Count > 0)
             body["items"] = items;
 
         var json = await PostJsonAsync(credentials, "PaymentPages/generateLink", body, cancelToken).ConfigureAwait(false);
+        string? notes = null;
         if (json != null && !IsResultsSuccess(json) && items.Count > 0)
         {
+            var rejection = GetResultsDescription(json) ?? GetRootString(json, "error") ?? "rejected";
             _logger.LogWarning(
                 "PayPlus generateLink rejected the request with items for order {OrderId} ({Description}); retrying without items.",
-                request.OrderId, GetResultsDescription(json));
+                request.OrderId, rejection);
+            // Surfaced on the InitHostedSession journal event so "the page shows no products" is diagnosable
+            // from the database alone.
+            notes = $"items rejected ({rejection}); page created without items";
             body.Remove("items");
             json = await PostJsonAsync(credentials, "PaymentPages/generateLink", body, cancelToken).ConfigureAwait(false);
+        }
+        else if (items.Count > 0)
+        {
+            notes = $"items={items.Count}";
         }
         if (json == null)
             return FailCreate("http", "Empty response from PayPlus.");
@@ -132,6 +145,7 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
             PaymentUrl = GetDataString(json, "payment_page_link"),
             LowProfileId = GetDataString(json, "page_request_uid"),
             RawJson = json,
+            Notes = notes,
         };
     }
 
@@ -172,6 +186,7 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
             ["transaction_uid"] = request.ProviderTransactionId,
             ["amount"] = request.Amount,
             ["more_info"] = request.ExternalUniqTranId,
+            ["initial_invoice"] = false,
         };
 
         var json = await PostJsonAsync(credentials, "Transactions/ChargeByTransactionUID", body, cancelToken).ConfigureAwait(false);
@@ -240,6 +255,7 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
                 ["token"] = tokenValue,
                 ["customer_uid"] = customerUid,
                 ["more_info"] = externalUniqTranId,
+                ["initial_invoice"] = false,
             };
             return await PostJsonAsync(credentials, path, body, cancelToken).ConfigureAwait(false);
         }
@@ -281,6 +297,7 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
             ["transaction_uid"] = request.OriginalTranzactionId,
             ["amount"] = request.Amount,
             ["more_info"] = request.ExternalUniqTranId,
+            ["initial_invoice"] = false,
         };
 
         var json = await PostJsonAsync(credentials, "Transactions/RefundByTransactionUID", body, cancelToken).ConfigureAwait(false);
@@ -592,23 +609,50 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
         return (terminal, cashier);
     }
 
-    private static List<Dictionary<string, object?>> BuildHostedPageItems(IReadOnlyList<HostedSessionLineItem>? lines)
+    /// <summary>
+    /// Hosted-page item list. PayPlus checks that the lines add up to <c>amount</c>; an authorization hold
+    /// carries a buffer above the order total (weighed lines), so the difference is shown as its own line
+    /// instead of letting the whole list be rejected. Public for tests.
+    /// </summary>
+    public static List<Dictionary<string, object?>> BuildHostedPageItems(IReadOnlyList<HostedSessionLineItem>? lines, decimal amount)
     {
         var items = new List<Dictionary<string, object?>>();
         if (lines == null) return items;
+        decimal sum = 0m;
         foreach (var line in lines)
         {
             if (line.Price < 0 || string.IsNullOrWhiteSpace(line.Name)) continue;
+            var quantity = line.Quantity <= 0 ? 1 : line.Quantity;
             var item = new Dictionary<string, object?>
             {
                 ["name"] = line.Name.Length > 100 ? line.Name[..100] : line.Name,
-                ["quantity"] = line.Quantity <= 0 ? 1 : line.Quantity,
+                ["quantity"] = quantity,
                 ["price"] = line.Price,
                 ["vat_type"] = line.VatExempt ? 2 : 0,
             };
             if (line.IsShipping)
                 item["shipping"] = true;
             items.Add(item);
+            sum += Math.Round(line.Price * quantity, 2, MidpointRounding.AwayFromZero);
+        }
+        if (items.Count == 0) return items;
+
+        var gap = Math.Round(amount - sum, 2, MidpointRounding.AwayFromZero);
+        if (gap > 0m)
+        {
+            items.Add(new Dictionary<string, object?>
+            {
+                ["name"] = "מסגרת אשראי למשקל סופי (לא נגבה)",
+                ["quantity"] = 1,
+                ["price"] = gap,
+                ["vat_type"] = 0,
+            });
+        }
+        else if (gap < 0m)
+        {
+            // Lines above the amount (order-level discount) - a negative adjustment is not a valid line, so
+            // the page is created without items rather than with a total that disagrees with the charge.
+            items.Clear();
         }
         return items;
     }

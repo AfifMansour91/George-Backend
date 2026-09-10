@@ -17,11 +17,16 @@ internal static class PayPlusDocumentPayload
                 ["quantity"] = p.Quantity,
                 ["price"] = p.UnitCost,
                 ["currency_code"] = doc.CurrencyCode,
+                // Catalog prices are gross (Israel); say so per line rather than trusting the account default.
+                ["vat_type_code"] = p.IsVatFree ? "vat-type-exempt" : "vat-type-included",
             };
-            if (p.IsVatFree)
-                line["vat_type_code"] = "vat-type-exempt";
             return line;
         }).ToList();
+
+        // Invoice+ rejects a document without its total (PEPE 9/9: "missing-totalAmount-param"). The total is
+        // the payment recorded when there is one (receipt-type docs), else the sum of the lines.
+        var linesTotal = Math.Round(doc.Products.Sum(p => p.UnitCost * p.Quantity), 2, MidpointRounding.AwayFromZero);
+        var totalAmount = doc.PaymentAmount is > 0m ? doc.PaymentAmount.Value : linesTotal;
 
         var customer = new Dictionary<string, object?>
         {
@@ -42,8 +47,10 @@ internal static class PayPlusDocumentPayload
         {
             ["language"] = doc.Language,
             ["currency_code"] = doc.CurrencyCode,
+            ["vatType"] = "vat-type-included",
             ["customer"] = customer,
             ["items"] = items,
+            ["totalAmount"] = totalAmount,
             ["send_document_email"] = doc.SendByEmail,
         };
 

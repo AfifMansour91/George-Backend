@@ -257,7 +257,9 @@ public partial class PaymentService
         // The callback URL is recorded so a missing webhook can be traced to configuration
         // (PublicApiBaseUrl) from the payment journal alone.
         await LogEventAsync(order.Id, "InitHostedSession", create.Success ? "0" : create.ErrorCode,
-            create.Success ? $"callback={apiBase}/Webhooks/PayPlus; saveCard={saveCard}" : create.ErrorDescription,
+            create.Success
+                ? $"callback={apiBase}/Webhooks/PayPlus; saveCard={saveCard}" + (string.IsNullOrWhiteSpace(create.Notes) ? "" : $"; {create.Notes}")
+                : create.ErrorDescription,
             null, null, sessionAmount, create.RawJson, cancelToken,
             provider: PaymentGatewayProviderId.PayPlus);
 
@@ -288,7 +290,8 @@ public partial class PaymentService
         string? transactionUid = null,
         string? uniqueIdentifier = null,
         bool? sendByEmail = null,
-        decimal? paymentAmount = null)
+        decimal? paymentAmount = null,
+        IReadOnlyList<PayPlusDocumentProductLine>? productsOverride = null)
     {
         // Same line discipline as the Cardcom document builder: picked quantity, and a unit price re-derived
         // from the charged line total when qty × unit disagrees with it (weighed lines, פחת), so the
@@ -323,6 +326,8 @@ public partial class PaymentService
         }
         if (order.ShippingCost is > 0m)
             items.Add(new PayPlusDocumentProductLine { Description = "משלוח", Quantity = 1, UnitCost = order.ShippingCost.Value });
+        if (productsOverride != null)
+            items = productsOverride.ToList();
 
         var (recipientName, recipientTaxId) = InvoiceRecipient.Resolve(order);
         return new PayPlusTransactionDocument
@@ -564,10 +569,16 @@ public partial class PaymentService
 
         try
         {
+            // Credit invoice: a full refund credits the order lines; a partial one credits a single line for the
+            // refunded amount. Either way the document records the refund as its payment (else Invoice+ answers
+            // missing-payment-information / missing-totalAmount-param and no זיכוי is attached - PEPE 9/9).
+            var partialLine = isFullRefund
+                ? null
+                : new[] { new PayPlusDocumentProductLine { Description = $"החזר חלקי להזמנה {order.OrderNumber}", Quantity = 1, UnitCost = amount } };
             var refundDoc = await _payPlus.CreateDocumentAsync(creds, new CreatePayPlusDocumentRequest
             {
                 Document = BuildPayPlusDocumentForOrder(order, creds, "inv_refund", originalTxId,
-                    $"refund-{order.Id}-{DateTime.UtcNow:yyyyMMddHHmmss}"),
+                    $"refund-{order.Id}-{DateTime.UtcNow:yyyyMMddHHmmss}", paymentAmount: amount, productsOverride: partialLine),
             }, cancelToken);
             await LogEventAsync(order.Id, "CreateRefundDocument", refundDoc.Success ? "0" : refundDoc.ResponseCode.ToString(),
                 refundDoc.Success ? refundDoc.DocumentNumber : refundDoc.Description, refundDoc.TranzactionId, null, amount,
