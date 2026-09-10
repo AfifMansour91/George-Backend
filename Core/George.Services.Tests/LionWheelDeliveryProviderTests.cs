@@ -182,6 +182,8 @@ public class LionWheelDeliveryProviderTests
         Assert.Equal("הרצל", payload["destination_street"]);
         Assert.Equal("12", payload["destination_number"]);
         Assert.False(payload.ContainsKey("company_id"));
+        Assert.False(payload.ContainsKey("money_collect"));
+        Assert.False(payload.ContainsKey("cod_type"));
         Assert.DoesNotContain(payload.Keys, k => k.StartsWith("source_", StringComparison.Ordinal));
     }
 }

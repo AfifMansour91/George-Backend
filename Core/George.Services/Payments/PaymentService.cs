@@ -601,9 +601,31 @@ public partial class PaymentService : ServiceBase
         {
             return await FinalizePickingPaymentCoreAsync(orderId, cancelToken).ConfigureAwait(false);
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Delinka #59 (2026-09-10): "החיוב נכשל" with an empty journal - nothing distinguished a request that
+            // never arrived from one that blew up before the gateway. Every failure now leaves a row.
+            await TryLogFinalizeJournalAsync(orderId, "FinalizeError", $"{ex.GetType().Name}: {ex.Message}", null, cancelToken);
+            throw;
+        }
         finally
         {
             gate.Release();
+        }
+    }
+
+    /// <summary>Best-effort payment-journal row for the finalize flow (never throws, never blocks the charge).</summary>
+    private async Task TryLogFinalizeJournalAsync(int orderId, string eventType, string description, decimal? amount, CancellationToken cancelToken, string? provider = null)
+    {
+        try
+        {
+            await LogEventAsync(orderId, eventType, eventType == "FinalizeStart" ? "0" : "-1",
+                description.Length > 900 ? description[..900] : description,
+                null, null, amount, null, cancelToken, provider ?? PaymentGatewayProviderId.Cardcom);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Finalize journal write failed for order {OrderId} ({EventType})", orderId, eventType);
         }
     }
 
@@ -617,18 +639,34 @@ public partial class PaymentService : ServiceBase
             return CreateResponse(response, StatusCode.ItemNotFound);
 
         var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
-        if (creds == null || creds.ProviderId == PaymentGatewayProviderId.None)
-            return CreateResponse(response, StatusCode.InvalidRequest, "Payment gateway not configured.");
+        var providerForJournal = creds?.ProviderId is { Length: > 0 } pid && pid != PaymentGatewayProviderId.None
+            ? pid
+            : PaymentGatewayProviderId.Cardcom;
 
         var finalAmount = order.Total ?? 0m;
         var authAmount = order.PaymentAuthorizedAmount ?? finalAmount;
+        var settleNow = (order.PaymentSettleStatus ?? "").Trim();
+
+        // First row of every finalize: proves the request reached the payment service and with what state.
+        await TryLogFinalizeJournalAsync(order.Id, "FinalizeStart",
+            $"total={finalAmount:0.##}; auth={authAmount:0.##}; settle={settleNow}; paymentStatus={order.PaymentStatus}; " +
+            $"method={order.PaymentMethod}; source={order.Source}; owner={order.PaymentCaptureOwner}; gateway={creds?.ProviderId ?? "none"}",
+            finalAmount, cancelToken, providerForJournal);
+
+        if (creds == null || creds.ProviderId == PaymentGatewayProviderId.None)
+        {
+            await TryLogFinalizeJournalAsync(order.Id, "FinalizeAborted", "Payment gateway not configured for this site.", finalAmount, cancelToken, providerForJournal);
+            return CreateResponse(response, StatusCode.InvalidRequest, "Payment gateway not configured.");
+        }
 
         if (finalAmount <= 0)
+        {
+            await TryLogFinalizeJournalAsync(order.Id, "FinalizeAborted", "Order total is not positive.", finalAmount, cancelToken, providerForJournal);
             return CreateResponse(response, StatusCode.InvalidRequest, "Order total must be positive.");
+        }
 
         // Idempotency: never charge an order whose payment is already settled - a repeat finalize used to
         // run the full charge again. Reports "Captured" so callers treat the order as paid.
-        var settleNow = (order.PaymentSettleStatus ?? "").Trim();
         if (settleNow.Equals(PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase) ||
             settleNow.Equals(PaymentSettleStatus.Refunded, StringComparison.OrdinalIgnoreCase) ||
             settleNow.Equals(PaymentSettleStatus.PartiallyRefunded, StringComparison.OrdinalIgnoreCase))
@@ -636,6 +674,7 @@ public partial class PaymentService : ServiceBase
             _logger.LogWarning(
                 "FinalizePickingPayment skipped: orderId={OrderId} payment already settled (settleStatus={SettleStatus}); not charging again.",
                 order.Id, settleNow);
+            await TryLogFinalizeJournalAsync(order.Id, "FinalizeSkipped", $"Payment already settled ({settleNow}); not charging again.", finalAmount, cancelToken, providerForJournal);
             response.Data = new FinalizePickingPaymentRes { Outcome = "Captured", FinalAmount = finalAmount };
             return response;
         }
@@ -643,7 +682,10 @@ public partial class PaymentService : ServiceBase
         if (creds.ProviderId == PaymentGatewayProviderId.PayPlus)
             return await FinalizePickingPaymentForPayPlusAsync(order, creds, finalAmount, authAmount, response, cancelToken);
         if (creds.ProviderId != PaymentGatewayProviderId.Cardcom)
+        {
+            await TryLogFinalizeJournalAsync(order.Id, "FinalizeAborted", $"Unsupported payment gateway '{creds.ProviderId}'.", finalAmount, cancelToken, providerForJournal);
             return CreateResponse(response, StatusCode.InvalidRequest, "Unsupported payment gateway.");
+        }
 
         _logger.LogInformation(
             "FinalizePickingPayment start: orderId={OrderId}, siteId={SiteId}, finalAmount={FinalAmount}, authAmount={AuthAmount}, " +
@@ -700,8 +742,13 @@ public partial class PaymentService : ServiceBase
                 !string.IsNullOrWhiteSpace(approval));
 
             if (string.IsNullOrWhiteSpace(approval))
+            {
+                await TryLogFinalizeJournalAsync(order.Id, "FinalizeAborted",
+                    $"No charge credentials: tokenShape={CardcomGateway.DescribeTokenShape(token)}, cardExpPresent={!string.IsNullOrWhiteSpace(cardExp)}, approvalPresent=false.",
+                    finalAmount, cancelToken);
                 return CreateResponse(response, StatusCode.InvalidRequest,
                     BuildMissingChargeCredentialsMessage(order));
+            }
 
             var txCapture = await _cardcom.CaptureAuthorizationAsync(creds, new CaptureAuthorizationRequest
             {
@@ -740,6 +787,8 @@ public partial class PaymentService : ServiceBase
                 "FinalizePickingPayment abort: orderId={OrderId} - refusing ChargeToken with invalid token shape={TokenShape}",
                 order.Id,
                 CardcomGateway.DescribeTokenShape(token));
+            await TryLogFinalizeJournalAsync(order.Id, "FinalizeAborted",
+                $"Stored token rejected before charge: tokenShape={CardcomGateway.DescribeTokenShape(token)}.", finalAmount, cancelToken);
             return CreateResponse(response, StatusCode.InvalidRequest,
                 "Payment token is invalid for this order. Re-authorize the card or contact support.");
         }

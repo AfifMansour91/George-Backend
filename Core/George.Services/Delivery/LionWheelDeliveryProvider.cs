@@ -169,11 +169,17 @@ public class LionWheelDeliveryProvider : IDeliveryProvider
         }
     }
 
-    /// <summary>Public for tests - the create payload without the creation-only company/source fields.</summary>
+    /// <summary>
+    /// Public for tests - the create payload without the creation-only fields: company/source, and the
+    /// collection pair. Verified live 2026-09-10: tasks/{id}/update ignores cod_type and a re-sent
+    /// money_collect (re)creates the COD record with an EMPTY kind, wiping the "גובינה סוג" the create call set.
+    /// </summary>
     public static Dictionary<string, object?> BuildUpdateTaskPayload(Order order, DeliveryProviderConfig config)
     {
         var payload = BuildCreateTaskPayload(order, config);
         payload.Remove("company_id");
+        payload.Remove("money_collect");
+        payload.Remove("cod_type");
         foreach (var key in payload.Keys.Where(k => k.StartsWith("source_", StringComparison.Ordinal)).ToList())
             payload.Remove(key);
         return payload;
