@@ -637,15 +637,17 @@ public static class OrderItemLineDisplay
     /// <summary>True when ליקוט changed billing: at least one confirmed pick, or a line explicitly zeroed (unpicked).</summary>
     public static bool OrderHasOcStoreosPickingAdjustments(IEnumerable<OrderItem> items)
     {
-        var active = items.Where(i => !i.IsDeleted).ToList();
+        // Bundle children are not billable lines (their parent is): a partially picked bundle must not
+        // flip the order into "after picking" mode and drop its (not yet confirmed) parent from the payload.
+        var active = BundleOrderLines.WithoutChildren(items.Where(i => !i.IsDeleted)).ToList();
         if (active.Any(i => i.PickingUserConfirmed))
             return true;
         return active.Any(i => i.PickedQuantity is 0m && !i.TotalPrice.HasValue);
     }
 
-    /// <summary>oc-storeos POST: bill only lines confirmed in picking with qty &gt; 0.</summary>
+    /// <summary>oc-storeos POST: bill only lines confirmed in picking with qty &gt; 0. Bundle children are never billable (spec §2).</summary>
     public static bool IsOcStoreosBillableLine(OrderItem item) =>
-        item.PickingUserConfirmed && item.PickedQuantity is > 0m;
+        !BundleOrderLines.IsBundleChild(item) && item.PickingUserConfirmed && item.PickedQuantity is > 0m;
 
     /// <summary>Line total for oc-storeos after picking; null when the line must not be charged.</summary>
     public static decimal? GetOcStoreosBillableLineTotal(OrderItem item)

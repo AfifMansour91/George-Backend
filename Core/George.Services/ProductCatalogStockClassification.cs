@@ -10,6 +10,11 @@ public static class ProductCatalogStockClassification
 {
     public static string ClassifyStock(Product p, Account? account)
     {
+        // Bundles (מארזים) never hold stock in George - availability comes from the OC Bundles plugin
+        // (BUNDLES_SYNC_SPEC.md §1 / §7 step 5): never "low", never "out" from the catalog's point of view.
+        if (BundleProducts.IsBundle(p))
+            return "ok";
+
         if (IsOnBackorderStatus(p))
             return "ok";
 

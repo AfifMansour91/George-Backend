@@ -15,6 +15,7 @@ public class PromotionService : ServiceBase
     private readonly SiteStorage _siteStorage;
     private readonly CustomerStorage _customerStorage;
     private readonly ProductStorage _productStorage;
+    private readonly BundleStorage _bundleStorage;
     private readonly PromotionWebhookDispatcher _webhooks;
 
     public PromotionService(
@@ -25,6 +26,7 @@ public class PromotionService : ServiceBase
         SiteStorage siteStorage,
         CustomerStorage customerStorage,
         ProductStorage productStorage,
+        BundleStorage bundleStorage,
         PromotionWebhookDispatcher webhooks)
         : base(logger, mapper, cache)
     {
@@ -32,6 +34,7 @@ public class PromotionService : ServiceBase
         _siteStorage = siteStorage;
         _customerStorage = customerStorage;
         _productStorage = productStorage;
+        _bundleStorage = bundleStorage;
         _webhooks = webhooks;
     }
 
@@ -464,14 +467,20 @@ public class PromotionService : ServiceBase
         }
         if (productIds.Count == 0) return;
 
+        var distinctIds = productIds.Distinct().ToList();
         var onSale = await _productStorage
-            .GetActiveCatalogSaleProductIdsAsync(productIds.Distinct().ToList(), utcNow, cancelToken)
+            .GetActiveCatalogSaleProductIdsAsync(distinctIds, utcNow, cancelToken)
             .ConfigureAwait(false);
-        if (onSale.Count == 0) return;
+        // A bundle (מארז) with a bundle-level discount (percent/fixed off the components' sum) is a
+        // discounted product too - BUNDLES_SYNC_SPEC.md §9.
+        var discountedBundles = await _bundleStorage
+            .GetDiscountedBundleProductIdsAsync(distinctIds, cancelToken)
+            .ConfigureAwait(false);
+        if (onSale.Count == 0 && discountedBundles.Count == 0) return;
 
         foreach (var line in cart)
         {
-            if (int.TryParse(line.ProductId, out var pid) && onSale.Contains(pid))
+            if (int.TryParse(line.ProductId, out var pid) && (onSale.Contains(pid) || discountedBundles.Contains(pid)))
                 line.IsCatalogDiscounted = true;
         }
     }

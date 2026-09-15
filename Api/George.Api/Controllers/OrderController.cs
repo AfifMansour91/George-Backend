@@ -135,6 +135,18 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _orderSvc.RemoveOrderItemAsync(orderId, orderItemId, cancelToken));
         }
 
+        /// <summary>
+        /// Bundles (מארזים): swap the product of a bundle component line during picking - BUNDLES_SYNC_SPEC.md §3.3.
+        /// POST /Order/{orderId}/Items/{orderItemId}/swap. Body: { "productId", "productVariantId", "surcharge", "title" }.
+        /// Child lines only; a product outside the slot's configured swaps requires Site.BundleAllowFreeSwap.
+        /// </summary>
+        [HttpPost("{orderId:int}/Items/{orderItemId:int}/swap")]
+        [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> SwapBundleComponentAsync([FromRoute] int orderId, [FromRoute] int orderItemId, [FromBody] SwapOrderItemReq? req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _orderSvc.SwapBundleComponentAsync(orderId, orderItemId, req, cancelToken));
+        }
+
         /// <summary>Save picking state (שמור וצא). Body: { "items": [ { "orderItemId", "pickedQuantity", "totalPrice", "pickingUserConfirmed" }, ... ] }.</summary>
         [HttpPut("{orderId:int}/Picking")]
         [ProducesResponseType(typeof(IApiResponse<OrderRes>), (int)HttpStatusCode.OK)]

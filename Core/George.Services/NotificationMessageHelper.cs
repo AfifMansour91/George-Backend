@@ -50,7 +50,8 @@ public static class NotificationMessageHelper
     /// </summary>
     private static decimal ResolveOrderTotalForPlaceholders(Order order)
     {
-        var items = order.OrderItem;
+        // Bundle children carry no order money (spec §2) - only plain lines and bundle parents are summed.
+        var items = order.OrderItem == null ? null : BundleOrderLines.WithoutChildren(order.OrderItem).ToList();
         if (items == null || items.Count == 0)
             return order.Total ?? 0m;
 

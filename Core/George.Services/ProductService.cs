@@ -21,6 +21,8 @@ namespace George.Services
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly OrderStorage _orderStorage;
         private readonly ProductSiteOverrideStorage _overrideStorage;
+        private readonly BundleService _bundleService;
+        private readonly BundleStorage _bundleStorage;
 
         public ProductService(
             ILogger<ProductService> logger,
@@ -33,9 +35,12 @@ namespace George.Services
             WooCommerceService wooCommerceService,
             IServiceScopeFactory serviceScopeFactory,
             OrderStorage orderStorage,
-            ProductSiteOverrideStorage overrideStorage
+            ProductSiteOverrideStorage overrideStorage,
+            BundleService bundleService,
+            BundleStorage bundleStorage
         ) : base(logger, mapper, cache)
         {
+            _bundleStorage = bundleStorage;
             _productStorage = productStorage;
             _categoryStorage = categoryStorage;
             _userStorage = userStorage;
@@ -44,6 +49,80 @@ namespace George.Services
             _serviceScopeFactory = serviceScopeFactory;
             _orderStorage = orderStorage;
             _overrideStorage = overrideStorage;
+            _bundleService = bundleService;
+        }
+
+        /// <summary>
+        /// Bundles (מארזים): a request that creates/turns a product into a bundle carries no variants/options, no
+        /// price of its own and is stock-managed by status, always in stock (see <see cref="BundleGuards"/>). Spec §1.
+        /// </summary>
+        private static void ApplyBundleRequestInvariants(ProductReq req, bool existingHasVariants) =>
+            BundleGuards.ApplyBundleRequestInvariants(req, existingHasVariants);
+
+        /// <summary>
+        /// Bundles: a bundle never carries a price / stock quantity of its own on the canonical row either (the
+        /// request invariants leave those fields null, which the partial-update merge reads as "keep existing" -
+        /// a product converted INTO a bundle would otherwise keep its old catalog price).
+        /// </summary>
+        private static void ApplyBundleProductInvariants(Product product)
+        {
+            product.Price = null;
+            product.SalePrice = null;
+            product.SalePriceStartDate = null;
+            product.SalePriceEndDate = null;
+            product.StockQuantity = null;
+            product.VariationStockByQuantity = null;
+        }
+
+        /// <summary>
+        /// Bundles: the request converts an existing bundle into a regular product (SetupType sent and not
+        /// 'bundle' - the editor, or a bulk edit such as "מוצר שקיל"). Allowed, but never silently: the bundle
+        /// definition is removed cleanly right after the SetupType is persisted (see CleanupConvertedBundleAsync).
+        /// </summary>
+        private static bool IsConversionAwayFromBundle(ProductReq req, Product existingProduct) =>
+            BundleProducts.IsBundle(existingProduct)
+            && !string.IsNullOrWhiteSpace(req.SetupType)
+            && !BundleProducts.IsBundleSetupType(req.SetupType);
+
+        /// <summary>Soft-deletes the bundle config/components/swaps of a product that just stopped being a bundle.</summary>
+        private async Task CleanupConvertedBundleAsync(int productId, string? newSetupType, CancellationToken cancelToken)
+        {
+            var removed = await _bundleStorage.DeleteDefinitionAsync(productId, cancelToken).ConfigureAwait(false);
+            _logger.LogWarning(
+                "Bundle conversion: product {ProductId} changed from 'bundle' to '{SetupType}' by user {UserId}; definition removed (config: {ConfigDeleted}, components: {Components}, swaps: {Swaps})",
+                productId, newSetupType, AuthUser?.Id, removed.ConfigDeleted, removed.ComponentsDeleted, removed.SwapsDeleted);
+        }
+
+        /// <summary>
+        /// Bundles: fills <see cref="ProductRes.BundleComputedPrice"/> for the bundle products of a list page (their
+        /// <c>Price</c> is always null). Definitions are loaded only when the page has at least one bundle.
+        /// </summary>
+        private async Task ApplyBundleComputedPricesAsync(List<ProductRes> items, int? siteId, CancellationToken cancelToken)
+        {
+            var bundleIds = items.Where(i => BundleProducts.IsBundleSetupType(i.SetupType)).Select(i => i.Id).Distinct().ToList();
+            if (bundleIds.Count == 0) return;
+            try
+            {
+                var prices = await _bundleService.ComputeUnitPricesAsync(bundleIds, siteId, cancelToken).ConfigureAwait(false);
+                foreach (var item in items)
+                {
+                    if (prices.TryGetValue(item.Id, out var price))
+                        item.BundleComputedPrice = price;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to compute bundle prices for product list (site {SiteId}, {Count} bundles)", siteId, bundleIds.Count);
+            }
+        }
+
+        /// <summary>Bundle definition validation for a create/update request; returns the response to send on failure.</summary>
+        private async Task<IApiResponse<ProductRes>?> ValidateBundleRequestAsync(ProductReq req, int? accountId, int? productId, CancellationToken cancelToken)
+        {
+            var error = await _bundleService.ValidateBundleReqAsync(req.Bundle, accountId, productId, cancelToken).ConfigureAwait(false);
+            if (error == null) return null;
+            var response = new ApiResponse<ProductRes> { DisplayMessage = error }; // frontend reads displayMessage
+            return CreateResponse(response, StatusCode.InvalidRequest, error);
         }
 
         public async Task<IApiResponse<ApiListResponse<ProductRes>>> GetProductsAsync(
@@ -64,6 +143,12 @@ namespace George.Services
             if (request.Filter?.SiteId is int listSiteId && listSiteId > 0 && response.Data.Items.Count > 0)
             {
                 await ApplyEffectiveSiteValuesAsync(response.Data.Items, listSiteId, cancelToken);
+            }
+
+            // Bundles (מארזים): the products screen shows the computed price instead of N/A.
+            if (response.Data.Items.Count > 0)
+            {
+                await ApplyBundleComputedPricesAsync(response.Data.Items, request.Filter?.SiteId is > 0 ? request.Filter.SiteId : null, cancelToken);
             }
 
             response.Data.Skip = request.Skip;
@@ -274,6 +359,19 @@ namespace George.Services
                 await ApplyEffectiveSiteValuesAsync(new List<ProductRes> { response.Data }, sid, cancelToken);
             }
 
+            // Bundles (מארזים): definition + computed prices (site-effective component prices when a site is given).
+            if (BundleProducts.IsBundle(product))
+            {
+                try
+                {
+                    response.Data.Bundle = await _bundleService.BuildBundleResAsync(productId, siteId is > 0 ? siteId : null, cancelToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to load bundle definition for product {ProductId}", productId);
+                }
+            }
+
             // Last Woo sync outcome per site - the edit page warns the shop when a change never reached the store.
             try
             {
@@ -340,6 +438,15 @@ namespace George.Services
         public async Task<IApiResponse<ProductRes>> CreateProductAsync(CreateProductReq req, CancellationToken cancelToken)
         {
             var response = new ApiResponse<ProductRes>();
+
+            // Bundles (מארזים): validate the definition before anything is written; enforce the bundle invariants.
+            var isBundleCreate = BundleProducts.IsBundleSetupType(req.SetupType);
+            if (isBundleCreate)
+            {
+                var bundleError = await ValidateBundleRequestAsync(req, req.AccountId, null, cancelToken).ConfigureAwait(false);
+                if (bundleError != null) return bundleError;
+                ApplyBundleRequestInvariants(req, existingHasVariants: false);
+            }
 
             // Map request to DB model
             var product = MapReqToProduct(req);
@@ -413,10 +520,18 @@ namespace George.Services
                     await _productStorage.CreateProductVariantsAsync(product.Id, variantDtos, optionDtos, cancelToken);
                 }
 
+                // Bundles: persist the definition BEFORE the Woo sync (the sync PUTs it to the OC Bundles plugin).
+                if (isBundleCreate && req.Bundle != null)
+                {
+                    await _bundleService.SaveBundleAsync(product.Id, req.Bundle, cancelToken).ConfigureAwait(false);
+                }
+
                 // Reload with all relationships
                 product = await _productStorage.GetProductAsync(product.Id, cancelToken);
                 response.Data = MapProductToRes(product!);
-                
+                if (isBundleCreate)
+                    response.Data.Bundle = await _bundleService.BuildBundleResAsync(product!.Id, null, cancelToken).ConfigureAwait(false);
+
                 // Sync to WooCommerce for assigned sites. Prefer request SiteIds; if omitted or empty, use sites on the reloaded product (inventory-only saves still push to Woo).
                 if (product != null)
                 {
@@ -444,6 +559,32 @@ namespace George.Services
             var existingProduct = await _productStorage.GetProductAsync(productId, cancelToken);
             if (existingProduct == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
+
+            // Bundles (מארזים): the product is (or becomes) a bundle. Validate the definition when one is sent
+            // (null on update = keep the stored definition) and enforce the bundle invariants on the request.
+            var isBundleUpdate = BundleProducts.IsBundleSetupType(req.SetupType)
+                || (string.IsNullOrWhiteSpace(req.SetupType) && BundleProducts.IsBundle(existingProduct));
+            if (isBundleUpdate)
+            {
+                if (req.Bundle != null)
+                {
+                    var bundleError = await ValidateBundleRequestAsync(req, existingProduct.AccountId, productId, cancelToken).ConfigureAwait(false);
+                    if (bundleError != null) return bundleError;
+                }
+                else if (BundleProducts.IsBundleSetupType(req.SetupType) && !BundleProducts.IsBundle(existingProduct))
+                {
+                    // Converting a regular product into a bundle needs a definition.
+                    var bundleError = await ValidateBundleRequestAsync(req, existingProduct.AccountId, productId, cancelToken).ConfigureAwait(false);
+                    if (bundleError != null) return bundleError;
+                }
+                var existingHasVariants = existingProduct.ProductVariant?.Any(v => !v.IsDeleted) == true;
+                ApplyBundleRequestInvariants(req, existingHasVariants);
+            }
+            // Conversion AWAY from bundle (SetupType sent and not 'bundle'): allowed, with a clean removal of the
+            // definition after the SetupType is persisted - orphaned bundle rows are never left behind.
+            var isConversionAwayFromBundle = IsConversionAwayFromBundle(req, existingProduct);
+            if (isConversionAwayFromBundle)
+                req.Bundle = null;
 
             // MultiSite Phase 2: when editing a single branch, write a per-site override instead of mutating
             // the canonical product (so changes do not leak to other sites). 'all_sites' / null = canonical update.
@@ -587,6 +728,8 @@ namespace George.Services
                     var weightLookups = MapToLookupDto(req);
                     await _productStorage.UpdateProductWeightSettingsAsync(
                         productId, req.IsWeighted, weightLookups.SetupType, weightLookups.WeightConfig, cancelToken);
+                    if (isConversionAwayFromBundle)
+                        await CleanupConvertedBundleAsync(productId, req.SetupType, cancelToken);
                 }
 
                 // Per-site VARIATIONS: a selected-site edit must NOT mutate the canonical variants of OTHER sites.
@@ -680,10 +823,19 @@ namespace George.Services
                         await _overrideStorage.UpsertVariantOverridesAsync(productId, siteId, variantOverrides, cancelToken);
                 }
 
+                // Bundles: the definition is product-wide structural data (like ProductOptions / weight settings
+                // above) - persist it canonically even on a per-branch edit.
+                if (isBundleUpdate && req.Bundle != null)
+                {
+                    await _bundleService.SaveBundleAsync(productId, req.Bundle, cancelToken).ConfigureAwait(false);
+                }
+
                 // Return the canonical product with the site's effective override applied (for the edited site).
                 var reloaded = await _productStorage.GetProductAsync(productId, cancelToken);
                 response.Data = MapProductToRes(reloaded!);
                 await ApplyEffectiveSiteValuesAsync(new List<ProductRes> { response.Data }, siteId, cancelToken);
+                if (BundleProducts.IsBundle(reloaded))
+                    response.Data.Bundle = await _bundleService.BuildBundleResAsync(productId, siteId, cancelToken).ConfigureAwait(false);
 
                 // MultiSite Phase 2: push the per-site effective values to THIS site's WooCommerce store only.
                 // The override path mutates no canonical data and returns here, so the regular assigned-sites sync
@@ -738,6 +890,8 @@ namespace George.Services
             // Handle lookups (only overwrites IDs when req has a value; existing IDs are already on product from merge)
             var lookupDto = MapToLookupDto(req);
             await _productStorage.MapLookupsAsync(product, lookupDto, cancelToken);
+            if (isBundleUpdate)
+                ApplyBundleProductInvariants(product);
 
             // MapLookupsAsync has now applied the request's stock status/type onto product; did the canonical stock
             // actually change on this all-sites edit? Used below to decide whether to clear per-site stock overrides.
@@ -765,6 +919,9 @@ namespace George.Services
 
             if (product != null)
             {
+                if (isConversionAwayFromBundle)
+                    await CleanupConvertedBundleAsync(productId, req.SetupType, cancelToken);
+
                 // Update images (link to existing account media when URL matches; resolve in the product's site context so the same URL picks media for that site only)
                 if (req.ImageUrls != null)
                 {
@@ -798,10 +955,18 @@ namespace George.Services
                     await _productStorage.UpdateProductVariantsAsync(productId, variantDtos, optionDtos, cancelToken);
                 }
 
+                // Bundles: persist the definition BEFORE the Woo sync (the sync PUTs it to the OC Bundles plugin).
+                if (isBundleUpdate && req.Bundle != null)
+                {
+                    await _bundleService.SaveBundleAsync(productId, req.Bundle, cancelToken).ConfigureAwait(false);
+                }
+
                 // Reload with all relationships
                 product = await _productStorage.GetProductAsync(productId, cancelToken);
                 response.Data = MapProductToRes(product!);
-                
+                if (BundleProducts.IsBundle(product))
+                    response.Data.Bundle = await _bundleService.BuildBundleResAsync(productId, null, cancelToken).ConfigureAwait(false);
+
                 // Sync to WooCommerce for assigned sites. Prefer request SiteIds; if omitted or empty, use sites on the reloaded product.
                 if (product != null)
                 {
@@ -925,6 +1090,18 @@ namespace George.Services
         public async Task<IApiResponse<bool>> DeleteProductAsync(int productId, int? siteId, CancellationToken cancelToken)
         {
             var response = new ApiResponse<bool>();
+
+            // Bundles (מארזים): a product that feeds a live bundle (component or swap) cannot be deleted - and
+            // cannot be unlinked from a site the bundle is sold on - or the bundle would sell a missing component.
+            var usingBundles = await _bundleStorage.GetBundlesUsingProductAsync(productId, siteId, cancelToken).ConfigureAwait(false);
+            if (usingBundles.Count > 0)
+            {
+                var guardMessage = BundleGuards.ComponentInUseMessage(usingBundles.Select(b => b.Name).ToList());
+                _logger.LogInformation("Delete of product {ProductId} (site {SiteId}) refused: used by bundles {BundleIds}",
+                    productId, siteId, string.Join(",", usingBundles.Select(b => b.Id)));
+                response.DisplayMessage = guardMessage; // frontend reads displayMessage
+                return CreateResponse(response, StatusCode.InvalidRequest, guardMessage);
+            }
 
             if (siteId.HasValue)
             {
@@ -1085,6 +1262,26 @@ namespace George.Services
                                 exclusiveSitesOnly: siteIdsForLookup != null && siteIdsForLookup.Any(),
                                 cancelToken);
                         }
+                    }
+
+                    // Bundles (מארזים): a CSV row never touches a bundle. An existing bundle product is skipped
+                    // (its price/stock/definition live in the bundles screen), and a row that would create - or
+                    // convert a product into - a bundle is rejected the same way (a bundle needs a definition).
+                    if (BundleProducts.IsBundle(existingProduct))
+                    {
+                        itemResult.ProductId = existingProduct!.Id;
+                        itemResult.ErrorMessage = BundleGuards.BulkImportExistingBundleError(existingProduct.Name ?? productReq.Name);
+                        failed++;
+                        results.Add(itemResult);
+                        continue;
+                    }
+                    if (BundleProducts.IsBundleSetupType(productReq.SetupType))
+                    {
+                        itemResult.ProductId = existingProduct?.Id;
+                        itemResult.ErrorMessage = BundleGuards.BulkImportCreateBundleError(productReq.Name);
+                        failed++;
+                        results.Add(itemResult);
+                        continue;
                     }
 
                     // Resolve categories - find or create them by path or ID

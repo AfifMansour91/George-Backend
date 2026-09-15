@@ -143,6 +143,12 @@ namespace George.Services.Request
 
         /// <summary>ללא לקטוז</summary>
         public bool? LabelLactoseFree { get; set; }
+
+        /// <summary>
+        /// Bundles (מארזים): the bundle definition when <see cref="SetupType"/> = "bundle" (required on create;
+        /// on update null = keep the existing definition). Spec: BUNDLES_SYNC_SPEC.md §3.1.
+        /// </summary>
+        public ProductBundleReq? Bundle { get; set; }
     }
 
     public class CreateProductReq : ProductReq

@@ -142,10 +142,43 @@ public partial class OrderItem
     [Column(TypeName = "decimal(18, 2)")]
     public decimal? DiscountAmount { get; set; }
 
+    // ─── Bundles (מארזים): parent / child line linkage (BUNDLES_SYNC_SPEC.md §2) ─────────
+    /// <summary>Parent line only: the bundle product id (= <see cref="ProductId"/>).</summary>
+    public int? BundleProductId { get; set; }
+
+    /// <summary>Child line only: the bundle parent line (<see cref="OrderItem.Id"/>). No cascade.</summary>
+    public int? ParentOrderItemId { get; set; }
+
+    /// <summary>Child line: the configured slot (<see cref="ProductBundleComponent"/>); null for lines of bundles George does not know.</summary>
+    public int? BundleComponentId { get; set; }
+
+    /// <summary>Child line: slot index in Woo's <c>_oc_bundle_components</c> (0-based).</summary>
+    public int? BundleComponentIndex { get; set; }
+
+    /// <summary>Child line: the configured component product when the slot was swapped.</summary>
+    public int? SwappedFromProductId { get; set; }
+
+    /// <summary>Child line: swap surcharge per bundle (not per line).</summary>
+    [Column(TypeName = "decimal(18, 2)")]
+    public decimal? SwapSurcharge { get; set; }
+
+    /// <summary>Any line: WooCommerce order item id (payload <c>itemId</c>).</summary>
+    public int? WooLineItemId { get; set; }
+
     [ForeignKey("OrderId")]
     [InverseProperty("OrderItem")]
     public virtual Order Order { get; set; } = null!;
 
     [ForeignKey("PromotionId")]
     public virtual Promotion? Promotion { get; set; }
+
+    [ForeignKey("ParentOrderItemId")]
+    [InverseProperty("ChildOrderItems")]
+    public virtual OrderItem? ParentOrderItem { get; set; }
+
+    [InverseProperty("ParentOrderItem")]
+    public virtual ICollection<OrderItem> ChildOrderItems { get; set; } = new List<OrderItem>();
+
+    [ForeignKey("BundleComponentId")]
+    public virtual ProductBundleComponent? BundleComponent { get; set; }
 }

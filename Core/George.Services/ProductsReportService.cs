@@ -125,18 +125,22 @@ namespace George.Services
                 .GetProductsWithCategoriesAsync(productIds, cancelToken)
                 .ConfigureAwait(false);
 
-            var catalogProducts = await _productsReportStorage
+            var allCatalogProducts = await _productsReportStorage
                 .GetSiteCatalogProductsAsync(siteId, cancelToken)
                 .ConfigureAwait(false);
 
             var account = await _productsReportStorage.GetAccountForSiteAsync(siteId, cancelToken).ConfigureAwait(false);
 
-            var productDict = catalogProducts.ToDictionary(p => p.Id);
+            // productDict (names, images, categories) knows every product incl. bundles (מארזים); the
+            // catalog-side metrics (stock KPIs, unsold list, catalog count) exclude bundle products -
+            // a bundle never manages stock and is reported in its own section (BUNDLES_SYNC_SPEC.md §7-8).
+            var productDict = allCatalogProducts.ToDictionary(p => p.Id);
             foreach (var kv in productsFromOrders)
             {
                 if (!productDict.ContainsKey(kv.Key))
                     productDict[kv.Key] = kv.Value;
             }
+            var catalogProducts = allCatalogProducts.Where(p => !BundleProducts.IsBundle(p)).ToList();
 
             var catFilter = categoryId is > 0 ? categoryId : null;
             var supFilter = supplierId is > 0 ? supplierId : null;
@@ -220,12 +224,109 @@ namespace George.Services
             res.CategorySlices = BuildCategorySlices(currentOrders, productDict, catFilter, supFilter, brandFilter, excludeIds, categories.Items);
             res.TopOptions = BuildTopOptions(currentOrders, productDict, catFilter, supFilter, brandFilter, excludeIds);
             res.UpsellPairs = BuildUpsellPairs(currentOrders, productDict, catFilter, supFilter, brandFilter, excludeIds);
+            res.Bundles = account?.BundlesEnabled == true
+                ? BuildBundlesSection(currentOrders, productDict, catFilter, supFilter, brandFilter, excludeIds)
+                : null;
 
             response.Data = res;
             return response;
         }
 
         private const int MaxUnsoldProductRows = 500;
+
+        // ─── Bundles (מארזים) - BUNDLES_SYNC_SPEC.md §8 ─────────────────────────────
+
+        /// <summary>
+        /// Only plain lines feed the product metrics: a bundle parent is the bundle itself and its child
+        /// lines are the components - a product sold inside a bundle is counted once, as the bundle,
+        /// in <see cref="ProductsReportRes.Bundles"/>.
+        /// </summary>
+        public static bool CountsTowardProductMetrics(OrderItem line) => BundleOrderLines.IsPlainLine(line);
+
+        /// <summary>
+        /// Bundle sales from the parent lines: orders (distinct), units (Σ parent quantity) and revenue
+        /// (parent line money, same gross rule as every other product row). Rows sorted by revenue desc;
+        /// <c>share</c> = row revenue / total bundle revenue. The category/supplier/brand filters apply to
+        /// the bundle product itself.
+        /// </summary>
+        public static ProductsReportBundlesDto BuildBundlesSection(
+            IEnumerable<Order> orders,
+            IReadOnlyDictionary<int, Product> products,
+            int? categoryId = null,
+            int? supplierId = null,
+            int? brandId = null,
+            HashSet<int>? excludeCategoryIds = null)
+        {
+            excludeCategoryIds ??= new HashSet<int>();
+            var byBundle = new Dictionary<int, BundleAgg>();
+            var allOrderIds = new HashSet<int>();
+            foreach (var o in orders)
+            {
+                foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
+                {
+                    if (line.IsDeleted || !BundleOrderLines.IsBundleParent(line)) continue;
+                    var pid = line.BundleProductId ?? line.ProductId ?? 0;
+                    if (pid <= 0) continue;
+                    products.TryGetValue(pid, out var p);
+                    if (p != null && !MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
+                    var merch = LineMerchandise(line);
+                    if (merch <= 0m && line.Quantity <= 0m) continue;
+
+                    if (!byBundle.TryGetValue(pid, out var agg))
+                    {
+                        agg = new BundleAgg
+                        {
+                            Name = !string.IsNullOrWhiteSpace(p?.Name)
+                                ? p!.Name!
+                                : (string.IsNullOrWhiteSpace(line.Title) ? $"#{pid}" : line.Title!.Trim()),
+                            Sku = string.IsNullOrWhiteSpace(p?.Sku) ? (string.IsNullOrWhiteSpace(line.LineSku) ? null : line.LineSku) : p!.Sku,
+                            ImageUrl = FirstImageUrl(p),
+                        };
+                        byBundle[pid] = agg;
+                    }
+
+                    agg.OrderIds.Add(o.Id);
+                    allOrderIds.Add(o.Id);
+                    agg.Units += line.Quantity;
+                    agg.Revenue += Math.Max(0m, merch);
+                }
+            }
+
+            var totalRevenue = byBundle.Values.Sum(a => a.Revenue);
+            var rows = byBundle
+                .OrderByDescending(kv => kv.Value.Revenue)
+                .ThenBy(kv => kv.Value.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(kv => new ProductsReportBundleRowDto
+                {
+                    ProductId = kv.Key,
+                    Name = kv.Value.Name,
+                    Sku = kv.Value.Sku,
+                    ImageUrl = kv.Value.ImageUrl,
+                    OrdersCount = kv.Value.OrderIds.Count,
+                    UnitsSold = Round2(kv.Value.Units),
+                    Revenue = Round2(kv.Value.Revenue),
+                    Share = totalRevenue > 0m ? Math.Round(kv.Value.Revenue / totalRevenue, 4, MidpointRounding.AwayFromZero) : 0m,
+                })
+                .ToList();
+
+            return new ProductsReportBundlesDto
+            {
+                OrdersCount = allOrderIds.Count,
+                UnitsSold = Round2(byBundle.Values.Sum(a => a.Units)),
+                Revenue = Round2(totalRevenue),
+                Rows = rows,
+            };
+        }
+
+        private sealed class BundleAgg
+        {
+            public string Name = "";
+            public string? Sku;
+            public string? ImageUrl;
+            public decimal Units;
+            public decimal Revenue;
+            public readonly HashSet<int> OrderIds = new();
+        }
 
         private static HashSet<int> ComputeSoldProductIdsForPeriod(
             List<Order> currentOrders,
@@ -241,6 +342,7 @@ namespace George.Services
                 foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
                 {
                     if (line.ProductId is not > 0) continue;
+                    if (!CountsTowardProductMetrics(line)) continue;
                     if (!productDict.TryGetValue(line.ProductId.Value, out var p)) continue;
                     if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
                     if (LineMerchandise(line) <= 0m) continue;
@@ -319,6 +421,7 @@ namespace George.Services
                 foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
                 {
                     if (line.ProductId is not > 0) continue;
+                    if (!CountsTowardProductMetrics(line)) continue;
                     if (!productDict.TryGetValue(line.ProductId.Value, out var p)) continue;
                     if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
                     var cid = PrimaryCategoryId(p);
@@ -390,6 +493,7 @@ namespace George.Services
 
                 foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
                 {
+                    if (!CountsTowardProductMetrics(line)) continue;
                     var pid = line.ProductId;
                     if (pid is not > 0
                         && line.WooCommerceProductId is > 0
@@ -446,6 +550,7 @@ namespace George.Services
                 foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
                 {
                     if (line.ProductId is not > 0) continue;
+                    if (!CountsTowardProductMetrics(line)) continue;
                     if (!products.TryGetValue(line.ProductId.Value, out var p)) continue;
                     if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
                     if (LineMerchandise(line) <= 0m) continue;
@@ -559,6 +664,7 @@ namespace George.Services
                 foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
                 {
                     if (line.ProductId is not > 0) continue;
+                    if (!CountsTowardProductMetrics(line)) continue;
                     if (!products.TryGetValue(line.ProductId.Value, out var p)) continue;
                     if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
                     var merch = LineMerchandise(line);
@@ -789,6 +895,7 @@ namespace George.Services
                 foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
                 {
                     if (line.ProductId is not > 0) continue;
+                    if (!CountsTowardProductMetrics(line)) continue;
                     if (!products.TryGetValue(line.ProductId.Value, out var p)) continue;
                     if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
                     var m = LineMerchandise(line);
@@ -890,6 +997,7 @@ namespace George.Services
                 foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
                 {
                     if (line.ProductId is not > 0) continue;
+                    if (!CountsTowardProductMetrics(line)) continue;
                     if (!products.TryGetValue(line.ProductId.Value, out var p)) continue;
                     if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
 
@@ -947,6 +1055,7 @@ namespace George.Services
                 foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
                 {
                     if (line.ProductId is not > 0) continue;
+                    if (!CountsTowardProductMetrics(line)) continue;
                     if (!products.TryGetValue(line.ProductId.Value, out var p)) continue;
                     if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
                     var m = LineMerchandise(line);

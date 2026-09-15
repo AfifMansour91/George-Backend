@@ -1481,6 +1481,7 @@ namespace George.Data
             }
 
             return await query
+                .Include(p => p.SetupType) // bulk import: a matched bundle product is skipped (BundleProducts.IsBundle)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(cancelToken);
         }
@@ -1512,6 +1513,7 @@ namespace George.Data
             }
 
             return await query
+                .Include(p => p.SetupType) // bulk import: a matched bundle product is skipped (BundleProducts.IsBundle)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(cancelToken);
         }
@@ -1545,6 +1547,7 @@ namespace George.Data
 
             return await query
                 .OrderBy(p => p.Id)
+                .Include(p => p.SetupType) // bulk import: a matched bundle product is skipped (BundleProducts.IsBundle)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(cancelToken);
         }

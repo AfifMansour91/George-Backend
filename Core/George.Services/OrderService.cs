@@ -75,11 +75,15 @@ namespace George.Services
             Payments.PaymentService paymentService,
             IOrderRealtimeNotifier orderRealtimeNotifier,
             IIntegrationLogQueue integrationLogQueue,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            BundleStorage bundleStorage,
+            BundleService bundleService)
             : base(logger, mapper, cache)
         {
             _orderStorage = orderStorage;
             _integrationLogQueue = integrationLogQueue;
+            _bundleStorage = bundleStorage;
+            _bundleService = bundleService;
             _customerStorage = customerStorage;
             _siteStorage = siteStorage;
             _accountStorage = accountStorage;
@@ -96,6 +100,34 @@ namespace George.Services
         }
 
         /// <summary>Catalog line: <see cref="CreateOrderItemReq.ProductId"/> &gt; 0. Generic (phone) line: title + price + qty without product.</summary>
+        /// <summary>
+        /// Manual orders: the client sums SubTotal/Total from its own line prices, but bundle parents are re-priced
+        /// server-side (spec §3.3). Adds Σ(engine parent TotalPrice − client line total) to both header amounts so
+        /// the header - and the Original* snapshot taken from it - matches the persisted lines. The i-th request line
+        /// for a bundle product became the i-th parent line, so the two sequences pair up by position.
+        /// </summary>
+        public static void ReconcileHeaderTotalsForRepricedBundleParents(Order order, IReadOnlyList<CreateOrderItemReq> reqs, IReadOnlyList<OrderItem> lines)
+        {
+            if (order.SubTotal == null && order.Total == null) return;
+            var parents = lines.Where(BundleOrderLines.IsBundleParent).ToList();
+            if (parents.Count == 0) return;
+            var bundleProductIds = parents.Where(p => p.ProductId is > 0).Select(p => p.ProductId!.Value).ToHashSet();
+            var bundleReqs = reqs.Where(r => r.ProductId is > 0 && bundleProductIds.Contains(r.ProductId.Value)).ToList();
+            if (bundleReqs.Count != parents.Count) return;
+
+            var delta = 0m;
+            for (var i = 0; i < parents.Count; i++)
+            {
+                var req = bundleReqs[i];
+                var clientTotal = req.TotalPrice ?? req.Quantity * (req.PricePerUnit ?? 0m);
+                delta += (parents[i].TotalPrice ?? 0m) - clientTotal;
+            }
+            delta = Math.Round(delta, 2, MidpointRounding.AwayFromZero);
+            if (delta == 0m) return;
+            if (order.SubTotal.HasValue) order.SubTotal = order.SubTotal.Value + delta;
+            if (order.Total.HasValue) order.Total = order.Total.Value + delta;
+        }
+
         private static bool IsValidCreateOrderLineItem(CreateOrderItemReq i)
         {
             if (i.ProductId is > 0)
@@ -227,24 +259,14 @@ namespace George.Services
             }
             order.IsDeleted = false;
             NormalizeOrderDeliveryAndPickupDates(order);
-            var items = new List<OrderItem>();
             var productCache = new Dictionary<int, Product?>();
-            for (var i = 0; i < req.Items.Count; i++)
-            {
-                var lineReq = req.Items[i];
-                var oi = _mapper.Map<OrderItem>(lineReq);
-                oi.SortOrder = i;
-                if (lineReq.ProductId is > 0)
-                {
-                    if (!productCache.TryGetValue(lineReq.ProductId.Value, out var product))
-                    {
-                        product = await _productStorage.GetProductAsync(lineReq.ProductId.Value, cancelToken).ConfigureAwait(false);
-                        productCache[lineReq.ProductId.Value] = product;
-                    }
-                    OrderLineDisplayFieldsBuilder.MergeComputedDisplayFields(oi, lineReq, product);
-                }
-                items.Add(oi);
-            }
+            // Plain lines as before; a bundle line is expanded into parent + children (spec §3.3).
+            var (items, bundleError) = await BuildManualOrderLinesAsync(req.SiteId, req.Items, productCache, 0, cancelToken).ConfigureAwait(false);
+            if (bundleError != null)
+                return CreateResponse(response, StatusCode.InvalidRequest, bundleError);
+            // The client header (SubTotal/Total) was summed from the client's line prices; bundle parents were
+            // re-priced by the engine, so fold the difference in before the Original* snapshot is taken.
+            ReconcileHeaderTotalsForRepricedBundleParents(order, req.Items, items);
 
             // ─── Sprint 4: persist promotion linkage on the order lines ──────────────
             // Spec `Sprint4/מבצעים.md` "סיכום אחריות": run the evaluator at finalize so
@@ -888,8 +910,9 @@ namespace George.Services
             if (siteId <= 0)
                 return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required.");
             var order = await _orderStorage.GetLastOrderByCustomerPhoneAsync(siteId, phone, cancelToken).ConfigureAwait(false);
+            // Bundle children are never re-added on their own - the parent (bundle product) is the purchasable line.
             if (order?.OrderItem != null)
-                response.Data = order.OrderItem.Select(i => _mapper.Map<OrderItemRes>(i)).ToList();
+                response.Data = BundleOrderLines.WithoutChildren(order.OrderItem).Select(i => _mapper.Map<OrderItemRes>(i)).ToList();
             return response;
         }
 
@@ -909,21 +932,10 @@ namespace George.Services
                 return CreateResponse(response, StatusCode.InvalidRequest, "Cannot add items to a cancelled order.");
 
             var productCache = new Dictionary<int, Product?>();
-            var newOrderItems = new List<OrderItem>();
-            foreach (var lineReq in items)
-            {
-                var oi = _mapper.Map<OrderItem>(lineReq);
-                if (lineReq.ProductId is > 0)
-                {
-                    if (!productCache.TryGetValue(lineReq.ProductId.Value, out var product))
-                    {
-                        product = await _productStorage.GetProductAsync(lineReq.ProductId.Value, cancelToken).ConfigureAwait(false);
-                        productCache[lineReq.ProductId.Value] = product;
-                    }
-                    OrderLineDisplayFieldsBuilder.MergeComputedDisplayFields(oi, lineReq, product);
-                }
-                newOrderItems.Add(oi);
-            }
+            // Plain lines as before; a bundle line is expanded into parent + children (spec §3.3).
+            var (newOrderItems, bundleError) = await BuildManualOrderLinesAsync(order.SiteId, items, productCache, 0, cancelToken).ConfigureAwait(false);
+            if (bundleError != null)
+                return CreateResponse(response, StatusCode.InvalidRequest, bundleError);
             var updated = await _orderStorage.AddOrderItemsAsync(orderId, newOrderItems, cancelToken);
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
@@ -933,6 +945,12 @@ namespace George.Services
             foreach (var oi in newOrderItems)
             {
                 if (oi.ProductId is not > 0 || oi.Quantity <= 0m) continue;
+                // A bundle parent never consumes stock (its components do) - only its picked baseline is set.
+                if (BundleOrderLines.IsBundleParent(oi))
+                {
+                    if (oi.Id > 0) newLineIdsForBaseline.Add(oi.Id);
+                    continue;
+                }
                 await _productStorage
                     .ApplyPickingConsumptionDeltaAsync(
                         oi.ProductId.Value,
@@ -982,26 +1000,40 @@ namespace George.Services
             if (string.Equals(order.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
                 return CreateResponse(response, StatusCode.InvalidRequest, "Cannot remove items from a cancelled order.");
             var line = order.OrderItem?.FirstOrDefault(i => i.Id == orderItemId && !i.IsDeleted);
-            var restoreProductId = line?.ProductId;
-            var restoreVariantId = line?.ProductVariantId;
-            var restorePicked = line?.PickedQuantity;
+            // Bundles (spec §3.3): a component cannot be removed on its own - swap it or remove the whole bundle;
+            // removing the parent removes (and restocks) its components.
+            if (line != null && BundleOrderLines.IsBundleChild(line))
+                return CreateResponse(response, StatusCode.InvalidRequest, Bundles.BundleOrderLineBuilder.ErrChildDelete);
+            var restoreLines = new List<OrderItem>();
+            if (line != null)
+            {
+                restoreLines.AddRange(BundleOrderLines.IsBundleParent(line)
+                    ? BundleOrderLines.ChildrenOf(order.OrderItem ?? new List<OrderItem>(), line)
+                    : new[] { line });
+            }
 
             var updated = await _orderStorage.RemoveOrderItemAsync(orderId, orderItemId, cancelToken);
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound, "Order item not found.");
 
-            if (restoreProductId is > 0 && restorePicked is > 0m)
+            var restoredProductIds = new List<int>();
+            foreach (var restore in restoreLines)
             {
+                if (restore.ProductId is not > 0 || restore.PickedQuantity is not > 0m) continue;
                 await _productStorage
                     .ApplyPickingConsumptionDeltaAsync(
-                        restoreProductId.Value,
-                        restoreVariantId,
-                        -restorePicked.Value,
+                        restore.ProductId.Value,
+                        restore.ProductVariantId,
+                        -restore.PickedQuantity.Value,
                         cancelToken)
                     .ConfigureAwait(false);
+                restoredProductIds.Add(restore.ProductId.Value);
+            }
+            if (restoredProductIds.Count > 0)
+            {
                 await ScheduleWooCommerceCatalogStockPushForProductsAsync(
                     updated.SiteId,
-                    new List<int> { restoreProductId.Value },
+                    restoredProductIds,
                     "remove item (stock restored)",
                     cancelToken).ConfigureAwait(false);
             }
@@ -1047,11 +1079,18 @@ namespace George.Services
             var updated = await _orderStorage.UpdatePickingAsync(orderId, updates, cancelToken, pickerUserId, pickerName);
             if (updated == null) return CreateResponse(response, StatusCode.ItemNotFound);
 
+            // Bundles (spec §3.3): parent confirmed = all children confirmed; sum + reweigh → parent total from the
+            // weighed components. Runs on the tracked order before promotions re-evaluate the parents.
+            if (orderCheck.OrderItem?.Any(BundleOrderLines.IsBundleParent) == true)
+                await ApplyBundlePickingRulesAsync(orderId, cancelToken).ConfigureAwait(false);
+
             var stockPushProductIds = new List<int>();
             foreach (var (orderItemId, newPicked, _, _, _, _) in updates)
             {
                 var line = orderCheck.OrderItem?.FirstOrDefault(i => i.Id == orderItemId && !i.IsDeleted);
                 if (line == null || line.ProductId is not > 0) continue;
+                // Stock consumption follows the component lines, never the bundle parent (spec §2).
+                if (BundleOrderLines.IsBundleParent(line)) continue;
                 var oldPicked = line.PickedQuantity ?? 0m;
                 var newPickedVal = newPicked ?? 0m;
                 var consumptionDelta = OrderItemStockConsumption.ResolvePickingDeltaCatalogConsumption(line, oldPicked, newPickedVal);
@@ -2040,64 +2079,10 @@ namespace George.Services
                         DateTime.UtcNow,
                         cancelToken).ConfigureAwait(false);
                 }
-                var updateItems = new List<OrderItem>();
                 var wooUpdateProductCache = new Dictionary<int, Product?>();
-                if (payload.Items != null)
-                {
-                    for (var i = 0; i < payload.Items.Count; i++)
-                    {
-                        var it = payload.Items[i];
-                        var ourProductId = await ResolveWooCommerceItemProductIdAsync(siteId, site.AccountId, it.ProductId, it.Sku, GetEffectiveVariationId(it), cancelToken).ConfigureAwait(false);
-                        Product? product = null;
-                        if (ourProductId.HasValue)
-                        {
-                            if (!wooUpdateProductCache.TryGetValue(ourProductId.Value, out product))
-                            {
-                                product = await _productStorage.GetProductAsync(ourProductId.Value, cancelToken).ConfigureAwait(false);
-                                wooUpdateProductCache[ourProductId.Value] = product;
-                            }
-                        }
-                        var updateSiteVariantWooIds = product != null
-                            ? await _productStorage.GetSiteVariantWooIdMapForProductAsync(product.Id, siteId, cancelToken).ConfigureAwait(false)
-                            : null;
-                        var matchedVariant = GetVariantFromPayloadItem(it, product, updateSiteVariantWooIds);
-                        var (qty, unitWeightGrams, variantTitle) = GetWooCommerceItemQuantityAndUnitWeight(it, product);
-                        // Unresolved lines keep ProductId null - the raw Woo id is NOT a local Product.Id, and
-                        // storing it links the line to whatever product happens to own that id (wrong image/price
-                        // on the order screen, stock deducted from the wrong product). Raw id stays in WooCommerceProductId.
-                        var oi = new OrderItem
-                        {
-                            OrderId = existing.Id,
-                            ProductId = ourProductId,
-                            ProductVariantId = matchedVariant?.Id,
-                            Title = it.Name,
-                            VariantTitle = GetVariantTitleFromPayload(it) ?? variantTitle,
-                            Quantity = qty,
-                            UnitWeightGrams = unitWeightGrams,
-                            PricePerUnit = it.UnitPrice,
-                            TotalPrice = it.LineTotal,
-                            Notes = !string.IsNullOrWhiteSpace(it.Note) ? it.Note : it.ProductNote,
-                            SaleUnits = it.SaleUnits,
-                            SaleTotalWeight = it.SaleTotalWeight,
-                            WooCommerceProductId = it.ProductId,
-                            WooCommerceVariationId = GetEffectiveVariationId(it),
-                            SortOrder = i
-                        };
-                        PopulateWooCommerceOrderItemPayloadColumns(oi, it);
-                        var mergeReq = new CreateOrderItemReq
-                        {
-                            ProductId = ourProductId,
-                            ProductVariantId = matchedVariant?.Id,
-                            Quantity = qty,
-                            UnitWeightGrams = unitWeightGrams,
-                            SaleUnits = it.SaleUnits,
-                            SaleTotalWeight = it.SaleTotalWeight,
-                        };
-                        OrderLineDisplayFieldsBuilder.MergeComputedDisplayFields(oi, mergeReq, product);
-                        ApplyWooCommerceQuantityTypeToLineDisplay(oi, it);
-                        updateItems.Add(oi);
-                    }
-                }
+                // Plain lines as before; a Woo bundle line becomes parent + children (spec §6).
+                var updateItems = await BuildWooCommerceOrderLinesAsync(
+                    siteId, site.AccountId, existing.Id, payload, wooUpdateProductCache, cancelToken).ConfigureAwait(false);
                 MergePickingStateIntoWooCommerceReplacementItems(
                     updateItems,
                     updated.OrderItem?.OrderBy(i => i.SortOrder).ToList());
@@ -2142,39 +2127,11 @@ namespace George.Services
                 await EnrichOrderResAsync(response.Data, loaded!, cancelToken).ConfigureAwait(false);
                 return response;
             }
-            var createItems = new List<CreateOrderItemReq>();
-            if (payload.Items != null)
-            {
-                for (var i = 0; i < payload.Items.Count; i++)
-                {
-                    var it = payload.Items[i];
-                    var ourProductId = await ResolveWooCommerceItemProductIdAsync(siteId, site.AccountId, it.ProductId, it.Sku, GetEffectiveVariationId(it), cancelToken).ConfigureAwait(false);
-                    Product? product = ourProductId.HasValue ? await _productStorage.GetProductAsync(ourProductId.Value, cancelToken).ConfigureAwait(false) : null;
-                    var createSiteVariantWooIds = product != null
-                        ? await _productStorage.GetSiteVariantWooIdMapForProductAsync(product.Id, siteId, cancelToken).ConfigureAwait(false)
-                        : null;
-                    var matchedVariant = GetVariantFromPayloadItem(it, product, createSiteVariantWooIds);
-                    var (qty, unitWeightGrams, variantTitle) = GetWooCommerceItemQuantityAndUnitWeight(it, product);
-                    // Unresolved lines keep ProductId null (see the update path above) - never the raw Woo id.
-                    createItems.Add(new CreateOrderItemReq
-                    {
-                        ProductId = ourProductId,
-                        ProductVariantId = matchedVariant?.Id,
-                        Title = it.Name,
-                        VariantTitle = GetVariantTitleFromPayload(it) ?? variantTitle,
-                        Quantity = qty,
-                        UnitWeightGrams = unitWeightGrams,
-                        PricePerUnit = it.UnitPrice,
-                        TotalPrice = it.LineTotal,
-                        Notes = !string.IsNullOrWhiteSpace(it.Note) ? it.Note : it.ProductNote,
-                        SaleUnits = it.SaleUnits,
-                        SaleTotalWeight = it.SaleTotalWeight,
-                        WooCommerceProductId = it.ProductId,
-                        WooCommerceVariationId = GetEffectiveVariationId(it),
-                        SortOrder = i
-                    });
-                }
-            }
+            // Lines are built directly as OrderItem rows (shared with the update path) - a Woo bundle line
+            // becomes parent + children (spec §6); unresolved lines keep ProductId null - never the raw Woo id.
+            var wooProductCache = new Dictionary<int, Product?>();
+            var items = await BuildWooCommerceOrderLinesAsync(
+                siteId, site.AccountId, 0, payload, wooProductCache, cancelToken).ConfigureAwait(false);
             var req = new CreateOrderReq
             {
                 SiteId = siteId,
@@ -2198,7 +2155,7 @@ namespace George.Services
                 ShippingCost = payload.ShippingTotal,
                 Total = payload.OrderTotal,
                 SubTotal = payload.OrderTotal - (payload.ShippingTotal ?? 0),
-                Items = createItems
+                Items = new List<CreateOrderItemReq>()
             };
             var wcMainAddrForCustomer = JoinMainDeliveryLine(payload.ShippingAddress?.Street, payload.ShippingAddress?.City, payload.ShippingAddress?.Zip);
             var saNew = payload.ShippingAddress;
@@ -2225,28 +2182,6 @@ namespace George.Services
             ApplyShippingInfoToOrder(order, payload.ShippingInfo, payload.GetResolvedShippingLabel());
             NormalizeOrderDeliveryAndPickupDates(order);
             ApplyWooCommercePickupStoreNote(order, payload.GetResolvedShippingStoreName());
-            var items = new List<OrderItem>();
-            var wooProductCache = new Dictionary<int, Product?>();
-            for (var i = 0; i < req.Items.Count; i++)
-            {
-                var lineReq = req.Items[i];
-                var oi = _mapper.Map<OrderItem>(lineReq);
-                oi.SortOrder = i;
-                if (payload.Items != null && i < payload.Items.Count)
-                    PopulateWooCommerceOrderItemPayloadColumns(oi, payload.Items[i]);
-                if (lineReq.ProductId is > 0)
-                {
-                    if (!wooProductCache.TryGetValue(lineReq.ProductId.Value, out var p))
-                    {
-                        p = await _productStorage.GetProductAsync(lineReq.ProductId.Value, cancelToken).ConfigureAwait(false);
-                        wooProductCache[lineReq.ProductId.Value] = p;
-                    }
-                    OrderLineDisplayFieldsBuilder.MergeComputedDisplayFields(oi, lineReq, p);
-                }
-                if (payload.Items != null && i < payload.Items.Count)
-                    ApplyWooCommerceQuantityTypeToLineDisplay(oi, payload.Items[i]);
-                items.Add(oi);
-            }
 
             IReadOnlyList<ResolvedOrderPromotion> wooCreatePromos;
             try
@@ -2405,9 +2340,12 @@ namespace George.Services
                     .ConfigureAwait(false);
                 notesMap.TryGetValue(orderForPrint.CustomerId.Value, out customerProfileNote);
             }
+            // Bundles (spec §8): entry vouchers list the components under each bundle; the after-picking voucher
+            // shows the bundle line only.
+            var showBundleComponents = VoucherShowsBundleComponents(trigger);
             var payload = useA4
-                ? BuildAutoVoucherA4Html(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines, site.ShowOrderHandler == true)
-                : BuildAutoVoucherHtml(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines, site.ShowOrderHandler == true);
+                ? BuildAutoVoucherA4Html(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines, site.ShowOrderHandler == true, showBundleComponents)
+                : BuildAutoVoucherHtml(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines, site.ShowOrderHandler == true, showBundleComponents);
             if (string.IsNullOrWhiteSpace(payload))
                 return false;
 
@@ -2520,9 +2458,12 @@ namespace George.Services
         /// email: customer + delivery boxes side by side, ordered-items table (product | qty | price),
         /// then subtotal / shipping / payment / grand-total rows. Delivered to the agent as an A4 PDF.
         /// </summary>
-        private string BuildAutoVoucherA4Html(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false, bool showHandler = false)
+        private string BuildAutoVoucherA4Html(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false, bool showHandler = false, bool showBundleComponents = true)
         {
-            var items = order.OrderItem?.OrderBy(i => i.SortOrder).ToList() ?? new List<OrderItem>();
+            // Bundle children are never standalone voucher lines (spec §8): they render indented under their parent
+            // on entry vouchers and are hidden after picking. Totals count parents + plain lines only.
+            var allItems = order.OrderItem?.OrderBy(i => i.SortOrder).ToList() ?? new List<OrderItem>();
+            var items = BundleOrderLines.WithoutChildren(allItems).ToList();
             var orderNo = order.OrderNumber ?? order.Id.ToString(CultureInfo.InvariantCulture);
             var created = FormatOrderDateTime(order.CreationTime);
             var sourceLabel = VoucherSourceLabels.TryGetValue(order.Source ?? "", out var srcLabel) ? srcLabel : (order.Source ?? "");
@@ -2588,6 +2529,11 @@ namespace George.Services
                 var meta = new StringBuilder();
                 foreach (var seg in OrderItemLineDisplay.GetOrderItemAttributeSegments(it, attrOpts))
                     meta.Append($"<div style=\"color:#374151;font-size:13px;line-height:1.6;\">{EscapeHtml(seg)}</div>");
+                if (showBundleComponents && BundleOrderLines.IsBundleParent(it))
+                {
+                    foreach (var child in BundleOrderLines.ChildrenOf(allItems, it))
+                        meta.Append($"<div style=\"color:#374151;font-size:13px;line-height:1.6;padding-right:14px;\">• {EscapeHtml(VoucherBundleComponentText(child))}</div>");
+                }
                 var legacyHint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(
                     it, string.Equals(order.Status, "New", StringComparison.OrdinalIgnoreCase));
                 if (!string.IsNullOrWhiteSpace(legacyHint))
@@ -2683,10 +2629,13 @@ namespace George.Services
             return sb.ToString();
         }
 
-        private string BuildAutoVoucherHtml(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false, bool showHandler = false)
+        private string BuildAutoVoucherHtml(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false, bool showHandler = false, bool showBundleComponents = true)
         {
             var sb = new StringBuilder();
-            var items = order.OrderItem?.OrderBy(i => i.SortOrder).ToList() ?? new List<OrderItem>();
+            // Bundle children are never standalone voucher lines (spec §8): they render indented under their parent
+            // on entry vouchers and are hidden after picking. Counts and totals cover parents + plain lines only.
+            var allItems = order.OrderItem?.OrderBy(i => i.SortOrder).ToList() ?? new List<OrderItem>();
+            var items = BundleOrderLines.WithoutChildren(allItems).ToList();
             var customerName = order.CustomerName ?? "-";
             var customerPhone = order.CustomerPhone ?? "-";
             var orderNo = order.OrderNumber ?? order.Id.ToString(CultureInfo.InvariantCulture);
@@ -2844,6 +2793,15 @@ namespace George.Services
                     sb.Append($"<div style=\"padding-right:12px;font-size:{VoucherPrintHtml.ProductMeta}px;font-weight:400;line-height:{VoucherPrintHtml.ProductMetaLineHeight}px;\">• ");
                     sb.Append(EscapeHtml(seg));
                     sb.Append("</div>");
+                }
+                if (showBundleComponents && BundleOrderLines.IsBundleParent(it))
+                {
+                    foreach (var child in BundleOrderLines.ChildrenOf(allItems, it))
+                    {
+                        sb.Append($"<div style=\"padding-right:18px;font-size:{VoucherPrintHtml.ProductMeta}px;font-weight:500;line-height:{VoucherPrintHtml.ProductMetaLineHeight}px;\">• ");
+                        sb.Append(EscapeHtml(VoucherBundleComponentText(child)));
+                        sb.Append("</div>");
+                    }
                 }
 
                 var legacyHint = OrderItemLineDisplay.FormatVoucherLegacyUnitWeightHint(it, newVoucher);
@@ -3229,7 +3187,7 @@ namespace George.Services
         /// </summary>
         private static decimal SumStampedPromotionDiscount(IEnumerable<OrderItem> items)
         {
-            var active = items.Where(i => !i.IsDeleted).ToList();
+            var active = BundleOrderLines.WithoutChildren(items.Where(i => !i.IsDeleted)).ToList();
             var anyPicked = active.Any(OrderItemLineDisplay.OrderMeaningfulPick);
             return active.Sum(i =>
             {
@@ -3250,7 +3208,8 @@ namespace George.Services
 
         private static decimal? ComputeVoucherGrandTotal(Order order)
         {
-            var items = order.OrderItem ?? new List<OrderItem>();
+            // Bundle children never carry order money (spec §2) - the parent line does.
+            var items = BundleOrderLines.WithoutChildren(order.OrderItem ?? new List<OrderItem>()).ToList();
             var shipping = order.ShippingCost ?? 0m;
             var promoDisc = SumStampedPromotionDiscount(items);
             var manualDisc = order.ManualDiscountAmount is > 0m ? order.ManualDiscountAmount.Value : 0m;
@@ -3455,12 +3414,17 @@ namespace George.Services
         {
             if (newItems.Count == 0 || previousItemsOrdered == null || previousItemsOrdered.Count == 0)
                 return;
-            var oldOrdered = previousItemsOrdered.OrderBy(i => i.SortOrder).ToList();
-            var n = Math.Min(newItems.Count, oldOrdered.Count);
+            // Positional identity over the TOP-LEVEL lines (plain + bundle parents); bundle children are merged
+            // inside their parent by slot index + product (spec §6), so a bundle never shifts the positions.
+            var oldOrdered = BundleOrderLines.WithoutChildren(previousItemsOrdered).OrderBy(i => i.SortOrder).ToList();
+            var newTop = BundleOrderLines.WithoutChildren(newItems).ToList();
+            var n = Math.Min(newTop.Count, oldOrdered.Count);
             for (var i = 0; i < n; i++)
             {
-                var line = newItems[i];
+                var line = newTop[i];
                 var prev = oldOrdered[i];
+                if (BundleOrderLines.IsBundleParent(line) || BundleOrderLines.IsBundleParent(prev))
+                    continue;
                 if (!SameWooCommerceLineIdentityForPickingMerge(line, prev))
                     continue;
                 if (!prev.PickedQuantity.HasValue || prev.PickedQuantity.Value <= 0m)
@@ -3478,6 +3442,7 @@ namespace George.Services
                 line.DepreciationPercent = prev.DepreciationPercent;
                 line.PickingUserConfirmed = prev.PickingUserConfirmed;
             }
+            MergePickingStateIntoBundleChildren(newItems, previousItemsOrdered);
         }
 
         private static bool SameWooCommerceLineIdentityForPickingMerge(OrderItem a, OrderItem b)
@@ -3539,6 +3504,8 @@ namespace George.Services
             foreach (var line in lines)
             {
                 if (line.ProductId is not > 0 || line.Quantity <= 0m) continue;
+                // Bundle parents never consume stock - their component lines do (spec §2).
+                if (BundleOrderLines.IsBundleParent(line)) continue;
                 await _productStorage
                     .ApplyPickingConsumptionDeltaAsync(
                         line.ProductId.Value,
@@ -3548,8 +3515,9 @@ namespace George.Services
                     .ConfigureAwait(false);
                 productIds.Add(line.ProductId.Value);
             }
-            if (productIds.Count == 0) return;
+            if (productIds.Count == 0 && !lines.Any(BundleOrderLines.IsBundleParent)) return;
             await _orderStorage.SetOrderedCatalogConsumedAndBaselinePickingAsync(order.Id, cancelToken).ConfigureAwait(false);
+            if (productIds.Count == 0) return;
             await ScheduleWooCommerceCatalogStockPushForProductsAsync(
                 order.SiteId,
                 productIds,
@@ -3575,6 +3543,8 @@ namespace George.Services
             foreach (var line in lines)
             {
                 if (line.ProductId is not > 0 || line.Quantity <= 0m) continue;
+                // Bundle parents never consume stock - their component lines do (spec §2).
+                if (BundleOrderLines.IsBundleParent(line)) continue;
                 await _productStorage
                     .ApplyPickingConsumptionDeltaAsync(
                         line.ProductId.Value,
@@ -3584,8 +3554,9 @@ namespace George.Services
                     .ConfigureAwait(false);
                 productIds.Add(line.ProductId.Value);
             }
-            if (productIds.Count == 0) return;
+            if (productIds.Count == 0 && !lines.Any(BundleOrderLines.IsBundleParent)) return;
             await _orderStorage.SetOrderedCatalogConsumedAndBaselinePickingAsync(order.Id, cancelToken).ConfigureAwait(false);
+            if (productIds.Count == 0) return;
             await ScheduleWooCommerceCatalogStockPushForProductsAsync(
                 order.SiteId,
                 productIds,
@@ -3604,6 +3575,8 @@ namespace George.Services
             foreach (var line in lines)
             {
                 if (line.ProductId is not > 0) continue;
+                // Bundle parents never consumed stock (spec §2) - nothing to give back.
+                if (BundleOrderLines.IsBundleParent(line)) continue;
                 decimal restoreQty = 0m;
                 if (line.PickedQuantity.HasValue && line.PickedQuantity.Value > 0m)
                     restoreQty = line.PickedQuantity.Value;
@@ -3629,6 +3602,8 @@ namespace George.Services
             foreach (var line in order.OrderItem?.Where(i => !i.IsDeleted) ?? Enumerable.Empty<OrderItem>())
             {
                 if (line.ProductId is not > 0) continue;
+                // Bundle parents never consume stock - their component lines do (spec §2).
+                if (BundleOrderLines.IsBundleParent(line)) continue;
                 if (line.PickedQuantity.HasValue)
                     continue;
                 if (line.Quantity <= 0m) continue;
@@ -3704,7 +3679,8 @@ namespace George.Services
             var cache = productCache != null
                 ? new Dictionary<int, Product?>(productCache)
                 : new Dictionary<int, Product?>();
-            foreach (var line in items.Where(i => i.ProductId is > 0))
+            // Bundle children never enter the evaluator (spec §9); parents are evaluated as one product.
+            foreach (var line in items.Where(i => i.ProductId is > 0 && !BundleOrderLines.IsBundleChild(i)))
             {
                 var pid = line.ProductId!.Value;
                 if (!cache.ContainsKey(pid))
@@ -3715,6 +3691,7 @@ namespace George.Services
             foreach (var it in items)
             {
                 if (it.ProductId is not > 0) continue;
+                if (BundleOrderLines.IsBundleChild(it)) continue;
                 OrderPromotionEvalLine? eval = resolveEvalLine != null
                     ? resolveEvalLine(it)
                     : DefaultPromotionEvalLine(it);
@@ -3782,6 +3759,7 @@ namespace George.Services
                     var match = items.FirstOrDefault(it =>
                         it.PromotionId == null
                         && it.ProductId != null
+                        && !BundleOrderLines.IsBundleChild(it)
                         && triggers.Contains(it.ProductId.Value.ToString()));
                     if (match != null)
                         StampOrderLinePromotion(items, match.ProductId!.Value.ToString(), applied.PromotionId, applied.DiscountAmount);
@@ -3803,8 +3781,9 @@ namespace George.Services
             if (discountAmount <= 0m) return;
             // Prefer a line with no unlinked (locally-authored Woo) discount, so a later stamp wipe
             // of this George link doesn't also drop the local discount sharing the line.
+            // A bundle CHILD shares its product id with plain lines but never carries a promotion (spec §9).
             var match = items
-                .Where(it => (it.ProductId ?? 0).ToString() == productId && it.PromotionId == null)
+                .Where(it => (it.ProductId ?? 0).ToString() == productId && it.PromotionId == null && !BundleOrderLines.IsBundleChild(it))
                 .OrderBy(it => (it.DiscountAmount ?? 0m) > 0m ? 1 : 0)
                 .FirstOrDefault();
             if (match == null) return;

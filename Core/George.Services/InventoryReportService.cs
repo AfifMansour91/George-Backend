@@ -34,6 +34,8 @@ public class InventoryReportService : ServiceBase
         var products = await _productsReportStorage
             .GetSiteCatalogProductsForInventoryReportAsync(siteId, cancelToken)
             .ConfigureAwait(false);
+        // Bundles never carry stock of their own (§7 step 5): their components do.
+        products = products.Where(p => !BundleProducts.IsBundle(p)).ToList();
 
         var account = await _productsReportStorage.GetAccountForSiteAsync(siteId, cancelToken).ConfigureAwait(false);
 

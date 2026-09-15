@@ -138,6 +138,19 @@ namespace George.Services.Response
         public bool LabelSugarFree { get; set; }
 
         public bool LabelLactoseFree { get; set; }
+
+        /// <summary>
+        /// Bundles (מארזים): the bundle definition + computed prices when <see cref="SetupType"/> = "bundle"
+        /// (single-product GET and create/update responses). Spec: BUNDLES_SYNC_SPEC.md §3.1.
+        /// </summary>
+        public ProductBundleRes? Bundle { get; set; }
+
+        /// <summary>
+        /// Bundles (מארזים): the computed unit price of a bundle product on the account/site product LISTS
+        /// (<see cref="Price"/> is always null for a bundle - the price comes from its definition). Site-effective
+        /// component prices on the per-site list, canonical prices on the account list. Null for non-bundles.
+        /// </summary>
+        public decimal? BundleComputedPrice { get; set; }
     }
 
     /// <summary>Outcome of the last WooCommerce sync of a product to one site's store.</summary>

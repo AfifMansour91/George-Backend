@@ -90,6 +90,7 @@ namespace George.Services
                     dest.IsKosherShop = src.IsKosherShop;
                     dest.AllowWeighted = src.AllowWeighted;
                     dest.KioskEnabled = src.KioskEnabled;
+                    dest.BundlesEnabled = src.BundlesEnabled;
                     if (src.KioskSettings != null)
                     {
                         dest.KioskSettings = context.Mapper.Map<KioskSettingsRes>(src.KioskSettings);
@@ -161,6 +162,10 @@ namespace George.Services
                     // Explicitly map WooCommerceEnabled to ensure it's included
                     dest.WooCommerceEnabled = src.WooCommerceEnabled;
 
+                    // Bundles: the OC Bundles API key is write-only - expose only whether one is configured.
+                    dest.BundlesApiKeyConfigured = !string.IsNullOrWhiteSpace(src.BundlesApiKey);
+                    dest.BundleAllowFreeSwap = src.BundleAllowFreeSwap ?? false;
+
                     // When account has kiosk enabled, include account kiosk settings (so GET Site/{id} returns showOutOfStockProducts, showOutOfStockAtBottom, etc.)
                     if (src.Account != null && src.Account.KioskEnabled && src.Account.KioskSettings != null)
                     {
@@ -203,7 +208,11 @@ namespace George.Services
                     dest.PickupDate = ToUnspecifiedCalendarDate(src.PickupDate);
                     dest.AccountName = src.Account?.Name;
                 });
-            CreateMap<OrderItem, OrderItemRes>();
+            CreateMap<OrderItem, OrderItemRes>()
+                // Bundles: classification via the shared helper (never ad-hoc checks) - spec §2.
+                .ForMember(dest => dest.IsBundleParent, opt => opt.MapFrom(src => BundleOrderLines.IsBundleParent(src)))
+                .ForMember(dest => dest.IsBundleChild, opt => opt.MapFrom(src => BundleOrderLines.IsBundleChild(src)))
+                .ForMember(dest => dest.SwappedFromProductName, opt => opt.Ignore());
             CreateMap<CreateOrderReq, Order>()
                 .ForMember(d => d.PickupDate, o => o.MapFrom(s => s.PickupDate.HasValue ? s.PickupDate.Value.ToDateTime(TimeOnly.MinValue) : (DateTime?)null))
                 .ForMember(d => d.DeliveryDate, o => o.MapFrom(s => s.DeliveryDate.HasValue ? s.DeliveryDate.Value.ToDateTime(TimeOnly.MinValue) : (DateTime?)null));

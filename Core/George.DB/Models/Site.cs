@@ -183,6 +183,16 @@ public partial class Site
     [StringLength(200)]
     public string? PromotionWebhookSecret { get; set; }
 
+    /// <summary>
+    /// Bundles (מארזים): OC Bundles plugin API key sent as <c>X-OC-Bundles-Key</c> to
+    /// <c>{WooCommerceUrl}/wp-json/oc-bundles/v1</c>. Write-only in the API (never returned).
+    /// </summary>
+    [StringLength(200)]
+    public string? BundlesApiKey { get; set; }
+
+    /// <summary>Bundles: a manager may swap a component to ANY catalog product and set the surcharge. Null = false.</summary>
+    public bool? BundleAllowFreeSwap { get; set; }
+
     /// <summary>When true (default), staff must confirm bag count before completing picking. When false, skip that prompt.</summary>
     public bool? AskBagsCountAtPickingFinish { get; set; }
 

@@ -56,6 +56,11 @@ namespace George.DB
 
 		public virtual DbSet<CategorySiteWooId> CategorySiteWooId { get; set; }
 
+		// Bundles (מארזים) - bundle definition tables (configured in MapNonScaffoldEntities).
+		public virtual DbSet<ProductBundleConfig> ProductBundleConfig { get; set; }
+		public virtual DbSet<ProductBundleComponent> ProductBundleComponent { get; set; }
+		public virtual DbSet<ProductBundleComponentSwap> ProductBundleComponentSwap { get; set; }
+
 		// DB Views mapping
 
 
@@ -353,6 +358,72 @@ namespace George.DB
 					.OnDelete(DeleteBehavior.NoAction)
 					.HasConstraintName("FK_CategorySiteWooId_Site");
 			});
+
+			// Bundles (מארזים) - BUNDLES_SYNC_SPEC.md §2. Constraint names match ProductBundle_CreateTables.sql.
+			modelBuilder.Entity<ProductBundleConfig>(entity =>
+			{
+				entity.ToTable("ProductBundleConfig");
+				entity.Property(e => e.PricingMode).HasDefaultValue("fixed");
+				entity.Property(e => e.DiscountType).HasDefaultValue("none");
+				entity.Property(e => e.OosBehavior).HasDefaultValue("unavailable");
+				entity.Property(e => e.Layout).HasDefaultValue("grid");
+				entity.Property(e => e.CartDisplay).HasDefaultValue("name_with_components");
+				entity.Property(e => e.InvoiceDisplay).HasDefaultValue("bundle");
+				entity.HasOne(d => d.Product).WithOne(p => p.BundleConfig)
+					.HasForeignKey<ProductBundleConfig>(d => d.ProductId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductBundleConfig_Product");
+			});
+
+			modelBuilder.Entity<ProductBundleComponent>(entity =>
+			{
+				entity.ToTable("ProductBundleComponent");
+				entity.Property(e => e.ComponentKey).HasDefaultValue(string.Empty);
+				entity.HasOne(d => d.BundleProduct).WithMany(p => p.BundleComponents)
+					.HasForeignKey(d => d.BundleProductId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductBundleComponent_BundleProduct");
+				entity.HasOne(d => d.ComponentProduct).WithMany()
+					.HasForeignKey(d => d.ComponentProductId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductBundleComponent_ComponentProduct");
+				entity.HasOne(d => d.ComponentVariant).WithMany()
+					.HasForeignKey(d => d.ComponentVariantId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductBundleComponent_ComponentVariant");
+			});
+
+			modelBuilder.Entity<ProductBundleComponentSwap>(entity =>
+			{
+				entity.ToTable("ProductBundleComponentSwap");
+				entity.HasOne(d => d.Component).WithMany(p => p.Swaps)
+					.HasForeignKey(d => d.ComponentId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductBundleComponentSwap_Component");
+				entity.HasOne(d => d.SwapProduct).WithMany()
+					.HasForeignKey(d => d.SwapProductId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductBundleComponentSwap_SwapProduct");
+				entity.HasOne(d => d.SwapVariant).WithMany()
+					.HasForeignKey(d => d.SwapVariantId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_ProductBundleComponentSwap_SwapVariant");
+			});
+
+			// OrderItem bundle linkage: self-reference parent → children (no cascade) + slot reference.
+			modelBuilder.Entity<OrderItem>(entity =>
+			{
+				entity.HasOne(d => d.ParentOrderItem).WithMany(p => p.ChildOrderItems)
+					.HasForeignKey(d => d.ParentOrderItemId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_OrderItem_ParentOrderItem");
+				entity.HasOne(d => d.BundleComponent).WithMany()
+					.HasForeignKey(d => d.BundleComponentId)
+					.OnDelete(DeleteBehavior.NoAction)
+					.HasConstraintName("FK_OrderItem_BundleComponent");
+				entity.HasIndex(e => e.ParentOrderItemId, "IX_OrderItem_ParentOrderItemId")
+					.HasFilter("([ParentOrderItemId] IS NOT NULL)");
+			});
 		}
 
 		private void SetQueryFilters(ModelBuilder modelBuilder)
@@ -378,6 +449,9 @@ namespace George.DB
             modelBuilder.Entity<Promotion>().HasQueryFilter(a => a.IsDeleted == false);
             modelBuilder.Entity<ProductSiteOverride>().HasQueryFilter(a => a.IsDeleted == false);
             modelBuilder.Entity<ProductSiteVariantStock>().HasQueryFilter(a => a.IsDeleted == false);
+            // Bundles: soft-deleted slots/swaps stay in the DB (order lines reference them) but never surface in reads.
+            modelBuilder.Entity<ProductBundleComponent>().HasQueryFilter(a => a.IsDeleted == false);
+            modelBuilder.Entity<ProductBundleComponentSwap>().HasQueryFilter(a => a.IsDeleted == false);
             //modelBuilder.Entity<Account>().HasQueryFilter(ent => EF.Property<bool>(ent, PROP_IS_DELETED) == false);
 
         }

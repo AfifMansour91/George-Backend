@@ -48,4 +48,41 @@ public class OrderItemRes
     public decimal? DiscountAmount { get; set; }
     /// <summary>Promotion display name when <see cref="PromotionId"/> is set.</summary>
     public string? PromotionName { get; set; }
+
+    // Bundles (מארזים) - BUNDLES_SYNC_SPEC.md §3.3
+    /// <summary>Parent line only: the bundle product id.</summary>
+    public int? BundleProductId { get; set; }
+    /// <summary>Child line only: id of the bundle parent line.</summary>
+    public int? ParentOrderItemId { get; set; }
+    /// <summary>Child line: the configured slot; null for lines of bundles George does not know.</summary>
+    public int? BundleComponentId { get; set; }
+    /// <summary>Child line: slot index in Woo's <c>_oc_bundle_components</c> (0-based).</summary>
+    public int? BundleComponentIndex { get; set; }
+    /// <summary>Child line: the configured component product when the slot was swapped.</summary>
+    public int? SwappedFromProductId { get; set; }
+    /// <summary>Display name of <see cref="SwappedFromProductId"/> (filled by the orders wave).</summary>
+    public string? SwappedFromProductName { get; set; }
+    /// <summary>Child line: swap surcharge per bundle.</summary>
+    public decimal? SwapSurcharge { get; set; }
+    /// <summary>WooCommerce order item id (payload <c>itemId</c>).</summary>
+    public int? WooLineItemId { get; set; }
+    /// <summary>See <c>BundleOrderLines.IsBundleParent</c>.</summary>
+    public bool IsBundleParent { get; set; }
+    /// <summary>See <c>BundleOrderLines.IsBundleChild</c>.</summary>
+    public bool IsBundleChild { get; set; }
+    /// <summary>
+    /// Child line, only while the order is still pickable (not Completed/Cancelled): the slot's configured swaps
+    /// the picker may choose from. Null otherwise. Spec §8 "picking / order screens".
+    /// </summary>
+    public List<OrderItemBundleSwapOptionRes>? BundleSwapOptions { get; set; }
+}
+
+/// <summary>One configured swap of a bundle slot, as offered on the picking screen.</summary>
+public class OrderItemBundleSwapOptionRes
+{
+    public int ProductId { get; set; }
+    public int? ProductVariantId { get; set; }
+    public string? Name { get; set; }
+    /// <summary>Per bundle.</summary>
+    public decimal Surcharge { get; set; }
 }

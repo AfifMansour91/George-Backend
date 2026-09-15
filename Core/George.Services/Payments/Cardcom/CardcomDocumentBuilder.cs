@@ -154,7 +154,8 @@ public static class CardcomDocumentBuilder
 
     private static IEnumerable<CardcomDocumentProductLine> BuildProductLines(Order order, IEnumerable<OrderItem> items)
     {
-        foreach (var item in items.Where(i => !i.IsDeleted).OrderBy(i => i.SortOrder).ThenBy(i => i.Id))
+        // Bundle children are informational (the parent line carries the bundle money) - never invoice them.
+        foreach (var item in BundleOrderLines.WithoutChildren(items.Where(i => !i.IsDeleted)).OrderBy(i => i.SortOrder).ThenBy(i => i.Id))
         {
             var qty = item.PickedQuantity ?? item.Quantity;
             if (qty <= 0)

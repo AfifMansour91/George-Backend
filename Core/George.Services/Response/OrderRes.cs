@@ -163,5 +163,8 @@ public class OrderRes
     /// <summary>Sum of line-level promotion discounts (NIS).</summary>
     public decimal? PromotionDiscountTotal { get; set; }
 
+    /// <summary>Bundles: <c>Site.BundleAllowFreeSwap</c> - a picker may swap a bundle component to ANY catalog product. Spec §8.</summary>
+    public bool SiteAllowsFreeSwap { get; set; }
+
     public List<OrderItemRes> Items { get; set; } = new();
 }

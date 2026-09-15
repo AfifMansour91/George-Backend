@@ -230,6 +230,8 @@ namespace George.Common.Request
         public bool IsKosherShop { get; set; }
         public bool AllowWeighted { get; set; }
         public bool KioskEnabled { get; set; }
+        /// <summary>Bundles (מארזים) feature gate (FE <c>allowBundles</c>). Super-admin switch.</summary>
+        public bool BundlesEnabled { get; set; }
         public int? WizardStep { get; set; }
         public string? WizardStatus { get; set; }
         /// <summary>Wizard type: "all_sites", "per_site", or "none" (no client-facing wizard).</summary>
@@ -508,7 +510,9 @@ namespace George.Common.Request
         public bool IsKosherShop { get; set; } = false;
         public bool AllowWeighted { get; set; } = false;
         public bool KioskEnabled { get; set; } = false;
-        
+        /// <summary>Bundles (מארזים) feature gate (FE <c>allowBundles</c>). ON by default for new accounts.</summary>
+        public bool BundlesEnabled { get; set; } = true;
+
         public string? LogoUrl { get; set; }
         public string? Website { get; set; }
     }

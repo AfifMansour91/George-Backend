@@ -178,6 +178,8 @@ public class DashboardService : ServiceBase
             foreach (var line in order.OrderItem ?? Enumerable.Empty<OrderItem>())
             {
                 if (line.IsDeleted || line.ProductId is not > 0) continue;
+                // A bundle parent carries no product demand of its own - its children do.
+                if (BundleOrderLines.IsBundleParent(line)) continue;
                 if (!products.TryGetValue(line.ProductId.Value, out var p)) continue;
                 // PickedQuantity is stored in kg for weighted lines; for unpicked lines resolve the
                 // ordered amount in the same catalog units (kg for weighted, pieces for units) so a
@@ -350,8 +352,9 @@ public class DashboardService : ServiceBase
         var income = DashboardMetricsHelper.Round2(active.Sum(o => o.Total ?? 0m));
         var avgOrder = count > 0 ? DashboardMetricsHelper.Round2(income / count) : 0m;
 
+        // A bundle counts as one item (its component children are not separate purchases).
         var totalItems = active.Sum(o =>
-            (o.OrderItem ?? Enumerable.Empty<OrderItem>()).Count(i => !i.IsDeleted && (i.ProductId ?? 0) > 0));
+            BundleOrderLines.WithoutChildren(o.OrderItem ?? Enumerable.Empty<OrderItem>()).Count(i => !i.IsDeleted && (i.ProductId ?? 0) > 0));
         var avgItems = count > 0
             ? DashboardMetricsHelper.Round2((decimal)totalItems / count)
             : 0m;

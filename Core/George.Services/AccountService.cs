@@ -104,6 +104,7 @@ namespace George.Services
                 IsKosherShop = req.IsKosherShop,
                 AllowWeighted = req.AllowWeighted,
                 KioskEnabled = req.KioskEnabled,
+                BundlesEnabled = req.BundlesEnabled,
                 IsActive = true,
                 CreationTime = DateTime.UtcNow,
             };
@@ -233,6 +234,7 @@ namespace George.Services
                 IsKosherShop = req.IsKosherShop,
                 AllowWeighted = req.AllowWeighted,
                 KioskEnabled = req.KioskEnabled,
+                BundlesEnabled = req.BundlesEnabled,
                 // Address fields: use request value if provided, otherwise preserve existing
                 Address = req.Address ?? existingAccount.Address,
                 City = req.City ?? existingAccount.City,

@@ -73,6 +73,12 @@ namespace George.Services.Response
         public string? PromotionWebhookUrl { get; set; }
         public string? PromotionWebhookSecret { get; set; }
 
+        // Bundles (מארזים) - BUNDLES_SYNC_SPEC.md §3.4. The raw BundlesApiKey is never returned.
+        /// <summary>True when an OC Bundles API key is stored for the site.</summary>
+        public bool BundlesApiKeyConfigured { get; set; }
+        /// <summary>A manager may swap a component to ANY catalog product and set the surcharge (DB null = false).</summary>
+        public bool BundleAllowFreeSwap { get; set; }
+
         /// <summary>When true (default), UI asks for bag count when completing picking.</summary>
         public bool? AskBagsCountAtPickingFinish { get; set; }
 

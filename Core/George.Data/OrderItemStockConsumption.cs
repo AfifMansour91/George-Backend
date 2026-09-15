@@ -41,6 +41,17 @@ public static class OrderItemStockConsumption
     public static decimal ResolveOrderedCatalogConsumption(OrderItem line)
     {
         if (line.Quantity <= 0m) return 0m;
+        // Bundle parents never consume stock (the components do). A bundle child stores its ordered quantity
+        // directly in its unit (kg for weight slots, pieces otherwise); its TotalPrice is an informational
+        // share - never a "kg × ₪/kg" line economy - so the price-based kg inference must not run on it.
+        if (BundleOrderLines.IsBundleParent(line)) return 0m;
+        if (BundleOrderLines.IsBundleChild(line))
+        {
+            if (string.Equals(line.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase))
+                return line.Quantity;
+            var childUnitKg = TryGetUnitWeightKg(line);
+            return childUnitKg is > 0m ? line.Quantity * childUnitKg.Value : line.Quantity;
+        }
         if (string.Equals(line.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase))
             return ResolveWeightModeOrderedKg(line);
         var unitKg = TryGetUnitWeightKg(line);

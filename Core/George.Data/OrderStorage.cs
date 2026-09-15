@@ -419,7 +419,7 @@ namespace George.Data
             {
                 if (item.ProductId is > 0 && item.Quantity > 0m)
                 {
-                    item.PickedQuantity = OrderItemStockConsumption.ResolveOrderedCatalogConsumption(item);
+                    item.PickedQuantity = BaselinePickedQuantity(item);
                     item.PickingUserConfirmed = false;
                 }
             }
@@ -449,7 +449,7 @@ namespace George.Data
             {
                 if (item.ProductId is > 0 && item.Quantity > 0m)
                 {
-                    item.PickedQuantity = OrderItemStockConsumption.ResolveOrderedCatalogConsumption(item);
+                    item.PickedQuantity = BaselinePickedQuantity(item);
                     item.PickingUserConfirmed = false;
                     touched = true;
                 }
@@ -458,6 +458,15 @@ namespace George.Data
             db.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
         }
+
+        /// <summary>
+        /// Picked-quantity baseline of a freshly ordered line: the catalog units its ordered quantity consumes.
+        /// A bundle parent is not pickable - its picked quantity mirrors the number of bundles (spec §2).
+        /// </summary>
+        private static decimal BaselinePickedQuantity(OrderItem item) =>
+            BundleOrderLines.IsBundleParent(item)
+                ? item.Quantity
+                : OrderItemStockConsumption.ResolveOrderedCatalogConsumption(item);
 
         /// <summary>Add line items to an existing order (e.g. from picking "הוסף פריט").</summary>
         public async Task<Order?> AddOrderItemsAsync(int orderId, List<OrderItem> newItems, CancellationToken cancelToken)
@@ -509,6 +518,20 @@ namespace George.Data
             if (item == null) return null;
             item.IsDeleted = true;
             item.UpdatedDate = DateTime.UtcNow;
+            // Bundles: removing the parent removes its component lines too (spec §3.3) - a child never lives alone.
+            if (BundleOrderLines.IsBundleParent(item))
+            {
+                var children = await _dbContext.OrderItem
+                    .IgnoreQueryFilters()
+                    .Where(i => i.OrderId == orderId && i.ParentOrderItemId == orderItemId && !i.IsDeleted)
+                    .ToListAsync(cancelToken)
+                    .ConfigureAwait(false);
+                foreach (var child in children)
+                {
+                    child.IsDeleted = true;
+                    child.UpdatedDate = DateTime.UtcNow;
+                }
+            }
             var order = await _dbContext.Order.FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
             if (order != null)
                 order.UpdatedDate = DateTime.UtcNow;
@@ -552,6 +575,15 @@ namespace George.Data
             foreach (var (orderItemId, pickedQty, totalPrice, confirmFromClient, notes, depreciationPercent) in updates)
             {
                 if (!itemMap.TryGetValue(orderItemId, out var item)) continue;
+                // A bundle parent is not pickable: its picked quantity / total / confirmation are derived from
+                // its children by OrderService (spec §3.3). Only the per-line note may be edited here.
+                if (BundleOrderLines.IsBundleParent(item))
+                {
+                    if (notes != null)
+                        item.Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+                    continue;
+                }
+                var isBundleChild = BundleOrderLines.IsBundleChild(item);
                 var prevPicked = item.PickedQuantity;
                 var prevTotal = item.TotalPrice;
 
@@ -573,7 +605,9 @@ namespace George.Data
                 item.PickedQuantity = pickedQty;
                 item.TotalPrice = totalPrice;
                 // פחת travels with the total it was folded into: a re-pick without it clears the stamp.
-                item.DepreciationPercent = depreciationPercent is > 0m ? depreciationPercent : null;
+                // Depreciation is never applied to bundle lines (spec §4); a child's total is the informational
+                // share recomputed by OrderService after this save (null in fixed mode).
+                item.DepreciationPercent = !isBundleChild && depreciationPercent is > 0m ? depreciationPercent : null;
 
                 // Per-line note edited during picking. Null = leave existing untouched; "" clears it. Bug #7.
                 if (notes != null)
@@ -583,7 +617,11 @@ namespace George.Data
                     item.PickingUserConfirmed = true;
                 else if (confirmFromClient == false)
                     item.PickingUserConfirmed = false;
-                else if (!NullableDecimalEquals(pickedQty, prevPicked) || !NullableDecimalEquals(totalPrice, prevTotal))
+                else if (!NullableDecimalEquals(pickedQty, prevPicked))
+                    item.PickingUserConfirmed = true;
+                // A bundle child's TotalPrice is rewritten server-side (informational share) - a total that differs
+                // from the client's copy is never a picking action; only its picked quantity is.
+                else if (!isBundleChild && !NullableDecimalEquals(totalPrice, prevTotal))
                     item.PickingUserConfirmed = true;
                 // else: unchanged vs DB - leave PickingUserConfirmed as-is (avoids marking every line picked when client sends full cart)
             }
@@ -637,7 +675,8 @@ namespace George.Data
         /// <summary>After picking: refresh header SubTotal/Total from lines + shipping (Original* unchanged).</summary>
         private static void RecalculateOrderHeaderTotalsFromLines(Order order)
         {
-            var active = order.OrderItem?.Where(i => !i.IsDeleted).ToList() ?? new List<OrderItem>();
+            // Bundle children never carry order money (their TotalPrice is an informational share) - the parent does.
+            var active = BundleOrderLines.WithoutChildren(order.OrderItem?.Where(i => !i.IsDeleted) ?? Enumerable.Empty<OrderItem>()).ToList();
             if (!active.Any(i => i.PickingUserConfirmed) &&
                 !active.Any(i => i.PickedQuantity is 0m && !i.TotalPrice.HasValue))
                 return;

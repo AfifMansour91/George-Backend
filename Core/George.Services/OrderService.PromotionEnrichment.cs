@@ -346,16 +346,27 @@ public partial class OrderService
             || s.Equals("Manual", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static OrderPromotionEvalLine DefaultPromotionEvalLine(OrderItem it)
+    /// <summary>
+    /// Evaluator line for an order line at finalize. Bundle children are never evaluated (null);
+    /// a bundle parent is evaluated as one product: <c>Quantity</c> = number of bundles,
+    /// <c>PricePerUnit</c> = bundle unit price (BUNDLES_SYNC_SPEC.md §9).
+    /// </summary>
+    private static OrderPromotionEvalLine? DefaultPromotionEvalLine(OrderItem it)
     {
+        if (!PromotionBundleLines.IsEvaluable(it)) return null;
         var qty = it.Quantity;
         var lineTotal = it.TotalPrice ?? qty * (it.PricePerUnit ?? 0m);
         var ppu = qty > 0m ? lineTotal / qty : (it.PricePerUnit ?? 0m);
         return new OrderPromotionEvalLine { Quantity = qty, PricePerUnit = ppu, LineTotal = lineTotal };
     }
 
-  private static OrderPromotionEvalLine? PickingPromotionEvalLine(OrderItem it)
+    private static OrderPromotionEvalLine? PickingPromotionEvalLine(OrderItem it)
     {
+        if (!PromotionBundleLines.IsEvaluable(it)) return null;
+        // A bundle parent is not pickable (PickedQuantity mirrors Quantity); its money may change under
+        // re-weigh but the count of bundles never does - evaluate it from the ordered quantity.
+        if (BundleOrderLines.IsBundleParent(it)) return DefaultPromotionEvalLine(it);
+
         if (OrderItemLineDisplay.OrderMeaningfulPick(it))
         {
             var pickedQty = it.PickedQuantity ?? 0m;
@@ -388,6 +399,13 @@ public partial class OrderService
         var hasGeorgePromotion = items.Any(i => i.PromotionId is > 0);
         if (!ShouldReapplyPromotionsDuringPicking(order.Source) && !hasGeorgePromotion) return;
 
+        // Bundles (§9): on a Woo-sourced order the evaluator may re-scale a stamp Woo put on a bundle
+        // parent, but must never ADD one Woo did not - remember the parents' stamps before the wipe.
+        var wooSourced = PromotionBundleLines.IsWooSourcedOrder(order.Source);
+        var bundleParentStampsBefore = wooSourced
+            ? PromotionBundleLines.SnapshotBundleParentStamps(items)
+            : null;
+
         foreach (var it in items)
         {
             // Only George-linked stamps are re-derived by the evaluator below. An unlinked discount
@@ -418,6 +436,15 @@ public partial class OrderService
         {
             _logger.LogError(ex, "TryReapplyOrderPromotionsAfterPickingAsync failed orderId={OrderId}", orderId);
             return;
+        }
+
+        if (bundleParentStampsBefore != null)
+        {
+            var reverted = PromotionBundleLines.RevertNewStampsOnUnstampedBundleParents(items, bundleParentStampsBefore);
+            if (reverted > 0)
+                _logger.LogInformation(
+                    "Order {OrderId}: dropped {Count} George promotion stamp(s) the evaluator added to bundle parents Woo did not stamp.",
+                    orderId, reverted);
         }
 
         await _orderStorage.PersistTrackedOrderTotalsAsync(order, cancelToken).ConfigureAwait(false);

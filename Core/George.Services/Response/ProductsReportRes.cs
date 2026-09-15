@@ -99,6 +99,30 @@ namespace George.Services.Response
         public string? QuantityLabel { get; set; }
     }
 
+    /// <summary>One bundle (מארז) product's sales in the period, from the bundle parent lines (BUNDLES_SYNC_SPEC.md §8).</summary>
+    public class ProductsReportBundleRowDto
+    {
+        public int ProductId { get; set; }
+        public string Name { get; set; } = "";
+        public string? Sku { get; set; }
+        public string? ImageUrl { get; set; }
+        public int OrdersCount { get; set; }
+        public decimal UnitsSold { get; set; }
+        public decimal Revenue { get; set; }
+        /// <summary>Row revenue / total bundle revenue (0..1).</summary>
+        public decimal Share { get; set; }
+    }
+
+    public class ProductsReportBundlesDto
+    {
+        /// <summary>Distinct orders containing at least one bundle.</summary>
+        public int OrdersCount { get; set; }
+        public decimal UnitsSold { get; set; }
+        public decimal Revenue { get; set; }
+        /// <summary>Sorted by revenue desc.</summary>
+        public List<ProductsReportBundleRowDto> Rows { get; set; } = new();
+    }
+
     public class ProductsReportRes
     {
         public ProductsReportRangeDto CurrentRange { get; set; } = new();
@@ -115,5 +139,8 @@ namespace George.Services.Response
 
         /// <summary>Subset of unsold catalog products for the modal (server-capped).</summary>
         public List<ProductsReportUnsoldRowDto> UnsoldProducts { get; set; } = new();
+
+        /// <summary>Bundles (מארזים) sold in the period - null unless <c>Account.BundlesEnabled</c> (UI hides the section).</summary>
+        public ProductsReportBundlesDto? Bundles { get; set; }
     }
 }

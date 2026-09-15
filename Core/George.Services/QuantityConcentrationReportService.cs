@@ -53,6 +53,7 @@ namespace George.Services
             int? categoryId,
             string? pickedFilter = null,
             bool includePicked = false,
+            bool includeBundles = false,
             CancellationToken cancelToken = default)
         {
             var response = new ApiResponse<QuantityConcentrationReportRes>();
@@ -126,14 +127,18 @@ namespace George.Services
                 foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
                 {
                     if (line.ProductId is not > 0) continue;
+                    // Bundles (מארזים): the parent line IS the bundle product - its components are the
+                    // child lines, which carry their own ProductId and are counted like any line.
+                    if (BundleOrderLines.IsBundleParent(line)) continue;
                     if (!LineMatchesPickedFilter(line, pickedMode)) continue;
                     if (!productDict.TryGetValue(line.ProductId.Value, out var p)) continue;
                     var cid = PrimaryCategoryId(p);
                     if (catFilter != null && cid != catFilter) continue;
                     if (!LineHasQuantity(line)) continue;
 
-                    var (kg, units) = SplitLineQty(line, p);
+                    var (kg, units) = SplitLineQtyForReport(line, p);
                     if (kg <= 0m && units <= 0m) continue;
+                    var fromBundle = BundleOrderLines.IsBundleChild(line);
 
                     var note = (line.Notes ?? "").Trim();
                     var variant = FindVariant(p, line);
@@ -167,6 +172,11 @@ namespace George.Services
                     b.OrderIds.Add(o.Id);
                     b.Kg += kg;
                     b.Units += units;
+                    if (fromBundle)
+                    {
+                        b.FromBundlesKg += kg;
+                        b.FromBundlesUnits += units;
+                    }
                     if (soldByUnits)
                     {
                         if (b.UnitWeightKg == null && unitWeightKey > 0m)
@@ -192,7 +202,7 @@ namespace George.Services
                 var stockDisplayMode = ResolveStockDisplayMode(p);
                 var variantQtyStock = UsesVariationQuantityStock(p);
 
-                decimal sumKg = 0m, sumUnits = 0m;
+                decimal sumKg = 0m, sumUnits = 0m, fromBundlesKg = 0m, fromBundlesUnits = 0m;
                 var lines = new List<QuantityConcentrationLineDto>();
                 foreach (var kv in g
                     .OrderBy(x => x.Value.LineLabel, StringComparer.OrdinalIgnoreCase)
@@ -201,6 +211,8 @@ namespace George.Services
                     var b = kv.Value;
                     if (b.Kg > 0m) sumKg += b.Kg;
                     if (b.Units > 0m) sumUnits += b.Units;
+                    if (b.FromBundlesKg > 0m) fromBundlesKg += b.FromBundlesKg;
+                    if (b.FromBundlesUnits > 0m) fromBundlesUnits += b.FromBundlesUnits;
                     var variantId = b.VariantIds.Count > 0 ? b.VariantIds.Min() : (int?)null;
                     var (lineSk, lineSu) = ResolveLineCatalogStock(p, stockDisplayMode, variantId);
                     var lineLabel = b.LineLabel;
@@ -243,6 +255,8 @@ namespace George.Services
                     CategoryId = PrimaryCategoryId(p) ?? 0,
                     TotalQuantityKg = sumKg > 0m ? Round2(sumKg) : null,
                     TotalQuantityUnits = totalUnitsOut,
+                    FromBundlesKg = fromBundlesKg > 0m ? Round2(fromBundlesKg) : 0m,
+                    FromBundlesUnits = fromBundlesUnits > 0m ? Round2(fromBundlesUnits) : 0m,
                     ShowUnitsInTotalQuantity = showUnitsInTotal,
                     ShowWeightPerUnitColumn = parentUnitWeightKg is > 0m || lines.Any(l =>
                         string.Equals(l.LineDisplayKind, "variant", StringComparison.Ordinal)
@@ -262,8 +276,157 @@ namespace George.Services
             }
 
             res.ProductGroups = groups;
+            if (includeBundles && account?.BundlesEnabled == true)
+                res.Bundles = BuildBundlesSection(orders, productDict, catFilter);
             response.Data = res;
             return response;
+        }
+
+        // ─── Bundles (מארזים) - BUNDLES_SYNC_SPEC.md §8 ─────────────────────────────
+
+        /// <summary>
+        /// kg/units of a line for the quantity report. A bundle child line (component) carries its
+        /// quantity in the component's own unit (<c>Quantity</c> = component qty × bundles, kg or units),
+        /// so it is split by its unit rather than by the Woo sale-line heuristics of a plain line.
+        /// </summary>
+        public static (decimal kg, decimal units) SplitLineQtyForReport(OrderItem line, Product p) =>
+            BundleOrderLines.IsBundleChild(line) ? SplitBundleChildQty(line, p) : SplitLineQty(line, p);
+
+        /// <summary>
+        /// Bundle child line → (kg, units): weight lines (mode <c>weight</c>, or a weighted-like product not
+        /// sold by pieces) put the picked/ordered quantity in kg; piece lines put it in units (plus kg from a
+        /// per-unit weight when known). Picked quantity wins once the picker confirmed the line.
+        /// </summary>
+        public static (decimal kg, decimal units) SplitBundleChildQty(OrderItem line, Product? p)
+        {
+            var qty = line.PickingUserConfirmed && line.PickedQuantity is > 0m
+                ? line.PickedQuantity.Value
+                : line.Quantity;
+            if (qty <= 0m) return (0m, 0m);
+
+            var mode = (line.OrderLineQuantityMode ?? "").Trim().ToLowerInvariant();
+            var isWeight = mode == "weight"
+                || (mode != "units" && p != null && ProductCatalogStockClassification.IsWeightedLikeProduct(p) && !IsWeightedSoldByUnits(line));
+            if (isWeight)
+                return (qty, 0m);
+
+            var kgPerUnit = line.LineUnitWeightKg is > 0m
+                ? line.LineUnitWeightKg.Value
+                : line.UnitWeightGrams is > 0m ? line.UnitWeightGrams.Value / 1000m : 0m;
+            return (kgPerUnit > 0m ? qty * kgPerUnit : 0m, qty);
+        }
+
+        /// <summary>A bundle parent counts as picked when the picker confirmed it or every child line.</summary>
+        public static bool IsBundleParentPicked(OrderItem parent, IReadOnlyList<OrderItem> children)
+        {
+            if (parent.PickingUserConfirmed) return true;
+            return children.Count > 0 && children.All(c => c.PickingUserConfirmed);
+        }
+
+        /// <summary>
+        /// Bundles ordered in the report's orders (parent lines), with the component demand aggregated from
+        /// their child lines. The category filter applies to the bundle product's primary category (like a
+        /// product group); the picked filter does not - <c>pickedBundles</c> carries that split.
+        /// </summary>
+        public static List<QuantityConcentrationBundleDto> BuildBundlesSection(
+            IEnumerable<Order> orders,
+            IReadOnlyDictionary<int, Product> productDict,
+            int? categoryFilter)
+        {
+            var byBundle = new Dictionary<int, BundleAgg>();
+            foreach (var o in orders)
+            {
+                var items = (o.OrderItem ?? Enumerable.Empty<OrderItem>()).Where(i => !i.IsDeleted).ToList();
+                var childrenByParent = items
+                    .Where(BundleOrderLines.IsBundleChild)
+                    .GroupBy(i => i.ParentOrderItemId!.Value)
+                    .ToDictionary(g => g.Key, g => (IReadOnlyList<OrderItem>)g.ToList());
+
+                foreach (var parent in items.Where(BundleOrderLines.IsBundleParent))
+                {
+                    var bundleProductId = parent.BundleProductId ?? parent.ProductId ?? 0;
+                    if (bundleProductId <= 0) continue;
+                    productDict.TryGetValue(bundleProductId, out var bundleProduct);
+                    if (categoryFilter != null && PrimaryCategoryId(bundleProduct) != categoryFilter) continue;
+
+                    if (!byBundle.TryGetValue(bundleProductId, out var agg))
+                    {
+                        agg = new BundleAgg
+                        {
+                            Name = !string.IsNullOrWhiteSpace(bundleProduct?.Name)
+                                ? bundleProduct!.Name!
+                                : (string.IsNullOrWhiteSpace(parent.Title) ? $"#{bundleProductId}" : parent.Title!.Trim()),
+                        };
+                        byBundle[bundleProductId] = agg;
+                    }
+
+                    childrenByParent.TryGetValue(parent.Id, out var children);
+                    children ??= Array.Empty<OrderItem>();
+
+                    agg.Ordered += parent.Quantity;
+                    if (IsBundleParentPicked(parent, children))
+                        agg.Picked += parent.Quantity;
+                    agg.OrderIds.Add(o.Id);
+
+                    foreach (var child in children)
+                    {
+                        if (child.ProductId is not > 0) continue;
+                        productDict.TryGetValue(child.ProductId.Value, out var cp);
+                        var (kg, units) = SplitBundleChildQty(child, cp);
+                        if (kg <= 0m && units <= 0m) continue;
+                        if (!agg.Components.TryGetValue(child.ProductId.Value, out var comp))
+                        {
+                            comp = new BundleComponentAgg
+                            {
+                                Name = !string.IsNullOrWhiteSpace(cp?.Name)
+                                    ? cp!.Name!
+                                    : (string.IsNullOrWhiteSpace(child.Title) ? $"#{child.ProductId.Value}" : child.Title!.Trim()),
+                            };
+                            agg.Components[child.ProductId.Value] = comp;
+                        }
+                        comp.Kg += kg;
+                        comp.Units += units;
+                    }
+                }
+            }
+
+            return byBundle
+                .OrderBy(kv => kv.Value.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(kv => new QuantityConcentrationBundleDto
+                {
+                    BundleProductId = kv.Key,
+                    Name = kv.Value.Name,
+                    OrderedBundles = Round2(kv.Value.Ordered),
+                    PickedBundles = Round2(kv.Value.Picked),
+                    OrdersCount = kv.Value.OrderIds.Count,
+                    Components = kv.Value.Components
+                        .OrderBy(c => c.Value.Name, StringComparer.OrdinalIgnoreCase)
+                        .Select(c => new QuantityConcentrationBundleComponentDto
+                        {
+                            ProductId = c.Key,
+                            Name = c.Value.Name,
+                            QuantityKg = Round2(c.Value.Kg),
+                            QuantityUnits = Round2(c.Value.Units),
+                        })
+                        .ToList(),
+                })
+                .ToList();
+        }
+
+        private sealed class BundleAgg
+        {
+            public string Name = "";
+            public decimal Ordered;
+            public decimal Picked;
+            public readonly HashSet<int> OrderIds = new();
+            public readonly Dictionary<int, BundleComponentAgg> Components = new();
+        }
+
+        private sealed class BundleComponentAgg
+        {
+            public string Name = "";
+            public decimal Kg;
+            public decimal Units;
         }
 
         private sealed class LineBucket
@@ -271,6 +434,9 @@ namespace George.Services
             public string LineLabel = "";
             public decimal Kg;
             public decimal Units;
+            /// <summary>Part of <see cref="Kg"/> / <see cref="Units"/> that came from bundle child lines.</summary>
+            public decimal FromBundlesKg;
+            public decimal FromBundlesUnits;
             public decimal? UnitWeightKg;
             public readonly HashSet<int> VariantIds = new();
             public readonly HashSet<int> OrderIds = new();

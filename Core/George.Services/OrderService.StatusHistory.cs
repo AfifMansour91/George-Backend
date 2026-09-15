@@ -33,6 +33,8 @@ public partial class OrderService
         ApplyStatusTimestampsToRes(res, order, map.GetValueOrDefault(order.Id));
         ApplyPickupBranchDisplayName(res, order);
         await ApplyCustomerProfileNotesAsync(new[] { res }, new[] { order }, cancelToken).ConfigureAwait(false);
+        // Bundles (spec §8): free-swap flag, swapped-out names and per-child swap options (single order reads).
+        await ApplyBundleOrderResEnrichmentAsync(new[] { res }, new[] { order }, includeSwapOptions: true, cancelToken).ConfigureAwait(false);
     }
 
     private async Task EnrichOrderResListAsync(
@@ -51,6 +53,8 @@ public partial class OrderService
             ApplyPickupBranchDisplayName(res, order);
         }
         await ApplyCustomerProfileNotesAsync(list, orders, cancelToken).ConfigureAwait(false);
+        // Bundles (spec §8): lists get the flag + swapped-out names; swap options only on single-order reads.
+        await ApplyBundleOrderResEnrichmentAsync(list, orders, includeSwapOptions: false, cancelToken).ConfigureAwait(false);
     }
 
     /// <summary>Self-pickup: expose branch name from Site when Woo/manual order has no shippingStoreName.</summary>

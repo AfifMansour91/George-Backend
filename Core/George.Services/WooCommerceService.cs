@@ -62,6 +62,7 @@ namespace George.Services
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ProductSiteOverrideStorage _overrideStorage;
         private readonly IIntegrationLogQueue _integrationLogQueue;
+        private readonly BundleStorage _bundleStorage;
         // Per-instance cache of "is this site network-managed?" so single-site/non-network syncs skip all
         // per-site override lookups entirely (zero overhead + absolute separation from the override feature).
         // ConcurrentDictionary: a batch may sync multiple products in parallel on one service instance.
@@ -119,10 +120,12 @@ namespace George.Services
             IHttpClientFactory httpClientFactory,
             IServiceScopeFactory scopeFactory,
             ProductSiteOverrideStorage overrideStorage,
-            IIntegrationLogQueue integrationLogQueue
+            IIntegrationLogQueue integrationLogQueue,
+            BundleStorage bundleStorage
         ) : base(logger, mapper, cache)
         {
             _integrationLogQueue = integrationLogQueue;
+            _bundleStorage = bundleStorage;
             _siteStorage = siteStorage;
             _categoryStorage = categoryStorage;
             _productStorage = productStorage;
@@ -1851,12 +1854,26 @@ namespace George.Services
             _logger.LogInformation("WooCommerce sync: products sync started for site {SiteId}, {Count} products", siteId, idsToSync.Count);
             progress?.Report(new WooCommerceSyncProgress { Total = idsToSync.Count, Completed = 0, Failed = 0 });
 
+            // Bundles (מארזים) go LAST, each in its own sequential batch: the OC Bundles PUT resolves the
+            // component Woo ids per site, so every regular product (the components) must be created first.
+            HashSet<int> bundleIds;
+            try
+            {
+                bundleIds = await _bundleStorage.GetBundleProductIdsAsync(idsToSync, cancelToken).ConfigureAwait(false);
+            }
+            catch (Exception bundleEx)
+            {
+                _logger.LogWarning(bundleEx, "WooCommerce sync: failed to detect bundle products for site {SiteId}; syncing in request order", siteId);
+                bundleIds = new HashSet<int>();
+            }
+            if (bundleIds.Count > 0)
+                _logger.LogInformation("WooCommerce sync: {Count} bundle product(s) deferred after the regular products for site {SiteId}", bundleIds.Count, siteId);
+
             // Each product: load by ID and sync in the same scope so options/variants/weight are always complete (no detached-entity issues)
             const int batchSize = 16;
-            for (int i = 0; i < idsToSync.Count; i += batchSize)
+            foreach (var batchIds in BundleGuards.PartitionSyncBatches(idsToSync, bundleIds, batchSize))
             {
                 cancelToken.ThrowIfCancellationRequested();
-                var batchIds = idsToSync.Skip(i).Take(batchSize).ToList();
                 var batchTasks = batchIds.Select(async productId =>
                 {
                     using var scope = _scopeFactory.CreateScope();
@@ -1907,7 +1924,62 @@ namespace George.Services
             var product = await _productStorage.GetProductAsync(productId, cancelToken);
             if (product == null || !product.Site.Any(s => s.Id == siteId))
                 return new WooCommerceSyncResult { Success = false, ProductId = productId, ProductName = "", Error = "Product not found or not in site." };
+            // Bundles (מארזים): components with no Woo id on this site are pushed first, or the definition PUT
+            // could not reference them (a bundle created together with new component products, or synced alone).
+            if (BundleProducts.IsBundle(product))
+                await EnsureBundleComponentsSyncedAsync(baseUrl, siteId, product.Id, categoryMap, httpClient, cancelToken).ConfigureAwait(false);
             return await SyncProductAsync(baseUrl, siteId, product, categoryMap, httpClient, cancelToken);
+        }
+
+        /// <summary>
+        /// Syncs the component/swap products of bundle <paramref name="bundleProductId"/> that have no Woo product id
+        /// on <paramref name="siteId"/> yet (live products assigned to the site only). Never throws: a component that
+        /// still fails surfaces as the bundle's own PUT error ("component has no Woo id").
+        /// </summary>
+        private async Task EnsureBundleComponentsSyncedAsync(
+            string baseUrl,
+            int siteId,
+            int bundleProductId,
+            Dictionary<int, int> categoryMap,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            try
+            {
+                var definition = await _bundleStorage.GetDefinitionAsync(bundleProductId, cancelToken).ConfigureAwait(false);
+                if (definition == null || definition.Components.Count == 0) return;
+
+                var componentIds = definition.Components.Select(c => c.ComponentProductId)
+                    .Concat(definition.Components.SelectMany(c => c.Swaps).Select(s => s.SwapProductId))
+                    .Where(id => id != bundleProductId)
+                    .Distinct()
+                    .ToList();
+                var wooMap = await _bundleStorage.GetSiteWooProductIdMapAsync(componentIds, siteId, cancelToken).ConfigureAwait(false);
+                var missing = componentIds.Where(id => !wooMap.ContainsKey(id)).ToList();
+                if (missing.Count == 0) return;
+
+                // Only live products on this site can be pushed; nested bundles are rejected by validation but are
+                // dropped here anyway so this can never recurse.
+                var onSite = await _bundleStorage.GetProductIdsOnSiteAsync(missing, siteId, cancelToken).ConfigureAwait(false);
+                var nested = await _bundleStorage.GetBundleProductIdsAsync(missing, cancelToken).ConfigureAwait(false);
+                missing = missing.Where(id => onSite.Contains(id) && !nested.Contains(id)).ToList();
+                if (missing.Count == 0) return;
+
+                _logger.LogInformation("WooCommerce sync: bundle {BundleProductId} on site {SiteId} - syncing {Count} component product(s) without a Woo id first: {Ids}",
+                    bundleProductId, siteId, missing.Count, string.Join(",", missing));
+                var results = await SyncProductsAsync(baseUrl, siteId, missing, categoryMap, httpClient, cancelToken).ConfigureAwait(false);
+                foreach (var failed in results.Where(r => !r.Success))
+                    _logger.LogWarning("WooCommerce sync: component {ProductId} of bundle {BundleProductId} failed on site {SiteId}: {Error}",
+                        failed.ProductId, bundleProductId, siteId, failed.Error);
+            }
+            catch (OperationCanceledException) when (cancelToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "WooCommerce sync: failed to pre-sync components of bundle {BundleProductId} on site {SiteId}", bundleProductId, siteId);
+            }
         }
 
         /// <summary>Syncs a single product to WooCommerce. Public so it can be invoked from a scoped WooCommerceService (each scope has its own DbContext).</summary>
@@ -2279,12 +2351,18 @@ namespace George.Services
                 // Weighted product fields - "זה מוצר שקיל". Keys must match WordPress admin POST (post.php): leading _ and no trailing _.
                 // When IsWeighted is null, derive from SetupType (same as frontend edit form).
                 var setupTypeName = product.SetupType?.Name ?? "";
+                // Bundles (מארזים): the OC Bundles plugin owns price/stock/components of an "oc_bundle" post;
+                // George sends only the catalog shell (§7 step 1) and then PUTs the definition (§7 step 2).
+                var isBundleProduct = BundleProducts.IsBundleSetupType(setupTypeName);
                 var isWeightedBySetup = setupTypeName is "by_weight" or "by_unit" or "by_unit_and_weight";
-                var isWeighted = product.IsWeighted == true || (product.IsWeighted != false && isWeightedBySetup);
+                var isWeighted = !isBundleProduct && (product.IsWeighted == true || (product.IsWeighted != false && isWeightedBySetup));
                 var weighableValue = isWeighted ? "yes" : "no";
-                metaData.Add(new { key = "_ocwsu_weighable", value = weighableValue });
-                metaData.Add(new { key = "ocwsu_weighable_", value = weighableValue });
-                metaData.Add(new { key = "ocwsu_weightable", value = weighableValue });
+                if (!isBundleProduct)
+                {
+                    metaData.Add(new { key = "_ocwsu_weighable", value = weighableValue });
+                    metaData.Add(new { key = "ocwsu_weighable_", value = weighableValue });
+                    metaData.Add(new { key = "ocwsu_weightable", value = weighableValue });
+                }
 
                 if (isWeighted)
                 {
@@ -2367,7 +2445,9 @@ namespace George.Services
                 var wooProduct = new Dictionary<string, object>
                 {
                     ["name"] = product.Name,
-                    ["type"] = (product.ProductVariant != null && product.ProductVariant.Any(v => !v.IsDeleted)) ? "variable" : "simple",
+                    ["type"] = isBundleProduct
+                        ? BundleProducts.WooProductType
+                        : ((product.ProductVariant != null && product.ProductVariant.Any(v => !v.IsDeleted)) ? "variable" : "simple"),
                     ["description"] = product.LongDescription ?? "",
                     ["short_description"] = product.ShortDescription ?? "",
                     ["sku"] = wooSku,
@@ -2422,8 +2502,14 @@ namespace George.Services
                 // create-fallback below still seeds an initial price on a brand-new Woo product.
                 Dictionary<string, object?>? priceFieldsHeldForCreate = null;
 
+                // Bundles: NO regular_price/sale_price/manage_stock/stock_quantity/stock_status/attributes - the OC
+                // Bundles plugin computes price and availability from the components (§7 step 1).
+                if (isBundleProduct)
+                {
+                    // Nothing to add: the definition (components, pricing) is PUT to oc-bundles/v1 after the post exists.
+                }
                 // For simple products, add pricing and stock and clear attributes (so WooCommerce removes variation attributes when product was variable before)
-                if (product.ProductVariant == null || !product.ProductVariant.Any(v => !v.IsDeleted))
+                else if (product.ProductVariant == null || !product.ProductVariant.Any(v => !v.IsDeleted))
                 {
                     // MultiSite Phase 2: prefer the per-site override values when present (else canonical).
                     var simpleRegularPrice = siteOverride?.Price ?? product.Price;
@@ -2683,8 +2769,8 @@ namespace George.Services
                     }
                 }
 
-                // Sync variations for variable products
-                if (wooCommerceId.HasValue && product.ProductVariant != null && product.ProductVariant.Any(v => !v.IsDeleted))
+                // Sync variations for variable products (never for bundles - they carry no variants)
+                if (wooCommerceId.HasValue && !isBundleProduct && product.ProductVariant != null && product.ProductVariant.Any(v => !v.IsDeleted))
                 {
                     await SyncProductVariantsAsync(baseUrl, siteId, wooCommerceId.Value, product, attributeMap, attributeSlugMap, httpClient, cancelToken, siteOverride);
                 }
@@ -2701,13 +2787,36 @@ namespace George.Services
                         _logger.LogWarning(ex, "ED/v1 ACF label sync failed for product {ProductId} Woo id {WooId}; main WooCommerce product sync succeeded.", product.Id, wooCommerceId.Value);
                     }
 
-                    try
+                    if (!isBundleProduct)
                     {
-                        await SyncProductOcwsuFixedUnitPriceDisplayAsync(baseUrl, siteId, wooCommerceId.Value, product, cancelToken);
+                        try
+                        {
+                            await SyncProductOcwsuFixedUnitPriceDisplayAsync(baseUrl, siteId, wooCommerceId.Value, product, cancelToken);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "ED/v1 OCWSU fixed unit price display sync failed for product {ProductId} Woo id {WooId}; main WooCommerce product sync succeeded.", product.Id, wooCommerceId.Value);
+                        }
                     }
-                    catch (Exception ex)
+                }
+
+                // Bundles §7 step 2: the post exists and its id is persisted - now PUT the definition to the OC
+                // Bundles plugin. A failure here is a FAILED sync of the product (the store would sell an empty
+                // bundle), recorded by the caller in ProductSiteWooSyncStatus with the plugin's error text.
+                if (wooCommerceId.HasValue && isBundleProduct)
+                {
+                    var bundleSync = await SyncBundleDefinitionToWooAsync(siteId, product.Id, wooCommerceId.Value, cancelToken).ConfigureAwait(false);
+                    if (!bundleSync.Success)
                     {
-                        _logger.LogWarning(ex, "ED/v1 OCWSU fixed unit price display sync failed for product {ProductId} Woo id {WooId}; main WooCommerce product sync succeeded.", product.Id, wooCommerceId.Value);
+                        return new WooCommerceSyncResult
+                        {
+                            Success = false,
+                            ProductId = product.Id,
+                            ProductName = product.Name ?? "",
+                            WooCommerceId = wooCommerceId,
+                            Action = action,
+                            Error = bundleSync.Error ?? "OC Bundles: sync failed",
+                        };
                     }
                 }
 
@@ -3110,8 +3219,10 @@ namespace George.Services
                 .OrderBy(i => i.SortOrder)
                 .ToList();
             var afterPicking = OrderItemLineDisplay.OrderHasOcStoreosPickingAdjustments(activeLines);
+            // Bundles (spec §6): a parent goes out as ONE item with a `bundle` object; its component lines are never items.
+            var bundleObjects = await BuildOcStoreosBundleObjectsAsync(siteId, activeLines, cancelToken).ConfigureAwait(false);
             var items = new List<Dictionary<string, object?>>();
-            foreach (var line in activeLines)
+            foreach (var line in BundleOrderLines.WithoutChildren(activeLines))
             {
                 if (afterPicking && !OrderItemLineDisplay.IsOcStoreosBillableLine(line))
                     continue;
@@ -3166,6 +3277,13 @@ namespace George.Services
                 row["saleTotalWeight"] = line.SaleTotalWeight;
                 if (line.WooCommerceProductId.HasValue)
                     row["productId"] = line.WooCommerceProductId.Value;
+                if (bundleObjects.TryGetValue(line.Id, out var bundleObject))
+                {
+                    row["quantityType"] = "unit";
+                    if (bundleObject["wooProductId"] is int bundleWooPid && bundleWooPid > 0)
+                        row["productId"] = bundleWooPid;
+                    row["bundle"] = bundleObject;
+                }
                 items.Add(row);
             }
             decimal? syncOrderTotal;
@@ -5371,6 +5489,14 @@ namespace George.Services
 
                 foreach (var wp in batch)
                 {
+                    // Bundles (§7 step 4): an "oc_bundle" post is owned by George's bundle definition (or was built by
+                    // hand in Woo) - never upsert it as a simple product; it would lose its components on the next sync.
+                    if (BundleProducts.IsWooBundleType(wp.type))
+                    {
+                        _logger.LogInformation("Woo import: skipping bundle product {WooId} '{Name}' (type oc_bundle) on site {SiteId}", wp.id, wp.name ?? "", siteId);
+                        continue;
+                    }
+
                     if (!variationMap.TryGetValue(wp.id, out var wooVariations))
                         wooVariations = new List<WooImportVariationItem>();
 

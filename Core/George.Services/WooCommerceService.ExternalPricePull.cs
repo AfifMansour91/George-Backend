@@ -88,6 +88,9 @@ namespace George.Services
                     foreach (var wp in items)
                     {
                         cancelToken.ThrowIfCancellationRequested();
+                        // Bundles (§7 step 5): the plugin computes the bundle price from its components - nothing to pull.
+                        if (BundleProducts.IsWooBundleType(wp.type))
+                            continue;
                         if (!wooToProduct.TryGetValue(wp.id, out var productId))
                         {
                             res.UnmatchedWooProducts++;

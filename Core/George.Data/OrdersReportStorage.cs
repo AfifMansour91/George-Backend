@@ -39,7 +39,12 @@ namespace George.Data
                     (o.DeliveryDate ?? o.PickupDate ?? o.CreationTime).Date >= fromD &&
                     (o.DeliveryDate ?? o.PickupDate ?? o.CreationTime).Date <= toD);
 
-            return await query.ToListAsync(cancelToken).ConfigureAwait(false);
+            return await query
+                // Bundles (מארזים) revenue section: only the bundle PARENT lines are loaded (filtered
+                // include) - the report never needs the plain / component lines.
+                .Include(o => o.OrderItem.Where(i => !i.IsDeleted && i.BundleProductId != null && i.ParentOrderItemId == null))
+                .ToListAsync(cancelToken)
+                .ConfigureAwait(false);
         }
     }
 }

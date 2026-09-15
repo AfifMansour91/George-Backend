@@ -96,6 +96,40 @@ public class CreateOrderItemReq
     public string? OrderLinePerUnitWeightLabel { get; set; }
     public string? OrderLineSizeLabel { get; set; }
     public string? OrderLineCuttingLabel { get; set; }
+
+    /// <summary>
+    /// Bundles (מארזים), parent line only (<see cref="ProductId"/> = a bundle product): the slot selection.
+    /// Only slots that differ from the configuration need to be sent; a missing slot uses the configured
+    /// product. The server ignores <see cref="PricePerUnit"/>/<see cref="TotalPrice"/> for bundle parents,
+    /// prices via the pricing engine and creates the child lines itself. BUNDLES_SYNC_SPEC.md §3.3.
+    /// </summary>
+    public List<CreateOrderBundleComponentReq>? BundleComponents { get; set; }
+}
+
+/// <summary>One bundle slot selection on a manual order line - BUNDLES_SYNC_SPEC.md §3.3.</summary>
+public class CreateOrderBundleComponentReq
+{
+    /// <summary><c>ProductBundleComponent.Id</c> (the slot).</summary>
+    public int ComponentId { get; set; }
+    /// <summary>Product actually in the slot (configured product, one of its swaps, or any product with Site.BundleAllowFreeSwap).</summary>
+    public int ProductId { get; set; }
+    public int? ProductVariantId { get; set; }
+    /// <summary>Optional child line quantity (total, in the component's unit); 0/null = slot qty × bundles.</summary>
+    public decimal? Quantity { get; set; }
+    /// <summary>Surcharge per bundle; used only for free swaps (configured swaps use the configured surcharge).</summary>
+    public decimal? SwapSurcharge { get; set; }
+    public int? SwappedFromProductId { get; set; }
+    public string? Title { get; set; }
+}
+
+/// <summary>Bundles: swap the product of a bundle child line during picking. POST Order/{orderId}/Items/{orderItemId}/swap - spec §3.3.</summary>
+public class SwapOrderItemReq
+{
+    public int ProductId { get; set; }
+    public int? ProductVariantId { get; set; }
+    /// <summary>Per bundle. Applied only on a free swap (Site.BundleAllowFreeSwap); configured swaps use their configured surcharge.</summary>
+    public decimal? Surcharge { get; set; }
+    public string? Title { get; set; }
 }
 
 /// <summary>Sprint 2: Add items to existing order (picking "הוסף פריט"). POST Order/{orderId}/Items.</summary>

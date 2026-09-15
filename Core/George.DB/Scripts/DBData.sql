@@ -152,6 +152,8 @@ INSERT [dbo].[SetupType] ([Id], [Name], [IsDeleted]) VALUES (3, N'by_weight', 0)
 GO
 INSERT [dbo].[SetupType] ([Id], [Name], [IsDeleted]) VALUES (4, N'by_unit_and_weight', 0)
 GO
+INSERT [dbo].[SetupType] ([Id], [Name], [IsDeleted]) VALUES (5, N'bundle', 0)
+GO
 SET IDENTITY_INSERT [dbo].[SetupType] OFF
 GO
 SET IDENTITY_INSERT [dbo].[ShippingClass] ON 

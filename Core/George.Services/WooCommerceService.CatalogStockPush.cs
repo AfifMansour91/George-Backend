@@ -175,6 +175,14 @@ public partial class WooCommerceService
             return null;
         }
 
+        // Bundles never manage stock in George (§7 step 5): availability is derived by the OC Bundles plugin.
+        if (BundleProducts.IsBundle(product))
+        {
+            summary.ProductsSkippedNotInSite++;
+            _logger.LogDebug("Catalog stock push: skipping bundle product {ProductId} on site {SiteId}", productId, siteId);
+            return null;
+        }
+
         var wooId = await _overrideStorage.GetSiteWooProductIdAsync(product.Id, siteId, cancelToken).ConfigureAwait(false)
             ?? product.WooCommerceId;
         if (wooId is not > 0)

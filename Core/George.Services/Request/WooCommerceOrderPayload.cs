@@ -474,6 +474,113 @@ public class WooCommerceOrderItemPayload
     /// <summary>Combined display e.g. "3 יח', 600 גר'" (optional).</summary>
     [JsonPropertyName("saleUnitsLine")]
     public string? SaleUnitsLine { get; set; }
+
+    /// <summary>WooCommerce order item id (every line). Stored on <c>OrderItem.WooLineItemId</c>. BUNDLES_SYNC_SPEC.md §6.</summary>
+    [JsonPropertyName("itemId")]
+    public int? ItemId { get; set; }
+
+    /// <summary>Present on a bundle (מארז) line: pricing + component slots. Component split lines are never sent as items.</summary>
+    [JsonPropertyName("bundle")]
+    public WooCommerceOrderItemBundlePayload? Bundle { get; set; }
+}
+
+/// <summary>Line-level <c>bundle</c> object (both directions) - BUNDLES_SYNC_SPEC.md §6.</summary>
+public class WooCommerceOrderItemBundlePayload
+{
+    /// <summary><c>george-{productId}</c>; null when the bundle was created in Woo by hand.</summary>
+    [JsonPropertyName("externalId")]
+    public string? ExternalId { get; set; }
+
+    [JsonPropertyName("wooProductId")]
+    public int? WooProductId { get; set; }
+
+    /// <summary>George → Woo: existing WC order item to update in place; omit/0 = create.</summary>
+    [JsonPropertyName("itemId")]
+    public int? ItemId { get; set; }
+
+    /// <summary>fixed | sum</summary>
+    [JsonPropertyName("pricingMode")]
+    public string? PricingMode { get; set; }
+
+    [JsonPropertyName("reweighPrice")]
+    public bool? ReweighPrice { get; set; }
+
+    /// <summary>bundle | components</summary>
+    [JsonPropertyName("invoiceDisplay")]
+    public string? InvoiceDisplay { get; set; }
+
+    /// <summary>Per bundle, after the bundle discount, before surcharges.</summary>
+    [JsonPropertyName("basePrice")]
+    public decimal? BasePrice { get; set; }
+
+    [JsonPropertyName("components")]
+    public List<WooCommerceOrderItemBundleComponentPayload>? Components { get; set; }
+
+    /// <summary>George product id parsed from <see cref="ExternalId"/> (<c>george-{id}</c>), or null.</summary>
+    public int? TryGetGeorgeProductId()
+    {
+        var s = ExternalId?.Trim();
+        if (string.IsNullOrEmpty(s) || !s.StartsWith("george-", StringComparison.OrdinalIgnoreCase)) return null;
+        return int.TryParse(s.Substring(7), out var id) && id > 0 ? id : null;
+    }
+}
+
+/// <summary>One slot of a bundle line - BUNDLES_SYNC_SPEC.md §6.</summary>
+public class WooCommerceOrderItemBundleComponentPayload
+{
+    /// <summary>0-based slot index in Woo's <c>_oc_bundle_components</c>.</summary>
+    [JsonPropertyName("index")]
+    public int? Index { get; set; }
+
+    /// <summary>Stable component key ("c" + George component id when George authored the bundle).</summary>
+    [JsonPropertyName("key")]
+    public string? Key { get; set; }
+
+    /// <summary>Woo product id of the product actually in the slot (after customer / auto swaps).</summary>
+    [JsonPropertyName("productId")]
+    public int? ProductId { get; set; }
+
+    [JsonPropertyName("variationId")]
+    public int? VariationId { get; set; }
+
+    [JsonPropertyName("sku")]
+    public string? Sku { get; set; }
+
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    /// <summary>Per bundle, in <see cref="Unit"/>.</summary>
+    [JsonPropertyName("qty")]
+    public decimal? Qty { get; set; }
+
+    /// <summary>kg | grams | unit</summary>
+    [JsonPropertyName("unit")]
+    public string? Unit { get; set; }
+
+    /// <summary>weight | unit | ...</summary>
+    [JsonPropertyName("mode")]
+    public string? Mode { get; set; }
+
+    [JsonPropertyName("unitWeight")]
+    public decimal? UnitWeight { get; set; }
+
+    /// <summary>Configured original product (Woo id) when the slot was swapped.</summary>
+    [JsonPropertyName("swappedFromProductId")]
+    public int? SwappedFromProductId { get; set; }
+
+    [JsonPropertyName("swappedFromVariationId")]
+    public int? SwappedFromVariationId { get; set; }
+
+    /// <summary>Surcharge per bundle of the active swap.</summary>
+    [JsonPropertyName("surcharge")]
+    public decimal? Surcharge { get; set; }
+
+    /// <summary>Line total across all bundles once weighed (Woo <c>_oc_bundle_actual[index]</c>); null before.</summary>
+    [JsonPropertyName("actualQty")]
+    public decimal? ActualQty { get; set; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
 }
 
 /// <summary>One promotion that WooCommerce applied to the order. Spec §1.2.</summary>

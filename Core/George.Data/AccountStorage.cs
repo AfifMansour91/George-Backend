@@ -142,6 +142,7 @@ namespace George.Data
             dbAcc.IsKosherShop = updated.IsKosherShop;
             dbAcc.AllowWeighted = updated.AllowWeighted;
             dbAcc.KioskEnabled = updated.KioskEnabled;
+            dbAcc.BundlesEnabled = updated.BundlesEnabled;
 
             // Update address and website fields
             dbAcc.Address = updated.Address;

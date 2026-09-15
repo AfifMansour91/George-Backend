@@ -396,6 +396,7 @@ namespace George.Api.Core
 			services.AddScoped<OrderStorage>();
 			services.AddScoped<DeliveryDispatchStorage>();
 			services.AddScoped<PromotionStorage>();
+			services.AddScoped<BundleStorage>();
 			services.AddScoped<IntegrationLogStorage>();
 			services.AddSingleton<George.Services.IntegrationLogQueue>();
 			services.AddSingleton<George.Services.IIntegrationLogQueue>(sp => sp.GetRequiredService<George.Services.IntegrationLogQueue>());
@@ -436,6 +437,7 @@ namespace George.Api.Core
 			services.AddScoped<OrderService>();
 			services.AddScoped<PromotionService>();
 			services.AddScoped<PromotionWebhookDispatcher>();
+			services.AddScoped<BundleService>();
 			services.AddScoped<SiteAccessService>();
 			services.AddScoped<George.Services.Orders.IOrderRealtimeNotifier, George.Services.Orders.NullOrderRealtimeNotifier>();
 			services.AddScoped<George.Services.Payments.PaymentService>();

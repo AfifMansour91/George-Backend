@@ -236,6 +236,10 @@ namespace George.Data
             if (updated.PromotionsApplyToDiscountedProducts.HasValue) dbSite.PromotionsApplyToDiscountedProducts = updated.PromotionsApplyToDiscountedProducts;
             if (updated.PromotionWebhookUrl != null) dbSite.PromotionWebhookUrl = updated.PromotionWebhookUrl;
             if (updated.PromotionWebhookSecret != null) dbSite.PromotionWebhookSecret = updated.PromotionWebhookSecret;
+            // Bundles (מארזים): API key is write-only - null = keep, "" = clear (spec §3.4).
+            if (updated.BundlesApiKey != null)
+                dbSite.BundlesApiKey = string.IsNullOrWhiteSpace(updated.BundlesApiKey) ? null : updated.BundlesApiKey.Trim();
+            if (updated.BundleAllowFreeSwap.HasValue) dbSite.BundleAllowFreeSwap = updated.BundleAllowFreeSwap;
             if (!string.IsNullOrWhiteSpace(updated.PaymentGatewayProvider))
                 dbSite.PaymentGatewayProvider = updated.PaymentGatewayProvider;
             if (updated.CardcomTerminalNumber.HasValue) dbSite.CardcomTerminalNumber = updated.CardcomTerminalNumber;

@@ -87,6 +87,12 @@ namespace George.Services.Request
         public string? PromotionWebhookUrl { get; set; }
         public string? PromotionWebhookSecret { get; set; }
 
+        // Bundles (מארזים) - BUNDLES_SYNC_SPEC.md §3.4
+        /// <summary>OC Bundles API key (X-OC-Bundles-Key). Write-only: null = keep, "" = clear. Never returned.</summary>
+        public string? BundlesApiKey { get; set; }
+        /// <summary>A manager may swap a component to ANY catalog product and set the surcharge.</summary>
+        public bool? BundleAllowFreeSwap { get; set; }
+
         /// <summary>When true (default), prompt for bag count when finishing picking.</summary>
         public bool? AskBagsCountAtPickingFinish { get; set; }
 

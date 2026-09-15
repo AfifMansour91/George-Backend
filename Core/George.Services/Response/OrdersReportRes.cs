@@ -56,6 +56,28 @@ namespace George.Services.Response
         public string Source { get; set; } = "";
     }
 
+    /// <summary>One bundle (מארז) product's sales in the report's orders, from the bundle parent lines (BUNDLES_SYNC_SPEC.md §8).</summary>
+    public class OrdersReportBundleRowDto
+    {
+        public int ProductId { get; set; }
+        public string Name { get; set; } = "";
+        public int OrdersCount { get; set; }
+        public decimal UnitsSold { get; set; }
+        public decimal Revenue { get; set; }
+    }
+
+    public class OrdersReportBundleRevenueDto
+    {
+        /// <summary>Distinct orders containing at least one bundle.</summary>
+        public int OrdersCount { get; set; }
+        public decimal UnitsSold { get; set; }
+        public decimal Revenue { get; set; }
+        /// <summary>Bundle revenue / <see cref="OrdersReportKpisDto.TotalRevenue"/> (0..1).</summary>
+        public decimal ShareOfRevenue { get; set; }
+        /// <summary>Sorted by revenue desc.</summary>
+        public List<OrdersReportBundleRowDto> Rows { get; set; } = new();
+    }
+
     public class OrdersReportRes
     {
         public OrdersReportRangeDto Range { get; set; } = new();
@@ -70,5 +92,11 @@ namespace George.Services.Response
         public bool HasCityNone { get; set; }
 
         public List<OrdersReportRowDto> Rows { get; set; } = new();
+
+        /// <summary>
+        /// Bundles (מארזים) revenue over the same orders as <see cref="Kpis"/> - null unless
+        /// <c>Account.BundlesEnabled</c> (UI hides the section).
+        /// </summary>
+        public OrdersReportBundleRevenueDto? BundleRevenue { get; set; }
     }
 }

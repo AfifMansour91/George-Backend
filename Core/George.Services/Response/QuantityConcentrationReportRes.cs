@@ -43,6 +43,10 @@ namespace George.Services.Response
         public int CategoryId { get; set; }
         public decimal? TotalQuantityKg { get; set; }
         public decimal? TotalQuantityUnits { get; set; }
+        /// <summary>Part of <see cref="TotalQuantityKg"/> that came from bundle (מארז) child lines; 0 when none.</summary>
+        public decimal FromBundlesKg { get; set; }
+        /// <summary>Part of <see cref="TotalQuantityUnits"/> that came from bundle (מארז) child lines; 0 when none.</summary>
+        public decimal FromBundlesUnits { get; set; }
         /// <summary>When false, total quantity column shows kg only (pure by-weight products).</summary>
         public bool ShowUnitsInTotalQuantity { get; set; } = true;
         /// <summary>When true, SPA shows optional unit-weight column for this product group.</summary>
@@ -65,10 +69,37 @@ namespace George.Services.Response
         public List<QuantityConcentrationLineDto> Lines { get; set; } = new();
     }
 
+    /// <summary>Component demand of one bundle product, aggregated from the child lines (BUNDLES_SYNC_SPEC.md §8).</summary>
+    public class QuantityConcentrationBundleComponentDto
+    {
+        public int ProductId { get; set; }
+        public string Name { get; set; } = "";
+        public decimal QuantityKg { get; set; }
+        public decimal QuantityUnits { get; set; }
+    }
+
+    public class QuantityConcentrationBundleDto
+    {
+        public int BundleProductId { get; set; }
+        public string Name { get; set; } = "";
+        /// <summary>Σ parent-line quantity (number of bundles) in the report's orders.</summary>
+        public decimal OrderedBundles { get; set; }
+        /// <summary>Bundles whose parent line (or every child line) was confirmed in picking.</summary>
+        public decimal PickedBundles { get; set; }
+        public int OrdersCount { get; set; }
+        public List<QuantityConcentrationBundleComponentDto> Components { get; set; } = new();
+    }
+
     public class QuantityConcentrationReportRes
     {
         public QuantityConcentrationRangeDto DeliveryRange { get; set; } = new();
         public List<QuantityConcentrationCategoryOptionDto> Categories { get; set; } = new();
         public List<QuantityConcentrationProductGroupDto> ProductGroups { get; set; } = new();
+
+        /// <summary>
+        /// Bundles (מארזים) ordered in the range - only with query <c>includeBundles=true</c> and
+        /// <c>Account.BundlesEnabled</c>; null otherwise (UI hides the section).
+        /// </summary>
+        public List<QuantityConcentrationBundleDto>? Bundles { get; set; }
     }
 }

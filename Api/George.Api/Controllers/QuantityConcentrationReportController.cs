@@ -31,10 +31,12 @@ namespace George.Api.Controllers
             /// <summary><c>all</c>, <c>picked</c>, or <c>notPicked</c> (default). Legacy: <c>includePicked=true</c> = all.</summary>
             [FromQuery] string? pickedFilter = null,
             [FromQuery] bool includePicked = false,
+            /// <summary>Bundles (מארזים): also return <c>bundles[]</c> (parent lines + component demand). Requires <c>Account.BundlesEnabled</c>.</summary>
+            [FromQuery] bool includeBundles = false,
             CancellationToken cancelToken = default)
         {
             return await SafeCallWithErrorCatchingAsync(() =>
-                _service.GetReportAsync(siteId, from, to, categoryId, pickedFilter, includePicked, cancelToken));
+                _service.GetReportAsync(siteId, from, to, categoryId, pickedFilter, includePicked, includeBundles, cancelToken));
         }
 
         [ApiExplorerSettings(IgnoreApi = true)]

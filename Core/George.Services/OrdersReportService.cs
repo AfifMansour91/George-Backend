@@ -16,15 +16,18 @@ namespace George.Services
     public class OrdersReportService : ServiceBase
     {
         private readonly OrdersReportStorage _storage;
+        private readonly ProductsReportStorage _productsReportStorage;
 
         public OrdersReportService(
             ILogger<OrdersReportService> logger,
             IMapper mapper,
             CacheManager cache,
-            OrdersReportStorage storage)
+            OrdersReportStorage storage,
+            ProductsReportStorage productsReportStorage)
             : base(logger, mapper, cache)
         {
             _storage = storage;
+            _productsReportStorage = productsReportStorage;
         }
 
         public async Task<IApiResponse<OrdersReportRes>> GetReportAsync(
@@ -71,6 +74,12 @@ namespace George.Services
             // KPIs deliberately ignore the fulfillment filter so the sent/pending split always shows both sides.
             var kpis = BuildKpis(filtered);
 
+            // Bundles (מארזים): parent lines of the same filter set as the KPIs (BUNDLES_SYNC_SPEC.md §8).
+            var account = await _productsReportStorage.GetAccountForSiteAsync(siteId, cancelToken).ConfigureAwait(false);
+            var bundleRevenue = account?.BundlesEnabled == true
+                ? BuildBundleRevenue(filtered, kpis.TotalRevenue)
+                : null;
+
             var fulfillmentMode = (fulfillment ?? "all").Trim().ToLowerInvariant();
             IEnumerable<Order> visible = fulfillmentMode switch
             {
@@ -98,11 +107,68 @@ namespace George.Services
                 Cities = cityNames,
                 HasCityNone = hasCityNone,
                 Rows = rows,
+                BundleRevenue = bundleRevenue,
             };
 
             response.Data = res;
             return response;
         }
+
+        /// <summary>
+        /// Bundle (מארז) revenue from the bundle parent lines of <paramref name="orders"/>: distinct orders,
+        /// Σ parent quantity, Σ parent line total (gross - the same rule as the order totals), and the share
+        /// of <paramref name="reportTotalRevenue"/>. Rows per bundle product, sorted by revenue desc.
+        /// </summary>
+        public static OrdersReportBundleRevenueDto BuildBundleRevenue(IEnumerable<Order> orders, decimal reportTotalRevenue)
+        {
+            var byBundle = new Dictionary<int, (string name, HashSet<int> orderIds, decimal units, decimal revenue)>();
+            var allOrderIds = new HashSet<int>();
+            foreach (var o in orders)
+            {
+                foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
+                {
+                    if (line.IsDeleted || !BundleOrderLines.IsBundleParent(line)) continue;
+                    var pid = line.BundleProductId ?? line.ProductId ?? 0;
+                    if (pid <= 0) continue;
+                    var money = Math.Max(0m, line.TotalPrice ?? line.Quantity * (line.PricePerUnit ?? 0m));
+                    if (!byBundle.TryGetValue(pid, out var agg))
+                    {
+                        var name = string.IsNullOrWhiteSpace(line.Title) ? $"#{pid}" : line.Title!.Trim();
+                        agg = (name, new HashSet<int>(), 0m, 0m);
+                    }
+                    agg.orderIds.Add(o.Id);
+                    allOrderIds.Add(o.Id);
+                    agg.units += line.Quantity;
+                    agg.revenue += money;
+                    byBundle[pid] = agg;
+                }
+            }
+
+            var revenue = byBundle.Values.Sum(a => a.revenue);
+            return new OrdersReportBundleRevenueDto
+            {
+                OrdersCount = allOrderIds.Count,
+                UnitsSold = Round2(byBundle.Values.Sum(a => a.units)),
+                Revenue = Round2(revenue),
+                ShareOfRevenue = reportTotalRevenue > 0m
+                    ? Math.Round(revenue / reportTotalRevenue, 4, MidpointRounding.AwayFromZero)
+                    : 0m,
+                Rows = byBundle
+                    .OrderByDescending(kv => kv.Value.revenue)
+                    .ThenBy(kv => kv.Value.name, StringComparer.OrdinalIgnoreCase)
+                    .Select(kv => new OrdersReportBundleRowDto
+                    {
+                        ProductId = kv.Key,
+                        Name = kv.Value.name,
+                        OrdersCount = kv.Value.orderIds.Count,
+                        UnitsSold = Round2(kv.Value.units),
+                        Revenue = Round2(kv.Value.revenue),
+                    })
+                    .ToList(),
+            };
+        }
+
+        private static decimal Round2(decimal d) => Math.Round(d, 2, MidpointRounding.AwayFromZero);
 
         private static List<Order> ApplyFilters(
             List<Order> orders,

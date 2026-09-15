@@ -169,7 +169,8 @@ public partial class PaymentService
     private static List<HostedSessionLineItem> BuildPayPlusHostedLineItems(Order order)
     {
         var items = new List<HostedSessionLineItem>();
-        foreach (var i in (order.OrderItem ?? new List<OrderItem>()).Where(i => !i.IsDeleted).OrderBy(i => i.SortOrder).ThenBy(i => i.Id))
+        // Bundle children are informational (the parent line carries the bundle money) - never list them.
+        foreach (var i in BundleOrderLines.WithoutChildren((order.OrderItem ?? new List<OrderItem>()).Where(i => !i.IsDeleted)).OrderBy(i => i.SortOrder).ThenBy(i => i.Id))
         {
             var name = string.Join(" - ", new[] { i.Title, i.VariantTitle }.Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
             if (string.IsNullOrWhiteSpace(name)) name = "פריט";
@@ -297,7 +298,8 @@ public partial class PaymentService
         // from the charged line total when qty × unit disagrees with it (weighed lines, פחת), so the
         // document's items add up to the payment it records.
         var items = new List<PayPlusDocumentProductLine>();
-        foreach (var i in (order.OrderItem?.Where(x => !x.IsDeleted) ?? Enumerable.Empty<OrderItem>()).OrderBy(x => x.SortOrder).ThenBy(x => x.Id))
+        // Bundle children are informational (the parent line carries the bundle money) - never invoice them.
+        foreach (var i in BundleOrderLines.WithoutChildren(order.OrderItem?.Where(x => !x.IsDeleted) ?? Enumerable.Empty<OrderItem>()).OrderBy(x => x.SortOrder).ThenBy(x => x.Id))
         {
             var qty = i.PickedQuantity ?? i.Quantity;
             if (qty <= 0) continue;

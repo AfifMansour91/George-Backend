@@ -75,7 +75,8 @@ public static class VoucherReceiptLayout
         // Same rule as OrderService.SumStampedPromotionDiscount: once picking started, only
         // meaningfully-picked lines contribute their discount - the discount follows its merchandise
         // (DiscountAmount is kept paired with the line gross by the picking save).
-        var activeItems = items.Where(i => !i.IsDeleted).ToList();
+        // Bundle children never carry money or promotion stamps (spec §2) - summarize parents + plain lines only.
+        var activeItems = BundleOrderLines.WithoutChildren(items.Where(i => !i.IsDeleted)).ToList();
         var anyPicked = activeItems.Any(OrderItemLineDisplay.OrderMeaningfulPick);
         var promo = activeItems.Sum(i =>
         {
