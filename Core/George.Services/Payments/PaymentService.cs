@@ -123,11 +123,38 @@ public partial class PaymentService : ServiceBase
             || m.Equals("CreditPhone", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Customer return URL after the hosted page. Staff (MOTO) sessions return to the origin the staff member's
+    /// browser sent (the app is served on more than one host - giorgio.co.il / storeos.co.il - and the return
+    /// page's sessionStorage breadcrumb is per origin), tagged <c>channel=moto</c> so the return page knows to
+    /// bring the staff member back to the order even without the breadcrumb. Customer sessions (SMS link)
+    /// always use the configured public app base.
+    /// </summary>
+    private string BuildCustomerReturnUrl(int orderId, string status, string? channel, string? appOrigin)
+    {
+        var isMoto = string.Equals(channel, "moto", StringComparison.OrdinalIgnoreCase);
+        var appBase = ResolveReturnAppBase(_publicAppBaseUrl, isMoto ? appOrigin : null);
+        var url = $"{appBase}/customer/pay/{orderId}/return?status={status}";
+        return isMoto ? url + "&channel=moto" : url;
+    }
+
+    /// <summary>Public for tests. Only an absolute http(s) origin is accepted; anything else falls back to the configured base.</summary>
+    public static string ResolveReturnAppBase(string? configuredAppBase, string? requestOrigin)
+    {
+        var fallback = (configuredAppBase ?? "").TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(requestOrigin)) return fallback;
+        if (!Uri.TryCreate(requestOrigin.Trim(), UriKind.Absolute, out var uri)) return fallback;
+        if (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp) return fallback;
+        if (string.Equals(uri.Host, "null", StringComparison.OrdinalIgnoreCase)) return fallback;
+        return uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+    }
+
     public async Task<IApiResponse<PaymentSessionRes>> CreatePaymentSessionAsync(
         int orderId,
         string? channel,
         CancellationToken cancelToken = default,
-        bool saveCard = true)
+        bool saveCard = true,
+        string? appOrigin = null)
     {
         var response = new ApiResponse<PaymentSessionRes>();
         var order = await _paymentStorage.GetOrderForPaymentAsync(orderId, cancelToken);
@@ -146,7 +173,7 @@ public partial class PaymentService : ServiceBase
         if (creds == null || creds.ProviderId == PaymentGatewayProviderId.None)
             return CreateResponse(response, StatusCode.InvalidRequest, "Payment gateway is not configured for this site.");
         if (creds.ProviderId == PaymentGatewayProviderId.PayPlus)
-            return await CreatePaymentSessionForPayPlusAsync(order, creds, channel, saveCard, cancelToken);
+            return await CreatePaymentSessionForPayPlusAsync(order, creds, channel, saveCard, cancelToken, appOrigin);
         if (creds.ProviderId != PaymentGatewayProviderId.Cardcom)
             return CreateResponse(response, StatusCode.InvalidRequest, "Unsupported payment gateway.");
 
@@ -186,7 +213,6 @@ public partial class PaymentService : ServiceBase
         var isMoto = string.Equals(channel, "moto", StringComparison.OrdinalIgnoreCase);
         var returnValue = order.Id.ToString();
         var apiBase = (_publicApiBaseUrl ?? _publicAppBaseUrl ?? "").TrimEnd('/');
-        var appBase = (_publicAppBaseUrl ?? "").TrimEnd('/');
 
         var create = await _cardcom.CreateHostedSessionAsync(creds, new CreateHostedSessionRequest
         {
@@ -199,8 +225,8 @@ public partial class PaymentService : ServiceBase
             MaxInstallments = creds.MaxInstallments,
             UseAuthorizationHold = !chargeNow,
             UseVirtualTerminal = isMoto,
-            SuccessRedirectUrl = $"{appBase}/customer/pay/{order.Id}/return?status=success",
-            FailedRedirectUrl = $"{appBase}/customer/pay/{order.Id}/return?status=failed",
+            SuccessRedirectUrl = BuildCustomerReturnUrl(order.Id, "success", channel, appOrigin),
+            FailedRedirectUrl = BuildCustomerReturnUrl(order.Id, "failed", channel, appOrigin),
             WebHookUrl = $"{apiBase}/Webhooks/Cardcom",
             CustomerName = order.CustomerName,
             CustomerPhone = order.CustomerPhone,

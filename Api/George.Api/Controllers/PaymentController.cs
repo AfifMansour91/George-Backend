@@ -28,8 +28,15 @@ public class PaymentController : GeorgeControllerBase, IAuthUserProvider
         [FromQuery] bool? saveCard,
         CancellationToken cancelToken = default)
     {
+        // The staff app is served on more than one host (giorgio.co.il / storeos.co.il); the MOTO return page
+        // must land on the host the staff member is actually using, else its per-origin sessionStorage
+        // breadcrumb is invisible and the tab is stranded on the "thank you" page (PEPE 9/15).
+        var appOrigin = Request.Headers.Origin.ToString();
+        if (string.IsNullOrWhiteSpace(appOrigin)
+            && Uri.TryCreate(Request.Headers.Referer.ToString(), UriKind.Absolute, out var referer))
+            appOrigin = referer.GetLeftPart(UriPartial.Authority);
         return await SafeCallWithErrorCatchingAsync(() =>
-            _paymentSvc.CreatePaymentSessionAsync(orderId, channel, cancelToken, saveCard ?? true));
+            _paymentSvc.CreatePaymentSessionAsync(orderId, channel, cancelToken, saveCard ?? true, appOrigin));
     }
 
     [HttpPost("Order/{orderId:int}/SendSms")]

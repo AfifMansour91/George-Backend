@@ -1,3 +1,4 @@
+using George.Services;
 using George.DB;
 
 namespace George.Services.Payments.Cardcom;
@@ -187,13 +188,7 @@ public static class CardcomDocumentBuilder
             else if (lineTotal is > 0 && Math.Abs(Math.Round(unitCost.Value * qty, 2, MidpointRounding.AwayFromZero) - lineTotal.Value) >= 0.01m)
                 unitCost = Math.Round(lineTotal.Value / qty, 2, MidpointRounding.AwayFromZero);
 
-            var description = string.Join(" - ", new[]
-                {
-                    item.Title,
-                    item.VariantTitle,
-                }.Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
-            if (string.IsNullOrWhiteSpace(description))
-                description = "פריט";
+            var description = OrderItemLineDisplay.FormatDocumentLineDescription(item);
             if (item.DepreciationPercent is > 0m)
                 description += depreciationNet.HasValue
                     ? $" (כולל פחת {item.DepreciationPercent.Value:0.##}%, משקל נטו {depreciationNet.Value:0.###} ק\"ג)"
