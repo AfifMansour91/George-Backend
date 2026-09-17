@@ -660,4 +660,74 @@ public class QuantityConcentrationReportServiceTests
         Assert.Contains(result, r => r.WeightPerUnitKg == 0.5m && r.QuantityKg == 1m && r.QuantityUnits == 2m);
         Assert.Contains(result, r => r.WeightPerUnitKg == 1m && r.QuantityKg == 2m && r.QuantityUnits == 2m);
     }
+
+    // DELIZ 2026-09-16: "בשר טחון טרי" ordered 0.5kg + 0.5kg + 2kg for the same day (manual weight lines,
+    // product without catalog options) - the variations toggle must show one row per ordered weight.
+    [Fact]
+    public void ResolveWeightChoiceKey_WeightModeLine_NoCatalogOptions_UsesOrderedWeight()
+    {
+        var p = new Product { Id = 4949, Name = "בשר טחון טרי", IsWeighted = true };
+        var half = new OrderItem { OrderLineQuantityMode = "weight", Quantity = 1m, UnitWeightGrams = 500m, SaleTotalWeight = "500 גר'" };
+        var two = new OrderItem { OrderLineQuantityMode = "weight", Quantity = 1m, UnitWeightGrams = 2000m, SaleTotalWeight = "2 ק\"ג" };
+        var wooKg = new OrderItem { OrderLineQuantityMode = "weight", Quantity = 1.5m, UnitWeightGrams = 1000m, SaleTotalWeight = "1.5 ק\"ג" };
+
+        Assert.Equal(0.5m, QuantityConcentrationReportService.ResolveWeightChoiceKey(half, p));
+        Assert.Equal(2m, QuantityConcentrationReportService.ResolveWeightChoiceKey(two, p));
+        Assert.Equal(1.5m, QuantityConcentrationReportService.ResolveWeightChoiceKey(wooKg, p));
+    }
+
+    [Fact]
+    public void ResolveWeightChoiceKey_IgnoresPickedWeight()
+    {
+        var p = new Product { Id = 1, Name = "בשר טחון טרי", IsWeighted = true };
+        var picked = new OrderItem { OrderLineQuantityMode = "weight", Quantity = 1m, UnitWeightGrams = 500m, PickedQuantity = 0.52m };
+        Assert.Equal(0.5m, QuantityConcentrationReportService.ResolveWeightChoiceKey(picked, p));
+    }
+
+    [Fact]
+    public void ResolveWeightChoiceKey_ZeroForUnitsLinesAndProductsWithOptions()
+    {
+        var plain = new Product { Id = 1, Name = "נתח", IsWeighted = true };
+        var unitsLine = new OrderItem { OrderLineQuantityMode = "units", Quantity = 2m, UnitWeightGrams = 500m };
+        Assert.Equal(0m, QuantityConcentrationReportService.ResolveWeightChoiceKey(unitsLine, plain));
+
+        var withOptions = new Product
+        {
+            Id = 2,
+            Name = "אנטריקוט",
+            IsWeighted = true,
+            ProductVariant = new List<ProductVariant> { new() { Id = 10, ProductId = 2, IsDeleted = false } },
+        };
+        var weightLine = new OrderItem { OrderLineQuantityMode = "weight", Quantity = 1.5m, UnitWeightGrams = 1000m };
+        Assert.Equal(0m, QuantityConcentrationReportService.ResolveWeightChoiceKey(weightLine, withOptions));
+    }
+
+    [Fact]
+    public void OrderedLineWeightKg_FallsBackToHebrewSaleTotalWeightLabel()
+    {
+        var line = new OrderItem { OrderLineQuantityMode = "weight", Quantity = 1m, SaleTotalWeight = "500 גר'" };
+        Assert.Equal(0.5m, QuantityConcentrationReportService.OrderedLineWeightKg(line));
+    }
+
+    [Fact]
+    public void ApplyDetailLineDisplayRules_SimpleProduct_WeightChoices_OneRowPerOrderedWeight_WithOrderCounts()
+    {
+        // Buckets as GetReportAsync builds them for DELIZ orders 299/300/301 (0.5 + 0.5 + 2 kg).
+        var lines = new List<QuantityConcentrationLineDto>
+        {
+            new() { LineLabel = "", QuantityKg = 1m, WeightPerUnitKg = 0.5m, OrderCount = 2 },
+            new() { LineLabel = "", QuantityKg = 2m, WeightPerUnitKg = 2m, OrderCount = 1 },
+        };
+        var p = new Product { Id = 4949, Name = "בשר טחון טרי", IsWeighted = true };
+        var result = QuantityConcentrationReportService.ApplyDetailLineDisplayRules(lines, p);
+
+        Assert.Equal(2, result.Count);
+        Assert.All(result, r => Assert.Equal("noteBucket", r.LineDisplayKind));
+        Assert.Equal(0.5m, result[0].WeightPerUnitKg);
+        Assert.Equal(1m, result[0].QuantityKg);
+        Assert.Equal(2, result[0].OrderCount);
+        Assert.Equal(2m, result[1].WeightPerUnitKg);
+        Assert.Equal(2m, result[1].QuantityKg);
+        Assert.Equal(1, result[1].OrderCount);
+    }
 }

@@ -48,6 +48,11 @@ public partial class PaymentService
             ApiPasswordStoredButUnreadable = secretKeyStoredButUnreadable,
             TestMode = site.PayPlusTestMode,
             MaxInstallments = Math.Clamp(site.PayPlusMaxInstallments, 1, 36),
+            // Shared (provider-neutral) hold settings - without these the model default (25%) applied to every
+            // PayPlus hold regardless of what the site configured (PEPE: 20% set, 2.50 held as 3.13).
+            AuthBufferPercent = site.PaymentAuthBufferPercent,
+            MaxAuthAmount = site.PaymentMaxAuthAmount,
+            AllowCaptureAboveAuth = site.PaymentAllowCaptureAboveAuth,
             CssUrl = site.PayPlusCssUrl,
             LogoUrl = site.PayPlusLogoUrl,
             ProviderExtrasJson = site.PayPlusProviderExtrasJson,
@@ -172,14 +177,13 @@ public partial class PaymentService
         // Bundle children are informational (the parent line carries the bundle money) - never list them.
         foreach (var i in BundleOrderLines.WithoutChildren((order.OrderItem ?? new List<OrderItem>()).Where(i => !i.IsDeleted)).OrderBy(i => i.SortOrder).ThenBy(i => i.Id))
         {
-            var name = string.Join(" - ", new[] { i.Title, i.VariantTitle }.Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
-            if (string.IsNullOrWhiteSpace(name)) name = "פריט";
             var lineTotal = i.TotalPrice ?? i.Quantity * (i.PricePerUnit ?? 0m);
             if (lineTotal < 0) continue;
             // Weighed lines price per kg while Quantity counts pieces, so the line is shown as one item at its
             // total; whole-unit lines keep their piece count.
             var isWholeUnits = i.Quantity > 0 && i.Quantity == Math.Truncate(i.Quantity)
                 && i.PricePerUnit is > 0m && Math.Abs(Math.Round(i.Quantity * i.PricePerUnit.Value, 2) - Math.Round(lineTotal, 2)) < 0.01m;
+            var name = BuildPayPlusHostedLineName(i, isWholeUnits);
             items.Add(isWholeUnits
                 ? new HostedSessionLineItem { Name = name, Quantity = i.Quantity, Price = i.PricePerUnit!.Value }
                 : new HostedSessionLineItem { Name = name, Quantity = 1, Price = Math.Round(lineTotal, 2) });
@@ -189,12 +193,37 @@ public partial class PaymentService
         return items;
     }
 
+    /// <summary>
+    /// Hosted-page line name: product + real option, and for weighed lines shown as one item the ordered
+    /// weight ("טסט - 500 גר'"). A unit-of-sale variant title ("ק\"ג" / "יחידה") is not an option and only
+    /// confused the customer ("טסט - ק״ג", quantity 1, for half a kilo - PEPE 14/9). Public for tests.
+    /// </summary>
+    public static string BuildPayPlusHostedLineName(OrderItem i, bool isWholeUnits)
+    {
+        var title = (i.Title ?? "").Trim();
+        var variant = (i.VariantTitle ?? "").Trim();
+        if (variant.Length > 0 && OrderItemLineDisplay.IsGenericVariantTitle(variant))
+            variant = "";
+        var parts = new List<string>();
+        if (title.Length > 0) parts.Add(title);
+        if (variant.Length > 0 && !string.Equals(variant, title, StringComparison.OrdinalIgnoreCase)) parts.Add(variant);
+        if (!isWholeUnits)
+        {
+            var qty = OrderItemLineDisplay.FormatOrderItemQuantityBadge(i).Trim();
+            if (qty.Length > 0 && !parts.Any(p => p.Contains(qty, StringComparison.Ordinal)))
+                parts.Add(qty);
+        }
+        var name = string.Join(" - ", parts).Trim();
+        return name.Length > 0 ? name : "פריט";
+    }
+
     private async Task<IApiResponse<PaymentSessionRes>> CreatePaymentSessionForPayPlusAsync(
         Order order,
         SitePaymentCredentials creds,
         string? channel,
         bool saveCard,
-        CancellationToken cancelToken)
+        CancellationToken cancelToken,
+        string? appOrigin = null)
     {
         var response = new ApiResponse<PaymentSessionRes>();
 
@@ -234,7 +263,6 @@ public partial class PaymentService
         }
 
         var apiBase = (_publicApiBaseUrl ?? _publicAppBaseUrl ?? "").TrimEnd('/');
-        var appBase = (_publicAppBaseUrl ?? "").TrimEnd('/');
 
         var create = await _payPlus.CreateHostedSessionAsync(creds, new CreateHostedSessionRequest
         {
@@ -246,8 +274,8 @@ public partial class PaymentService
             SaveCard = saveCard,
             MaxInstallments = creds.MaxInstallments,
             UseAuthorizationHold = !chargeNow,
-            SuccessRedirectUrl = $"{appBase}/customer/pay/{order.Id}/return?status=success",
-            FailedRedirectUrl = $"{appBase}/customer/pay/{order.Id}/return?status=failed",
+            SuccessRedirectUrl = BuildCustomerReturnUrl(order.Id, "success", channel, appOrigin),
+            FailedRedirectUrl = BuildCustomerReturnUrl(order.Id, "failed", channel, appOrigin),
             WebHookUrl = $"{apiBase}/Webhooks/PayPlus",
             CustomerName = order.CustomerName,
             CustomerPhone = order.CustomerPhone,
@@ -318,8 +346,7 @@ public partial class PaymentService
             }
             else if (lineTotal is > 0 && Math.Abs(Math.Round(unit.Value * qty, 2, MidpointRounding.AwayFromZero) - lineTotal.Value) >= 0.01m)
                 unit = Math.Round(lineTotal.Value / qty, 2, MidpointRounding.AwayFromZero);
-            var description = string.Join(" - ", new[] { i.Title, i.VariantTitle }.Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
-            if (string.IsNullOrWhiteSpace(description)) description = "פריט";
+            var description = OrderItemLineDisplay.FormatDocumentLineDescription(i);
             if (i.DepreciationPercent is > 0m)
                 description += depreciationNet.HasValue
                     ? $" (כולל פחת {i.DepreciationPercent.Value:0.##}%, משקל נטו {depreciationNet.Value:0.###} ק\"ג)"

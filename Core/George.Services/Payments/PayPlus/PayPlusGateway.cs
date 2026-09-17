@@ -513,17 +513,50 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
         if (json == null)
             return Fail("Empty response from PayPlus.");
 
-        // Failures come back root-level ({"status":"failure","error":"brand-not-found",...}), not wrapped
-        // in the usual {results:{...}} envelope - surface the actual error code, not a generic message.
-        if (!TryGetObjectProperty(json, "docUID", out _) && !IsResultsSuccess(json))
-            return Fail(GetResultsDescription(json) ?? GetRootString(json, "error") ?? "PayPlus document creation failed.", json);
+        return ParseDocumentResult(json);
+    }
+
+    /// <summary>
+    /// Invoice+ (books/docs/new) answers root-level, not in the {results:{...}} envelope:
+    /// success = {"status":"success","details":{"docUID","number","originalDocAddress",...}},
+    /// failure = {"status":"failure","error":"brand-not-found","error_code":...}.
+    /// The first version looked for docUID at the root, so every real success (PEPE 14/9: invoices 4003/4004,
+    /// credit note 5003) was logged as "document creation failed", nothing was stored on the order, no invoice
+    /// SMS went out, and the manual retry created a duplicate invoice. Public for tests.
+    /// </summary>
+    public static PaymentTransactionResult ParseDocumentResult(string json)
+    {
+        var details = TryGetObjectProperty(json, "details", out var d) ? d : (JsonElement?)null;
+        var rootStatus = GetRootString(json, "status");
+        var hasDocUid = (details != null && TryGetStringProperty(details.Value, "docUID", out _))
+            || GetRootString(json, "docUID") != null;
+        var success = hasDocUid
+            || string.Equals(rootStatus, "success", StringComparison.OrdinalIgnoreCase)
+            || IsResultsSuccess(json);
+        if (!success || string.Equals(rootStatus, "failure", StringComparison.OrdinalIgnoreCase))
+        {
+            return new PaymentTransactionResult
+            {
+                Success = false,
+                ResponseCode = -1,
+                Description = GetResultsDescription(json) ?? GetRootString(json, "error") ?? "PayPlus document creation failed.",
+                RawJson = json,
+            };
+        }
+
+        string? Field(string name)
+        {
+            if (details != null && TryGetStringProperty(details.Value, name, out var v) && !string.IsNullOrWhiteSpace(v))
+                return v;
+            return GetRootString(json, name);
+        }
 
         return new PaymentTransactionResult
         {
             Success = true,
             ResponseCode = 0,
-            DocumentNumber = GetRootString(json, "number"),
-            DocumentUrl = GetRootString(json, "originalDocAddress"),
+            DocumentNumber = Field("number"),
+            DocumentUrl = Field("originalDocAddress"),
             RawJson = json,
         };
     }
@@ -642,7 +675,8 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
         {
             items.Add(new Dictionary<string, object?>
             {
-                ["name"] = "מסגרת אשראי למשקל סופי (לא נגבה)",
+                // Wording: "(לא נגבה)" read as "this was not collected" (PEPE 14/9) - say what it is instead.
+                ["name"] = "מסגרת אשראי זמנית - החיוב הסופי לפי המשקל בפועל",
                 ["quantity"] = 1,
                 ["price"] = gap,
                 ["vat_type"] = 0,

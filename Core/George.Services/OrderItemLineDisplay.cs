@@ -297,6 +297,21 @@ public static class OrderItemLineDisplay
         return $"{Math.Round(kg * 1000)} גרם";
     }
 
+    /// <summary>
+    /// "Product - option" for invoice / payment-page lines. A unit-of-sale variant title ("ק\"ג" / "יחידה",
+    /// what manual orders store for weighed or unit lines) is not an option and only puzzles the customer
+    /// ("טסט - ק״ג" on PEPE's invoice 4005, 9/16) - it is dropped; real options ("עובי אצבע") stay.
+    /// </summary>
+    public static string FormatDocumentLineDescription(OrderItem item, string fallback = "פריט")
+    {
+        var title = (item.Title ?? "").Trim();
+        var variant = (item.VariantTitle ?? "").Trim();
+        if (variant.Length > 0 && (IsGenericVariantTitle(variant) || string.Equals(variant, title, StringComparison.OrdinalIgnoreCase)))
+            variant = "";
+        var description = string.Join(" - ", new[] { title, variant }.Where(s => s.Length > 0)).Trim();
+        return description.Length > 0 ? description : fallback;
+    }
+
     public static bool IsGenericVariantTitle(string vt)
     {
         var s = vt.Trim().Normalize(NormalizationForm.FormC);

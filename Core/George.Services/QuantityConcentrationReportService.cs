@@ -159,10 +159,16 @@ namespace George.Services
                     var soldByUnits = IsWeightedSoldByUnits(line);
                     var gramsPerUnit = soldByUnits ? GramsPerUnitFromOrderItem(line) : 0m;
                     var unitWeightKey = gramsPerUnit > 0m ? Math.Round(gramsPerUnit / 1000m, 3) : 0m;
+                    // Weight-mode lines of a product without catalog options ("בשר טחון טרי" ordered as
+                    // 0.5kg / 0.5kg / 2kg) are separate prep rows per ordered weight too - otherwise they
+                    // all fold into one unlabeled bucket and the variations toggle shows nothing.
+                    var weightChoiceKey = !soldByUnits ? ResolveWeightChoiceKey(line, p) : 0m;
+                    if (weightChoiceKey > 0m)
+                        unitWeightKey = weightChoiceKey;
                     var key = (line.ProductId.Value, cutKey, note, unitWeightKey);
                     if (!buckets.TryGetValue(key, out var b))
                     {
-                        b = new LineBucket { LineLabel = optionLabel ?? "" };
+                        b = new LineBucket { LineLabel = optionLabel ?? "", WeightChoice = weightChoiceKey > 0m };
                         buckets[key] = b;
                     }
 
@@ -185,6 +191,10 @@ namespace George.Services
                             b.UnitWeightKg = line.LineUnitWeightKg;
                         else if (b.UnitWeightKg == null && line.UnitWeightGrams is > 0m)
                             b.UnitWeightKg = line.UnitWeightGrams.Value / 1000m;
+                    }
+                    else if (weightChoiceKey > 0m && b.UnitWeightKg == null)
+                    {
+                        b.UnitWeightKg = weightChoiceKey;
                     }
                 }
             }
@@ -245,8 +255,10 @@ namespace George.Services
                 var showUnitsInTotal = ShowUnitsInTotalQuantityForTotalQtyColumn(p, sumUnits);
                 var totalUnitsOut = sumUnits > 0m ? Round2(sumUnits) : (decimal?)null;
                 var lineStockUnitLabel = StockUnitLabelForProduct(p, variantQtyStock);
+                // Weight-choice buckets carry the ordered line weight, not a pack weight - they must not
+                // surface as the parent's "משקל ליח'".
                 var parentUnitWeightKg = ResolveNoVariationParentUnitWeightKg(
-                    p, g.Select(kv => kv.Value.UnitWeightKg));
+                    p, g.Where(kv => !kv.Value.WeightChoice).Select(kv => kv.Value.UnitWeightKg));
 
                 groups.Add(new QuantityConcentrationProductGroupDto
                 {
@@ -438,6 +450,8 @@ namespace George.Services
             public decimal FromBundlesKg;
             public decimal FromBundlesUnits;
             public decimal? UnitWeightKg;
+            /// <summary>Bucket keyed by the ordered weight of weight-mode lines (not a per-unit pack weight).</summary>
+            public bool WeightChoice;
             public readonly HashSet<int> VariantIds = new();
             public readonly HashSet<int> OrderIds = new();
         }
@@ -751,6 +765,43 @@ namespace George.Services
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Bucket key (kg, 3 decimals) for a weight-mode line of a product without catalog options: the
+        /// ORDERED line weight (0.5 / 2 kg), so each weight choice becomes its own detail row with its own
+        /// order count. 0 when the line is not a weight choice (units line, product with options, no weight).
+        /// Uses the ordered weight, never the picked weight - picking 0.52 kg must not split the 0.5 kg row.
+        /// </summary>
+        public static decimal ResolveWeightChoiceKey(OrderItem line, Product p)
+        {
+            var mode = (line.OrderLineQuantityMode ?? "").Trim().ToLowerInvariant();
+            if (mode != "weight") return 0m;
+            if (ProductHasCatalogVariationOptions(p)) return 0m;
+            var kg = OrderedLineWeightKg(line);
+            return kg is > 0m ? Math.Round(kg.Value, 3) : 0m;
+        }
+
+        /// <summary>Ordered (not picked) line weight in kg - same precedence as <see cref="LineWeightKg"/> minus the picked branch.</summary>
+        public static decimal? OrderedLineWeightKg(OrderItem i)
+        {
+            if (i.UnitWeightGrams is > 0m && i.Quantity > 0m)
+                return i.Quantity * (i.UnitWeightGrams.Value / 1000m);
+
+            if (!string.IsNullOrWhiteSpace(i.SaleTotalWeight))
+            {
+                var st = i.SaleTotalWeight.Trim();
+                if (decimal.TryParse(st, NumberStyles.Any, CultureInfo.InvariantCulture, out var w) && w > 0m)
+                    return w;
+                var grams = ParseGramsFromHebrewWeightLabel(st);
+                if (grams > 0m)
+                    return grams / 1000m;
+            }
+
+            if (i.LineUnitWeightKg is > 0m && i.Quantity > 0m)
+                return i.Quantity * i.LineUnitWeightKg.Value;
+
+            return null;
         }
 
         private static decimal GramsPerUnitFromOrderItem(OrderItem line)
