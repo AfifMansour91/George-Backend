@@ -19,10 +19,12 @@ namespace George.Data
         {
             var res = new DataListResult<Category>();
 
+            // Account / ParentCategory are not read by any list consumer (the mapper uses ParentCategoryId), and in
+            // single-query mode every category row was repeated per linked site with the full Account + Site
+            // columns - the category chips of the new-order page waited on that join.
             var query = _dbContext.Category
-                .Include(c => c.Account)
-                .Include(c => c.ParentCategory)
                 .Include(c => c.Site)
+                .AsSplitQuery()
                 .AsNoTracking();
 
             // Apply filters

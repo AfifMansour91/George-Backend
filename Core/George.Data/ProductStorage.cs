@@ -94,6 +94,11 @@ namespace George.Data
 
             // Related/complementary are not loaded here; kiosk gets them via GetUpsellProductIdsForSite when needed.
 
+            // Type-ahead mode (ProductFilter.QuickSearch): relevance order + SQL paging, see below.
+            var quickSearchTerm = filter?.QuickSearch == true && filter.Search?.SearchTerm.HasValue() == true
+                ? filter.Search.SearchTerm!.Trim()
+                : null;
+
             // Apply filters
             if (filter != null)
             {
@@ -112,7 +117,32 @@ namespace George.Data
                     query = query.Where(p => p.ProductCategory.Any(pc => pc.CategoryId == filter.CategoryId.Value));
                 }
 
-                if (filter.Search?.SearchTerm.HasValue() == true)
+                if (quickSearchTerm != null)
+                {
+                    // Type-ahead: every typed word must appear in the name (canonical or the site's override) or the
+                    // term matches a SKU. ShortDescription is left out - "שמן" used to return every product whose
+                    // description mentions oil, ahead of the oils themselves.
+                    var term = quickSearchTerm;
+                    var siteIdForName = filter.SiteId;
+                    var tokens = term.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    var nameMatches = _dbContext.Product.Where(p => !p.IsDeleted);
+                    if (filter.AccountId.HasValue)
+                        nameMatches = nameMatches.Where(p => p.AccountId == filter.AccountId.Value);
+                    if (siteIdForName.HasValue)
+                        nameMatches = nameMatches.Where(p => p.Site.Any(s => s.Id == siteIdForName.Value));
+                    foreach (var token in tokens)
+                    {
+                        var tok = token;
+                        nameMatches = nameMatches.Where(p => p.Name.Contains(tok));
+                    }
+                    var nameMatchIds = nameMatches.Select(p => p.Id);
+                    query = query.Where(p => nameMatchIds.Contains(p.Id) ||
+                                           (siteIdForName.HasValue && _dbContext.ProductSiteOverride.Any(o =>
+                                               o.ProductId == p.Id && o.SiteId == siteIdForName.Value && o.Name != null && o.Name.Contains(term))) ||
+                                           (p.Sku != null && p.Sku.Contains(term)) ||
+                                           p.ProductVariant.Any(v => !v.IsDeleted && v.Sku != null && v.Sku.Contains(term)));
+                }
+                else if (filter.Search?.SearchTerm.HasValue() == true)
                 {
                     var term = filter.Search.SearchTerm!.Trim();
                     query = query.Where(p => p.Name.Contains(term) ||
@@ -134,9 +164,32 @@ namespace George.Data
             if (paging.IncludeTotal)
                 res.Total = await query.CountAsync(cancelToken).ConfigureAwait(false);
 
-            query = query
-                .OrderBy(p => p.DisplayOrder ?? int.MaxValue)
-                .ThenByDescending(p => p.CreationTime);
+            if (quickSearchTerm != null)
+            {
+                // Relevance: exact name > name starts with the term > a word in the name starts with it > anywhere
+                // in the name > SKU / override-name matches. Paging runs in SQL, so the split-query includes load
+                // only the returned page instead of every match (the list below is unpaged on purpose - callers
+                // like My Products / export expect the full set).
+                var term = quickSearchTerm;
+                var wordPrefix = " " + term;
+                query = query
+                    .OrderBy(p => p.Name == term ? 0
+                        : p.Name.StartsWith(term) ? 1
+                        : p.Name.Contains(wordPrefix) ? 2
+                        : p.Name.Contains(term) ? 3
+                        : 4)
+                    .ThenBy(p => p.Name.Length)
+                    .ThenBy(p => p.DisplayOrder ?? int.MaxValue)
+                    .ThenBy(p => p.Id)
+                    .Skip(Math.Max(0, paging.Skip))
+                    .Take(Math.Clamp(paging.Take, 1, 100));
+            }
+            else
+            {
+                query = query
+                    .OrderBy(p => p.DisplayOrder ?? int.MaxValue)
+                    .ThenByDescending(p => p.CreationTime);
+            }
 
             res.Items = await query.ToListAsync(cancelToken).ConfigureAwait(false);
             return res;

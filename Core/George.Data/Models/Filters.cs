@@ -91,6 +91,9 @@ namespace George.Common
         public bool? IncludeOptionsAndVariants { get; set; }
         /// <summary>When true, list response includes RelatedProduct and ComplementaryProduct (e.g. kiosk catalog for upsell step). Use only when needed.</summary>
         public bool IncludeRelatedAndComplementaryProducts { get; set; }
+        /// <summary>Type-ahead search (new manual order): match name / SKU only, order by relevance and apply Skip/Take in SQL.
+        /// Opt-in because the other list callers rely on the full unpaged result.</summary>
+        public bool QuickSearch { get; set; }
     }
 
     public class CategoryFilter

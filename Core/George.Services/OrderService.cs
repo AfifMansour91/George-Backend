@@ -696,6 +696,11 @@ namespace George.Services
             if (updated == null)
                 return CreateResponse(response, StatusCode.ItemNotFound);
             var courierDetailsChanged = courierBefore != null && !courierBefore.Equals(CourierDeliverySnapshot.From(updated));
+            // Archive "החזר למוכן": an order completed by mistake goes back to the Ready column. It already
+            // went through Ready once, so the customer SMS, Woo status push (Ready and Completed are both
+            // "completed" there) and courier dispatch must not fire a second time.
+            var restoredFromArchive = string.Equals(previousStatus, "Completed", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(updated.Status, "Ready", StringComparison.OrdinalIgnoreCase);
             if (req.Status != null)
             {
                 await RecordOrderStatusChangeAsync(
@@ -710,12 +715,12 @@ namespace George.Services
                 {
                     await TryReversePromotionMetricsForOrderAsync(beforeUpdate, cancelToken).ConfigureAwait(false);
                 }
-                if (ShouldSyncWooCommerceOrderAfterStatusChange(previousStatus, updated.Status))
+                if (!restoredFromArchive && ShouldSyncWooCommerceOrderAfterStatusChange(previousStatus, updated.Status))
                     await ScheduleWooCommerceStoreSyncIfApplicableAsync(orderId, updated, "order status", statusOverrideForWcRest: null, cancelToken).ConfigureAwait(false);
                 // LionWheel courier: dispatch when reaching the configured trigger status; cancel the task on cancel.
                 if (string.Equals(updated.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
                     ScheduleDeliveryCancel(orderId);
-                else if (!courierDetailsChanged)
+                else if (!courierDetailsChanged && !restoredFromArchive)
                     ScheduleDeliveryDispatch(orderId, updated.Status);
             }
             // LionWheel courier: edits that change what the courier sees (delivery type, supply date, address,
@@ -788,6 +793,7 @@ namespace George.Services
                 loaded = await _orderStorage.GetOrderByIdAsync(loaded.Id, cancelToken).ConfigureAwait(false) ?? loaded;
             }
             if (loaded != null &&
+                !restoredFromArchive &&
                 !string.Equals(previousStatus, "Ready", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(loaded.Status, "Ready", StringComparison.OrdinalIgnoreCase))
             {
