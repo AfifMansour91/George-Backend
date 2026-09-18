@@ -24,8 +24,10 @@ public sealed class BundleLineSlot
     public bool IsWeight { get; set; }
     /// <summary>Explicit total line quantity (overrides <see cref="QtyPerBundle"/> × bundles) when &gt; 0.</summary>
     public decimal? LineQuantityOverride { get; set; }
-    /// <summary>Catalog / site price of the product in the slot (per kg / per unit) - informational <c>PricePerUnit</c>.</summary>
+    /// <summary>Price of ONE SLOT UNIT of the product in the slot (per kg for kg slots; per piece otherwise - a product priced per kg but sold by units costs price × unit weight, like a regular order line) - informational <c>PricePerUnit</c>.</summary>
     public decimal UnitPrice { get; set; }
+    /// <summary>Weight (kg) chosen for one unit of the slot - only meaningful for "choose a weight" products.</summary>
+    public decimal? UnitWeightKg { get; set; }
     /// <summary>Configured original product when the slot is swapped.</summary>
     public int? SwappedFromProductId { get; set; }
     /// <summary>Surcharge per bundle of the active swap (0 when the slot holds its configured product).</summary>
@@ -54,6 +56,7 @@ public static class BundleOrderLineBuilder
     public const string ErrSlotUnknown = "רכיב המארז אינו מוכר";
     public const string ErrFreeSwapNotAllowed = "החלפה חופשית של רכיבי מארז אינה מופעלת לאתר זה - ניתן לבחור רק מוצר מרשימת ההחלפות של הרכיב";
     public const string ErrChildNotSwappable = "ניתן להחליף רק רכיב של מארז";
+    public const string ErrSlotNotSwappable = "הרכיב לא סומן כניתן להחלפה בהגדרת המארז";
     public const string ErrChildDelete = "לא ניתן להסיר רכיב בודד מהמארז - החלף את הרכיב או הסר את המארז כולו";
     public const string ErrNoDefinition = "למארז אין הגדרת רכיבים - יש להגדיר את רכיבי המארז לפני הזמנה";
     public const string ErrProductOtherAccount = "המוצר שנבחר לרכיב אינו שייך לחשבון של ההזמנה";
@@ -86,9 +89,10 @@ public static class BundleOrderLineBuilder
         var m = (mode ?? "").Trim().ToLowerInvariant();
         if (u == "grams" || u == "gram" || u == "g")
             return (BundlePricingEngine.Round4(q / 1000m), true);
-        // `mode` is derived by the plugin from the product itself (OCWSU sold-by-weight), so it outranks a
-        // `unit` value a caller may have stored wrongly; "weight" always means the quantity is kg.
-        if (u == "kg" || m == "weight")
+        // `unit` is what the quantity is actually expressed in (George always sends it explicitly: "kg" for
+        // by_weight slots, "unit" otherwise), so it wins. `mode` only decides when no unit was sent - a product
+        // sold by units WITH a weight ("units_weight"/"weight" mode, unit "unit") must stay a units line.
+        if (u == "kg" || (u.Length == 0 && m == "weight"))
             return (q, true);
         return (q, false);
     }
@@ -116,7 +120,8 @@ public static class BundleOrderLineBuilder
     /// <summary>
     /// Validates the product chosen for a slot and resolves its surcharge: the configured product (surcharge 0),
     /// one of the configured swaps (its surcharge), or - only with <paramref name="allowFreeSwap"/> - any product
-    /// (<paramref name="requestedSurcharge"/>). Returns a Hebrew error, or null when valid.
+    /// (<paramref name="requestedSurcharge"/>). A slot not marked <c>Swappable</c> accepts only its configured
+    /// product, free swap or not. Returns a Hebrew error, or null when valid.
     /// <paramref name="resolvedVariantId"/> is the variant the slot ends up with: the configured product sent
     /// without a variant takes the slot's configured variant (it is the configured product, not a free swap).
     /// </summary>
@@ -146,6 +151,10 @@ public static class BundleOrderLineBuilder
             return null;
         }
 
+        // "ניתן להחלפה" is the manager's decision per slot; the site's free-swap flag only widens WHAT a swappable slot takes.
+        if (!slot.Swappable)
+            return ErrSlotNotSwappable;
+
         var configured = slot.Swaps
             .Where(s => !s.IsDeleted)
             .FirstOrDefault(s => s.SwapProductId == productId && (s.SwapVariantId ?? 0) == (variant ?? 0))
@@ -165,6 +174,24 @@ public static class BundleOrderLineBuilder
         return null;
     }
 
+    /// <summary>
+    /// Quantity of a product that replaces another in a slot, in the NEW product's unit. Same kind of unit → unchanged.
+    /// Units → kg: units × the old unit weight; kg → units: kg ÷ the new unit weight, rounded to whole units (≥ 1).
+    /// Without a usable unit weight the number is kept as-is.
+    /// </summary>
+    public static decimal ConvertSwapQuantity(decimal qty, bool fromWeight, decimal? fromUnitWeightKg, bool toWeight, decimal? toUnitWeightKg)
+    {
+        if (qty <= 0m) return qty;
+        if (fromWeight == toWeight) return qty;
+        if (fromWeight)
+        {
+            if (toUnitWeightKg is not > 0m) return Math.Max(1m, Math.Round(qty, 0, MidpointRounding.AwayFromZero));
+            return Math.Max(1m, Math.Round(qty / toUnitWeightKg.Value, 0, MidpointRounding.AwayFromZero));
+        }
+        if (fromUnitWeightKg is not > 0m) return qty;
+        return BundlePricingEngine.Round4(qty * fromUnitWeightKg.Value);
+    }
+
     /// <summary>Inverse of <see cref="BundlePricingEngine.ApplyDiscount"/>: the raw price a base price came from (ratio only).</summary>
     public static decimal RawFromBase(decimal basePrice, string? discountType, decimal discountValue)
     {
@@ -174,6 +201,28 @@ public static class BundleOrderLineBuilder
         if (string.Equals(discountType, BundlePricingEngine.DiscountFixed, StringComparison.OrdinalIgnoreCase) && discountValue > 0m)
             return basePrice + discountValue;
         return basePrice;
+    }
+
+    /// <summary>
+    /// A child's picked quantity in the SLOT unit. The picking UI stores kg for a units line that carries a
+    /// per-unit weight (200 g portions → 0.8 kg for 4 pieces, see <see cref="OrderItemStockConsumption.LinePickingStoresKg"/>);
+    /// the slot counts pieces, so kg ÷ unit weight (fractional pieces = the weighed share). Otherwise as stored.
+    /// </summary>
+    public static decimal? PickedQuantityInSlotUnit(OrderItem child)
+    {
+        if (child.PickedQuantity is not > 0m) return child.PickedQuantity;
+        if (string.Equals(child.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase)) return child.PickedQuantity;
+        var unitKg = OrderItemStockConsumption.TryGetUnitWeightKg(child);
+        return unitKg is > 0m ? BundlePricingEngine.Round4(child.PickedQuantity.Value / unitKg.Value) : child.PickedQuantity;
+    }
+
+    /// <summary>Inverse: a slot-unit quantity (Woo actualQty in pieces) as the picking UI stores it (kg for weighed-piece lines).</summary>
+    public static decimal? SlotUnitQuantityToPicked(OrderItem child, decimal? slotQty)
+    {
+        if (slotQty is not > 0m) return slotQty;
+        if (string.Equals(child.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase)) return slotQty;
+        var unitKg = OrderItemStockConsumption.TryGetUnitWeightKg(child);
+        return unitKg is > 0m ? BundlePricingEngine.Round4(slotQty.Value * unitKg.Value) : slotQty;
     }
 
     /// <summary>Base price per bundle implied by a parent line: unit price minus the children's surcharges (clamped ≥ 0).</summary>
@@ -257,6 +306,8 @@ public static class BundleOrderLineBuilder
                 // The slot's unit is fixed by the bundle definition - never let the catalog heuristics flip it.
                 child.OrderLineQuantityMode = slot.IsWeight ? "weight" : "units";
                 if (slot.IsWeight) child.UnitWeightGrams = 1000m;
+                // Woo's actualQty arrives in the slot unit (pieces); the picking UI keeps kg for weighed-piece lines.
+                child.PickedQuantity = SlotUnitQuantityToPicked(child, child.PickedQuantity);
             }
             children.Add(child);
             i++;
@@ -286,12 +337,42 @@ public static class BundleOrderLineBuilder
         }
         var basePer = basePrice ?? BaseFromParent(parent, children);
         var raw = RawFromBase(basePer, discountType, discountValue);
+
+        if (useOrderedQuantities)
+        {
+            // Ordered state: the parent's money is what the customer pays (engine / store); the children only
+            // SHOW how it splits. Split the base (parent minus surcharges) by the catalog value of what is in each
+            // slot and add each slot's surcharge, so the shares always add up to the parent - also after a swap,
+            // where price × qty of the swapped-in product no longer equals the original's (spec §4: the base is
+            // built from the ORIGINAL components, a swap only adds its surcharge). Same rule as the plugin's
+            // invoice split of an externally priced line.
+            var bundles = Math.Max(0m, parent.Quantity);
+            var parentTotal = parent.TotalPrice ?? BundlePricingEngine.Round2((parent.PricePerUnit ?? 0m) * bundles);
+            var surchargeTotal = children.Sum(c => (c.SwapSurcharge ?? 0m) * bundles);
+            var baseTotal = Math.Max(0m, parentTotal - surchargeTotal);
+            var rawValues = children.Select(c => Math.Max(0m, (c.PricePerUnit ?? 0m) * c.Quantity)).ToList();
+            var rawSum = rawValues.Sum();
+            var assigned = 0m;
+            for (var i = 0; i < children.Count; i++)
+            {
+                var share = rawSum > 0m ? baseTotal * rawValues[i] / rawSum : 0m;
+                share += (children[i].SwapSurcharge ?? 0m) * bundles;
+                share = BundlePricingEngine.Round2(share);
+                // Rounding remainder lands on the last child so Σ shares == parent total exactly.
+                if (i == children.Count - 1) share = BundlePricingEngine.Round2(parentTotal - assigned);
+                children[i].TotalPrice = Math.Max(0m, share);
+                assigned += children[i].TotalPrice!.Value;
+            }
+            return parentTotal;
+        }
+
         var picked = new List<BundleReweighComponent>(children.Count);
         for (var i = 0; i < children.Count; i++)
         {
             var c = children[i];
+            // Re-weigh prices the slot unit (price per piece × pieces, price per kg × kg): a weighed-piece line stores kg.
             var qty = !useOrderedQuantities && c.PickingUserConfirmed && c.PickedQuantity.HasValue
-                ? c.PickedQuantity.Value
+                ? PickedQuantityInSlotUnit(c) ?? c.Quantity
                 : c.Quantity;
             picked.Add(new BundleReweighComponent
             {
@@ -330,15 +411,23 @@ public static class BundleOrderLineBuilder
 
         var before = parent.TotalPrice;
         var sumMode = BundlePricingEngine.IsSumMode(pricingMode);
-        if (sumMode && reweighPrice && !children.Any(c => c.PricePerUnit is null or <= 0m))
+        var anyWeighed = children.Any(c => c.PickingUserConfirmed && c.PickedQuantity is > 0m);
+        if (sumMode && reweighPrice && anyWeighed && !children.Any(c => c.PricePerUnit is null or <= 0m))
         {
             var total = ApplyChildShares(parent, children, pricingMode, discountType, discountValue, null, useOrderedQuantities: false);
             if (total.HasValue) parent.TotalPrice = total.Value;
+        }
+        else if (sumMode && !children.Any(c => c.PricePerUnit is null or <= 0m))
+        {
+            // Nothing weighed yet (or no re-weigh): the parent keeps its money; re-split it over the children
+            // (a swap may have changed what is in a slot).
+            ApplyChildShares(parent, children, pricingMode, discountType, discountValue, null, useOrderedQuantities: true);
         }
         else if (!sumMode)
         {
             foreach (var c in children) c.TotalPrice = null;
         }
+        // sum mode with a price-less child: parent and shares are left as they are (a 0 share would mislead).
         return before != parent.TotalPrice;
     }
 

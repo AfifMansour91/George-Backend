@@ -75,6 +75,8 @@ public class OrderItemRes
     /// the picker may choose from. Null otherwise. Spec §8 "picking / order screens".
     /// </summary>
     public List<OrderItemBundleSwapOptionRes>? BundleSwapOptions { get; set; }
+    /// <summary>The slot's "ניתן להחלפה" flag (single pickable order reads); null when the bundle has no definition in George.</summary>
+    public bool? BundleSlotSwappable { get; set; }
 }
 
 /// <summary>One configured swap of a bundle slot, as offered on the picking screen.</summary>

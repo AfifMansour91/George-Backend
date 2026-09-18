@@ -140,6 +140,8 @@ INSERT [dbo].[ProductStatus] ([Id], [Name], [IsDeleted]) VALUES (2, N'outOfStock
 GO
 INSERT [dbo].[ProductStatus] ([Id], [Name], [IsDeleted]) VALUES (3, N'hidden', 0)
 GO
+INSERT [dbo].[ProductStatus] ([Id], [Name], [IsDeleted]) VALUES (4, N'draft', 0)
+GO
 SET IDENTITY_INSERT [dbo].[ProductStatus] OFF
 GO
 SET IDENTITY_INSERT [dbo].[SetupType] ON 

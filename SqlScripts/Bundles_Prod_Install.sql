@@ -12,7 +12,7 @@
 -- Run order (do not reorder):
 --   1. SetupType bundle row            2. Account.BundlesEnabled
 --   3. Site bundle settings            4. ProductBundle* tables
---   5. OrderItem bundle columns
+--   5. OrderItem bundle columns        6. ProductStatus draft row
 --
 -- Spec: shop-manager/docs/wooCommerceEngines/BUNDLES_SYNC_SPEC.md
 -- Run on prod BEFORE deploying the backend that ships the bundles feature.
@@ -258,6 +258,22 @@ BEGIN
     CREATE INDEX IX_OrderItem_ParentOrderItemId
         ON dbo.OrderItem (ParentOrderItemId)
         WHERE ParentOrderItemId IS NOT NULL;
+END
+GO
+
+GO
+IF XACT_STATE() = 0 SET NOEXEC ON;  -- a prior step failed + rolled back; skip the rest
+GO
+
+-- =============================================================================
+-- SOURCE: ProductStatus_AddDraft.sql
+-- =============================================================================
+
+-- The bundle editor offers "טיוטה" (draft). Without a 'draft' lookup row the status saved as NULL and the
+-- WooCommerce sync published the bundle. Idempotent.
+IF NOT EXISTS (SELECT 1 FROM dbo.ProductStatus WHERE Name = N'draft')
+BEGIN
+    INSERT INTO dbo.ProductStatus (Name, IsDeleted) VALUES (N'draft', 0);
 END
 GO
 

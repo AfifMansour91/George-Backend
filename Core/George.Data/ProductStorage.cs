@@ -123,7 +123,11 @@ namespace George.Data
 
                 if (filter.Status.HasValue())
                 {
-                    query = query.Where(p => p.Status != null && p.Status.Name == filter.Status);
+                    // The shop UI calls an active product "published"/"public"; the lookup row is "active"
+                    // (the save path already maps these). Without the alias the filter matched nothing.
+                    var statusName = filter.Status!.Trim().ToLowerInvariant();
+                    if (statusName == "published" || statusName == "public") statusName = "active";
+                    query = query.Where(p => p.Status != null && p.Status.Name == statusName);
                 }
             }
 

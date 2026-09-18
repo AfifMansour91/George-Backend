@@ -33,6 +33,8 @@ public sealed class BundleComponentUpsert
     public int SortOrder { get; set; }
     public bool Swappable { get; set; }
     public string? Description { get; set; }
+    /// <summary>Chosen unit weight (kg) of a "choose a weight" product; null = keep what the slot has.</summary>
+    public decimal? UnitWeightKg { get; set; }
     public List<BundleComponentSwapUpsert> Swaps { get; set; } = new();
 }
 
@@ -75,6 +77,8 @@ public sealed class BundleListRow
 {
     public Product Product { get; set; } = null!;
     public int ComponentsCount { get; set; }
+    /// <summary>Visibility lookup name (active | hidden ...); "hidden" = the header's "מוסתר".</summary>
+    public string? VisibilityName { get; set; }
 }
 
 /// <summary>Catalog facts about a product used to validate/price bundle components (includes soft-deleted rows).</summary>
@@ -91,6 +95,15 @@ public sealed class BundleCatalogProductInfo
     public decimal? SalePrice { get; set; }
     public DateTime? SalePriceStartDate { get; set; }
     public DateTime? SalePriceEndDate { get; set; }
+    // Weight configuration: a product priced per kg but sold by units costs price × unit weight per unit.
+    public bool IsWeighted { get; set; }
+    /// <summary>Weight config unit name: "kg" | "g".</summary>
+    public string? WeightUnit { get; set; }
+    public string? UnitWeight { get; set; }
+    /// <summary>average | variable | by_variant</summary>
+    public string? UnitWeightMode { get; set; }
+    public bool WeightByVariant { get; set; }
+    public string? WeightOptions { get; set; }
 }
 
 /// <summary>Catalog facts about a variant used to validate/price bundle components.</summary>
@@ -101,6 +114,8 @@ public sealed class BundleCatalogVariantInfo
     public string? Sku { get; set; }
     public decimal? Price { get; set; }
     public decimal? SalePrice { get; set; }
+    /// <summary>Variant weight in the product's weight-config unit ("weight by variant" products).</summary>
+    public decimal? Weight { get; set; }
     public bool IsDeleted { get; set; }
 }
 
@@ -183,6 +198,9 @@ public class BundleStorage : StorageBase
             .AsNoTracking()
             .Include(c => c.ComponentProduct)
                 .ThenInclude(p => p.SetupType)   // BundleOrderLineBuilder.IsWeightSlot: by_weight ⇒ kg slot
+            .Include(c => c.ComponentProduct)
+                .ThenInclude(p => p.WeightConfig!)
+                    .ThenInclude(w => w.UnitWeightMode)   // "variable" ⇒ the slot's chosen unit weight is sent to the store
             .Include(c => c.ComponentVariant)
             .Include(c => c.Swaps)
                 .ThenInclude(s => s.SwapProduct)
@@ -271,6 +289,11 @@ public class BundleStorage : StorageBase
                 _dbContext.ProductBundleComponent.Add(row);
                 newComponents.Add(row);
             }
+            // The unit weight belongs to the product in the slot: a different product drops the old one.
+            if (comp.UnitWeightKg is > 0m)
+                row.UnitWeightKg = comp.UnitWeightKg;
+            else if (row.ComponentProductId != comp.ComponentProductId || row.ComponentVariantId != comp.ComponentVariantId)
+                row.UnitWeightKg = null;
             row.ComponentProductId = comp.ComponentProductId;
             row.ComponentVariantId = comp.ComponentVariantId;
             row.Qty = comp.Qty;
@@ -451,7 +474,12 @@ public class BundleStorage : StorageBase
             query = query.Where(p => p.Name.Contains(term) || (p.Sku != null && p.Sku.Contains(term)));
         }
         if (filter.Status.HasValue())
-            query = query.Where(p => p.Status != null && p.Status.Name == filter.Status);
+        {
+            // UI alias: an active product is "published"/"public" in the shop UI; the lookup row is "active".
+            var statusName = filter.Status!.Trim().ToLowerInvariant();
+            if (statusName == "published" || statusName == "public") statusName = "active";
+            query = query.Where(p => p.Status != null && p.Status.Name == statusName);
+        }
 
         res.Total = await query.CountAsync(cancelToken).ConfigureAwait(false);
 
@@ -480,6 +508,7 @@ public class BundleStorage : StorageBase
                 {
                     p.Id,
                     StatusName = p.Status != null ? p.Status.Name : null,
+                    VisibilityName = p.Visibility != null ? p.Visibility.Name : null,
                     ImageUrl = p.ProductImage.OrderBy(i => i.SortOrder).Select(i => i.Url).FirstOrDefault(),
                     Config = p.BundleConfig,
                 })
@@ -494,6 +523,7 @@ public class BundleStorage : StorageBase
                 if (e.ImageUrl != null)
                     row.Product.ProductImage = new List<ProductImage> { new ProductImage { Url = e.ImageUrl } };
                 row.Product.BundleConfig = e.Config;
+                row.VisibilityName = e.VisibilityName;
             }
         }
 
@@ -523,6 +553,12 @@ public class BundleStorage : StorageBase
                 SalePrice = p.SalePrice,
                 SalePriceStartDate = p.SalePriceStartDate,
                 SalePriceEndDate = p.SalePriceEndDate,
+                IsWeighted = p.IsWeighted == true,
+                WeightUnit = p.WeightConfig != null && p.WeightConfig.Unit != null ? p.WeightConfig.Unit.Name : null,
+                UnitWeight = p.WeightConfig != null ? p.WeightConfig.UnitWeight : null,
+                UnitWeightMode = p.WeightConfig != null && p.WeightConfig.UnitWeightMode != null ? p.WeightConfig.UnitWeightMode.Name : null,
+                WeightByVariant = p.WeightConfig != null && p.WeightConfig.WeightByVariant == true,
+                WeightOptions = p.WeightConfig != null ? p.WeightConfig.WeightOptions : null,
             })
             .ToListAsync(cancelToken)
             .ConfigureAwait(false);
@@ -545,6 +581,7 @@ public class BundleStorage : StorageBase
                 Sku = v.Sku,
                 Price = v.Price,
                 SalePrice = v.SalePrice,
+                Weight = v.Weight,
                 IsDeleted = v.IsDeleted,
             })
             .ToListAsync(cancelToken)
@@ -624,7 +661,8 @@ public class BundleStorage : StorageBase
             var m = byComponentId[row.Id];
             row.Unit = Truncate(m.Unit, 10);
             row.Mode = Truncate(m.Mode, 20);
-            row.UnitWeightKg = m.UnitWeightKg;
+            // The store echoes the unit weight it prices with; never wipe a weight chosen in George with an empty echo.
+            if (m.UnitWeightKg is > 0m) row.UnitWeightKg = m.UnitWeightKg;
         }
         await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
     }

@@ -125,6 +125,12 @@ public class CreateOrderBundleComponentReq
 /// <summary>Bundles: swap the product of a bundle child line during picking. POST Order/{orderId}/Items/{orderItemId}/swap - spec §3.3.</summary>
 public class SwapOrderItemReq
 {
+    /// <summary>
+    /// Total line quantity in the NEW product's unit (kg for a by_weight product, units otherwise). Omitted: the
+    /// slot quantity converted by weight (units × unit weight ↔ kg ÷ unit weight); back to the configured product =
+    /// the definition's quantity.
+    /// </summary>
+    public decimal? Quantity { get; set; }
     public int ProductId { get; set; }
     public int? ProductVariantId { get; set; }
     /// <summary>Per bundle. Applied only on a free swap (Site.BundleAllowFreeSwap); configured swaps use their configured surcharge.</summary>

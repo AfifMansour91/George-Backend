@@ -231,10 +231,10 @@ namespace George.Services
                 // - Non-empty string means set the logo URL
                 LogoUrl = req.LogoUrl != null ? (string.IsNullOrWhiteSpace(req.LogoUrl) ? null : req.LogoUrl) : existingAccount.LogoUrl,
                 // Update IsKosherShop and AllowWeighted
-                IsKosherShop = req.IsKosherShop,
-                AllowWeighted = req.AllowWeighted,
-                KioskEnabled = req.KioskEnabled,
-                BundlesEnabled = req.BundlesEnabled,
+                IsKosherShop = req.IsKosherShop ?? existingAccount.IsKosherShop,
+                AllowWeighted = req.AllowWeighted ?? existingAccount.AllowWeighted,
+                KioskEnabled = req.KioskEnabled ?? existingAccount.KioskEnabled,
+                BundlesEnabled = req.BundlesEnabled ?? existingAccount.BundlesEnabled,
                 // Address fields: use request value if provided, otherwise preserve existing
                 Address = req.Address ?? existingAccount.Address,
                 City = req.City ?? existingAccount.City,

@@ -227,11 +227,16 @@ namespace George.Common.Request
     {
         public string Name { get; set; } = default!;
         public bool IsActive { get; set; }
-        public bool IsKosherShop { get; set; }
-        public bool AllowWeighted { get; set; }
-        public bool KioskEnabled { get; set; }
-        /// <summary>Bundles (מארזים) feature gate (FE <c>allowBundles</c>). Super-admin switch.</summary>
-        public bool BundlesEnabled { get; set; }
+        /// <summary>Nullable on update: null/absent = keep the stored value (a partial update must never reset a flag by omission).</summary>
+        public bool? IsKosherShop { get; set; }
+        public bool? AllowWeighted { get; set; }
+        public bool? KioskEnabled { get; set; }
+        /// <summary>
+        /// Bundles (מארזים) feature gate (FE <c>allowBundles</c>). Super-admin switch. Nullable on update:
+        /// null = keep the current value, so a partial update (e.g. the setup wizard sending only the
+        /// account name) can never switch the module off by omission.
+        /// </summary>
+        public bool? BundlesEnabled { get; set; }
         public int? WizardStep { get; set; }
         public string? WizardStatus { get; set; }
         /// <summary>Wizard type: "all_sites", "per_site", or "none" (no client-facing wizard).</summary>

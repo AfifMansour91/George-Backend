@@ -101,7 +101,7 @@ namespace George.Services
                     });
                 }
 
-                components.Add(new Dictionary<string, object?>
+                var component = new Dictionary<string, object?>
                 {
                     ["key"] = string.IsNullOrEmpty(c.ComponentKey) ? "c" + c.Id : c.ComponentKey,
                     ["product_id"] = wooPid,
@@ -112,7 +112,13 @@ namespace George.Services
                     ["swappable"] = c.Swappable,
                     ["description"] = c.Description ?? string.Empty,
                     ["swaps"] = swaps,
-                });
+                };
+                // "Choose a weight" product: the weight chosen for the slot, so the store prices the unit like George does.
+                if (c.UnitWeightKg is > 0m
+                    && string.Equals(c.ComponentProduct?.SetupType?.Name, "by_unit", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(c.ComponentProduct?.WeightConfig?.UnitWeightMode?.Name, "variable", StringComparison.OrdinalIgnoreCase))
+                    component["unit_weight"] = c.UnitWeightKg;
+                components.Add(component);
             }
 
             var cfg = definition.Config;

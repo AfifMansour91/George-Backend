@@ -23,6 +23,11 @@ namespace George.Services.Request
         public int? SortOrder { get; set; }
         public bool Swappable { get; set; }
         public string? Description { get; set; }
+        /// <summary>
+        /// Weight (kg) of one unit, for a product whose unit weight is chosen from a list (by_unit + "variable") -
+        /// the slot then costs price × this weight per unit, like a regular order line. Ignored for other products.
+        /// </summary>
+        public decimal? UnitWeightKg { get; set; }
         public List<ProductBundleSwapReq>? Swaps { get; set; }
     }
 

@@ -80,13 +80,15 @@ public class BundleService : ServiceBase
     /// <summary>Site → its account; else the requested (impersonated) account for unrestricted callers; else the caller's own account.</summary>
     private async Task<int?> ResolveCallerAccountIdAsync(int? siteId, int? requestedAccountId, CancellationToken cancelToken)
     {
+        var user = await _userStorage.GetThinUserAsync(AuthUser.Id, cancelToken).ConfigureAwait(false);
+        var unrestricted = AuthUser.IsMaster || user?.RoleId == (int)UserRole.Admin;
         if (siteId is > 0)
         {
             var site = await _siteStorage.GetSiteAsync(siteId.Value, cancelToken).ConfigureAwait(false);
-            if (site?.AccountId > 0) return site.AccountId;
+            // A restricted user may only act on sites of their own account (the site id is client-supplied).
+            if (site?.AccountId > 0)
+                return unrestricted || site.AccountId == user?.AccountId ? site.AccountId : null;
         }
-        var user = await _userStorage.GetThinUserAsync(AuthUser.Id, cancelToken).ConfigureAwait(false);
-        var unrestricted = AuthUser.IsMaster || user?.RoleId == (int)UserRole.Admin;
         if (unrestricted && requestedAccountId is > 0)
             return requestedAccountId;
         return user?.AccountId;
@@ -102,6 +104,14 @@ public class BundleService : ServiceBase
     {
         if (req == null)
             return "חסרה הגדרת מארז (bundle)";
+
+        // The module gate applies to the product API too: no bundle definitions for an account without מארזים.
+        if (accountId is > 0)
+        {
+            var account = await _accountStorage.GetAccountAsync(accountId.Value, cancelToken).ConfigureAwait(false);
+            if (account?.BundlesEnabled != true)
+                return ErrBundlesDisabled;
+        }
 
         if (await _bundleStorage.GetBundleSetupTypeIdAsync(cancelToken).ConfigureAwait(false) is null)
             return "סוג המוצר 'bundle' אינו מוגדר במסד הנתונים (יש להריץ SetupType_AddBundle.sql)";
@@ -186,6 +196,7 @@ public class BundleService : ServiceBase
                 SortOrder = x.c.SortOrder ?? x.i,
                 Swappable = x.c.Swappable,
                 Description = x.c.Description,
+                UnitWeightKg = x.c.UnitWeightKg is > 0m ? x.c.UnitWeightKg : null,
                 Swaps = (x.c.Swaps ?? new List<ProductBundleSwapReq>())
                     .Select((s, j) => new { s, j })
                     .OrderBy(y => y.s.SortOrder ?? y.j).ThenBy(y => y.j)
@@ -312,6 +323,7 @@ public class BundleService : ServiceBase
         return null;
     }
 
+
     public static string DeletedComponentError(string name) => $"הרכיב '{name}' נמחק מהקטלוג - יש להסיר או להחליף אותו בהגדרת המארז";
 
     // ───────────────────────────── /Bundle list ─────────────────────────────
@@ -363,6 +375,7 @@ public class BundleService : ServiceBase
                 Name = p.Name,
                 Sku = p.Sku,
                 Status = p.Status?.Name,
+                Visibility = row.VisibilityName,
                 ImageUrl = p.ProductImage?.FirstOrDefault()?.Url,
                 PricingMode = p.BundleConfig?.PricingMode ?? def?.Config.PricingMode ?? "fixed",
                 ComputedPrice = computed,
@@ -493,6 +506,18 @@ public class BundleService : ServiceBase
             return CreateResponse(response, StatusCode.ItemNotFound, "Bundle definition not found");
 
         var siteId = req.SiteId > 0 ? req.SiteId : (int?)null;
+        // The preview applies the same slot rules as the order: "ניתן להחלפה" per slot, listed swaps with their
+        // surcharge, any product only with the site's free-swap flag, never another account's / a deleted product.
+        var allowFreeSwap = false;
+        int? bundleAccountId = null;
+        if (siteId.HasValue)
+        {
+            var site = await _siteStorage.GetSiteAsync(siteId.Value, cancelToken).ConfigureAwait(false);
+            allowFreeSwap = site?.BundleAllowFreeSwap == true;
+            bundleAccountId = site?.AccountId;
+        }
+        var requested = (req.Components ?? new List<BundlePriceComponentReq>()).Where(c => c.ProductId > 0).Select(c => c.ProductId).Distinct().ToList();
+        var requestedInfos = await _bundleStorage.GetCatalogProductInfosAsync(requested, cancelToken).ConfigureAwait(false);
         var swaps = new Dictionary<int, BundleSlotSwap>();
         foreach (var c in req.Components ?? new List<BundlePriceComponentReq>())
         {
@@ -501,18 +526,21 @@ public class BundleService : ServiceBase
                 return CreateResponse(response, StatusCode.InvalidRequest, $"componentId {c.ComponentId} אינו רכיב של מארז זה");
             var productId = c.ProductId > 0 ? c.ProductId : slot.ComponentProductId;
             var variantId = c.ProductVariantId is > 0 ? c.ProductVariantId : (c.ProductId > 0 ? null : slot.ComponentVariantId);
-            var isOriginal = productId == slot.ComponentProductId && (variantId ?? 0) == (slot.ComponentVariantId ?? 0);
-            decimal surcharge;
-            if (isOriginal)
-                surcharge = 0m;
-            else if (c.Surcharge.HasValue)
-                surcharge = c.Surcharge.Value;
-            else
+            if (c.ProductId > 0 && productId != slot.ComponentProductId)
             {
-                var configured = slot.Swaps.FirstOrDefault(s => s.SwapProductId == productId && (s.SwapVariantId ?? 0) == (variantId ?? 0));
-                surcharge = configured?.Surcharge ?? 0m;
+                if (!requestedInfos.TryGetValue(productId, out var info) || info.IsDeleted)
+                    return CreateResponse(response, StatusCode.InvalidRequest, DeletedComponentError($"#{productId}"));
+                if (BundleProducts.IsBundleSetupType(info.SetupType))
+                    return CreateResponse(response, StatusCode.InvalidRequest, "לא ניתן להכניס מארז לתוך מארז.");
+                var accountId = bundleAccountId ?? def.Components.Select(x => x.ComponentProduct?.AccountId).FirstOrDefault(x => x.HasValue);
+                if (info.AccountId.HasValue && accountId.HasValue && info.AccountId.Value != accountId.Value)
+                    return CreateResponse(response, StatusCode.InvalidRequest, BundleOrderLineBuilder.ErrProductOtherAccount);
             }
-            swaps[slot.Id] = new BundleSlotSwap { ProductId = productId, VariantId = variantId, Surcharge = BundlePricingEngine.Round2(surcharge) };
+            var err = BundleOrderLineBuilder.ResolveSlotSelection(
+                slot, productId, variantId, allowFreeSwap, c.Surcharge, out var surcharge, out _, out _, out var resolvedVariantId);
+            if (err != null)
+                return CreateResponse(response, err == BundleOrderLineBuilder.ErrFreeSwapNotAllowed ? StatusCode.UnauthorizedData : StatusCode.InvalidRequest, err);
+            swaps[slot.Id] = new BundleSlotSwap { ProductId = productId, VariantId = resolvedVariantId, Surcharge = surcharge };
         }
 
         var prices = await ResolveComponentPricesAsync(def, siteId, cancelToken).ConfigureAwait(false);
@@ -566,7 +594,12 @@ public class BundleService : ServiceBase
         };
         foreach (var c in def.Components.OrderBy(c => c.SortOrder).ThenBy(c => c.Id))
         {
-            prices.TryGetValue((c.ComponentProductId, c.ComponentVariantId), out var originalPrice);
+            // The slot's own chosen weight wins for "choose a weight" products (price book); plain dictionaries as-is.
+            decimal originalPrice;
+            if (prices is BundlePriceBook book)
+                originalPrice = book.SlotPrice(c.ComponentProductId, c.ComponentVariantId, c.UnitWeightKg);
+            else
+                prices.TryGetValue((c.ComponentProductId, c.ComponentVariantId), out originalPrice);
             // A component whose catalog product was deleted no longer contributes to the sum-mode price
             // (the bundle is flagged and cannot be synced or ordered until the slot is fixed).
             if (c.ComponentProduct == null || c.ComponentProduct.IsDeleted)
@@ -590,7 +623,7 @@ public class BundleService : ServiceBase
     /// The price the shop charges today for each component product/variant of a definition: site override →
     /// sale price in window → price (spec §4). Without a site: catalog prices.
     /// </summary>
-    public async Task<Dictionary<(int ProductId, int? VariantId), decimal>> ResolveComponentPricesAsync(BundleDefinition def, int? siteId, CancellationToken cancelToken)
+    public async Task<BundlePriceBook> ResolveComponentPricesAsync(BundleDefinition def, int? siteId, CancellationToken cancelToken)
     {
         var keys = def.Components.Select(c => (ProductId: c.ComponentProductId, VariantId: c.ComponentVariantId))
             .Concat(def.Components.SelectMany(c => c.Swaps).Select(s => (ProductId: s.SwapProductId, VariantId: s.SwapVariantId)))
@@ -625,10 +658,14 @@ public class BundleService : ServiceBase
         return result;
     }
 
-    public async Task<Dictionary<(int ProductId, int? VariantId), decimal>> ResolvePricesAsync(
+    /// <summary>
+    /// Price of ONE SLOT UNIT per (product, variant): the catalog/site price, times the unit weight for products
+    /// priced per kg but sold by units - exactly like a regular order line (<see cref="BundleSlotUnitWeight"/>).
+    /// </summary>
+    public async Task<BundlePriceBook> ResolvePricesAsync(
         IReadOnlyCollection<(int ProductId, int? VariantId)> keys, int? siteId, CancellationToken cancelToken)
     {
-        var result = new Dictionary<(int, int?), decimal>();
+        var result = new BundlePriceBook();
         if (keys.Count == 0) return result;
         var now = DateTime.UtcNow;
 
@@ -658,7 +695,8 @@ public class BundleService : ServiceBase
             products.TryGetValue(key.ProductId, out var p);
             overrides.TryGetValue(key.ProductId, out var ov);
             decimal price;
-            if (key.VariantId is > 0 && variants.TryGetValue(key.VariantId.Value, out var v))
+            BundleCatalogVariantInfo? v = null;
+            if (key.VariantId is > 0 && variants.TryGetValue(key.VariantId.Value, out v))
             {
                 ProductSiteOverrideStorage.VariantSiteOverride? vov = null;
                 if (variantOverrides.TryGetValue(key.ProductId, out var perProduct))
@@ -678,7 +716,7 @@ public class BundleService : ServiceBase
             {
                 price = 0m;
             }
-            result[key] = price;
+            result.Set(key, price, price * BundleSlotUnitWeight.PriceFactor(p, v, slotUnitWeightKg: null), BundleSlotUnitWeight.IsVariableWeight(p));
         }
         return result;
     }

@@ -33,6 +33,8 @@ public class BundleOrderLineBuilderTests
             ComponentKey = "c" + id,
             Unit = unit,
             ComponentProduct = new Product { Id = productId, Name = "P" + productId },
+            // Tests exercise swaps; a real definition marks such a slot swappable (the API rejects swaps on one that is not).
+            Swappable = true,
         };
         foreach (var s in swaps)
         {
@@ -107,6 +109,24 @@ public class BundleOrderLineBuilderTests
     }
 
     [Fact]
+    public void Expand_SumMode_SwappedSlot_SharesStillSumToParent()
+    {
+        // Slot 1 swapped to a dearer product (₪95/kg in a 2-unit slot): the parent stays engine-priced
+        // (base 83.25 + surcharge 7 = 90.25); the children split exactly that, never price × qty of the swap.
+        var slots = new List<BundleLineSlot>
+        {
+            new() { ComponentId = 1, SlotIndex = 0, ProductId = 3814, Title = "קרפיון", QtyPerBundle = 0.4m, IsWeight = true, UnitPrice = 95m, SwappedFromProductId = 3802, Surcharge = 7m },
+            new() { ComponentId = 2, SlotIndex = 1, ProductId = 3813, Title = "דג טחון", QtyPerBundle = 0.5m, IsWeight = true, UnitPrice = 69m },
+        };
+        var parent = new OrderItem { ProductId = 10, Quantity = 1m, PricePerUnit = 90.25m, TotalPrice = 90.25m };
+        var exp = BundleOrderLineBuilder.Expand(parent, 1m, slots, "sum", "percent", 10m, 0, basePrice: 83.25m);
+        Assert.Equal(90.25m, exp.Children.Sum(c => c.TotalPrice ?? 0m));
+        // base 83.25 split by catalog value 38 : 34.5, plus the surcharge on the swapped slot
+        Assert.Equal(Math.Round(83.25m * 38m / 72.5m + 7m, 2), exp.Children[0].TotalPrice);
+        Assert.True(exp.Children[1].TotalPrice > 0m);
+    }
+
+    [Fact]
     public void Expand_ExplicitLineQuantityOverridesSlotQty()
     {
         var slots = TwoSlots();
@@ -159,6 +179,25 @@ public class BundleOrderLineBuilderTests
     }
 
     [Fact]
+    public void ApplyPickingRules_Reweigh_WeighedPieceLine_ChargesTheWeighedKgAtThePerKgPrice()
+    {
+        // 4 portions of ~0.2 kg (₪145/kg → ₪29 a piece) ordered; the picker weighed 0.9 kg (stored as kg, like a
+        // regular order line) → 4.5 pieces × 29 = 145 × 0.9 = 130.50, not 29 × 0.9.
+        var parent = new OrderItem { Id = 1, BundleProductId = 10, Quantity = 1m, PricePerUnit = 116m, TotalPrice = 116m };
+        var c1 = new OrderItem { Id = 2, ParentOrderItemId = 1, Quantity = 4m, OrderLineQuantityMode = "units", UnitWeightGrams = 200m, PricePerUnit = 29m, PickedQuantity = 0.9m, PickingUserConfirmed = true };
+        Assert.Equal(4.5m, BundleOrderLineBuilder.PickedQuantityInSlotUnit(c1));
+        Assert.Equal(0.9m, BundleOrderLineBuilder.SlotUnitQuantityToPicked(c1, 4.5m));
+        BundleOrderLineBuilder.ApplyPickingRules(parent, new[] { c1 }, "sum", true, "none", 0m);
+        Assert.Equal(130.5m, parent.TotalPrice);
+
+        // A kg line and a plain pieces line are unchanged.
+        var kg = new OrderItem { OrderLineQuantityMode = "weight", UnitWeightGrams = 1000m, PickedQuantity = 1.2m };
+        Assert.Equal(1.2m, BundleOrderLineBuilder.PickedQuantityInSlotUnit(kg));
+        var pcs = new OrderItem { OrderLineQuantityMode = "units", PickedQuantity = 3m };
+        Assert.Equal(3m, BundleOrderLineBuilder.PickedQuantityInSlotUnit(pcs));
+    }
+
+    [Fact]
     public void ApplyPickingRules_SumWithoutReweigh_KeepsParentTotal()
     {
         var parent = new OrderItem { Id = 1, BundleProductId = 10, Quantity = 1m, PricePerUnit = 149m, TotalPrice = 149m };
@@ -190,6 +229,33 @@ public class BundleOrderLineBuilderTests
         Assert.Equal(12m, s2);
         Assert.True(swap2);
         Assert.True(free2);
+    }
+
+    [Fact]
+    public void ResolveSlotSelection_SlotNotMarkedSwappable_RejectsEverythingButItsOwnProduct()
+    {
+        var slot = Slot(12, 2293, 1m, "kg", new ProductBundleComponentSwap { Id = 3, SwapProductId = 2313, Surcharge = 30m });
+        slot.Swappable = false;
+
+        Assert.Null(BundleOrderLineBuilder.ResolveSlotSelection(slot, 2293, null, true, null, out _, out _, out _, out _));
+        // Neither a listed swap nor a free swap (site flag on) gets past "ניתן להחלפה" = off.
+        Assert.Equal(BundleOrderLineBuilder.ErrSlotNotSwappable, BundleOrderLineBuilder.ResolveSlotSelection(slot, 2313, null, false, null, out _, out _, out _, out _));
+        Assert.Equal(BundleOrderLineBuilder.ErrSlotNotSwappable, BundleOrderLineBuilder.ResolveSlotSelection(slot, 5000, null, true, 12m, out _, out _, out _, out _));
+    }
+
+    [Fact]
+    public void ConvertSwapQuantity_ReExpressesTheQuantityInTheNewProductsUnit()
+    {
+        // 4 portions of ~0.2 kg → a kg product: 0.8 kg; 1 kg → ~0.2 kg portions: 5 units; 0.7 kg → 4 units (rounded, ≥ 1).
+        Assert.Equal(0.8m, BundleOrderLineBuilder.ConvertSwapQuantity(4m, false, 0.2m, true, null));
+        Assert.Equal(5m, BundleOrderLineBuilder.ConvertSwapQuantity(1m, true, null, false, 0.2m));
+        Assert.Equal(4m, BundleOrderLineBuilder.ConvertSwapQuantity(0.7m, true, null, false, 0.2m));
+        Assert.Equal(1m, BundleOrderLineBuilder.ConvertSwapQuantity(0.1m, true, null, false, 0.5m));
+        // Same kind of unit: unchanged. No usable weight: the number is kept (kg → whole units).
+        Assert.Equal(1.5m, BundleOrderLineBuilder.ConvertSwapQuantity(1.5m, true, null, true, 0.2m));
+        Assert.Equal(3m, BundleOrderLineBuilder.ConvertSwapQuantity(3m, false, null, false, null));
+        Assert.Equal(3m, BundleOrderLineBuilder.ConvertSwapQuantity(3m, false, null, true, null));
+        Assert.Equal(2m, BundleOrderLineBuilder.ConvertSwapQuantity(1.6m, true, null, false, null));
     }
 
     [Fact]

@@ -58,7 +58,8 @@ namespace George.Services
                 var mode = !string.IsNullOrWhiteSpace(slot?.Mode) ? slot!.Mode : (isWeight ? "weight" : "units");
                 // Line total across all bundles once weighed in George (confirmed picks only). George stores kg;
                 // the plugin reads actualQty in the emitted unit, so a grams slot gets grams.
-                decimal? actualQty = child.PickingUserConfirmed && child.PickedQuantity.HasValue ? child.PickedQuantity : null;
+                // In the slot unit: a weighed-piece line (200 g portions) stores kg, the slot counts pieces.
+                decimal? actualQty = child.PickingUserConfirmed && child.PickedQuantity.HasValue ? BundleOrderLineBuilder.PickedQuantityInSlotUnit(child) : null;
                 if (actualQty.HasValue && IsGramsUnit(unit))
                     actualQty = actualQty.Value * 1000m;
 

@@ -127,7 +127,7 @@ namespace George.Services
             if (extraKeys.Count > 0)
             {
                 var extra = await _bundleService.ResolvePricesAsync(extraKeys, siteId, cancelToken).ConfigureAwait(false);
-                foreach (var kv in extra) prices[kv.Key] = kv.Value;
+                prices.Merge(extra);
             }
             var pricing = BundlePricingEngine.Price(BundleService.BuildPricingInput(def, prices, bundleQty, swaps));
 
@@ -161,7 +161,23 @@ namespace George.Services
                 var variant = variantId is > 0
                     ? slotProduct?.ProductVariant?.FirstOrDefault(v => v.Id == variantId.Value && !v.IsDeleted)
                     : null;
-                prices.TryGetValue((productId, variantId), out var unitPrice);
+                // The slot's chosen unit weight only applies to its configured product, not to a swap.
+                var slotUnitWeightKg = productId == slot.ComponentProductId ? slot.UnitWeightKg : null;
+                var slotIsWeight = BundleOrderLineBuilder.IsWeightSlot(slot, slotProduct);
+                var unitPrice = prices.LinePrice(productId, variantId, slotIsWeight, slotUnitWeightKg);
+                // A swap to a product measured differently (portions ↔ kg) re-expresses the slot quantity in the new
+                // unit by weight - the same rule as a swap during picking (BundleOrderLineBuilder.ConvertSwapQuantity).
+                var qtyPerBundle = slot.Qty;
+                if (isSwap)
+                {
+                    var configuredIsWeight = BundleOrderLineBuilder.IsWeightSlot(slot, slot.ComponentProduct);
+                    if (configuredIsWeight != slotIsWeight)
+                    {
+                        var fromKg = configuredIsWeight ? null : (slot.UnitWeightKg is > 0m ? slot.UnitWeightKg : await ResolveUnitWeightKgAsync(slot.ComponentProductId, slot.ComponentVariantId, cancelToken).ConfigureAwait(false));
+                        var toKg = slotIsWeight ? null : await ResolveUnitWeightKgAsync(productId, variant?.Id, cancelToken).ConfigureAwait(false);
+                        qtyPerBundle = BundleOrderLineBuilder.ConvertSwapQuantity(slot.Qty, configuredIsWeight, fromKg, slotIsWeight, toKg);
+                    }
+                }
                 lineSlots.Add(new BundleLineSlot
                 {
                     ComponentId = slot.Id,
@@ -171,10 +187,11 @@ namespace George.Services
                     Product = slotProduct,
                     Title = !string.IsNullOrWhiteSpace(sel?.Title) ? sel!.Title!.Trim() : (slotProduct?.Name ?? slot.ComponentProduct?.Name),
                     VariantTitle = VariantDisplayTitle(variant),
-                    QtyPerBundle = slot.Qty,
-                    IsWeight = BundleOrderLineBuilder.IsWeightSlot(slot, slotProduct),
+                    QtyPerBundle = qtyPerBundle,
+                    IsWeight = slotIsWeight,
                     LineQuantityOverride = sel?.Quantity is > 0m ? sel.Quantity : null,
                     UnitPrice = unitPrice,
+                    UnitWeightKg = slotUnitWeightKg,
                     SwappedFromProductId = isSwap ? slot.ComponentProductId : null,
                     Surcharge = surcharge,
                     Sku = variant?.Sku ?? slotProduct?.Sku,
@@ -413,6 +430,10 @@ namespace George.Services
                         VariantTitle = VariantDisplayTitle(variant),
                         QtyPerBundle = qtyPer,
                         IsWeight = isWeight,
+                        // Unit weight of the slot as the store priced it; else the definition's (configured product only).
+                        UnitWeightKg = comp.UnitWeight is > 0m
+                            ? comp.UnitWeight
+                            : (slot != null && compProductId == slot.ComponentProductId ? slot.UnitWeightKg : null),
                         SwappedFromProductId = swappedFrom,
                         Surcharge = BundlePricingEngine.Round2(comp.Surcharge ?? 0m),
                         // actualQty arrives in the component's own unit (grams possible) - store kg like Quantity.
@@ -445,6 +466,7 @@ namespace George.Services
                         VariantTitle = VariantDisplayTitle(variant),
                         QtyPerBundle = slot.Qty,
                         IsWeight = BundleOrderLineBuilder.IsWeightSlot(slot, compProduct),
+                        UnitWeightKg = slot.UnitWeightKg,
                         Sku = variant?.Sku ?? compProduct?.Sku,
                     });
                 }
@@ -463,8 +485,8 @@ namespace George.Services
                     var prices = await _bundleService.ResolvePricesAsync(keys, siteId, cancelToken).ConfigureAwait(false);
                     foreach (var s in lineSlots)
                     {
-                        if (s.ProductId is > 0 && prices.TryGetValue((s.ProductId.Value, s.ProductVariantId), out var p))
-                            s.UnitPrice = p;
+                        if (s.ProductId is > 0 && prices.ContainsKey((s.ProductId.Value, s.ProductVariantId)))
+                            s.UnitPrice = prices.LinePrice(s.ProductId.Value, s.ProductVariantId, s.IsWeight, s.UnitWeightKg);
                     }
                 }
             }
@@ -646,7 +668,21 @@ namespace George.Services
             var oldPicked = line.PickedQuantity ?? 0m;
             var oldSurcharge = line.SwapSurcharge ?? 0m;
 
-            var isWeight = string.Equals(line.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase);
+            // The line's unit follows the product now in the slot (a kg product is weighed, anything else is counted),
+            // and the quantity is re-expressed in that unit: the definition's quantity when back to the configured
+            // product, the caller's when given, else the old quantity converted by weight.
+            var wasWeight = string.Equals(line.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase);
+            var isWeight = slot != null && product.Id == slot.ComponentProductId
+                ? BundleOrderLineBuilder.IsWeightSlot(slot, product)
+                : string.Equals(product.SetupType?.Name, "by_weight", StringComparison.OrdinalIgnoreCase);
+            var newUnitWeightKg = await ResolveUnitWeightKgAsync(product.Id, variant?.Id, cancelToken).ConfigureAwait(false);
+            if (req.Quantity is > 0m)
+                line.Quantity = isWeight ? BundlePricingEngine.Round4(req.Quantity.Value) : Math.Max(1m, Math.Round(req.Quantity.Value, 0, MidpointRounding.AwayFromZero));
+            else if (slot != null && !swappedFrom.HasValue)
+                line.Quantity = BundlePricingEngine.Round4(slot.Qty * parent.Quantity);
+            else
+                line.Quantity = BundleOrderLineBuilder.ConvertSwapQuantity(
+                    line.Quantity, wasWeight, wasWeight ? null : line.UnitWeightGrams / 1000m, isWeight, newUnitWeightKg);
             line.ProductId = product.Id;
             line.ProductVariantId = variant?.Id;
             line.Title = !string.IsNullOrWhiteSpace(req.Title) ? req.Title.Trim() : product.Name;
@@ -680,8 +716,9 @@ namespace George.Services
             {
                 var priceMap = await _bundleService.ResolvePricesAsync(
                     new[] { (ProductId: product.Id, VariantId: variant?.Id) }, order.SiteId, cancelToken).ConfigureAwait(false);
-                priceMap.TryGetValue((product.Id, variant?.Id), out var unitPrice);
-                line.PricePerUnit = unitPrice;
+                // A kg line stays priced per kg; a units line costs price × unit weight, like a regular order line.
+                var slotUnitWeightKg = slot != null && product.Id == slot.ComponentProductId ? slot.UnitWeightKg : null;
+                line.PricePerUnit = priceMap.LinePrice(product.Id, variant?.Id, isWeight, slotUnitWeightKg);
                 var wooMap = await _bundleStorage.GetSiteWooProductIdMapAsync(new[] { product.Id }, order.SiteId, cancelToken).ConfigureAwait(false);
                 line.WooCommerceProductId = wooMap.TryGetValue(product.Id, out var wooPid) ? wooPid : null;
                 line.WooCommerceVariationId = null;
@@ -710,7 +747,7 @@ namespace George.Services
                 if (extraKeys.Count > 0)
                 {
                     var extra = await _bundleService.ResolvePricesAsync(extraKeys, order.SiteId, cancelToken).ConfigureAwait(false);
-                    foreach (var kv in extra) prices[kv.Key] = kv.Value;
+                    prices.Merge(extra);
                 }
                 var pricing = BundlePricingEngine.Price(BundleService.BuildPricingInput(def, prices, parent.Quantity, swaps));
                 parent.PricePerUnit = pricing.UnitPrice;
@@ -753,6 +790,23 @@ namespace George.Services
             await LogOrderEventAsync(IntegrationLogOperation.Picking, IntegrationLogDirection.Internal, loaded.SiteId, loaded.Id, loaded.ExternalOrderId, true,
                 requestJson: OrderLogSnapshot(loaded), cancelToken: cancelToken).ConfigureAwait(false);
             return response;
+        }
+
+        /// <summary>kg per unit of a product counted in units (null for kg products / products without a weight).</summary>
+        private async Task<decimal?> ResolveUnitWeightKgAsync(int productId, int? variantId, CancellationToken cancelToken)
+        {
+            var infos = await _bundleStorage.GetCatalogProductInfosAsync(new[] { productId }, cancelToken).ConfigureAwait(false);
+            if (!infos.TryGetValue(productId, out var info)) return null;
+            if (!string.Equals(info.SetupType, "by_unit", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(info.SetupType, "by_unit_and_weight", StringComparison.OrdinalIgnoreCase))
+                return null;
+            BundleCatalogVariantInfo? v = null;
+            if (variantId is > 0)
+            {
+                var vs = await _bundleStorage.GetCatalogVariantInfosAsync(new[] { variantId.Value }, cancelToken).ConfigureAwait(false);
+                vs.TryGetValue(variantId.Value, out v);
+            }
+            return BundleSlotUnitWeight.PriceFactor(info, v, null);
         }
 
         // ───────────────────────────── order screens (§8) ─────────────────────────────
@@ -821,6 +875,7 @@ namespace George.Services
                     if (bundleId.HasValue && defs.TryGetValue(bundleId.Value, out var def))
                     {
                         var slot = def.Components.FirstOrDefault(s => s.Id == c.Item.BundleComponentId);
+                        c.Item.BundleSlotSwappable = slot?.Swappable;
                         // Configured swaps are offered only for a swappable slot.
                         if (slot is { Swappable: true })
                         {

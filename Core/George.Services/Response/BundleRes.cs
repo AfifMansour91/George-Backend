@@ -65,6 +65,8 @@ namespace George.Services.Response
         public string Name { get; set; } = string.Empty;
         public string? Sku { get; set; }
         public string? Status { get; set; }
+        /// <summary>Visibility lookup name; "hidden" when the bundle is hidden from the storefront.</summary>
+        public string? Visibility { get; set; }
         public string? ImageUrl { get; set; }
         public string PricingMode { get; set; } = "fixed";
         public decimal ComputedPrice { get; set; }
