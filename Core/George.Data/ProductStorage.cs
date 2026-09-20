@@ -1519,7 +1519,8 @@ namespace George.Data
                 && string.Equals(variantSku, parentSku.Trim(), StringComparison.OrdinalIgnoreCase))
                 variantSku = null; // same guard as CreateProductVariantsAsync (Woo rejects variation sku == parent sku)
 
-            target.ImageUrl = dto.ImageUrl;
+            // "" = the image was removed in the editor (the selected-site path needs "" to tell "removed" from "not sent") - store NULL.
+            target.ImageUrl = string.IsNullOrWhiteSpace(dto.ImageUrl) ? null : dto.ImageUrl;
             target.Price = dto.Price;
             target.SalePrice = dto.SalePrice;
             target.StockQuantity = dto.StockQuantity;
