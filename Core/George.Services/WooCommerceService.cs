@@ -3899,6 +3899,14 @@ namespace George.Services
             var variantSyncWork = new List<(ProductVariant variant, int? wooVariationIdToUse, Dictionary<string, object> wooPayload, Dictionary<string, object>? priceFieldsOnCreate)>();
             var wpJsonBaseForMedia = GetWordPressRestBaseUrlFromWooV3BaseUrl(baseUrl);
 
+            // Variation images sideloaded by URL: reuse what the store already has, share one attachment between the
+            // variations of a picture (see WooVariationImageIsSameAsGeorgeImage). Loaded lazily - most products have none.
+            Dictionary<int, WooVariationImageBlock>? currentVariationImages = null;
+            var variationSideloadNameByUrl = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var variationImageIdByUrl = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var variationSideloadLeaderByUrl = new Dictionary<string, ProductVariant>(StringComparer.OrdinalIgnoreCase);
+            var variationSideloadFollowerUrl = new Dictionary<ProductVariant, string>();
+
             // Per-variation stock in Woo only when George tracks numeric quantity per variation.
             // Binary in/out per variation uses stock_status only (no manage_stock / stock_quantity in Woo).
             // NOTE: mirrored by the lean stock push in WooCommerceService.CatalogStockPush.cs — change both together.
@@ -4143,8 +4151,61 @@ namespace George.Services
                         }
                         else
                         {
-                            var variationImageFileName = await ResolveWooImageSideloadFileNameAsync(vUrl, variant.Sku, cancelToken).ConfigureAwait(false);
-                            wooVariation["image"] = new { src = vUrl, name = variationImageFileName };
+                            // Never send "src" for an image the store already has: WordPress downloads a NEW copy on every
+                            // src, i.e. one duplicate per variation per sync (Zano Dagim's media library, 2026-09).
+                            if (!variationSideloadNameByUrl.TryGetValue(vUrl, out var variationImageFileName))
+                            {
+                                var resolvedName = await ResolveWooImageSideloadFileNameAsync(vUrl, variant.Sku, cancelToken).ConfigureAwait(false);
+                                variationImageFileName = GeorgeWooVariationImageSideloadFileName(product.Id, vUrl, resolvedName);
+                                variationSideloadNameByUrl[vUrl] = variationImageFileName;
+                            }
+
+                            currentVariationImages ??= await GetWooVariationImagesAsync(baseUrl, wooProductId, httpClient, cancelToken).ConfigureAwait(false);
+                            WooVariationImageBlock? currentImage = null;
+                            if (wooVariationIdToUse.HasValue)
+                                currentVariationImages.TryGetValue(wooVariationIdToUse.Value, out currentImage);
+
+                            if (WooVariationImageIsSameAsGeorgeImage(currentImage, vUrl, variationImageFileName, baseUrl))
+                            {
+                                // 1. The variation already carries this image - keep its attachment.
+                                variationImageIdByUrl.TryAdd(vUrl, currentImage!.id);
+                                wooVariation["image"] = new { id = currentImage.id };
+                            }
+                            else
+                            {
+                                // 2. A sibling variation already carries it (variations of one product usually share a picture).
+                                if (!variationImageIdByUrl.ContainsKey(vUrl))
+                                {
+                                    var sibling = currentVariationImages.Values.FirstOrDefault(img =>
+                                        WooVariationImageIsSameAsGeorgeImage(img, vUrl, variationImageFileName, baseUrl));
+                                    if (sibling != null)
+                                        variationImageIdByUrl[vUrl] = sibling.id;
+                                }
+                                // 3. The image lives on the store itself (imported from Woo) - find the original attachment.
+                                if (!variationImageIdByUrl.ContainsKey(vUrl) && !variationSideloadLeaderByUrl.ContainsKey(vUrl)
+                                    && ImageUrlIsHostedOnStore(vUrl, baseUrl))
+                                {
+                                    var originalId = await TryFindWordPressMediaIdByCompatFileNameAsync(
+                                        wpJsonBaseForMedia, WooImageStemWithoutDuplicateSuffix(vUrl) + ".jpg", httpClient, cancelToken).ConfigureAwait(false);
+                                    if (originalId.HasValue)
+                                        variationImageIdByUrl[vUrl] = originalId.Value;
+                                }
+
+                                if (variationImageIdByUrl.TryGetValue(vUrl, out var sharedImageId))
+                                {
+                                    wooVariation["image"] = new { id = sharedImageId };
+                                }
+                                else if (variationSideloadLeaderByUrl.TryAdd(vUrl, variant))
+                                {
+                                    // 4. First variation with this picture: sideload ONCE under the deterministic name...
+                                    wooVariation["image"] = new { src = vUrl, name = variationImageFileName };
+                                }
+                                else
+                                {
+                                    // ...and the rest wait for the leader's attachment id (pushed after it, below).
+                                    variationSideloadFollowerUrl[variant] = vUrl;
+                                }
+                            }
                         }
                     }
                     else
@@ -4164,36 +4225,61 @@ namespace George.Services
             }
 
             const int variationSyncConcurrency = 4;
-            for (var i = 0; i < variantSyncWork.Count; i += variationSyncConcurrency)
+            // Followers of a shared sideloaded picture are pushed in a second pass, once the leader variation exists
+            // in Woo and its new attachment id can be read back (otherwise each would sideload its own copy).
+            var wooVariationIdByVariant = new Dictionary<ProductVariant, int>();
+            var followerWork = variantSyncWork.Where(w => variationSideloadFollowerUrl.ContainsKey(w.variant)).ToList();
+            var firstPassWork = variantSyncWork.Where(w => !variationSideloadFollowerUrl.ContainsKey(w.variant)).ToList();
+            for (var pass = 0; pass < 2; pass++)
             {
-                var batch = variantSyncWork.Skip(i).Take(variationSyncConcurrency).ToList();
-                var batchResults = await Task.WhenAll(batch.Select(async work =>
+                var passWork = pass == 0 ? firstPassWork : followerWork;
+                if (pass == 1 && followerWork.Count > 0)
                 {
-                    var (variant, wooVariationIdToUse, wooVariation, priceFieldsOnCreate) = work;
-                    try
+                    var imagesAfterLeaders = await GetWooVariationImagesAsync(baseUrl, wooProductId, httpClient, cancelToken).ConfigureAwait(false);
+                    foreach (var work in followerWork)
                     {
-                        var wooVariationId = await PushVariantPayloadToWooCommerceAsync(
-                            baseUrl, wooProductId, product.Id, wooVariationIdToUse, wooVariation, httpClient, cancelToken, priceFieldsOnCreate);
-                        return (variant, wooVariationId);
+                        var followerUrl = variationSideloadFollowerUrl[work.variant];
+                        var leaderImageId = variationSideloadLeaderByUrl.TryGetValue(followerUrl, out var leader)
+                            && wooVariationIdByVariant.TryGetValue(leader, out var leaderWooId)
+                            && imagesAfterLeaders.TryGetValue(leaderWooId, out var leaderImage) ? leaderImage.id : 0;
+                        // Leader failed / image unreadable: fall back to the old per-variation sideload rather than no image.
+                        work.wooPayload["image"] = leaderImageId > 0
+                            ? new { id = leaderImageId }
+                            : new { src = followerUrl, name = variationSideloadNameByUrl[followerUrl] };
                     }
-                    catch (Exception ex)
+                }
+                for (var i = 0; i < passWork.Count; i += variationSyncConcurrency)
+                {
+                    var batch = passWork.Skip(i).Take(variationSyncConcurrency).ToList();
+                    var batchResults = await Task.WhenAll(batch.Select(async work =>
                     {
-                        _logger.LogError(ex, "Failed to sync variation {VariantId} for product {ProductId}", variant.Id, product.Id);
-                        return (variant, (int?)null);
-                    }
-                }));
+                        var (variant, wooVariationIdToUse, wooVariation, priceFieldsOnCreate) = work;
+                        try
+                        {
+                            var wooVariationId = await PushVariantPayloadToWooCommerceAsync(
+                                baseUrl, wooProductId, product.Id, wooVariationIdToUse, wooVariation, httpClient, cancelToken, priceFieldsOnCreate);
+                            return (variant, wooVariationId);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to sync variation {VariantId} for product {ProductId}", variant.Id, product.Id);
+                            return (variant, (int?)null);
+                        }
+                    }));
 
-                foreach (var (variant, wooVariationId) in batchResults)
-                {
-                    if (!wooVariationId.HasValue) continue;
-                    // Track the ACTUAL id Woo returned. A PUT to a stale id may have 404'd and CREATED a new
-                    // variation with a different id; without recording it here the orphan-cleanup below deleted the
-                    // just-created variation (it only knew the old id) - the root cause of "0 variations on the 2nd site".
-                    usedWooVariationIds.Add(wooVariationId.Value);
-                    if (isNetworkManagedForVariants)
-                        await _overrideStorage.SetSiteVariantWooIdAsync(variant.Id, siteId, product.Id, wooVariationId.Value, cancelToken);
-                    else if (variant.WooCommerceVariationId != wooVariationId.Value)
-                        await _productStorage.UpdateProductVariantWooCommerceIdAsync(variant.Id, wooVariationId.Value, cancelToken);
+                    foreach (var (variant, wooVariationId) in batchResults)
+                    {
+                        if (!wooVariationId.HasValue) continue;
+                        wooVariationIdByVariant[variant] = wooVariationId.Value;
+                        // Track the ACTUAL id Woo returned. A PUT to a stale id may have 404'd and CREATED a new
+                        // variation with a different id; without recording it here the orphan-cleanup below deleted the
+                        // just-created variation (it only knew the old id) - the root cause of "0 variations on the 2nd site".
+                        usedWooVariationIds.Add(wooVariationId.Value);
+                        if (isNetworkManagedForVariants)
+                            await _overrideStorage.SetSiteVariantWooIdAsync(variant.Id, siteId, product.Id, wooVariationId.Value, cancelToken);
+                        else if (variant.WooCommerceVariationId != wooVariationId.Value)
+                            await _productStorage.UpdateProductVariantWooCommerceIdAsync(variant.Id, wooVariationId.Value, cancelToken);
+                    }
                 }
             }
 
@@ -4701,6 +4787,89 @@ namespace George.Services
             return $"george-woo-var-{productId}-{variantId}-{fingerprint}.jpg";
         }
 
+        /// <summary>
+        /// Attachment name for a variation image that Woo sideloads by URL. Keyed by product + image URL - NOT by
+        /// variant - so the variations sharing one picture share one attachment, and the next sync recognises it.
+        /// </summary>
+        private static string GeorgeWooVariationImageSideloadFileName(int productId, string imageUrl, string resolvedSideloadFileName)
+        {
+            var ext = Path.GetExtension(resolvedSideloadFileName);
+            if (string.IsNullOrEmpty(ext) || !FileNameHasRecognizedImageExtension(resolvedSideloadFileName))
+                ext = ".jpg";
+            var fingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                Encoding.UTF8.GetBytes(imageUrl.Trim()))[..12]).ToLowerInvariant();
+            return $"george-woo-var-{productId}-{fingerprint}{ext.ToLowerInvariant()}";
+        }
+
+        /// <summary>File-name stem of a URL/attachment name without WordPress's duplicate ("-12") and "-scaled" suffixes, lowercased.</summary>
+        private static string WooImageStemWithoutDuplicateSuffix(string? urlOrName)
+        {
+            var value = (urlOrName ?? "").Trim();
+            if (value.Length == 0) return "";
+            var q = value.IndexOfAny(new[] { '?', '#' });
+            if (q >= 0) value = value[..q];
+            var slash = value.LastIndexOf('/');
+            if (slash >= 0) value = value[(slash + 1)..];
+            try { value = Uri.UnescapeDataString(value); } catch { /* keep raw */ }
+            var stem = Path.GetFileNameWithoutExtension(value);
+            stem = Regex.Replace(stem, @"-scaled$", "", RegexOptions.IgnoreCase);
+            stem = Regex.Replace(stem, @"-\d{1,4}$", "");
+            return stem.ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// True when the image a Woo variation currently carries IS the George variant image, so the sync must reuse
+        /// its attachment id instead of sending <c>src</c> again. Sending <c>src</c> makes WordPress download a NEW copy on
+        /// every sync: Zano Dagim's media library filled with "gal_1479_1-57.jpg" duplicates - one per variation per
+        /// sync (2026-09). Matches: same URL; the attachment George named on a previous sync; or - for an image hosted
+        /// on the store itself (imported from Woo) - one of WordPress's numbered copies of that same file.
+        /// </summary>
+        private static bool WooVariationImageIsSameAsGeorgeImage(WooVariationImageBlock? current, string georgeImageUrl, string georgeSideloadFileName, string storeBaseUrl)
+        {
+            if (current == null || current.id <= 0) return false;
+            var currentSrc = (current.src ?? "").Trim();
+            if (string.Equals(currentSrc, georgeImageUrl.Trim(), StringComparison.OrdinalIgnoreCase)) return true;
+
+            var georgeNameStem = Path.GetFileNameWithoutExtension(georgeSideloadFileName).ToLowerInvariant();
+            if (georgeNameStem.Length > 0 &&
+                (string.Equals(Path.GetFileNameWithoutExtension((current.name ?? "").Trim()), georgeNameStem, StringComparison.OrdinalIgnoreCase)
+                 || WooImageStemWithoutDuplicateSuffix(currentSrc) == georgeNameStem))
+                return true;
+
+            if (!ImageUrlIsHostedOnStore(georgeImageUrl, storeBaseUrl)) return false;
+            var georgeStem = WooImageStemWithoutDuplicateSuffix(georgeImageUrl);
+            return georgeStem.Length > 0 && WooImageStemWithoutDuplicateSuffix(currentSrc) == georgeStem;
+        }
+
+        private static bool ImageUrlIsHostedOnStore(string imageUrl, string storeBaseUrl)
+        {
+            if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var img) || !Uri.TryCreate(storeBaseUrl, UriKind.Absolute, out var store))
+                return false;
+            static string Host(Uri u) => u.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? u.Host[4..] : u.Host;
+            return string.Equals(Host(img), Host(store), StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Current image (id, name, src) of every Woo variation of a product; empty on any failure (caller then sideloads as before).</summary>
+        private async Task<Dictionary<int, WooVariationImageBlock>> GetWooVariationImagesAsync(string baseUrl, int wooProductId, HttpClient httpClient, CancellationToken cancelToken)
+        {
+            var result = new Dictionary<int, WooVariationImageBlock>();
+            try
+            {
+                var list = await FetchWooPagedAsync<WooVariationIdWithImage>(
+                    httpClient, $"{baseUrl}/products/{wooProductId}/variations?_fields=id,image", cancelToken).ConfigureAwait(false);
+                foreach (var v in list)
+                {
+                    if (v.id > 0 && v.image != null && v.image.id > 0)
+                        result[v.id] = v.image;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Woo sync: could not read current variation images for Woo product {WooProductId}; images will be sideloaded", wooProductId);
+            }
+            return result;
+        }
+
         private static (int id, string? src, string? name) FindExistingWooImageByAttachmentName(
             List<(int id, string? src, string? name)>? existingWooImages,
             string attachmentName)
@@ -5167,6 +5336,12 @@ namespace George.Services
         /// <summary>GET single variation - image block includes media id and filename for AVIF-compat dedup.</summary>
         private class WooVariationReadForImage
         {
+            public WooVariationImageBlock? image { get; set; }
+        }
+
+        private class WooVariationIdWithImage
+        {
+            public int id { get; set; }
             public WooVariationImageBlock? image { get; set; }
         }
 
