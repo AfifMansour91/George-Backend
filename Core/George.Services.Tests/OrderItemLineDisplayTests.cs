@@ -388,6 +388,49 @@ public class OrderItemLineDisplayTests
     }
 
     [Fact]
+    public void Numeric_value_of_non_size_attribute_is_prefixed_with_its_name_legacy_path()
+    {
+        // PEPE "בקר טחון טרי": by-weight line, variation "חלוקה למגשים" = 2 - the voucher printed a bare "2".
+        var item = new OrderItem
+        {
+            Title = "בקר טחון טרי",
+            VariantTitle = "2",
+            OrderLineQuantityMode = "weight",
+            Quantity = 1.5m,
+            LineDisplayJson = "{\"v\":1,\"kind\":\"by_weight\",\"sizeName\":\"2\",\"sizeOptionName\":\"חלוקה למגשים\",\"totalWeightGrams\":1500}",
+        };
+        Assert.Equal("חלוקה למגשים: 2", OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(item));
+    }
+
+    [Fact]
+    public void Numeric_value_of_non_size_attribute_is_prefixed_with_its_name_structured_path()
+    {
+        var item = new OrderItem
+        {
+            Title = "בקר טחון טרי",
+            LineDisplayJson = "{\"v\":1,\"kind\":\"by_weight\",\"sizeName\":\"2\",\"sizeOptionName\":\"חלוקה למגשים\",\"cuttingName\":\"דק\"}",
+        };
+        var line = OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(
+            item, new OrderItemAttributeDisplayOptions { UseStructuredLineDisplay = true });
+        Assert.Equal("חלוקה למגשים: 2 | דק", line);
+    }
+
+    [Fact]
+    public void Worded_value_of_non_size_attribute_stays_bare()
+    {
+        // Other shops' printouts must not change: "סוג" = "עוף" reads on its own, like cutting values always did.
+        var item = new OrderItem
+        {
+            Title = "שניצל",
+            VariantTitle = "עוף",
+            OrderLineQuantityMode = "weight",
+            Quantity = 1m,
+            LineDisplayJson = "{\"v\":1,\"kind\":\"by_weight\",\"sizeName\":\"עוף\",\"sizeOptionName\":\"סוג\"}",
+        };
+        Assert.Equal("עוף", OrderItemLineDisplay.GetOrderItemAttributeSummaryLine(item));
+    }
+
+    [Fact]
     public void Structured_snapshot_renders_average_line()
     {
         // Order #34 line 2 equivalent (מכירה לפי יחידה): per-unit weight + cutting, no size.

@@ -16,6 +16,9 @@ public partial class AttributeValue
     [StringLength(200)]
     public string Value { get; set; } = null!;
 
+    /// <summary>Manual value order inside the attribute (lower = first). NULL = never ordered: sorts after ordered values, alphabetically.</summary>
+    public int? DisplayOrder { get; set; }
+
     [ForeignKey("AttributeId")]
     [InverseProperty("AttributeValue")]
     public virtual Attribute Attribute { get; set; } = null!;

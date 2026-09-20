@@ -75,7 +75,8 @@ namespace George.Services
             model.IsDeleted = false;
 
             // Create the data in the DB.
-            model = await _attributeStorage.CreateAttributeAsync(model, req.Values, cancelToken).ConfigureAwait(false);
+            // The typed order of several values is the user's own order (e.g. קטן, בינוני, גדול); a single value carries none.
+            model = await _attributeStorage.CreateAttributeAsync(model, req.Values, cancelToken, preserveValueOrder: req.Values?.Count > 1).ConfigureAwait(false);
             if (model != null)
             {
                 // Load with relationships for mapping
@@ -141,10 +142,48 @@ namespace George.Services
             // Map attribute values
             if (attribute.AttributeValue != null && attribute.AttributeValue.Any())
             {
-                res.Values = attribute.AttributeValue.Select(av => av.Value).ToList();
+                res.Values = OrderedValues(attribute);
             }
 
             return res;
+        }
+
+        /// <summary>Attribute values in their manual order; never-ordered values (NULL) follow alphabetically.</summary>
+        public static List<string> OrderedValues(Attribute attribute)
+        {
+            return attribute.AttributeValue
+                .OrderBy(av => av.DisplayOrder ?? int.MaxValue)
+                .ThenBy(av => av.Value, StringComparer.OrdinalIgnoreCase)
+                .Select(av => av.Value)
+                .ToList();
+        }
+
+        /// <summary>Linked-product count per attribute value for a site (attributes screen). Values with no products are omitted.</summary>
+        public async Task<IApiResponse<List<AttributeValueProductCountRes>>> GetValueProductCountsAsync(int siteId, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<List<AttributeValueProductCountRes>> { Data = new List<AttributeValueProductCountRes>() };
+
+            var attributes = await _attributeStorage.GetAttributesAsync(
+                new AttributeFilter { SiteIds = new List<int> { siteId } }, new PagingExDto(), cancelToken);
+            var links = await _attributeStorage.GetSiteProductOptionValueLinksAsync(siteId, cancelToken);
+
+            // Products link to attributes by option NAME + value text (no FK), compared like the rest of the option code: trimmed, case-insensitive.
+            var productIdsByKey = links
+                .GroupBy(l => (Name: l.OptionName.ToLowerInvariant(), Value: l.Value.ToLowerInvariant()))
+                .ToDictionary(g => g.Key, g => g.Select(l => l.ProductId).Distinct().Count());
+
+            foreach (var attribute in attributes.Items.Where(a => !a.IsDeleted))
+            {
+                var name = attribute.Name?.Trim().ToLowerInvariant() ?? "";
+                foreach (var av in attribute.AttributeValue)
+                {
+                    var value = av.Value?.Trim().ToLowerInvariant() ?? "";
+                    if (productIdsByKey.TryGetValue((name, value), out var count) && count > 0)
+                        response.Data.Add(new AttributeValueProductCountRes { AttributeId = attribute.Id, Value = av.Value!, ProductCount = count });
+                }
+            }
+
+            return response;
         }
 
         private async Task SyncAttributeToWooCommerceWhenEnabledAsync(int attributeId, int siteId, CancellationToken cancelToken)

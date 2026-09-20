@@ -140,7 +140,7 @@ public static class OrderLineDisplayFieldsBuilder
             }
         }
 
-        var sizeName = GetVariantSizeName(product, variantIndex);
+        var sizeName = GetVariantSizeName(product, variantIndex, out var sizeOptionName);
 
         decimal? unitCount = null;
         int? totalGrams = null;
@@ -161,6 +161,7 @@ public static class OrderLineDisplayFieldsBuilder
         {
             Kind = kind,
             SizeName = string.IsNullOrWhiteSpace(sizeName) ? null : sizeName,
+            SizeOptionName = string.IsNullOrWhiteSpace(sizeName) ? null : sizeOptionName,
             ApproxUnitWeightGrams = approxGrams,
             ChosenUnitWeightGrams = chosenGrams,
             CuttingName = string.IsNullOrWhiteSpace(cuttingValue) ? null : cuttingValue.Trim(),
@@ -169,13 +170,19 @@ public static class OrderLineDisplayFieldsBuilder
         };
     }
 
-    /// <summary>Clean size name from the resolved variant (non-cutting option; prefers "גודל"/"size").</summary>
-    private static string? GetVariantSizeName(Product product, int variantIndex)
+    /// <summary>
+    /// Clean size name from the resolved variant (non-cutting option; prefers "גודל"/"size").
+    /// <paramref name="optionName"/> is the attribute's name when the value came from a NON-size attribute
+    /// (e.g. "חלוקה למגשים") - displays prefix it, a bare "2" says nothing. Null for a real size.
+    /// </summary>
+    private static string? GetVariantSizeName(Product product, int variantIndex, out string? optionName)
     {
+        optionName = null;
         var v = GetOrderedVariants(product).ElementAtOrDefault(variantIndex);
         var ov = v?.ProductVariantOptionValue;
         if (ov == null) return null;
         string? firstNonCutting = null;
+        string? firstNonCuttingName = null;
         foreach (var kv in ov)
         {
             if (string.IsNullOrWhiteSpace(kv.OptionValue)) continue;
@@ -183,8 +190,12 @@ public static class OrderLineDisplayFieldsBuilder
             if (name == "גודל" || string.Equals(name, "size", StringComparison.OrdinalIgnoreCase))
                 return WooPercentEncodedText.Decode(kv.OptionValue.Trim());
             if (firstNonCutting == null && !CuttingKeyHint.IsMatch(name))
+            {
                 firstNonCutting = WooPercentEncodedText.Decode(kv.OptionValue.Trim());
+                firstNonCuttingName = WooPercentEncodedText.Decode(name.Trim());
+            }
         }
+        optionName = string.IsNullOrWhiteSpace(firstNonCuttingName) ? null : firstNonCuttingName;
         return firstNonCutting;
     }
 

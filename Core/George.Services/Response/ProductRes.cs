@@ -8,6 +8,8 @@ namespace George.Services.Response
     {
         public string Name { get; set; } = null!;
         public List<string> Values { get; set; } = new();
+        /// <summary>True when Values (and the product's variants) were sorted to the attribute's manual value order - clients must not re-sort them.</summary>
+        public bool HasManualValueOrder { get; set; }
     }
 
     public class ProductVariantRes

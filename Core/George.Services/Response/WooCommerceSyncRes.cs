@@ -39,6 +39,11 @@ namespace George.Services.Response
         public int? WooCommerceId { get; set; }
         public bool Success { get; set; }
         public string Message { get; set; } = string.Empty;
+        /// <summary>
+        /// True when the value order was sent but the Woo attribute still sorts by something other than "Custom ordering"
+        /// (menu_order) and Giorgio did not switch it - the store shows the manual order only after that is changed in Woo.
+        /// </summary>
+        public bool ValueOrderNeedsCustomOrdering { get; set; }
     }
 
     public class WooCommerceImportEntityCounts

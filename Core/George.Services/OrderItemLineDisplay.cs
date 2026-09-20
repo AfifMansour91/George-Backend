@@ -468,6 +468,44 @@ public static class OrderItemLineDisplay
         OrderItem item,
         OrderItemAttributeDisplayOptions options = default)
     {
+        return PrefixNonSizeOptionName(GetOrderItemAttributeSegmentsCore(item, options), item.LineDisplayJson);
+    }
+
+    /// <summary>
+    /// A variation value of a non-size attribute ("חלוקה למגשים" = "2") prints as "חלוקה למגשים: 2" on every
+    /// surface (cards, voucher, A4) - the bare "2" was unreadable. The name comes from the line snapshot
+    /// (<see cref="OrderLineDisplaySnapshot.SizeOptionName"/>); sizes and cutting values stay as they were.
+    /// Keep in sync with shop-manager orderItemLineDisplay.ts prefixNonSizeOptionName.
+    /// </summary>
+    internal static IReadOnlyList<string> PrefixNonSizeOptionName(IReadOnlyList<string> segments, string? lineDisplayJson)
+    {
+        if (segments.Count == 0 || string.IsNullOrWhiteSpace(lineDisplayJson) || !lineDisplayJson.Contains("sizeOptionName", StringComparison.Ordinal))
+            return segments;
+        var snap = OrderLineDisplaySnapshot.TryParse(lineDisplayJson);
+        var name = snap?.SizeOptionName?.Trim().TrimEnd(':').Trim();
+        var value = snap?.SizeName?.Trim();
+        if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(value)) return segments;
+        // Only values that say nothing on their own - no letters ("2", "1.5"). Worded values ("פרוס", "גדול", "טעם
+        // וניל") keep printing bare like cutting values always did, so other shops' printouts don't change.
+        if (value.Any(char.IsLetter)) return segments;
+
+        var valueKey = OrderItemAttrDedupeKey(value);
+        var result = segments.ToList();
+        for (var i = 0; i < result.Count; i++)
+        {
+            // The value alone, or followed by its "(כ X ק"ג)" approx-weight suffix.
+            var bare = Regex.Replace(result[i], @"\s*\(כ[^)]*\)\s*$", "").Trim();
+            if (OrderItemAttrDedupeKey(bare) != valueKey) continue;
+            result[i] = $"{name}: {result[i]}";
+            break;
+        }
+        return result;
+    }
+
+    private static IReadOnlyList<string> GetOrderItemAttributeSegmentsCore(
+        OrderItem item,
+        OrderItemAttributeDisplayOptions options)
+    {
         if (options.UseStructuredLineDisplay)
         {
             var structuredSegs = TryGetStructuredAttributeSegments(item.LineDisplayJson, options.HideWeightDetails);

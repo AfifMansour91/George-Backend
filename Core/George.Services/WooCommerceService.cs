@@ -1191,6 +1191,11 @@ namespace George.Services
 
                 if (wooAttrId.HasValue)
                 {
+                    // Manual value order (attributes screen drag and drop) -> Woo term menu_order. Only on this explicit
+                    // attribute sync, not on the per-product save path, to keep product syncs light.
+                    response.Data.ValueOrderNeedsCustomOrdering =
+                        await PushAttributeTermOrderAsync(baseUrl, wooAttrId.Value, attribute, httpClient, cancelToken);
+
                     await _attributeStorage.UpdateAttributeWooCommerceIdAsync(attributeId, wooAttrId.Value, cancelToken);
                     response.Data.AttributeId = attributeId;
                     response.Data.WooCommerceId = wooAttrId.Value;
@@ -1456,6 +1461,109 @@ namespace George.Services
             }
 
             return (wooAttrId, slug);
+        }
+
+        /// <summary>
+        /// Pushes the attribute's manual value order to WooCommerce: makes the attribute sort by menu_order (imported
+        /// attributes usually sort by name) and batch-updates the menu_order of the terms whose position differs.
+        /// No-op for attributes that were never ordered in Giorgio. Never throws - the order is cosmetic and must
+        /// not fail the attribute sync. Returns true when the attribute is left on a non-menu_order sorting (the
+        /// store won't show the manual order until "Custom ordering" is chosen for the attribute in Woo).
+        /// </summary>
+        private async Task<bool> PushAttributeTermOrderAsync(string baseUrl, int wooAttrId, Attribute attribute, HttpClient httpClient, CancellationToken cancelToken)
+        {
+            var needsCustomOrdering = false;
+            try
+            {
+                if (attribute.AttributeValue == null || !attribute.AttributeValue.Any(av => av.DisplayOrder != null))
+                    return false;
+
+                var orderedValues = AttributeService.OrderedValues(attribute);
+
+                var attrUrl = $"{baseUrl}/products/attributes/{wooAttrId}";
+                var attrResponse = await httpClient.GetAsync(attrUrl, cancelToken);
+                if (!attrResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("WooCommerce attribute order: GET attribute {WooAttrId} failed ({Status}); order not pushed", wooAttrId, (int)attrResponse.StatusCode);
+                    return false;
+                }
+                var wooAttr = TryDeserialize<WooCommerceAttributeResponse>(await attrResponse.Content.ReadAsStringAsync(cancelToken));
+                if (wooAttr != null && !string.Equals(wooAttr.order_by, "menu_order", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Woo's attribute PUT rebuilds name/slug/type/has_archives from the request (a missing slug is re-derived from
+                    // the name, which RENAMES the taxonomy), so everything is echoed back as-is - and only for plain ASCII slugs
+                    // that survive the round trip unchanged. Hebrew / percent-encoded slugs are left for a manual switch in Woo.
+                    var slugKey = NormalizeWooAttributeSlugKey(wooAttr.slug);
+                    var slugIsRoundTripSafe = slugKey.Length > 0 && slugKey.All(c => c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '-' or '_');
+                    if (slugIsRoundTripSafe && !string.IsNullOrWhiteSpace(wooAttr.name))
+                    {
+                        var updated = await TryUpdateProductAttributeAsync(
+                            baseUrl,
+                            wooAttrId,
+                            new { name = wooAttr.name, slug = slugKey, type = wooAttr.type ?? "select", order_by = "menu_order", has_archives = wooAttr.has_archives },
+                            httpClient,
+                            cancelToken);
+                        needsCustomOrdering = !updated.id.HasValue;
+                    }
+                    else
+                    {
+                        needsCustomOrdering = true;
+                    }
+                    if (needsCustomOrdering)
+                        _logger.LogWarning("WooCommerce attribute order: attribute {WooAttrId} ({Name}, slug {Slug}) sorts by {OrderBy} and was not switched to menu_order",
+                            wooAttrId, attribute.Name, wooAttr.slug, wooAttr.order_by);
+                }
+
+                var terms = new List<WooCommerceAttributeTermListItem>();
+                const int perPage = 100;
+                for (var page = 1; page <= 10; page++)
+                {
+                    var response = await httpClient.GetAsync($"{baseUrl}/products/attributes/{wooAttrId}/terms?per_page={perPage}&page={page}", cancelToken);
+                    if (!response.IsSuccessStatusCode) break;
+                    var list = TryDeserialize<List<WooCommerceAttributeTermListItem>>(await response.Content.ReadAsStringAsync(cancelToken));
+                    if (list == null || list.Count == 0) break;
+                    terms.AddRange(list);
+                    if (list.Count < perPage) break;
+                }
+
+                var termByName = new Dictionary<string, WooCommerceAttributeTermListItem>(StringComparer.OrdinalIgnoreCase);
+                foreach (var term in terms.Where(t => t.id > 0 && !string.IsNullOrWhiteSpace(t.name)))
+                    termByName.TryAdd(System.Net.WebUtility.HtmlDecode(term.name!).Trim(), term);
+
+                var updates = new List<object>();
+                for (var i = 0; i < orderedValues.Count; i++)
+                {
+                    // 1-based: a term Woo never ordered reads as 0, so it can't tie with the first ordered value.
+                    var menuOrder = i + 1;
+                    if (termByName.TryGetValue(orderedValues[i].Trim(), out var term) && term.menu_order != menuOrder)
+                        updates.Add(new { id = term.id, menu_order = menuOrder });
+                }
+                if (updates.Count == 0) return needsCustomOrdering;
+
+                var batchUrl = $"{baseUrl}/products/attributes/{wooAttrId}/terms/batch";
+                foreach (var chunk in updates.Chunk(100))
+                {
+                    var json = JsonSerializer.Serialize(new { update = chunk });
+                    using var content = new StringContent(json, Encoding.UTF8, "application/json");
+                    using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancelToken);
+                    cts.CancelAfter(AttributeTermRequestTimeout);
+                    using var batchResponse = await httpClient.PostAsync(batchUrl, content, cts.Token);
+                    if (!batchResponse.IsSuccessStatusCode)
+                    {
+                        var err = await batchResponse.Content.ReadAsStringAsync(cancelToken);
+                        _logger.LogWarning("WooCommerce attribute order: terms batch for attribute {WooAttrId} ({Name}) failed ({Status}): {Error}",
+                            wooAttrId, attribute.Name, (int)batchResponse.StatusCode, err);
+                        return needsCustomOrdering;
+                    }
+                }
+                _logger.LogInformation("WooCommerce attribute order: updated menu_order of {Count} terms for attribute {WooAttrId} ({Name})",
+                    updates.Count, wooAttrId, attribute.Name);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "WooCommerce attribute order: failed to push term order for attribute {WooAttrId} ({Name})", wooAttrId, attribute.Name);
+            }
+            return needsCustomOrdering;
         }
 
         private async Task SyncAttributeTermsAsync(string baseUrl, int wooAttrId, Attribute attribute, HttpClient httpClient, CancellationToken cancelToken)
@@ -4994,11 +5102,16 @@ namespace George.Services
             public int id { get; set; }
             public string? name { get; set; }
             public string? slug { get; set; }
+            public string? order_by { get; set; }
+            public string? type { get; set; }
+            public bool has_archives { get; set; }
         }
 
         private class WooCommerceAttributeTermListItem
         {
+            public int id { get; set; }
             public string? name { get; set; }
+            public int? menu_order { get; set; }
         }
 
         /// <summary>POST body for WooCommerce attribute term creation. "name" is required by the API.</summary>

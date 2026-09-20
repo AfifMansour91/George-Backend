@@ -23,6 +23,13 @@ public sealed class OrderLineDisplaySnapshot
     [JsonPropertyName("sizeName")]
     public string? SizeName { get; set; }
 
+    /// <summary>
+    /// Attribute name behind <see cref="SizeName"/> when it is NOT a size (e.g. "חלוקה למגשים") - the value alone
+    /// ("2") is meaningless, so it renders as "חלוקה למגשים: 2". Null for גודל/size: a size name reads on its own.
+    /// </summary>
+    [JsonPropertyName("sizeOptionName")]
+    public string? SizeOptionName { get; set; }
+
     /// <summary>Informational per-unit weight (grams) - average / by-variant portion.</summary>
     [JsonPropertyName("approxUnitWeightGrams")]
     public int? ApproxUnitWeightGrams { get; set; }

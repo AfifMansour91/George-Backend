@@ -71,6 +71,13 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _attributeSvc.GetAttributesAsync(request, cancelToken));
         }
 
+        [HttpGet("Site/{siteId:int}/ValueProductCounts")]
+        [ProducesResponseType(typeof(IApiResponse<List<AttributeValueProductCountRes>>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetValueProductCountsAsync([FromRoute] int siteId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _attributeSvc.GetValueProductCountsAsync(siteId, cancelToken));
+        }
+
         [ApiExplorerSettings(IgnoreApi = true)]
         public void SetAuthUser()
         {

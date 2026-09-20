@@ -23,6 +23,7 @@ namespace George.Services
         private readonly ProductSiteOverrideStorage _overrideStorage;
         private readonly BundleService _bundleService;
         private readonly BundleStorage _bundleStorage;
+        private readonly AttributeStorage _attributeStorage;
 
         public ProductService(
             ILogger<ProductService> logger,
@@ -37,9 +38,11 @@ namespace George.Services
             OrderStorage orderStorage,
             ProductSiteOverrideStorage overrideStorage,
             BundleService bundleService,
-            BundleStorage bundleStorage
+            BundleStorage bundleStorage,
+            AttributeStorage attributeStorage
         ) : base(logger, mapper, cache)
         {
+            _attributeStorage = attributeStorage;
             _bundleStorage = bundleStorage;
             _productStorage = productStorage;
             _categoryStorage = categoryStorage;
@@ -116,6 +119,55 @@ namespace George.Services
             }
         }
 
+        /// <summary>
+        /// Attribute value order (attributes screen drag and drop): sorts each product's option values - and its
+        /// variants, by their option values - to the manual order of the matching site attribute. Attributes that
+        /// were never ordered are left exactly as stored; values unknown to the attribute keep their place at the end.
+        /// </summary>
+        private async Task ApplyAttributeValueOrderAsync(List<ProductRes> items, int? siteId, int? accountId, CancellationToken cancelToken)
+        {
+            if (!items.Any(i => i.ProductOptions != null && i.ProductOptions.Count > 0)) return;
+            try
+            {
+                var orderMap = await _attributeStorage.GetAttributeValueOrderMapAsync(siteId, accountId, cancelToken).ConfigureAwait(false);
+                if (orderMap.Count == 0) return;
+
+                foreach (var item in items)
+                {
+                    if (item.ProductOptions == null || item.ProductOptions.Count == 0) continue;
+
+                    var orderedOptions = new List<(string Name, Dictionary<string, int> Order)>();
+                    foreach (var option in item.ProductOptions)
+                    {
+                        if (!orderMap.TryGetValue(option.Name?.Trim() ?? "", out var order)) continue;
+                        orderedOptions.Add((option.Name!, order));
+                        option.HasManualValueOrder = true;
+                        option.Values = option.Values
+                            .OrderBy(v => order.TryGetValue(v?.Trim() ?? "", out var idx) ? idx : int.MaxValue) // OrderBy is stable
+                            .ToList();
+                    }
+
+                    if (orderedOptions.Count == 0 || item.Variants == null || item.Variants.Count < 2) continue;
+                    IOrderedEnumerable<ProductVariantRes>? sorted = null;
+                    foreach (var (name, order) in orderedOptions)
+                    {
+                        int Rank(ProductVariantRes v)
+                        {
+                            var value = v.OptionValues?
+                                .FirstOrDefault(kv => string.Equals(kv.Key?.Trim(), name.Trim(), StringComparison.OrdinalIgnoreCase)).Value;
+                            return order.TryGetValue(value?.Trim() ?? "", out var idx) ? idx : int.MaxValue;
+                        }
+                        sorted = sorted == null ? item.Variants.OrderBy(Rank) : sorted.ThenBy(Rank);
+                    }
+                    item.Variants = sorted!.ToList();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to apply attribute value order to product list (site {SiteId}, account {AccountId})", siteId, accountId);
+            }
+        }
+
         /// <summary>Bundle definition validation for a create/update request; returns the response to send on failure.</summary>
         private async Task<IApiResponse<ProductRes>?> ValidateBundleRequestAsync(ProductReq req, int? accountId, int? productId, CancellationToken cancelToken)
         {
@@ -149,6 +201,7 @@ namespace George.Services
             if (response.Data.Items.Count > 0)
             {
                 await ApplyBundleComputedPricesAsync(response.Data.Items, request.Filter?.SiteId is > 0 ? request.Filter.SiteId : null, cancelToken);
+                await ApplyAttributeValueOrderAsync(response.Data.Items, request.Filter?.SiteId, request.Filter?.AccountId, cancelToken);
             }
 
             response.Data.Skip = request.Skip;
@@ -294,6 +347,7 @@ namespace George.Services
             var res = await _productStorage.GetProductsBySiteAndIdsAsync(siteId, productIds, paging, cancelToken).ConfigureAwait(false);
 
             response.Data!.Items = res.Items.ConvertAll(p => MapProductToRes(p));
+            await ApplyAttributeValueOrderAsync(response.Data.Items, siteId, null, cancelToken);
             response.Data.Skip = request.Skip;
             response.Data.Limit = request.Take;
             response.Data.Total = res.Total;
@@ -323,6 +377,7 @@ namespace George.Services
             var paging = new PagingExDto { Skip = 0, Take = take, IncludeTotal = false };
             var res = await _productStorage.GetProductsBySiteAndIdsAsync(siteId, productIds, paging, cancelToken).ConfigureAwait(false);
             response.Data!.Items = res.Items.ConvertAll(p => MapProductToRes(p));
+            await ApplyAttributeValueOrderAsync(response.Data.Items, siteId, null, cancelToken);
             response.Data.Total = res.Items.Count;
             return response;
         }
@@ -358,6 +413,8 @@ namespace George.Services
             {
                 await ApplyEffectiveSiteValuesAsync(new List<ProductRes> { response.Data }, sid, cancelToken);
             }
+
+            await ApplyAttributeValueOrderAsync(new List<ProductRes> { response.Data }, siteId, product.AccountId, cancelToken);
 
             // Bundles (מארזים): definition + computed prices (site-effective component prices when a site is given).
             if (BundleProducts.IsBundle(product))

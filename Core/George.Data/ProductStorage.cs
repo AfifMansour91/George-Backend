@@ -1228,9 +1228,8 @@ namespace George.Data
         {
             {
                 var opt = new ProductOptionDto { Name = optName, Values = distinctValues };
-                // "גודל" (Size) is a product variation dimension (e.g. weight-by-size), not a reusable feature - do not create a global Attribute for it
-                var isVariationOnlyOption = opt.Name == "גודל" || string.Equals(opt.Name, "Size", StringComparison.OrdinalIgnoreCase);
-                if (!isVariationOnlyOption)
+                // "גודל" (Size) used to be skipped here as a variation-only dimension. It now gets a site Attribute like any
+                // other option so its values can be ordered on the attributes screen (the Woo sync created one anyway).
                 {
                     // Create/find Attribute and AttributeValue for each site
                     foreach (var siteId in siteIds)
