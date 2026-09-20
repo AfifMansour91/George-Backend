@@ -19,6 +19,11 @@ namespace George.Services.Response
     {
         public string LineLabel { get; set; } = "";
         public decimal? WeightPerUnitKg { get; set; }
+        /// <summary>
+        /// True when <see cref="WeightPerUnitKg"/> is the ORDERED weight of a weight-mode line (0.5 kg of ground beef), not a
+        /// per-unit weight: the UI shows it in the row label ("0.5 ק״ג | חלוקה למגשים: 1"), not in the weight-per-unit column.
+        /// </summary>
+        public bool WeightIsOrderedChoice { get; set; }
         public decimal? QuantityKg { get; set; }
         public decimal? QuantityUnits { get; set; }
         public bool ShowUnitsInTotalQuantity { get; set; } = true;

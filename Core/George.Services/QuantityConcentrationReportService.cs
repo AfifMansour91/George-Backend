@@ -153,6 +153,8 @@ namespace George.Services
                             optionLabel = catalogLabel;
                     }
 
+                    optionLabel = QualifyBareValueLabel(optionLabel, variant);
+
                     var cutKey = !string.IsNullOrEmpty(optionLabel) ? AttrDedupeKey(optionLabel) : NoStructuredOptionKey;
                     // Weighted lines sold by units split further per weight choice (0.5kg vs 1kg packs of the
                     // same variant must stay separate prep rows), so the per-unit weight joins the bucket key.
@@ -231,6 +233,7 @@ namespace George.Services
                     {
                         LineLabel = lineLabel,
                         WeightPerUnitKg = b.UnitWeightKg is > 0m ? Round2(b.UnitWeightKg.Value) : null,
+                        WeightIsOrderedChoice = b.WeightChoice && b.UnitWeightKg is > 0m,
                         QuantityKg = b.Kg > 0m ? Round2(b.Kg) : null,
                         QuantityUnits = b.Units > 0m ? Round2(b.Units) : null,
                         Note = noteText,
@@ -272,6 +275,7 @@ namespace George.Services
                     ShowUnitsInTotalQuantity = showUnitsInTotal,
                     ShowWeightPerUnitColumn = parentUnitWeightKg is > 0m || lines.Any(l =>
                         string.Equals(l.LineDisplayKind, "variant", StringComparison.Ordinal)
+                        && !l.WeightIsOrderedChoice
                         && l.WeightPerUnitKg is > 0m),
                     WeightPerUnitKg = parentUnitWeightKg is > 0m ? Round2(parentUnitWeightKg.Value) : null,
                     StockKg = stockKg,
@@ -653,6 +657,7 @@ namespace George.Services
                 LineLabel = bestLabel,
                 Note = list[0].Note,
                 WeightPerUnitKg = wpu is > 0m ? wpu : null,
+                WeightIsOrderedChoice = wpu is > 0m && list.Any(x => x.WeightIsOrderedChoice),
                 QuantityKg = kg > 0m ? Round2(kg) : null,
                 QuantityUnits = u > 0m ? Round2(u) : null,
                 OrderCount = MergeOrderCount(list),
@@ -768,17 +773,18 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Bucket key (kg, 3 decimals) for a weight-mode line of a product without catalog options: the
+        /// Bucket key (kg, 3 decimals) for a weight-mode line (with or without catalog variations): the
         /// ORDERED line weight (0.5 / 2 kg), so each weight choice becomes its own detail row with its own
-        /// order count. 0 when the line is not a weight choice (units line, product with options, no weight).
+        /// order count. 0 when the line is not a weight choice (units line, no weight).
         /// Uses the ordered weight, never the picked weight - picking 0.52 kg must not split the 0.5 kg row.
         /// </summary>
         public static decimal ResolveWeightChoiceKey(OrderItem line, Product p)
         {
             var mode = (line.OrderLineQuantityMode ?? "").Trim().ToLowerInvariant();
             if (mode != "weight") return 0m;
-            if (ProductHasCatalogVariationOptions(p)) return 0m;
-            var kg = OrderedLineWeightKg(line);
+            // Products WITH variations split per ordered weight too (PEPE: "0.5 ק״ג | חלוקה למגשים: 1" - the prep list
+            // must say how many packs of each weight to make per variation); the variation is the other half of the key.
+            var kg = OrderedLineWeightKg(line) ?? (line.Quantity is > 0m and < 500m ? line.Quantity : null);
             return kg is > 0m ? Math.Round(kg.Value, 3) : 0m;
         }
 
@@ -995,6 +1001,34 @@ namespace George.Services
         private static string FormatVariantLabel(ProductVariant v) =>
             ProductCatalogVariantResolution.FormatVariantDisplayLabel(v);
 
+        /// <summary>
+        /// A variation value with no letters ("2" of "חלוקה למגשים") says nothing in a prep list - PEPE's tester
+        /// could not find the trays in the report because the rows read "1" / "2". Each such piece of the label gets
+        /// its attribute name from the catalog variant: "חלוקה למגשים: 2". Worded values ("פרוס", "מגש 1") are kept
+        /// as they are. Same rule as the order cards / voucher (OrderItemLineDisplay.PrefixNonSizeOptionName).
+        /// </summary>
+        public static string? QualifyBareValueLabel(string? optionLabel, ProductVariant? variant)
+        {
+            if (string.IsNullOrWhiteSpace(optionLabel) || variant?.ProductVariantOptionValue == null)
+                return optionLabel;
+            var pieces = optionLabel.Split('|').Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
+            if (pieces.Count == 0 || pieces.All(s => s.Any(char.IsLetter)))
+                return optionLabel;
+
+            var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < pieces.Count; i++)
+            {
+                if (pieces[i].Any(char.IsLetter)) continue;
+                var option = variant.ProductVariantOptionValue.FirstOrDefault(ov =>
+                    !string.IsNullOrWhiteSpace(ov.OptionName)
+                    && string.Equals((ov.OptionValue ?? "").Trim(), pieces[i], StringComparison.OrdinalIgnoreCase)
+                    && usedNames.Add(ov.OptionName!.Trim()));
+                if (option != null)
+                    pieces[i] = $"{option.OptionName!.Trim().TrimEnd(':').Trim()}: {pieces[i]}";
+            }
+            return string.Join(" | ", pieces);
+        }
+
         /// <summary>Unit count in total-qty column only for non-weighted products; parent units column is separate.</summary>
         private static bool ShowUnitsInTotalQuantityForTotalQtyColumn(Product p, decimal sumUnits)
         {
@@ -1096,7 +1130,8 @@ namespace George.Services
 
             foreach (var v in variants.OrderBy(FormatVariantLabel, StringComparer.OrdinalIgnoreCase))
             {
-                var label = FormatVariantLabel(v);
+                // Same naming as the ordered rows ("חלוקה למגשים: 2"), so a stock-only row matches / reads like them.
+                var label = QualifyBareValueLabel(FormatVariantLabel(v), v) ?? FormatVariantLabel(v);
                 var stockQty = Round2(v.StockQuantity ?? 0m);
                 var labelKey = AttrDedupeKey(label);
 

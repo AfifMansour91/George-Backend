@@ -525,6 +525,30 @@ public class QuantityConcentrationReportServiceTests
     }
 
     /// <summary>
+    /// PEPE "בקר טחון טרי": the trays attribute holds bare numbers ("חלוקה למגשים" = 1..10). A prep row labelled "2"
+    /// is unreadable - the tester could not find the trays in the report - so the attribute name is added.
+    /// </summary>
+    [Fact]
+    public void QualifyBareValueLabel_NumericTrayValue_GetsItsAttributeName()
+    {
+        var variant = new ProductVariant
+        {
+            Id = 25162,
+            ProductVariantOptionValue = new List<ProductVariantOptionValue>
+            {
+                new() { OptionName = "חלוקה למגשים", OptionValue = "2" },
+                new() { OptionName = "צורת חיתוך", OptionValue = "דק" },
+            },
+        };
+
+        Assert.Equal("חלוקה למגשים: 2", QuantityConcentrationReportService.QualifyBareValueLabel("2", variant));
+        Assert.Equal("חלוקה למגשים: 2 | דק", QuantityConcentrationReportService.QualifyBareValueLabel("2 | דק", variant));
+        // Worded values and lines without a catalog variant stay as they are.
+        Assert.Equal("מגש 1", QuantityConcentrationReportService.QualifyBareValueLabel("מגש 1", variant));
+        Assert.Equal("2", QuantityConcentrationReportService.QualifyBareValueLabel("2", null));
+    }
+
+    /// <summary>
     /// דוגמת הלקוח: בשר טחון שנמכר לפי 0.5 ק"ג עם וריאציית מגשים -
     /// כל שילוב מגש+משקל+הערה נשאר שורת הכנה נפרדת עם ספירת הזמנות.
     /// </summary>
@@ -685,7 +709,7 @@ public class QuantityConcentrationReportServiceTests
     }
 
     [Fact]
-    public void ResolveWeightChoiceKey_ZeroForUnitsLinesAndProductsWithOptions()
+    public void ResolveWeightChoiceKey_ZeroForUnitsLines_OrderedWeightForProductsWithOptions()
     {
         var plain = new Product { Id = 1, Name = "נתח", IsWeighted = true };
         var unitsLine = new OrderItem { OrderLineQuantityMode = "units", Quantity = 2m, UnitWeightGrams = 500m };
@@ -699,7 +723,8 @@ public class QuantityConcentrationReportServiceTests
             ProductVariant = new List<ProductVariant> { new() { Id = 10, ProductId = 2, IsDeleted = false } },
         };
         var weightLine = new OrderItem { OrderLineQuantityMode = "weight", Quantity = 1.5m, UnitWeightGrams = 1000m };
-        Assert.Equal(0m, QuantityConcentrationReportService.ResolveWeightChoiceKey(weightLine, withOptions));
+        // PEPE 2026-09-21: a product WITH variations (trays / cut) splits per ordered weight as well.
+        Assert.Equal(1.5m, QuantityConcentrationReportService.ResolveWeightChoiceKey(weightLine, withOptions));
     }
 
     [Fact]
