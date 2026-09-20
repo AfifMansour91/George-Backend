@@ -291,6 +291,20 @@ namespace George.Data
             return res;
         }
 
+        /// <summary>productId → Product.PrintName, only for products that have one (order-entry voucher names).</summary>
+        public async Task<Dictionary<int, string>> GetPrintNamesAsync(IReadOnlyCollection<int> productIds, CancellationToken cancelToken)
+        {
+            if (productIds.Count == 0) return new Dictionary<int, string>();
+            var ids = productIds.Distinct().ToList();
+            var rows = await _dbContext.Product
+                .AsNoTracking()
+                .Where(p => ids.Contains(p.Id) && p.PrintName != null && p.PrintName != "")
+                .Select(p => new { p.Id, p.PrintName })
+                .ToListAsync(cancelToken)
+                .ConfigureAwait(false);
+            return rows.ToDictionary(r => r.Id, r => r.PrintName!.Trim());
+        }
+
         public async Task<Product?> GetProductAsync(int productId, CancellationToken cancelToken)
         {
             return await _dbContext.Product
@@ -577,6 +591,7 @@ namespace George.Data
             dbProduct.ShippingClassId = updated.ShippingClassId;
             dbProduct.SetupTypeId = updated.SetupTypeId;
             dbProduct.WeightConfigId = updated.WeightConfigId;
+            dbProduct.PrintName = string.IsNullOrWhiteSpace(updated.PrintName) ? null : updated.PrintName.Trim();
             dbProduct.SeoTitle = updated.SeoTitle;
             dbProduct.SeoDescription = updated.SeoDescription;
             dbProduct.Slug = string.IsNullOrWhiteSpace(updated.Slug) ? null : updated.Slug.Trim();

@@ -111,6 +111,18 @@ namespace George.Services.Response
         public decimal Revenue { get; set; }
         /// <summary>Row revenue / total bundle revenue (0..1).</summary>
         public decimal Share { get; set; }
+        /// <summary>The products sold inside this bundle (component lines, swaps included), by revenue share desc.</summary>
+        public List<ProductsReportBundleComponentDto> Components { get; set; } = new();
+    }
+
+    /// <summary>One product sold inside a bundle: quantities from the component lines, revenue = its share of the bundle's money.</summary>
+    public class ProductsReportBundleComponentDto
+    {
+        public int ProductId { get; set; }
+        public string Name { get; set; } = "";
+        public decimal QuantityKg { get; set; }
+        public decimal QuantityUnits { get; set; }
+        public decimal Revenue { get; set; }
     }
 
     public class ProductsReportBundlesDto

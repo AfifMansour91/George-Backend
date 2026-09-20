@@ -199,6 +199,12 @@ public partial class Site
     /// <summary>When true (default), show picking confirmation dialog after barcode scan. When false, apply scan silently unless weight exceeds tolerance.</summary>
     public bool? ConfirmPickingAfterScan { get; set; }
 
+    /// <summary>Scanning a READY order's voucher barcode completes the order instead of opening its window (null/false = open).</summary>
+    public bool? ScanCompletesReadyOrder { get; set; }
+
+    /// <summary>Opt-in: products of this site may carry a print name (<see cref="Product.PrintName"/>) for the order-entry voucher (null/false = off).</summary>
+    public bool? ProductPrintNameEnabled { get; set; }
+
     /// <summary>When true (default), show order deviation % and amount in picking footer and archive.</summary>
     public bool? ShowPickingDeviation { get; set; }
 

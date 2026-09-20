@@ -52,10 +52,17 @@ namespace George.Services
                     : null;
 
                 var isWeight = string.Equals(child.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase);
-                var qtyPerBundle = slot?.Qty ?? BundlePricingEngine.Round4(child.Quantity / bundles);
-                var unit = !string.IsNullOrWhiteSpace(slot?.Unit) ? slot!.Unit : (isWeight ? "kg" : "unit");
+                // A swap to a product measured differently (portions ↔ kg) changed the LINE's unit and quantity in
+                // George; the definition's unit / qty no longer describe it, so the line's own values are sent.
+                var slotIsWeight = slot != null && BundleOrderLineBuilder.IsWeightSlot(slot, slot.ComponentProduct);
+                var followsSlot = slot != null && !(child.SwappedFromProductId.HasValue && slotIsWeight != isWeight);
+                // A swapped child may also carry the alternative's OWN quantity - the line is what ships.
+                var qtyPerBundle = followsSlot && !child.SwappedFromProductId.HasValue
+                    ? slot!.Qty
+                    : BundlePricingEngine.Round4(child.Quantity / bundles);
+                var unit = followsSlot && !string.IsNullOrWhiteSpace(slot!.Unit) ? slot.Unit : (isWeight ? "kg" : "unit");
                 // Plugin vocabulary: units | units_weight | weight.
-                var mode = !string.IsNullOrWhiteSpace(slot?.Mode) ? slot!.Mode : (isWeight ? "weight" : "units");
+                var mode = followsSlot && !string.IsNullOrWhiteSpace(slot!.Mode) ? slot.Mode : (isWeight ? "weight" : "units");
                 // Line total across all bundles once weighed in George (confirmed picks only). George stores kg;
                 // the plugin reads actualQty in the emitted unit, so a grams slot gets grams.
                 // In the slot unit: a weighed-piece line (200 g portions) stores kg, the slot counts pieces.
@@ -74,7 +81,7 @@ namespace George.Services
                     ["qty"] = qtyPerBundle,
                     ["unit"] = unit,
                     ["mode"] = mode,
-                    ["unitWeight"] = slot?.UnitWeightKg,
+                    ["unitWeight"] = followsSlot ? slot?.UnitWeightKg : null,
                     ["swappedFromProductId"] = swappedFromWooId,
                     ["swappedFromVariationId"] = swappedFromVariationWooId,
                     ["surcharge"] = child.SwapSurcharge ?? 0m,

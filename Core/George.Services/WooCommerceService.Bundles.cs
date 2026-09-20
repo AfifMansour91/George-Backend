@@ -98,6 +98,8 @@ namespace George.Services
                         ["product_id"] = swapWooPid,
                         ["variation_id"] = swapVariationId,
                         ["surcharge"] = s.Surcharge,
+                        // Own quantity per bundle in the alternative's unit (plugin 1.5.2+); null = inherit the slot's.
+                        ["qty"] = s.Qty is > 0m ? s.Qty : null,
                     });
                 }
 
@@ -138,7 +140,9 @@ namespace George.Services
                 ["invoice_display"] = cfg.InvoiceDisplay,
                 ["hide_price_labels"] = cfg.HidePriceLabels,
                 ["reweigh_price"] = cfg.ReweighPrice,
-                ["show_components_in_desc"] = cfg.ShowComponentsInDesc,
+                // George writes the list into the short description itself (BuildBundleComponentsDescriptionHtmlAsync);
+                // the plugin's own flag stays off so a wp-admin save never REPLACES that excerpt with the bare list.
+                ["show_components_in_desc"] = false,
                 ["components"] = components,
             };
         }
@@ -175,6 +179,36 @@ namespace George.Services
                 404 => "OC Bundles: תוסף המארזים לא נמצא באתר (404)",
                 _ => $"OC Bundles: שגיאת HTTP {statusCode}" + (text.Length > 0 ? " - " + (text.Length > 300 ? text[..300] : text) : string.Empty),
             };
+        }
+
+        /// <summary>
+        /// HTML list of a bundle's components for the store's short description, or null when the bundle does not
+        /// ask for it (<c>ShowComponentsInDesc</c>) / has no definition. One line per slot: quantity + unit, product
+        /// name and the slot's own description.
+        /// </summary>
+        private async Task<string?> BuildBundleComponentsDescriptionHtmlAsync(int bundleProductId, CancellationToken cancelToken)
+        {
+            try
+            {
+                var def = await _bundleStorage.GetDefinitionAsync(bundleProductId, cancelToken).ConfigureAwait(false);
+                if (def == null || !def.Config.ShowComponentsInDesc) return null;
+                var lines = new List<string>();
+                foreach (var c in BundleOrderLineBuilder.OrderedSlots(def))
+                {
+                    if (c.ComponentProduct == null || c.ComponentProduct.IsDeleted) continue;
+                    var qty = c.Qty.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+                    var unit = BundleOrderLineBuilder.IsWeightSlot(c, c.ComponentProduct) ? "ק\"ג" : "יח'";
+                    var text = $"{qty} {unit} {c.ComponentProduct.Name}";
+                    if (!string.IsNullOrWhiteSpace(c.Description)) text += $" - {c.Description.Trim()}";
+                    lines.Add("<li>" + System.Net.WebUtility.HtmlEncode(text) + "</li>");
+                }
+                return lines.Count == 0 ? null : "<ul class=\"oc-bundle-desc-list\">" + string.Join("", lines) + "</ul>";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Bundle {ProductId}: failed to build the components list for the short description", bundleProductId);
+                return null;
+            }
         }
 
         /// <summary>

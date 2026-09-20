@@ -174,6 +174,15 @@ public static class BundleOrderLineBuilder
         return null;
     }
 
+    /// <summary>The configured alternative of a slot for a product/variant (exact variant first, then "any variant"), or null.</summary>
+    public static ProductBundleComponentSwap? FindConfiguredSwap(ProductBundleComponent slot, int productId, int? productVariantId)
+    {
+        var variant = productVariantId is > 0 ? productVariantId : null;
+        var live = slot.Swaps.Where(s => !s.IsDeleted).ToList();
+        return live.FirstOrDefault(s => s.SwapProductId == productId && (s.SwapVariantId ?? 0) == (variant ?? 0))
+            ?? live.FirstOrDefault(s => s.SwapProductId == productId && !s.SwapVariantId.HasValue);
+    }
+
     /// <summary>
     /// Quantity of a product that replaces another in a slot, in the NEW product's unit. Same kind of unit → unchanged.
     /// Units → kg: units × the old unit weight; kg → units: kg ÷ the new unit weight, rounded to whole units (≥ 1).
@@ -382,7 +391,17 @@ public static class BundleOrderLineBuilder
                 Surcharge = c.SwapSurcharge ?? 0m,
             });
         }
-        var result = BundlePricingEngine.Reweigh(basePer, raw, parent.Quantity, picked);
+        // The ratio comes from THIS ORDER, not from the bundle config: what the customer paid for the contents
+        // (parent unit price minus surcharges - already after the bundle discount AND any coupon / promotion the
+        // store applied) over the catalog value of what was ordered. So weighing exactly the ordered quantities
+        // gives exactly the ordered total, a coupon survives the re-weigh, and a swapped-in dearer product does
+        // not re-price the bundle by itself.
+        var bundleCount = Math.Max(0m, parent.Quantity);
+        var paidBaseTotal = Math.Max(0m, (parent.PricePerUnit ?? 0m) * bundleCount - children.Sum(c => (c.SwapSurcharge ?? 0m) * bundleCount));
+        var orderedCatalogTotal = children.Sum(c => Math.Max(0m, (c.PricePerUnit ?? 0m) * c.Quantity));
+        var result = orderedCatalogTotal > 0m
+            ? BundlePricingEngine.Reweigh(paidBaseTotal, orderedCatalogTotal, parent.Quantity, picked)
+            : BundlePricingEngine.Reweigh(basePer, raw, parent.Quantity, picked);
         for (var i = 0; i < children.Count; i++)
             children[i].TotalPrice = result.Shares.TryGetValue(i, out var share) ? share : null;
         return result.ParentTotal;
@@ -419,6 +438,10 @@ public static class BundleOrderLineBuilder
         }
         else if (sumMode && !children.Any(c => c.PricePerUnit is null or <= 0m))
         {
+            // Re-weighed bundle with nothing weighed (any more): back to the ordered price - the unit price is the
+            // ordered money (a swap moves it by the surcharge delta only), the total is what re-weighing changes.
+            if (reweighPrice && !anyWeighed && parent.PricePerUnit is > 0m)
+                parent.TotalPrice = BundlePricingEngine.Round2(parent.PricePerUnit.Value * Math.Max(0m, parent.Quantity));
             // Nothing weighed yet (or no re-weigh): the parent keeps its money; re-split it over the children
             // (a swap may have changed what is in a slot).
             ApplyChildShares(parent, children, pricingMode, discountType, discountValue, null, useOrderedQuantities: true);

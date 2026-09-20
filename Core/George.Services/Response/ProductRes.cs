@@ -98,6 +98,7 @@ namespace George.Services.Response
 
         public int? AccountId { get; set; }
         public int? DisplayOrder { get; set; }
+        public string? PrintName { get; set; }
         public string? SeoTitle { get; set; }
         public string? SeoDescription { get; set; }
 

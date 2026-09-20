@@ -181,6 +181,12 @@ namespace George.Services
             var baselineOrdersAll = await _incomeReportStorage.GetReportOrdersAsync(siteId, baselineFrom, baselineToEx, couponTrim, cancelToken)
                 .ConfigureAwait(false);
 
+            // Money lines only: a bundle's (מארז) component lines just show how the parent's money splits - summing them
+            // too would weigh every bundle twice in the category shares and the top products.
+            foreach (var o in currentOrdersAll.Concat(baselineOrdersAll))
+                if (o.OrderItem != null)
+                    o.OrderItem = BundleOrderLines.WithoutChildren(o.OrderItem).ToList();
+
             var cityTrim = string.IsNullOrWhiteSpace(city) ? null : city.Trim();
             var currentOrders = FilterOrdersByCity(currentOrdersAll, cityTrim);
             var baselineOrders = FilterOrdersByCity(baselineOrdersAll, cityTrim);

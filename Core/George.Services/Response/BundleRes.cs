@@ -8,6 +8,8 @@ namespace George.Services.Response
         public string? ProductName { get; set; }
         public string? Sku { get; set; }
         public decimal Surcharge { get; set; }
+        /// <summary>Own quantity per bundle in the alternative's unit; null = inherits the slot quantity.</summary>
+        public decimal? Qty { get; set; }
         public int SortOrder { get; set; }
         /// <summary>The swap's catalog product was soft-deleted after the bundle was defined; the bundle needs attention.</summary>
         public bool ProductDeleted { get; set; }

@@ -25,6 +25,13 @@ public partial class ProductBundleComponentSwap
     [Column(TypeName = "decimal(18, 2)")]
     public decimal Surcharge { get; set; }
 
+    /// <summary>
+    /// The alternative's own quantity per bundle, in ITS unit (kg for a by_weight product, units otherwise).
+    /// Null = inherit the slot quantity (converted by weight when the units differ).
+    /// </summary>
+    [Column(TypeName = "decimal(18, 4)")]
+    public decimal? Qty { get; set; }
+
     public int SortOrder { get; set; }
 
     public bool IsDeleted { get; set; }

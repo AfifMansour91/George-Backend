@@ -1649,6 +1649,7 @@ namespace George.Services
                 ManagementMode = req.ManagementMode,
                 OwnerSiteId = req.OwnerSiteId,
                 DisplayOrder = req.DisplayOrder,
+                PrintName = string.IsNullOrWhiteSpace(req.PrintName) ? null : req.PrintName.Trim(),
                 SeoTitle = req.SeoTitle,
                 SeoDescription = req.SeoDescription,
                 Slug = string.IsNullOrWhiteSpace(req.Slug) ? null : req.Slug.Trim(),
@@ -1698,6 +1699,7 @@ namespace George.Services
                 AccountId = existing.AccountId ?? req.AccountId,
                 ManagementMode = req.ManagementMode ?? existing.ManagementMode,
                 OwnerSiteId = req.OwnerSiteId ?? existing.OwnerSiteId,
+                PrintName = req.PrintName != null ? (string.IsNullOrWhiteSpace(req.PrintName) ? null : req.PrintName.Trim()) : existing.PrintName,
                 SeoTitle = req.SeoTitle ?? existing.SeoTitle,
                 SeoDescription = req.SeoDescription ?? existing.SeoDescription,
                 Slug = req.Slug != null
@@ -1786,6 +1788,7 @@ namespace George.Services
                 DisplayOrder = product.DisplayOrder,
                 ShowAsMl = product.ShowAsMl ?? (product.WeightUnit == "ml" ? true : null),
                 WeightUnit = product.WeightUnit,
+                PrintName = product.PrintName,
                 SeoTitle = product.SeoTitle,
                 SeoDescription = product.SeoDescription,
                 Slug = product.Slug,

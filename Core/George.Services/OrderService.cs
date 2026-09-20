@@ -643,7 +643,15 @@ namespace George.Services
                 }
                 if (req.PaymentMethod != null) o.PaymentMethod = req.PaymentMethod;
                 if (req.BagsCount.HasValue) o.BagsCount = req.BagsCount;
-                if (req.ShippingCost.HasValue) o.ShippingCost = req.ShippingCost.Value;
+                if (req.ShippingCost.HasValue)
+                {
+                    // A delivery fee changed on its own (picking "הסר משלוח"): the stored total follows right away -
+                    // it is otherwise recomputed only by the next picking save. A caller that sends Total owns it.
+                    var previousShipping = o.ShippingCost ?? 0m;
+                    o.ShippingCost = req.ShippingCost.Value;
+                    if (!req.Total.HasValue && o.Total.HasValue && previousShipping != req.ShippingCost.Value)
+                        o.Total = Math.Max(0m, o.Total.Value - previousShipping + req.ShippingCost.Value);
+                }
                 if (req.SubTotal.HasValue) o.SubTotal = req.SubTotal.Value;
                 if (req.Total.HasValue) o.Total = req.Total.Value;
                 if (req.CouponCode != null)
@@ -916,9 +924,10 @@ namespace George.Services
             if (siteId <= 0)
                 return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required.");
             var order = await _orderStorage.GetLastOrderByCustomerPhoneAsync(siteId, phone, cancelToken).ConfigureAwait(false);
-            // Bundle children are never re-added on their own - the parent (bundle product) is the purchasable line.
+            // Bundle children ride along (ParentOrderItemId set): the client never re-adds them as lines of their own,
+            // it reads them to rebuild the bundle the way the customer got it - swaps, surcharges and quantities.
             if (order?.OrderItem != null)
-                response.Data = BundleOrderLines.WithoutChildren(order.OrderItem).Select(i => _mapper.Map<OrderItemRes>(i)).ToList();
+                response.Data = order.OrderItem.Where(i => !i.IsDeleted).Select(i => _mapper.Map<OrderItemRes>(i)).ToList();
             return response;
         }
 
@@ -2349,6 +2358,13 @@ namespace George.Services
             // Bundles (spec §8): entry vouchers list the components under each bundle; the after-picking voucher
             // shows the bundle line only.
             var showBundleComponents = VoucherShowsBundleComponents(trigger);
+            // Product.PrintName: the ORDER-ENTRY vouchers print it instead of the catalog name (the after-picking
+            // voucher is the customer's receipt and keeps the real names).
+            _voucherPrintNames = showBundleComponents && site.ProductPrintNameEnabled == true
+                ? await _productStorage.GetPrintNamesAsync(
+                    (orderForPrint.OrderItem ?? new List<OrderItem>()).Where(i => i.ProductId is > 0).Select(i => i.ProductId!.Value).Distinct().ToList(),
+                    cancelToken).ConfigureAwait(false)
+                : null;
             var payload = useA4
                 ? BuildAutoVoucherA4Html(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines, site.ShowOrderHandler == true, showBundleComponents)
                 : BuildAutoVoucherHtml(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines, site.ShowOrderHandler == true, showBundleComponents);
@@ -2464,6 +2480,15 @@ namespace George.Services
         /// email: customer + delivery boxes side by side, ordered-items table (product | qty | price),
         /// then subtotal / shipping / payment / grand-total rows. Delivered to the agent as an A4 PDF.
         /// </summary>
+        /// <summary>Print names for the voucher being built (set right before the builders run; null = catalog names).</summary>
+        private Dictionary<int, string>? _voucherPrintNames;
+
+        /// <summary>The name a voucher prints for a line: Product.PrintName on entry vouchers, else the line's own name.</summary>
+        private string VoucherLineName(OrderItem it) =>
+            it.ProductId is > 0 && _voucherPrintNames != null && _voucherPrintNames.TryGetValue(it.ProductId.Value, out var printName)
+                ? printName
+                : OrderItemLineDisplay.GetOrderItemProductName(it);
+
         private string BuildAutoVoucherA4Html(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false, bool showHandler = false, bool showBundleComponents = true)
         {
             // Bundle children are never standalone voucher lines (spec §8): they render indented under their parent
@@ -2528,7 +2553,7 @@ namespace George.Services
             var rows = new StringBuilder();
             foreach (var it in items)
             {
-                var title = EscapeHtml(OrderItemLineDisplay.GetOrderItemProductName(it));
+                var title = EscapeHtml(VoucherLineName(it));
                 var qtyStr = EscapeHtml(OrderItemLineDisplay.FormatOrderItemQuantityBadge(it));
                 var lineAmt = GetVoucherPickedLineAmount(it) ?? OrderedLineGrossForVoucher(it);
 
@@ -2660,7 +2685,11 @@ namespace George.Services
                 : (isShipping ? order.DeliveryTime : order.PickupTime);
             var newVoucher = string.Equals(order.Status, "New", StringComparison.OrdinalIgnoreCase);
             var pickingVoucher = string.Equals(order.Status, "InTreatment", StringComparison.OrdinalIgnoreCase);
-            var showTopQr = newVoucher || pickingVoucher;
+            // The after-picking voucher (the only trigger that hides bundle components) always carries its barcode at
+            // the BOTTOM: a cash order is still "InTreatment" when it prints, a credit order already "Ready" - the
+            // barcode used to jump to the top for cash only.
+            var afterPickingVoucher = !showBundleComponents;
+            var showTopQr = (newVoucher || pickingVoucher) && !afterPickingVoucher;
             var showBottomQr = !showTopQr;
             var orderNotes = CombineOrderLevelNotes(order, customerProfileNote);
             var grandTotal = ComputeVoucherGrandTotal(order);
@@ -2788,12 +2817,13 @@ namespace George.Services
             var attrOpts = new OrderItemAttributeDisplayOptions { OmitOrderLineSizeLabel = true, HideWeightDetails = hideUnitWeight, UseStructuredLineDisplay = useStructuredLines };
             foreach (var it in items)
             {
-                var title = EscapeHtml(OrderItemLineDisplay.GetOrderItemProductName(it));
+                var title = EscapeHtml(VoucherLineName(it));
                 var qtyStr = EscapeHtml(OrderItemLineDisplay.FormatOrderItemQuantityBadge(it));
                 sb.Append("  <div style=\"display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px dashed #000;\">");
-                sb.Append($"<div style=\"flex-shrink:0;white-space:nowrap;padding-top:2px;text-align:right;font-size:17px;font-weight:900;line-height:22px;\">{qtyStr}</div>");
+                // Quantity and title share size / line-height and start on the same line (they used to sit 3px apart).
+                sb.Append($"<div style=\"flex-shrink:0;white-space:nowrap;padding-top:0;text-align:right;font-size:17px;font-weight:900;line-height:20px;\">{qtyStr}</div>");
                 sb.Append("<div style=\"flex:1;min-width:0;text-align:right;\">");
-                sb.Append($"<div style=\"font-size:17px;font-weight:700;line-height:19px;\">{title}</div>");
+                sb.Append($"<div style=\"font-size:17px;font-weight:700;line-height:20px;\">{title}</div>");
                 foreach (var seg in OrderItemLineDisplay.GetOrderItemAttributeSegments(it, attrOpts))
                 {
                     sb.Append($"<div style=\"padding-right:12px;font-size:{VoucherPrintHtml.ProductMeta}px;font-weight:400;line-height:{VoucherPrintHtml.ProductMetaLineHeight}px;\">• ");

@@ -92,6 +92,8 @@ namespace George.Services.Request
         public int? AccountId { get; set; }
         /// <summary>List sort order (ascending). When omitted on create, defaults to 0 in storage.</summary>
         public int? DisplayOrder { get; set; }
+        /// <summary>Name printed on the order-entry voucher instead of the catalog name; "" clears it, null keeps it.</summary>
+        public string? PrintName { get; set; }
         public string? SeoTitle { get; set; }
         public string? SeoDescription { get; set; }
 

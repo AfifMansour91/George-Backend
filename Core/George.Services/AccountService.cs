@@ -208,6 +208,9 @@ namespace George.Services
                 wizardTypeId = MapWizardTypeNameToId(req.WizardType);
             }
 
+            var caller = AuthUser.IsMaster ? null : await _userStorage.GetThinUserAsync(AuthUser.Id, cancelToken).ConfigureAwait(false);
+            var canSetModules = AuthUser.IsMaster || caller?.RoleId == (int)UserRole.Admin;
+
             var model = new Account
             {
                 Id = accountId,
@@ -233,8 +236,10 @@ namespace George.Services
                 // Update IsKosherShop and AllowWeighted
                 IsKosherShop = req.IsKosherShop ?? existingAccount.IsKosherShop,
                 AllowWeighted = req.AllowWeighted ?? existingAccount.AllowWeighted,
-                KioskEnabled = req.KioskEnabled ?? existingAccount.KioskEnabled,
-                BundlesEnabled = req.BundlesEnabled ?? existingAccount.BundlesEnabled,
+                // Module switches belong to the super admin. A shop user's save (e.g. the stock thresholds of "הגדרות חנות")
+                // used to carry the flags of a stale client copy and once switched the bundles module OFF.
+                KioskEnabled = canSetModules ? (req.KioskEnabled ?? existingAccount.KioskEnabled) : existingAccount.KioskEnabled,
+                BundlesEnabled = canSetModules ? (req.BundlesEnabled ?? existingAccount.BundlesEnabled) : existingAccount.BundlesEnabled,
                 // Address fields: use request value if provided, otherwise preserve existing
                 Address = req.Address ?? existingAccount.Address,
                 City = req.City ?? existingAccount.City,

@@ -25,11 +25,48 @@ public class ProductsReportBundlesTests
     };
 
     [Fact]
-    public void CountsTowardProductMetrics_OnlyPlainLines()
+    public void CountsTowardProductMetrics_PlainAndComponentLines_NotTheBundleItself()
     {
         Assert.True(ProductsReportService.CountsTowardProductMetrics(Plain(1, 1m, 10m)));
         Assert.False(ProductsReportService.CountsTowardProductMetrics(Parent(5, 10, 1m, 199m)));
-        Assert.False(ProductsReportService.CountsTowardProductMetrics(Child(5, 2293, 1m)));
+        Assert.True(ProductsReportService.CountsTowardProductMetrics(Child(5, 2293, 1m)));
+    }
+
+    [Fact]
+    public void ApplyBundleComponentShares_FixedBundle_SplitsByCatalogValue_SumsToParent()
+    {
+        var a = Child(100, 1, 1m); a.PricePerUnit = 100m;
+        var b = Child(100, 2, 2m); b.PricePerUnit = 25m;
+        var c = Child(100, 3, 1m); c.PricePerUnit = 49.99m;
+        var parent = Parent(100, 10, 1m, 180m);
+        var orders = new List<Order> { new() { Id = 1, OrderItem = new List<OrderItem> { parent, a, b, c } } };
+
+        ProductsReportService.ApplyBundleComponentShares(orders);
+
+        Assert.Equal(180m, a.TotalPrice + b.TotalPrice + c.TotalPrice);
+        Assert.Equal(90.00m, a.TotalPrice);   // 100 / 199.99 of 180
+        Assert.Equal(45.00m, b.TotalPrice);
+        Assert.Equal(180m, parent.TotalPrice); // the bundle's own money is untouched
+    }
+
+    [Fact]
+    public void ApplyBundleComponentShares_SavedShares_AreKept_NoPrices_EqualParts()
+    {
+        var a = Child(100, 1, 1m); a.TotalPrice = 120m;
+        var b = Child(100, 2, 1m); b.TotalPrice = 80m;
+        var x = Child(200, 1, 1m);
+        var y = Child(200, 2, 1m);
+        var orders = new List<Order>
+        {
+            new() { Id = 1, OrderItem = new List<OrderItem> { Parent(100, 10, 1m, 200m), a, b, Parent(200, 11, 1m, 99m), x, y } },
+        };
+
+        ProductsReportService.ApplyBundleComponentShares(orders);
+
+        Assert.Equal(120m, a.TotalPrice);
+        Assert.Equal(80m, b.TotalPrice);
+        Assert.Equal(49.50m, x.TotalPrice);
+        Assert.Equal(49.50m, y.TotalPrice);
     }
 
     [Fact]

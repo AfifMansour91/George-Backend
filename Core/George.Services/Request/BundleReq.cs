@@ -9,6 +9,8 @@ namespace George.Services.Request
         public int ProductId { get; set; }
         public int? ProductVariantId { get; set; }
         public decimal Surcharge { get; set; }
+        /// <summary>Own quantity per bundle in the alternative's unit; null / 0 = inherit the slot quantity.</summary>
+        public decimal? Qty { get; set; }
         public int? SortOrder { get; set; }
     }
 

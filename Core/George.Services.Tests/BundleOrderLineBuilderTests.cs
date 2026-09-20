@@ -198,6 +198,30 @@ public class BundleOrderLineBuilderTests
     }
 
     [Fact]
+    public void ApplyPickingRules_Reweigh_KeepsTheStoreCouponAndASwapDoesNotRepriceByItself()
+    {
+        // Store order: catalog contents 100 (2 kg × 30 + 1 kg × 40), the customer paid 90 after a 10% COUPON
+        // (the bundle itself has no discount). Weighing exactly what was ordered must give exactly 90 back.
+        var parent = new OrderItem { Id = 1, BundleProductId = 10, Quantity = 1m, PricePerUnit = 90m, TotalPrice = 90m };
+        var c1 = new OrderItem { Id = 2, ParentOrderItemId = 1, Quantity = 2m, OrderLineQuantityMode = "weight", UnitWeightGrams = 1000m, PricePerUnit = 30m, PickedQuantity = 2m, PickingUserConfirmed = true };
+        var c2 = new OrderItem { Id = 3, ParentOrderItemId = 1, Quantity = 1m, OrderLineQuantityMode = "weight", UnitWeightGrams = 1000m, PricePerUnit = 40m, PickedQuantity = 1m, PickingUserConfirmed = true };
+        BundleOrderLineBuilder.ApplyPickingRules(parent, new[] { c1, c2 }, "sum", true, "none", 0m);
+        Assert.Equal(90m, parent.TotalPrice);
+
+        // 10% more of the first component: only that share grows, still at the coupon's ratio (60 → 66, × 0.9).
+        c1.PickedQuantity = 2.2m;
+        BundleOrderLineBuilder.ApplyPickingRules(parent, new[] { c1, c2 }, "sum", true, "none", 0m);
+        Assert.Equal(95.4m, parent.TotalPrice);
+
+        // A dearer product swapped into slot 2 (surcharge 5 → the customer pays 95): ordered quantities = 95, not a catalog re-price.
+        var swapped = new OrderItem { Id = 1, BundleProductId = 10, Quantity = 1m, PricePerUnit = 95m, TotalPrice = 95m };
+        var s1 = new OrderItem { Id = 2, ParentOrderItemId = 1, Quantity = 2m, OrderLineQuantityMode = "weight", UnitWeightGrams = 1000m, PricePerUnit = 30m, PickedQuantity = 2m, PickingUserConfirmed = true };
+        var s2 = new OrderItem { Id = 3, ParentOrderItemId = 1, Quantity = 1m, OrderLineQuantityMode = "weight", UnitWeightGrams = 1000m, PricePerUnit = 80m, SwapSurcharge = 5m, SwappedFromProductId = 7, PickedQuantity = 1m, PickingUserConfirmed = true };
+        BundleOrderLineBuilder.ApplyPickingRules(swapped, new[] { s1, s2 }, "sum", true, "none", 0m);
+        Assert.Equal(95m, swapped.TotalPrice);
+    }
+
+    [Fact]
     public void ApplyPickingRules_SumWithoutReweigh_KeepsParentTotal()
     {
         var parent = new OrderItem { Id = 1, BundleProductId = 10, Quantity = 1m, PricePerUnit = 149m, TotalPrice = 149m };

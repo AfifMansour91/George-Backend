@@ -168,7 +168,13 @@ namespace George.Services
                 // A swap to a product measured differently (portions ↔ kg) re-expresses the slot quantity in the new
                 // unit by weight - the same rule as a swap during picking (BundleOrderLineBuilder.ConvertSwapQuantity).
                 var qtyPerBundle = slot.Qty;
-                if (isSwap)
+                // A listed alternative with its own quantity wins; otherwise the slot quantity, converted by weight.
+                var ownSwapQty = isSwap ? BundleOrderLineBuilder.FindConfiguredSwap(slot, productId, variantId)?.Qty : null;
+                if (ownSwapQty is > 0m)
+                {
+                    qtyPerBundle = slotIsWeight ? ownSwapQty.Value : Math.Max(1m, Math.Round(ownSwapQty.Value, 0, MidpointRounding.AwayFromZero));
+                }
+                else if (isSwap)
                 {
                     var configuredIsWeight = BundleOrderLineBuilder.IsWeightSlot(slot, slot.ComponentProduct);
                     if (configuredIsWeight != slotIsWeight)
@@ -419,6 +425,25 @@ namespace George.Services
                         swappedFrom = slot.ComponentProductId;
                     }
 
+                    // The store keeps a swapped slot in the ORIGINAL slot's unit (2 "units" of a kg product). George
+                    // measures a line by the product in it, so re-express the quantity by weight - the same rule as a
+                    // swap made in George (2 portions of 0.2 kg → 0.4 kg; 1 kg → 5 portions).
+                    decimal? actualInLineUnit = comp.ActualQty;
+                    if (swappedFrom.HasValue && compProduct != null && !string.IsNullOrEmpty(compProduct.SetupType?.Name))
+                    {
+                        var productIsWeight = string.Equals(compProduct.SetupType!.Name, "by_weight", StringComparison.OrdinalIgnoreCase);
+                        if (productIsWeight != isWeight)
+                        {
+                            var fromKg = isWeight ? null : (comp.UnitWeight is > 0m ? comp.UnitWeight
+                                : await ResolveUnitWeightKgAsync(swappedFrom.Value, null, cancelToken).ConfigureAwait(false));
+                            var toKg = productIsWeight ? null : await ResolveUnitWeightKgAsync(compProduct.Id, variant?.Id, cancelToken).ConfigureAwait(false);
+                            qtyPer = BundleOrderLineBuilder.ConvertSwapQuantity(qtyPer, isWeight, fromKg, productIsWeight, toKg);
+                            if (actualInLineUnit is > 0m)
+                                actualInLineUnit = BundleOrderLineBuilder.ConvertSwapQuantity(actualInLineUnit.Value, isWeight, fromKg, productIsWeight, toKg);
+                            isWeight = productIsWeight;
+                        }
+                    }
+
                     lineSlots.Add(new BundleLineSlot
                     {
                         ComponentId = slot?.Id,
@@ -438,7 +463,9 @@ namespace George.Services
                         Surcharge = BundlePricingEngine.Round2(comp.Surcharge ?? 0m),
                         // actualQty arrives in the component's own unit (grams possible) - store kg like Quantity.
                         PickedQuantity = comp.ActualQty is > 0m
-                            ? BundleOrderLineBuilder.NormalizeWooComponentQty(comp.ActualQty, comp.Unit ?? slot?.Unit, comp.Mode ?? slot?.Mode).Qty
+                            ? (actualInLineUnit != comp.ActualQty
+                                ? actualInLineUnit
+                                : BundleOrderLineBuilder.NormalizeWooComponentQty(comp.ActualQty, comp.Unit ?? slot?.Unit, comp.Mode ?? slot?.Mode).Qty)
                             : null,
                         WooProductId = comp.ProductId,
                         WooVariationId = comp.VariationId is > 0 ? comp.VariationId : null,
@@ -680,6 +707,11 @@ namespace George.Services
                 line.Quantity = isWeight ? BundlePricingEngine.Round4(req.Quantity.Value) : Math.Max(1m, Math.Round(req.Quantity.Value, 0, MidpointRounding.AwayFromZero));
             else if (slot != null && !swappedFrom.HasValue)
                 line.Quantity = BundlePricingEngine.Round4(slot.Qty * parent.Quantity);
+            else if (slot != null && BundleOrderLineBuilder.FindConfiguredSwap(slot, product.Id, variant?.Id)?.Qty is > 0m and var ownQty)
+                // A listed alternative with its own quantity (per bundle, in its unit).
+                line.Quantity = isWeight
+                    ? BundlePricingEngine.Round4(ownQty * parent.Quantity)
+                    : Math.Max(1m, Math.Round(ownQty * parent.Quantity, 0, MidpointRounding.AwayFromZero));
             else
                 line.Quantity = BundleOrderLineBuilder.ConvertSwapQuantity(
                     line.Quantity, wasWeight, wasWeight ? null : line.UnitWeightGrams / 1000m, isWeight, newUnitWeightKg);
@@ -733,34 +765,20 @@ namespace George.Services
                 _logger.LogWarning(ex, "Bundle swap: failed to resolve price / Woo ids for product {ProductId} (order {OrderId})", product.Id, orderId);
             }
 
-            // Parent: unit price from the engine (definition known), else adjust by the surcharge delta.
+            // Parent: the unit price the customer was charged moves only by the surcharge delta. Never re-price
+            // from the catalog here: an order from the store may carry a coupon / promotion inside the parent's
+            // price, and the engine would silently drop it (the contents' base never depends on what is swapped in).
             var children = BundleOrderLines.ChildrenOf(active, parent);
-            if (def != null)
-            {
-                var swaps = BundleOrderLineBuilder.SwapsFromChildren(children);
-                var prices = await _bundleService.ResolveComponentPricesAsync(def, order.SiteId, cancelToken).ConfigureAwait(false);
-                var extraKeys = swaps.Values
-                    .Select(s => (ProductId: s.ProductId, VariantId: s.VariantId))
-                    .Where(k => !prices.ContainsKey(k))
-                    .Distinct()
-                    .ToList();
-                if (extraKeys.Count > 0)
-                {
-                    var extra = await _bundleService.ResolvePricesAsync(extraKeys, order.SiteId, cancelToken).ConfigureAwait(false);
-                    prices.Merge(extra);
-                }
-                var pricing = BundlePricingEngine.Price(BundleService.BuildPricingInput(def, prices, parent.Quantity, swaps));
-                parent.PricePerUnit = pricing.UnitPrice;
-                parent.TotalPrice = pricing.LineTotal;
-                BundleOrderLineBuilder.ApplyPickingRules(
-                    parent, children, def.Config.PricingMode, def.Config.ReweighPrice, def.Config.DiscountType, def.Config.DiscountValue);
-            }
-            else
             {
                 var unit = Math.Max(0m, (parent.PricePerUnit ?? 0m) - oldSurcharge + surcharge);
                 parent.PricePerUnit = BundlePricingEngine.Round2(unit);
                 parent.TotalPrice = BundlePricingEngine.Round2(unit * parent.Quantity);
-                BundleOrderLineBuilder.ApplyPickingRules(parent, children, BundlePricingEngine.PricingModeFixed, false, null, 0m);
+                // Known definition: its own picking rules (sum + re-weigh re-splits / re-weighs); unknown bundle: fixed.
+                if (def != null)
+                    BundleOrderLineBuilder.ApplyPickingRules(
+                        parent, children, def.Config.PricingMode, def.Config.ReweighPrice, def.Config.DiscountType, def.Config.DiscountValue);
+                else
+                    BundleOrderLineBuilder.ApplyPickingRules(parent, children, BundlePricingEngine.PricingModeFixed, false, null, 0m);
             }
             parent.UpdatedDate = DateTime.UtcNow;
             await _orderStorage.PersistTrackedOrderTotalsAsync(order, cancelToken).ConfigureAwait(false);
@@ -868,6 +886,15 @@ namespace George.Services
                 var defs = bundleIds.Count > 0
                     ? await _bundleStorage.GetDefinitionsAsync(bundleIds, cancelToken).ConfigureAwait(false)
                     : new Dictionary<int, BundleDefinition>();
+                foreach (var res in list)
+                {
+                    foreach (var parent in res.Items.Where(i => i.IsBundleParent && i.BundleProductId is > 0))
+                    {
+                        if (defs.TryGetValue(parent.BundleProductId!.Value, out var parentDef))
+                            parent.BundleReweighPrice = BundlePricingEngine.IsSumMode(parentDef.Config.PricingMode) && parentDef.Config.ReweighPrice;
+                    }
+                }
+
                 foreach (var c in pickable)
                 {
                     var options = new List<OrderItemBundleSwapOptionRes>();
@@ -888,6 +915,7 @@ namespace George.Services
                                     ProductVariantId = s.SwapVariantId,
                                     Name = s.SwapProduct?.Name,
                                     Surcharge = s.Surcharge,
+                                    Qty = s.Qty,
                                 }));
                         }
                     }
@@ -910,10 +938,10 @@ namespace George.Services
             !string.Equals(trigger, "AfterPicking", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Component row text for vouchers: quantity badge + name (no price). "(במקום X)" is not known here.</summary>
-        private static string VoucherBundleComponentText(OrderItem child)
+        private string VoucherBundleComponentText(OrderItem child)
         {
             var qty = OrderItemLineDisplay.FormatOrderItemQuantityBadge(child);
-            var name = OrderItemLineDisplay.GetOrderItemProductName(child);
+            var name = VoucherLineName(child);
             return string.IsNullOrWhiteSpace(qty) ? name : $"{qty} {name}";
         }
     }

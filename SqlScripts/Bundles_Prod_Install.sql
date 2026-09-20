@@ -13,10 +13,14 @@
 --   1. SetupType bundle row            2. Account.BundlesEnabled
 --   3. Site bundle settings            4. ProductBundle* tables
 --   5. OrderItem bundle columns        6. ProductStatus draft row
+--   7. Product.PrintName               8. Site.ScanCompletesReadyOrder
+--   9. Site.ProductPrintNameEnabled
 --
 -- Spec: shop-manager/docs/wooCommerceEngines/BUNDLES_SYNC_SPEC.md
 -- Run on prod BEFORE deploying the backend that ships the bundles feature.
--- Then run Account_EnableBundlesForAll.sql to switch the module ON for the accounts that already exist.
+-- After this script the module is OFF for every account (Account.BundlesEnabled = 0). Switch it on per account from the
+-- super-admin accounts screen. OPTIONAL, only if wanted: Account_EnableBundlesForAll.sql switches it ON for ALL accounts
+-- and makes ON the DB default - do NOT run it when the rollout is account by account.
 -- =============================================================================
 
 SET XACT_ABORT ON;
@@ -65,12 +69,14 @@ GO
 
 -- Bundles (מארזים): account-level feature gate (pattern: Account.KioskEnabled).
 -- Spec: BUNDLES_SYNC_SPEC.md §1 / §3.4. Idempotent.
--- Default ON: the module is enabled for every new account (existing accounts: Account_EnableBundlesForAll.sql).
+-- Default OFF: adding the column leaves the module OFF for EVERY existing account (and for rows inserted outside the
+-- API). It is switched on per account by a super admin (חשבונות → עריכה → "מארזים"); to switch it on for everyone
+-- at once there is the separate, optional Account_EnableBundlesForAll.sql.
 
 IF COL_LENGTH(N'dbo.Account', N'BundlesEnabled') IS NULL
 BEGIN
     ALTER TABLE dbo.Account ADD
-        BundlesEnabled BIT NOT NULL CONSTRAINT DF_Account_BundlesEnabled DEFAULT (1);
+        BundlesEnabled BIT NOT NULL CONSTRAINT DF_Account_BundlesEnabled DEFAULT (0);
 END
 GO
 
@@ -179,6 +185,11 @@ BEGIN
 END
 GO
 
+-- An alternative may carry its OWN quantity per bundle (its unit); NULL = inherit the slot quantity.
+IF COL_LENGTH(N'dbo.ProductBundleComponentSwap', N'Qty') IS NULL
+    ALTER TABLE dbo.ProductBundleComponentSwap ADD Qty DECIMAL(18, 4) NULL;
+GO
+
 GO
 IF XACT_STATE() = 0 SET NOEXEC ON;  -- a prior step failed + rolled back; skip the rest
 GO
@@ -275,6 +286,47 @@ IF NOT EXISTS (SELECT 1 FROM dbo.ProductStatus WHERE Name = N'draft')
 BEGIN
     INSERT INTO dbo.ProductStatus (Name, IsDeleted) VALUES (N'draft', 0);
 END
+GO
+
+GO
+IF XACT_STATE() = 0 SET NOEXEC ON;  -- a prior step failed + rolled back; skip the rest
+GO
+
+-- =============================================================================
+-- SOURCE: Product_AddPrintName.sql
+-- =============================================================================
+
+-- Product.PrintName: optional name printed on the ORDER-ENTRY voucher instead of the catalog name
+-- (e.g. Arabic text for the pickers). NULL = the catalog name. Idempotent.
+IF COL_LENGTH(N'dbo.Product', N'PrintName') IS NULL
+    ALTER TABLE dbo.Product ADD PrintName NVARCHAR(300) NULL;
+GO
+
+GO
+IF XACT_STATE() = 0 SET NOEXEC ON;  -- a prior step failed + rolled back; skip the rest
+GO
+
+-- =============================================================================
+-- SOURCE: Site_AddScanCompletesReadyOrder.sql
+-- =============================================================================
+
+-- Site.ScanCompletesReadyOrder: scanning a READY order's voucher barcode completes the order instead of
+-- opening its window. NULL / 0 = open the window (the behaviour so far). Idempotent.
+IF COL_LENGTH(N'dbo.Site', N'ScanCompletesReadyOrder') IS NULL
+    ALTER TABLE dbo.Site ADD ScanCompletesReadyOrder BIT NULL;
+GO
+
+GO
+IF XACT_STATE() = 0 SET NOEXEC ON;  -- a prior step failed + rolled back; skip the rest
+GO
+
+-- =============================================================================
+-- SOURCE: Site_AddProductPrintNameEnabled.sql
+-- =============================================================================
+
+-- Site.ProductPrintNameEnabled: opt-in per site for Product.PrintName (hidden + ignored on prints while off).
+IF COL_LENGTH(N'dbo.Site', N'ProductPrintNameEnabled') IS NULL
+    ALTER TABLE dbo.Site ADD ProductPrintNameEnabled BIT NULL;
 GO
 
 GO

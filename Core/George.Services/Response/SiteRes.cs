@@ -84,6 +84,8 @@ namespace George.Services.Response
 
         /// <summary>When true (default), UI shows picking confirmation dialog after barcode scan.</summary>
         public bool? ConfirmPickingAfterScan { get; set; }
+        public bool? ScanCompletesReadyOrder { get; set; }
+        public bool? ProductPrintNameEnabled { get; set; }
 
         /// <summary>When true (default), show picking deviation in footer and archive.</summary>
         public bool? ShowPickingDeviation { get; set; }

@@ -2470,6 +2470,16 @@ namespace George.Services
                     if (!string.IsNullOrEmpty(siteOverride.Sku)) wooProduct["sku"] = siteOverride.Sku;
                 }
 
+                // Bundles: "הצגת הרכיבים בתיאור" - the components list is appended to the short description here.
+                // The plugin only writes it from its own wp-admin save (never over REST), and it REPLACES the
+                // excerpt; appending on our side keeps the manager's text and stays in sync with the definition.
+                if (isBundleProduct)
+                {
+                    var componentsHtml = await BuildBundleComponentsDescriptionHtmlAsync(product.Id, cancelToken).ConfigureAwait(false);
+                    if (!string.IsNullOrEmpty(componentsHtml))
+                        wooProduct["short_description"] = ((wooProduct["short_description"] as string) ?? "") + componentsHtml;
+                }
+
                 // menu_order is pushed only on Woo product CREATE (see dedicated PUT below). Updates must not
                 // touch sort - George DisplayOrder often diverges from Woo (defaults, stale import) and
                 // pushing on edit reshuffles the live catalog.

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using George.Common;
 using George.DB;
 using George.Services.Response;
@@ -35,6 +36,32 @@ public partial class OrderService
         await ApplyCustomerProfileNotesAsync(new[] { res }, new[] { order }, cancelToken).ConfigureAwait(false);
         // Bundles (spec §8): free-swap flag, swapped-out names and per-child swap options (single order reads).
         await ApplyBundleOrderResEnrichmentAsync(new[] { res }, new[] { order }, includeSwapOptions: true, cancelToken).ConfigureAwait(false);
+        await ApplyProductPrintNamesAsync(new[] { res }, new[] { order }, cancelToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Product.PrintName on each line (the order-entry voucher prints it instead of the title) - only for orders of a
+    /// site that switched the feature on (<c>Site.ProductPrintNameEnabled</c>). Never throws.
+    /// </summary>
+    private async Task ApplyProductPrintNamesAsync(IReadOnlyList<OrderRes> all, IReadOnlyList<Order> orders, CancellationToken cancelToken)
+    {
+        try
+        {
+            var enabledOrderIds = orders.Where(o => o.Site?.ProductPrintNameEnabled == true).Select(o => o.Id).ToHashSet();
+            if (enabledOrderIds.Count == 0) return;
+            var list = all.Where(r => enabledOrderIds.Contains(r.Id)).ToList();
+            var ids = list.SelectMany(r => r.Items).Where(i => i.ProductId is > 0).Select(i => i.ProductId!.Value).Distinct().ToList();
+            if (ids.Count == 0) return;
+            var names = await _productStorage.GetPrintNamesAsync(ids, cancelToken).ConfigureAwait(false);
+            if (names.Count == 0) return;
+            foreach (var item in list.SelectMany(r => r.Items))
+                if (item.ProductId is > 0 && names.TryGetValue(item.ProductId.Value, out var printName))
+                    item.ProductPrintName = printName;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Order enrichment: product print names failed; response returned without them.");
+        }
     }
 
     private async Task EnrichOrderResListAsync(
@@ -55,6 +82,7 @@ public partial class OrderService
         await ApplyCustomerProfileNotesAsync(list, orders, cancelToken).ConfigureAwait(false);
         // Bundles (spec §8): lists get the flag + swapped-out names; swap options only on single-order reads.
         await ApplyBundleOrderResEnrichmentAsync(list, orders, includeSwapOptions: false, cancelToken).ConfigureAwait(false);
+        await ApplyProductPrintNamesAsync(list, orders, cancelToken).ConfigureAwait(false);
     }
 
     /// <summary>Self-pickup: expose branch name from Site when Woo/manual order has no shippingStoreName.</summary>

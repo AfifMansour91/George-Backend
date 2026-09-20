@@ -210,6 +210,8 @@ namespace George.Data
             if (updated.HideUnpaidCreditOrdersInTreatment.HasValue) dbSite.HideUnpaidCreditOrdersInTreatment = updated.HideUnpaidCreditOrdersInTreatment;
             if (updated.AskBagsCountAtPickingFinish.HasValue) dbSite.AskBagsCountAtPickingFinish = updated.AskBagsCountAtPickingFinish;
             if (updated.ConfirmPickingAfterScan.HasValue) dbSite.ConfirmPickingAfterScan = updated.ConfirmPickingAfterScan;
+            if (updated.ScanCompletesReadyOrder.HasValue) dbSite.ScanCompletesReadyOrder = updated.ScanCompletesReadyOrder;
+            if (updated.ProductPrintNameEnabled.HasValue) dbSite.ProductPrintNameEnabled = updated.ProductPrintNameEnabled;
             if (updated.ShowPickingDeviation.HasValue) dbSite.ShowPickingDeviation = updated.ShowPickingDeviation;
             if (updated.ShowSkuInPicking.HasValue) dbSite.ShowSkuInPicking = updated.ShowSkuInPicking;
             if (updated.PickingSortByOrderLines.HasValue) dbSite.PickingSortByOrderLines = updated.PickingSortByOrderLines;

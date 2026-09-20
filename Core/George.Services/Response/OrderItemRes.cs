@@ -62,6 +62,9 @@ public class OrderItemRes
     public int? SwappedFromProductId { get; set; }
     /// <summary>Display name of <see cref="SwappedFromProductId"/> (filled by the orders wave).</summary>
     public string? SwappedFromProductName { get; set; }
+
+    /// <summary>Product.PrintName - printed on the order-entry voucher instead of the title (null = none).</summary>
+    public string? ProductPrintName { get; set; }
     /// <summary>Child line: swap surcharge per bundle.</summary>
     public decimal? SwapSurcharge { get; set; }
     /// <summary>WooCommerce order item id (payload <c>itemId</c>).</summary>
@@ -77,6 +80,12 @@ public class OrderItemRes
     public List<OrderItemBundleSwapOptionRes>? BundleSwapOptions { get; set; }
     /// <summary>The slot's "ניתן להחלפה" flag (single pickable order reads); null when the bundle has no definition in George.</summary>
     public bool? BundleSlotSwappable { get; set; }
+    /// <summary>
+    /// Bundle PARENT line (single pickable order reads): true when the bundle is priced by its components AND
+    /// re-weighed on picking - the picking screen then shows the bundle price following the weighed quantities
+    /// (same formula as the save, <c>BundleOrderLineBuilder.ApplyChildShares</c>).
+    /// </summary>
+    public bool? BundleReweighPrice { get; set; }
 }
 
 /// <summary>One configured swap of a bundle slot, as offered on the picking screen.</summary>
@@ -87,4 +96,6 @@ public class OrderItemBundleSwapOptionRes
     public string? Name { get; set; }
     /// <summary>Per bundle.</summary>
     public decimal Surcharge { get; set; }
+    /// <summary>The alternative's own quantity per bundle (its unit); null = the slot quantity converted by weight.</summary>
+    public decimal? Qty { get; set; }
 }

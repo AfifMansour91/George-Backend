@@ -114,6 +114,11 @@ namespace George.Services
                 .GetReportOrdersAsync(siteId, baselineFrom, baselineToEx, null, cancelToken)
                 .ConfigureAwait(false);
 
+            // Product statistics see a bundle (מארז) through its components: each component line gets its share of the
+            // bundle's money, and the bundle line itself feeds only the bundles view - the money is counted once.
+            ApplyBundleComponentShares(currentOrders);
+            ApplyBundleComponentShares(baselineOrders);
+
             var productIds = currentOrders.SelectMany(o => o.OrderItem ?? Enumerable.Empty<OrderItem>())
                 .Concat(baselineOrders.SelectMany(o => o.OrderItem ?? Enumerable.Empty<OrderItem>()))
                 .Select(i => i.ProductId ?? 0)
@@ -237,11 +242,47 @@ namespace George.Services
         // ─── Bundles (מארזים) - BUNDLES_SYNC_SPEC.md §8 ─────────────────────────────
 
         /// <summary>
-        /// Only plain lines feed the product metrics: a bundle parent is the bundle itself and its child
-        /// lines are the components - a product sold inside a bundle is counted once, as the bundle,
-        /// in <see cref="ProductsReportRes.Bundles"/>.
+        /// Plain lines and bundle COMPONENT lines feed the product metrics ("3 products sold" for a bundle of three);
+        /// the bundle parent is the bundle itself and is reported in <see cref="ProductsReportRes.Bundles"/>.
+        /// Component money = its share of the parent (see <see cref="ApplyBundleComponentShares"/>).
         /// </summary>
-        public static bool CountsTowardProductMetrics(OrderItem line) => BundleOrderLines.IsPlainLine(line);
+        public static bool CountsTowardProductMetrics(OrderItem line) => !BundleOrderLines.IsBundleParent(line);
+
+        /// <summary>
+        /// Writes each bundle component line's share of its parent's money into the (untracked, report-local) line:
+        /// weights = the saved shares when every component has one (sum mode), else catalog value (price × quantity),
+        /// else equal parts; the shares always add up to the parent's money exactly.
+        /// </summary>
+        public static void ApplyBundleComponentShares(IEnumerable<Order> orders)
+        {
+            foreach (var o in orders)
+            {
+                var lines = (o.OrderItem ?? Enumerable.Empty<OrderItem>()).Where(l => !l.IsDeleted).ToList();
+                foreach (var parent in lines.Where(BundleOrderLines.IsBundleParent))
+                {
+                    var children = BundleOrderLines.ChildrenOf(lines, parent);
+                    if (children.Count == 0) continue;
+                    var money = Math.Max(0m, LineMerchandise(parent));
+                    var weights = children.All(c => c.TotalPrice is > 0m)
+                        ? children.Select(c => c.TotalPrice!.Value).ToList()
+                        : children.Select(c => Math.Max(0m, (c.PricePerUnit ?? 0m) * c.Quantity)).ToList();
+                    var weightSum = weights.Sum();
+                    if (weightSum <= 0m)
+                    {
+                        weights = children.Select(_ => 1m).ToList();
+                        weightSum = children.Count;
+                    }
+
+                    var left = money;
+                    for (var i = 0; i < children.Count; i++)
+                    {
+                        var share = i == children.Count - 1 ? left : Round2(money * weights[i] / weightSum);
+                        children[i].TotalPrice = share;
+                        left -= share;
+                    }
+                }
+            }
+        }
 
         /// <summary>
         /// Bundle sales from the parent lines: orders (distinct), units (Σ parent quantity) and revenue
@@ -289,6 +330,35 @@ namespace George.Services
                     allOrderIds.Add(o.Id);
                     agg.Units += line.Quantity;
                     agg.Revenue += Math.Max(0m, merch);
+
+                    foreach (var child in BundleOrderLines.ChildrenOf(o.OrderItem!, line))
+                    {
+                        var cid = child.ProductId ?? 0;
+                        if (cid <= 0) continue;
+                        products.TryGetValue(cid, out var cp);
+                        if (!agg.Components.TryGetValue(cid, out var comp))
+                        {
+                            comp = new BundleComponentAgg
+                            {
+                                Name = !string.IsNullOrWhiteSpace(cp?.Name) ? cp!.Name! : (child.Title ?? $"#{cid}").Trim(),
+                            };
+                            agg.Components[cid] = comp;
+                        }
+
+                        if (cp != null)
+                        {
+                            var (kg, units) = SplitLineQty(child, cp);
+                            comp.Kg += kg;
+                            comp.Units += units;
+                        }
+                        else if (string.Equals(child.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase))
+                            comp.Kg += child.PickedQuantity is > 0m ? child.PickedQuantity.Value : child.Quantity;
+                        else
+                            comp.Units += child.Quantity;
+
+                        // Set by ApplyBundleComponentShares; a caller that skipped it reports quantities only.
+                        comp.Revenue += Math.Max(0m, child.TotalPrice ?? 0m);
+                    }
                 }
             }
 
@@ -306,6 +376,18 @@ namespace George.Services
                     UnitsSold = Round2(kv.Value.Units),
                     Revenue = Round2(kv.Value.Revenue),
                     Share = totalRevenue > 0m ? Math.Round(kv.Value.Revenue / totalRevenue, 4, MidpointRounding.AwayFromZero) : 0m,
+                    Components = kv.Value.Components
+                        .OrderByDescending(c => c.Value.Revenue)
+                        .ThenBy(c => c.Value.Name, StringComparer.OrdinalIgnoreCase)
+                        .Select(c => new ProductsReportBundleComponentDto
+                        {
+                            ProductId = c.Key,
+                            Name = c.Value.Name,
+                            QuantityKg = Round2(c.Value.Kg),
+                            QuantityUnits = Round2(c.Value.Units),
+                            Revenue = Round2(c.Value.Revenue),
+                        })
+                        .ToList(),
                 })
                 .ToList();
 
@@ -326,6 +408,15 @@ namespace George.Services
             public decimal Units;
             public decimal Revenue;
             public readonly HashSet<int> OrderIds = new();
+            public readonly Dictionary<int, BundleComponentAgg> Components = new();
+        }
+
+        private sealed class BundleComponentAgg
+        {
+            public string Name = "";
+            public decimal Kg;
+            public decimal Units;
+            public decimal Revenue;
         }
 
         private static HashSet<int> ComputeSoldProductIdsForPeriod(
@@ -741,6 +832,9 @@ namespace George.Services
 
         private static decimal EffectiveLineUnits(OrderItem line)
         {
+            // Weighed pieces (units + per-unit weight) keep their picked quantity in KG - the piece count is the ordered one.
+            if (OrderItemStockConsumption.LinePickingStoresKg(line))
+                return line.LineUnit ?? line.Quantity;
             if (line.PickingUserConfirmed && line.PickedQuantity is > 0m &&
                 !string.Equals(line.OrderLineQuantityMode, "weight", StringComparison.OrdinalIgnoreCase))
                 return line.PickedQuantity.Value;
@@ -1055,7 +1149,8 @@ namespace George.Services
                 foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
                 {
                     if (line.ProductId is not > 0) continue;
-                    if (!CountsTowardProductMetrics(line)) continue;
+                    // The components of one bundle are "bought together" by definition - pairs come from plain lines only.
+                    if (!BundleOrderLines.IsPlainLine(line)) continue;
                     if (!products.TryGetValue(line.ProductId.Value, out var p)) continue;
                     if (!MatchesProductFilter(p, categoryId, supplierId, brandId, excludeCategoryIds)) continue;
                     var m = LineMerchandise(line);

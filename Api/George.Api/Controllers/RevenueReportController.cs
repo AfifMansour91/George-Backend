@@ -36,12 +36,13 @@ namespace George.Api.Controllers
             [FromQuery] string? statuses = null,
             [FromQuery] string? cities = null,
             [FromQuery] string? categoryIds = null,
+            [FromQuery] bool bundlesOnly = false,
             CancellationToken cancelToken = default)
         {
             return await SafeCallWithErrorCatchingAsync(() =>
                 _revenueReportService.GetReportAsync(
                     siteId, period, from, to, dateBasis, compare, search,
-                    channels, paymentMethods, statuses, cities, categoryIds, cancelToken));
+                    channels, paymentMethods, statuses, cities, categoryIds, bundlesOnly, cancelToken));
         }
 
         [ApiExplorerSettings(IgnoreApi = true)]

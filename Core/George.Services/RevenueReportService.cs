@@ -53,6 +53,7 @@ namespace George.Services
             string? statuses = null,
             string? cities = null,
             string? categoryIds = null,
+            bool bundlesOnly = false,
             CancellationToken cancelToken = default)
         {
             var response = new ApiResponse<RevenueReportRes>();
@@ -81,7 +82,7 @@ namespace George.Services
             var paymentFilter = ParseCsvKeys(paymentMethods);
             var statusFilter = ParseCsvKeys(statuses);
             var cityFilter = ParseCsvKeys(cities);
-            var categoryFilter = ParseIntCsv(categoryIds);
+            var categoryFilter = new RevenueLineFilter(ParseIntCsv(categoryIds), bundlesOnly);
 
             var currentAll = await _storage.GetOrdersInWindowAsync(siteId, fromUtc, toUtcExclusive, byCharge, cancelToken)
                 .ConfigureAwait(false);
@@ -328,7 +329,7 @@ namespace George.Services
             HashSet<string> payments,
             HashSet<string> statuses,
             HashSet<string> cities,
-            HashSet<int> categories,
+            RevenueLineFilter categories,
             Dictionary<int, Product>? products)
         {
             IEnumerable<Order> q = orders;
@@ -359,53 +360,69 @@ namespace George.Services
                 });
             }
 
-            if (categories.Count > 0)
-                q = q.Where(o => OrderMatchesCategories(o, products, categories));
+            if (!categories.IsEmpty)
+                q = q.Where(o => OrderMatchesCategories(o, products!, categories));
 
             return q.ToList();
         }
 
-        private static bool OrderMatchesCategories(Order o, Dictionary<int, Product> products, HashSet<int> categoryIds)
+        /// <summary>
+        /// The line filter of the report: selected categories and/or "bundles only" (מארזים). An order stays in the
+        /// report when one of its money lines matches, and its amounts are allocated by the matching share.
+        /// </summary>
+        public sealed class RevenueLineFilter
         {
-            foreach (var line in o.OrderItem ?? Enumerable.Empty<OrderItem>())
+            public RevenueLineFilter(HashSet<int> categoryIds, bool bundlesOnly)
             {
-                if (line.ProductId is not > 0 || !products.TryGetValue(line.ProductId.Value, out var p)) continue;
-                var cid = PrimaryCategoryId(p);
-                if (cid != null && categoryIds.Contains(cid.Value)) return true;
+                CategoryIds = categoryIds;
+                BundlesOnly = bundlesOnly;
             }
 
-            return false;
+            public HashSet<int> CategoryIds { get; }
+            public bool BundlesOnly { get; }
+            public bool IsEmpty => CategoryIds.Count == 0 && !BundlesOnly;
+
+            public bool Matches(OrderItem line, Dictionary<int, Product> products)
+            {
+                if (BundlesOnly && !BundleOrderLines.IsBundleParent(line)) return false;
+                if (CategoryIds.Count == 0) return true;
+                if (line.ProductId is not > 0 || !products.TryGetValue(line.ProductId.Value, out var p)) return false;
+                var cid = PrimaryCategoryId(p);
+                return cid != null && CategoryIds.Contains(cid.Value);
+            }
         }
 
+        /// <summary>
+        /// The lines that carry the order's money: plain lines and bundle parents. A bundle's component lines only
+        /// show how the parent's money splits - counting them too would weigh every bundle twice.
+        /// </summary>
+        private static IEnumerable<OrderItem> MoneyLines(Order o) =>
+            BundleOrderLines.WithoutChildren(o.OrderItem ?? Enumerable.Empty<OrderItem>());
+
+        private static bool OrderMatchesCategories(Order o, Dictionary<int, Product> products, RevenueLineFilter filter) =>
+            MoneyLines(o).Any(line => filter.Matches(line, products));
+
         /// <summary>Share of order merchandise belonging to selected categories (0..1).</summary>
-        private static decimal CategoryFilterShare(Order o, Dictionary<int, Product> products, HashSet<int> categoryIds)
+        public static decimal CategoryFilterShare(Order o, Dictionary<int, Product> products, RevenueLineFilter filter)
         {
-            if (categoryIds.Count == 0) return 1m;
-            var items = o.OrderItem ?? Enumerable.Empty<OrderItem>();
+            if (filter.IsEmpty) return 1m;
+            var items = MoneyLines(o).ToList();
             var totalMerch = items.Sum(LineMerch);
             if (totalMerch <= 0m) return 0m;
-            decimal matched = 0m;
-            foreach (var line in items)
-            {
-                if (line.ProductId is not > 0 || !products.TryGetValue(line.ProductId.Value, out var p)) continue;
-                var cid = PrimaryCategoryId(p);
-                if (cid != null && categoryIds.Contains(cid.Value))
-                    matched += LineMerch(line);
-            }
-
+            var matched = items.Where(line => filter.Matches(line, products)).Sum(LineMerch);
             return matched / totalMerch;
         }
 
-        private static decimal AllocatedNet(Order o, Dictionary<int, Product> products, HashSet<int> categoryIds, RefundAmountIndex refunds) =>
+        private static decimal AllocatedNet(Order o, Dictionary<int, Product> products, RevenueLineFilter categoryIds, RefundAmountIndex refunds) =>
             OrderNetContribution(o, refunds) * CategoryFilterShare(o, products, categoryIds);
 
-        private static decimal AllocatedCredit(Order o, Dictionary<int, Product> products, HashSet<int> categoryIds, RefundAmountIndex refunds) =>
+        private static decimal AllocatedCredit(Order o, Dictionary<int, Product> products, RevenueLineFilter categoryIds, RefundAmountIndex refunds) =>
             CreditAmount(o, refunds) * CategoryFilterShare(o, products, categoryIds);
 
-        private static decimal AllocatedCancellation(Order o, Dictionary<int, Product> products, HashSet<int> categoryIds) =>
+        private static decimal AllocatedCancellation(Order o, Dictionary<int, Product> products, RevenueLineFilter categoryIds) =>
             CancellationKpiAmount(o) * CategoryFilterShare(o, products, categoryIds);
 
-        private static decimal AllocatedDiscount(Order o, Dictionary<int, Product> products, HashSet<int> categoryIds) =>
+        private static decimal AllocatedDiscount(Order o, Dictionary<int, Product> products, RevenueLineFilter categoryIds) =>
             OrderDiscount(o) * CategoryFilterShare(o, products, categoryIds);
 
         private static RevenueReportKpisDto BuildKpis(
@@ -413,7 +430,7 @@ namespace George.Services
             List<Order> baseline,
             bool byCharge,
             Dictionary<int, Product> products,
-            HashSet<int> categoryIds,
+            RevenueLineFilter categoryIds,
             RefundAmountIndex refunds)
         {
             var net = current.Sum(o => AllocatedNet(o, products, categoryIds, refunds));
@@ -476,7 +493,7 @@ namespace George.Services
             string grouping,
             bool byCharge,
             Dictionary<int, Product> products,
-            HashSet<int> categoryIds,
+            RevenueLineFilter categoryIds,
             RefundAmountIndex refunds)
         {
             var buckets = new Dictionary<string, (string label, decimal income)>();
@@ -513,7 +530,7 @@ namespace George.Services
             string grouping,
             bool byCharge,
             Dictionary<int, Product> products,
-            HashSet<int> categoryIds,
+            RevenueLineFilter categoryIds,
             RefundAmountIndex refunds)
         {
             if (grouping != "daily")
@@ -591,7 +608,7 @@ namespace George.Services
         private static RevenueReportSegmentsDto BuildSegments(
             List<Order> orders,
             Dictionary<int, Product> products,
-            HashSet<int> categoryFilter,
+            RevenueLineFilter categoryFilter,
             RefundAmountIndex refunds)
         {
             var netTotal = orders.Sum(o => AllocatedNet(o, products, categoryFilter, refunds));
@@ -639,14 +656,15 @@ namespace George.Services
             {
                 var orderNet = OrderNetContribution(o, refunds);
                 if (orderNet <= 0) continue;
-                foreach (var line in o.OrderItem)
+                var moneyLines = MoneyLines(o).ToList();
+                var totalMerch = moneyLines.Sum(LineMerch);
+                foreach (var line in moneyLines)
                 {
                     if (line.ProductId is not > 0 || !products.TryGetValue(line.ProductId.Value, out var p)) continue;
                     var cid = PrimaryCategoryId(p);
                     if (cid == null) continue;
-                    if (categoryFilter.Count > 0 && !categoryFilter.Contains(cid.Value)) continue;
+                    if (!categoryFilter.Matches(line, products)) continue;
                     var merch = LineMerch(line);
-                    var totalMerch = o.OrderItem.Sum(LineMerch);
                     if (totalMerch <= 0) continue;
                     var part = orderNet * (merch / totalMerch);
                     var catName = p.ProductCategory?.FirstOrDefault(x => x.CategoryId == cid)?.Category?.Name ?? "";

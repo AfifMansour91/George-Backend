@@ -87,6 +87,10 @@ public partial class Product
     [StringLength(5)]
     public string? WeightUnit { get; set; }
 
+    /// <summary>Optional name printed on the order-entry voucher instead of <see cref="Name"/> (e.g. Arabic text).</summary>
+    [StringLength(300)]
+    public string? PrintName { get; set; }
+
     [StringLength(300)]
     public string? SeoTitle { get; set; }
 

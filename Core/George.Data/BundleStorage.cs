@@ -20,6 +20,8 @@ public sealed class BundleComponentSwapUpsert
     public int SwapProductId { get; set; }
     public int? SwapVariantId { get; set; }
     public decimal Surcharge { get; set; }
+    /// <summary>Own quantity per bundle in the alternative's unit; null = inherit the slot quantity.</summary>
+    public decimal? Qty { get; set; }
     public int SortOrder { get; set; }
 }
 
@@ -321,6 +323,7 @@ public class BundleStorage : StorageBase
                 swapRow.SwapProductId = sw.SwapProductId;
                 swapRow.SwapVariantId = sw.SwapVariantId;
                 swapRow.Surcharge = sw.Surcharge;
+                swapRow.Qty = sw.Qty is > 0m ? sw.Qty : null;
                 swapRow.SortOrder = swapSort++;
                 swapRow.IsDeleted = false;
                 if (swapRow.Id > 0) keptSwapIds.Add(swapRow.Id);

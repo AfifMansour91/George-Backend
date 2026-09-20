@@ -153,6 +153,8 @@ namespace George.Services
             if (req.PrintLabelsAfterPicking.HasValue) model.PrintLabelsAfterPicking = req.PrintLabelsAfterPicking;
             if (req.PrintCustomerLabelOnNewOrder.HasValue) model.PrintCustomerLabelOnNewOrder = req.PrintCustomerLabelOnNewOrder;
             if (req.HideUnpaidCreditOrdersInTreatment.HasValue) model.HideUnpaidCreditOrdersInTreatment = req.HideUnpaidCreditOrdersInTreatment;
+            if (req.ScanCompletesReadyOrder.HasValue) model.ScanCompletesReadyOrder = req.ScanCompletesReadyOrder;
+            if (req.ProductPrintNameEnabled.HasValue) model.ProductPrintNameEnabled = req.ProductPrintNameEnabled;
             model = await _siteStorage.UpdateSiteAsync(model, req.BusinessTypeIds, cancelToken).ConfigureAwait(false);
             if (model != null)
             {

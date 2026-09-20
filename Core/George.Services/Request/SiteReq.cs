@@ -98,6 +98,10 @@ namespace George.Services.Request
 
         /// <summary>When true (default), show picking confirmation dialog after barcode scan.</summary>
         public bool? ConfirmPickingAfterScan { get; set; }
+        /// <summary>Scanning a READY order's barcode completes it instead of opening its window.</summary>
+        public bool? ScanCompletesReadyOrder { get; set; }
+        /// <summary>Opt-in for the product print name (order-entry voucher).</summary>
+        public bool? ProductPrintNameEnabled { get; set; }
 
         /// <summary>When true (default), show picking deviation in footer and archive.</summary>
         public bool? ShowPickingDeviation { get; set; }

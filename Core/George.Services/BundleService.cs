@@ -174,6 +174,7 @@ public class BundleService : ServiceBase
             foreach (var s in c.Swaps ?? new List<ProductBundleSwapReq>())
             {
                 if (s.Surcharge < 0m) return "תוספת מחיר להחלפה חייבת להיות 0 ומעלה";
+                if (s.Qty is < 0m) return "כמות המוצר החלופי חייבת להיות גדולה מ-0";
                 err = CheckProduct(s.ProductId, s.ProductVariantId, isSwap: true);
                 if (err != null) return err;
             }
@@ -206,6 +207,7 @@ public class BundleService : ServiceBase
                         SwapProductId = y.s.ProductId,
                         SwapVariantId = y.s.ProductVariantId is > 0 ? y.s.ProductVariantId : null,
                         Surcharge = BundlePricingEngine.Round2(y.s.Surcharge),
+                        Qty = y.s.Qty is > 0m ? BundlePricingEngine.Round4(y.s.Qty.Value) : null,
                         SortOrder = y.s.SortOrder ?? y.j,
                     })
                     .ToList(),
@@ -298,6 +300,7 @@ public class BundleService : ServiceBase
                     ProductName = s.SwapProduct?.Name,
                     Sku = s.SwapVariant?.Sku ?? s.SwapProduct?.Sku,
                     Surcharge = s.Surcharge,
+                    Qty = s.Qty,
                     SortOrder = s.SortOrder,
                     ProductDeleted = s.SwapProduct == null || s.SwapProduct.IsDeleted,
                 }).ToList(),
