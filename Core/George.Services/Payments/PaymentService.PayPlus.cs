@@ -194,9 +194,12 @@ public partial class PaymentService
     }
 
     /// <summary>
-    /// Hosted-page line name: product + real option, and for weighed lines shown as one item the ordered
-    /// weight ("טסט - 500 גר'"). A unit-of-sale variant title ("ק\"ג" / "יחידה") is not an option and only
-    /// confused the customer ("טסט - ק״ג", quantity 1, for half a kilo - PEPE 14/9). Public for tests.
+    /// Hosted-page line name. For weighed lines shown as one item the ordered weight comes FIRST, then the
+    /// product, then the real option: "500 גר' - בקר טחון טרי - חלוקה למגשים: 2". The old order
+    /// ("בקר טחון טרי - 2 - 500 גר'") read as TWO packs of 500 g while "2" was the trays split (PEPE 21/9) -
+    /// so a bare numeric option also gets its attribute name (same rule as the order cards / voucher).
+    /// A unit-of-sale variant title ("ק\"ג" / "יחידה") is not an option and only confused the customer
+    /// ("טסט - ק״ג", quantity 1, for half a kilo - PEPE 14/9). Public for tests.
     /// </summary>
     public static string BuildPayPlusHostedLineName(OrderItem i, bool isWholeUnits)
     {
@@ -204,6 +207,13 @@ public partial class PaymentService
         var variant = (i.VariantTitle ?? "").Trim();
         if (variant.Length > 0 && OrderItemLineDisplay.IsGenericVariantTitle(variant))
             variant = "";
+        if (variant.Length > 0)
+        {
+            // "2" -> "חלוקה למגשים: 2" (each "|" piece on its own, the name comes from the line snapshot).
+            var pieces = variant.Split('|').Select(p => p.Trim()).Where(p => p.Length > 0).ToList();
+            variant = string.Join(" | ", OrderItemLineDisplay.PrefixNonSizeOptionName(pieces, i.LineDisplayJson));
+        }
+
         var parts = new List<string>();
         if (title.Length > 0) parts.Add(title);
         if (variant.Length > 0 && !string.Equals(variant, title, StringComparison.OrdinalIgnoreCase)) parts.Add(variant);
@@ -211,7 +221,7 @@ public partial class PaymentService
         {
             var qty = OrderItemLineDisplay.FormatOrderItemQuantityBadge(i).Trim();
             if (qty.Length > 0 && !parts.Any(p => p.Contains(qty, StringComparison.Ordinal)))
-                parts.Add(qty);
+                parts.Insert(0, qty);
         }
         var name = string.Join(" - ", parts).Trim();
         return name.Length > 0 ? name : "פריט";

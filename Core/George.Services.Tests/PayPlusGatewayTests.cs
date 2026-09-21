@@ -115,7 +115,28 @@ public class PayPlusGatewayTests
             TotalPrice = 2.50m,
         };
 
-        Assert.Equal("טסט - 500 גר'", PaymentService.BuildPayPlusHostedLineName(line, isWholeUnits: false));
+        // The ordered weight leads the name (PEPE 21/9) - see the trays test below.
+        Assert.Equal("500 גר' - טסט", PaymentService.BuildPayPlusHostedLineName(line, isWholeUnits: false));
+    }
+
+    // PEPE 21/9: "בקר טחון טרי - 2 - 500 גר'" read as two packs of 500 g; the "2" is the trays split.
+    [Fact]
+    public void BuildPayPlusHostedLineName_TraysVariation_WeightFirst_AndNumericOptionNamed()
+    {
+        var line = new George.DB.OrderItem
+        {
+            Title = "בקר טחון טרי",
+            VariantTitle = "2",
+            Quantity = 1m,
+            UnitWeightGrams = 500m,
+            SaleTotalWeight = "500 גר'",
+            OrderLineQuantityMode = "weight",
+            PricePerUnit = 79.90m,
+            TotalPrice = 39.95m,
+            LineDisplayJson = "{\"v\":1,\"kind\":\"by_weight\",\"sizeName\":\"2\",\"sizeOptionName\":\"חלוקה למגשים\",\"totalWeightGrams\":500}",
+        };
+
+        Assert.Equal("500 גר' - בקר טחון טרי - חלוקה למגשים: 2", PaymentService.BuildPayPlusHostedLineName(line, isWholeUnits: false));
     }
 
     [Fact]
