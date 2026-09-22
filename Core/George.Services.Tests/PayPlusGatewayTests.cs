@@ -119,6 +119,36 @@ public class PayPlusGatewayTests
         Assert.Equal("500 גר' - טסט", PaymentService.BuildPayPlusHostedLineName(line, isWholeUnits: false));
     }
 
+    // PEPE 21/9 (tester): the page showed "500 גר'" in the name with quantity 1 - a weight line now goes as
+    // quantity 0.5 × ₪/kg, and the name carries no weight (it is the quantity). Unit lines are unchanged.
+    [Fact]
+    public void BuildPayPlusHostedLineItems_WeightLine_QuantityIsKilograms_PriceIsPerKg()
+    {
+        var order = new George.DB.Order
+        {
+            OrderItem = new List<George.DB.OrderItem>
+            {
+                new()
+                {
+                    Title = "בקר טחון טרי", VariantTitle = "1", Quantity = 1m, UnitWeightGrams = 500m, SaleTotalWeight = "500 גר'",
+                    OrderLineQuantityMode = "weight", PricePerUnit = 79.90m, TotalPrice = 39.95m, SortOrder = 0,
+                    LineDisplayJson = "{\"v\":1,\"kind\":\"by_weight\",\"sizeName\":\"1\",\"sizeOptionName\":\"חלוקה למגשים\"}",
+                },
+                new() { Title = "סטייק אנטריקוט", VariantTitle = "עובי אצבע", Quantity = 2m, PricePerUnit = 60m, TotalPrice = 120m, SortOrder = 1 },
+            },
+        };
+
+        var items = PaymentService.BuildPayPlusHostedLineItems(order);
+
+        Assert.Equal(2, items.Count);
+        Assert.Equal("בקר טחון טרי - חלוקה למגשים: 1", items[0].Name);
+        Assert.Equal(0.5m, items[0].Quantity);
+        Assert.Equal(79.90m, items[0].Price);
+        Assert.Equal("סטייק אנטריקוט - עובי אצבע", items[1].Name);
+        Assert.Equal(2m, items[1].Quantity);
+        Assert.Equal(60m, items[1].Price);
+    }
+
     // PEPE 21/9: "בקר טחון טרי - 2 - 500 גר'" read as two packs of 500 g; the "2" is the trays split.
     [Fact]
     public void BuildPayPlusHostedLineName_TraysVariation_WeightFirst_AndNumericOptionNamed()

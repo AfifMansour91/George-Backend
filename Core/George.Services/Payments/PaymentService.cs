@@ -310,6 +310,17 @@ public partial class PaymentService : ServiceBase
         bool saveCard = true)
     {
         var session = await CreatePaymentSessionAsync(orderId, "sms", cancelToken, saveCard);
+        if (session.IsSuccessful && session.Data != null && session.Data.PaymentUrl == null)
+        {
+            // No link because the order is already authorized / captured (the customer paid the earlier SMS while
+            // staff were still on the new-order screen - PEPE 22/9). Not an error: say so, send nothing.
+            var paid = await _paymentStorage.GetOrderForPaymentAsync(orderId, cancelToken);
+            if (paid != null && paid.PaymentSettleStatus is PaymentSettleStatus.Authorized or PaymentSettleStatus.Captured)
+                return new ApiResponse<SendPaymentSmsRes>
+                {
+                    Data = new SendPaymentSmsRes { Sent = false, AlreadyPaid = true, PaymentSettleStatus = paid.PaymentSettleStatus },
+                };
+        }
         if (!session.IsSuccessful || session.Data?.PaymentUrl == null)
             return CreateResponse(new ApiResponse<SendPaymentSmsRes>(), StatusCode.InvalidRequest,
                 session.DisplayMessage ?? "Could not create payment link.");

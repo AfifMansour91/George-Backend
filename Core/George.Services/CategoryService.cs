@@ -176,6 +176,39 @@ namespace George.Services
             return response;
         }
 
+        /// <summary>
+        /// Drag and drop order of sibling categories (categories screen). Saved as Category.SortOrder - the order of
+        /// the categories everywhere in Giorgio (the kiosk / manual-order orders fall back to it when not set) - and
+        /// pushed to every WooCommerce store the categories live on as the category menu_order. The store push runs
+        /// in the background: a slow store must not hold the drag and drop.
+        /// </summary>
+        public async Task<IApiResponse<bool>> UpdateCategoryOrderAsync(UpdateCategoryOrderReq req, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<bool>();
+            if (req?.CategoryIds == null || req.CategoryIds.Count == 0)
+                return CreateResponse(response, StatusCode.InvalidRequest, "CategoryIds is required.");
+
+            // Account users reorder their own categories only; a super admin (no account) is not scoped.
+            int? accountId = null;
+            if (AuthUser.Id > 0)
+            {
+                var user = await _userStorage.GetUserAsync(AuthUser.Id, cancelToken).ConfigureAwait(false);
+                accountId = user?.AccountId;
+            }
+
+            var (updated, wooTargets) = await _categoryStorage
+                .UpdateCategoryOrderAsync(req.CategoryIds, accountId, AuthUser.Id > 0 ? AuthUser.Id : null, cancelToken)
+                .ConfigureAwait(false);
+            response.Data = updated > 0;
+
+            if (wooTargets.Count > 0)
+            {
+                var woo = _wooCommerceService;
+                _ = Task.Run(() => woo.PushCategoryMenuOrderAsync(wooTargets, CancellationToken.None));
+            }
+            return response;
+        }
+
         /// <param name="siteId">When provided, only removes the category from this site (unlinks CategorySite). Other sites keep the category. When null, soft-deletes the category for all sites.</param>
         public async Task<IApiResponse<bool>> DeleteCategoryAsync(int categoryId, int? siteId, CancellationToken cancelToken)
         {

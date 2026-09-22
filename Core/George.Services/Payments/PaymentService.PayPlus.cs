@@ -171,7 +171,7 @@ public partial class PaymentService
     }
 
     /// <summary>Order lines for the hosted page's order summary (every line, generic ones included).</summary>
-    private static List<HostedSessionLineItem> BuildPayPlusHostedLineItems(Order order)
+    public static List<HostedSessionLineItem> BuildPayPlusHostedLineItems(Order order)
     {
         var items = new List<HostedSessionLineItem>();
         // Bundle children are informational (the parent line carries the bundle money) - never list them.
@@ -183,10 +183,23 @@ public partial class PaymentService
             // total; whole-unit lines keep their piece count.
             var isWholeUnits = i.Quantity > 0 && i.Quantity == Math.Truncate(i.Quantity)
                 && i.PricePerUnit is > 0m && Math.Abs(Math.Round(i.Quantity * i.PricePerUnit.Value, 2) - Math.Round(lineTotal, 2)) < 0.01m;
-            var name = BuildPayPlusHostedLineName(i, isWholeUnits);
-            items.Add(isWholeUnits
-                ? new HostedSessionLineItem { Name = name, Quantity = i.Quantity, Price = i.PricePerUnit!.Value }
-                : new HostedSessionLineItem { Name = name, Quantity = 1, Price = Math.Round(lineTotal, 2) });
+            if (isWholeUnits)
+            {
+                items.Add(new HostedSessionLineItem { Name = BuildPayPlusHostedLineName(i, true), Quantity = i.Quantity, Price = i.PricePerUnit!.Value });
+                continue;
+            }
+            // A line ordered BY WEIGHT: quantity = the kilograms, price = the ₪/kg ("0.5 × 79.90 = 39.95") - the way
+            // the customer thinks of it. "quantity 1, 39.95" under a 500 g name read as one pack of some kind
+            // (PEPE 21/9). Only when kg × ₪/kg really is the line total (to the agora) - otherwise the line stays
+            // one item at its total, as before.
+            var kg = OrderedLineWeightKgForPayPlus(i);
+            if (kg is > 0m && i.PricePerUnit is > 0m
+                && Math.Abs(Math.Round(kg.Value * i.PricePerUnit.Value, 2) - Math.Round(lineTotal, 2)) < 0.01m)
+            {
+                items.Add(new HostedSessionLineItem { Name = BuildPayPlusHostedLineName(i, false, weightInQuantity: true), Quantity = kg.Value, Price = i.PricePerUnit.Value });
+                continue;
+            }
+            items.Add(new HostedSessionLineItem { Name = BuildPayPlusHostedLineName(i, false), Quantity = 1, Price = Math.Round(lineTotal, 2) });
         }
         if (order.ShippingCost is > 0m)
             items.Add(new HostedSessionLineItem { Name = "משלוח", Quantity = 1, Price = order.ShippingCost.Value, IsShipping = true });
@@ -201,7 +214,19 @@ public partial class PaymentService
     /// A unit-of-sale variant title ("ק\"ג" / "יחידה") is not an option and only confused the customer
     /// ("טסט - ק״ג", quantity 1, for half a kilo - PEPE 14/9). Public for tests.
     /// </summary>
-    public static string BuildPayPlusHostedLineName(OrderItem i, bool isWholeUnits)
+    /// <summary>Ordered weight (kg) of a line sold by weight - null for unit lines / lines without a usable weight.</summary>
+    public static decimal? OrderedLineWeightKgForPayPlus(OrderItem i)
+    {
+        var mode = (i.OrderLineQuantityMode ?? "").Trim().ToLowerInvariant();
+        if (mode != "weight") return null;
+        var kg = QuantityConcentrationReportService.OrderedLineWeightKg(i);
+        if (kg is > 0m) return Math.Round(kg.Value, 3);
+        // Woo weight lines: Quantity IS the kilograms.
+        return i.Quantity is > 0m and < 500m ? Math.Round(i.Quantity, 3) : null;
+    }
+
+    /// <param name="weightInQuantity">The kilograms go in the page's quantity column - the name must not repeat them.</param>
+    public static string BuildPayPlusHostedLineName(OrderItem i, bool isWholeUnits, bool weightInQuantity = false)
     {
         var title = (i.Title ?? "").Trim();
         var variant = (i.VariantTitle ?? "").Trim();
@@ -217,7 +242,7 @@ public partial class PaymentService
         var parts = new List<string>();
         if (title.Length > 0) parts.Add(title);
         if (variant.Length > 0 && !string.Equals(variant, title, StringComparison.OrdinalIgnoreCase)) parts.Add(variant);
-        if (!isWholeUnits)
+        if (!isWholeUnits && !weightInQuantity)
         {
             var qty = OrderItemLineDisplay.FormatOrderItemQuantityBadge(i).Trim();
             if (qty.Length > 0 && !parts.Any(p => p.Contains(qty, StringComparison.Ordinal)))

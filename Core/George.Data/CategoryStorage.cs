@@ -224,6 +224,75 @@ namespace George.Data
             return true;
         }
 
+        /// <summary>One store's share of a category reorder: the Woo category ids and the menu_order each should get.</summary>
+        public sealed class CategoryOrderWooTarget
+        {
+            public int SiteId { get; set; }
+            public string Url { get; set; } = "";
+            public string Key { get; set; } = "";
+            public string Secret { get; set; } = "";
+            public List<(int WooCategoryId, int MenuOrder)> Items { get; set; } = new();
+        }
+
+        /// <summary>
+        /// Drag and drop order (categories screen): SortOrder = position in <paramref name="categoryIds"/>.
+        /// <paramref name="accountId"/> scopes the write to the caller's account (null = super admin). Returns, per
+        /// WooCommerce-enabled site the categories live on, what to push as menu_order (per-site Woo id when the
+        /// category is shared across stores, else Category.WooCommerceId).
+        /// </summary>
+        public async Task<(int Updated, List<CategoryOrderWooTarget> WooTargets)> UpdateCategoryOrderAsync(
+            List<int> categoryIds, int? accountId, int? updateUserId, CancellationToken cancelToken)
+        {
+            var ids = categoryIds.Where(id => id > 0).Distinct().ToList();
+            if (ids.Count == 0) return (0, new List<CategoryOrderWooTarget>());
+
+            var categories = await _dbContext.Category
+                .Include(c => c.Site)
+                .Where(c => ids.Contains(c.Id) && !c.IsDeleted && (accountId == null || c.AccountId == accountId))
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+            var byId = categories.ToDictionary(c => c.Id);
+
+            var now = DateTime.UtcNow;
+            var position = 0;
+            var orderById = new Dictionary<int, int>();
+            foreach (var id in ids)
+            {
+                if (!byId.TryGetValue(id, out var category)) continue;
+                orderById[id] = position;
+                if (category.SortOrder != position)
+                {
+                    category.SortOrder = position;
+                    category.UpdatedDate = now;
+                    category.UpdateUserId = updateUserId;
+                }
+                position++;
+            }
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+
+            var perSiteWooIds = await _dbContext.CategorySiteWooId.AsNoTracking()
+                .Where(x => ids.Contains(x.CategoryId))
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+
+            var targets = new Dictionary<int, CategoryOrderWooTarget>();
+            foreach (var category in categories)
+            {
+                foreach (var site in category.Site.Where(s => !s.IsDeleted && s.WooCommerceEnabled == true
+                             && !string.IsNullOrEmpty(s.WooCommerceUrl) && !string.IsNullOrEmpty(s.WooCommerceKey) && !string.IsNullOrEmpty(s.WooCommerceSecret)))
+                {
+                    var wooId = perSiteWooIds.FirstOrDefault(x => x.CategoryId == category.Id && x.SiteId == site.Id)?.WooCommerceCategoryId
+                                ?? category.WooCommerceId;
+                    if (wooId is not > 0) continue;
+                    if (!targets.TryGetValue(site.Id, out var target))
+                    {
+                        target = new CategoryOrderWooTarget { SiteId = site.Id, Url = site.WooCommerceUrl!, Key = site.WooCommerceKey!, Secret = site.WooCommerceSecret! };
+                        targets[site.Id] = target;
+                    }
+                    target.Items.Add((wooId.Value, orderById[category.Id]));
+                }
+            }
+            return (orderById.Count, targets.Values.ToList());
+        }
+
         public async Task<bool> UpdateCategoryWooCommerceIdAsync(int categoryId, int? wooCommerceId, CancellationToken cancelToken)
         {
             var category = await _dbContext.Category

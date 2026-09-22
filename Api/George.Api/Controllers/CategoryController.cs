@@ -51,6 +51,13 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _categorySvc.UpdateCategoryAsync(categoryId, req, cancelToken));
         }
 
+        [HttpPut("Order")]
+        [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> UpdateCategoryOrderAsync([FromBody] UpdateCategoryOrderReq req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _categorySvc.UpdateCategoryOrderAsync(req, cancelToken));
+        }
+
         [HttpDelete("{categoryId:int}")]
         [ProducesResponseType(typeof(IApiResponse<bool>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> DeleteCategoryAsync([FromRoute] int categoryId, [FromQuery] int? siteId, CancellationToken cancelToken = default)

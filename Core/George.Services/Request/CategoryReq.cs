@@ -46,6 +46,12 @@ namespace George.Services.Request
     {
     }
 
+    /// <summary>Drag and drop order of sibling categories (categories screen): the list order becomes Category.SortOrder.</summary>
+    public class UpdateCategoryOrderReq
+    {
+        public List<int> CategoryIds { get; set; } = new();
+    }
+
     public class UpdateCategoryReq : CategoryReq
     {
         [Required]

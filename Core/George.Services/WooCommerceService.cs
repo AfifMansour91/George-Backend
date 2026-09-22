@@ -1195,6 +1195,10 @@ namespace George.Services
                     // attribute sync, not on the per-product save path, to keep product syncs light.
                     response.Data.ValueOrderNeedsCustomOrdering =
                         await PushAttributeTermOrderAsync(baseUrl, wooAttrId.Value, attribute, httpClient, cancelToken);
+                    // The product page shows the PRODUCT's own option list (swatch plugins ignore the term order), so
+                    // the products using this attribute are re-synced - in the background, they can be many.
+                    if (attribute.AttributeValue?.Any(av => av.DisplayOrder != null) == true)
+                        QueueResyncOfProductsUsingAttribute(siteId, attribute.Name);
 
                     await _attributeStorage.UpdateAttributeWooCommerceIdAsync(attributeId, wooAttrId.Value, cancelToken);
                     response.Data.AttributeId = attributeId;
@@ -1216,6 +1220,51 @@ namespace George.Services
                 _logger.LogError(ex, "WooCommerce sync attribute failed: AttributeId={AttributeId}, site {SiteId}, Error={Error}", attributeId, siteId, ex.Message);
                 return CreateResponse(response, StatusCode.UnknownError, ex.Message);
             }
+        }
+
+        /// <summary>Per (site, attribute): the generation of the last queued re-sync. A newer drag supersedes a waiting one.</summary>
+        private static readonly ConcurrentDictionary<string, long> AttributeResyncGeneration = new();
+        /// <summary>Wait after the last drag before the products are pushed - one re-sync per burst, not per drag (Zano: 29 products ≈ 4.5 min each).</summary>
+        private static readonly TimeSpan AttributeResyncDebounce = TimeSpan.FromSeconds(45);
+
+        /// <summary>
+        /// Attribute value order changed: push every product of the site that carries this option (their variation
+        /// menu_order follows the new order). Debounced: consecutive drags on the attributes screen each call this,
+        /// and only the last one within <see cref="AttributeResyncDebounce"/> runs. Fire-and-forget on its own
+        /// scope; failures are logged only.
+        /// </summary>
+        private void QueueResyncOfProductsUsingAttribute(int siteId, string attributeName)
+        {
+            var key = NormalizeOptionKey(attributeName);
+            var genKey = $"{siteId}:{key}";
+            var generation = AttributeResyncGeneration.AddOrUpdate(genKey, 1, (_, g) => g + 1);
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(AttributeResyncDebounce).ConfigureAwait(false);
+                    if (AttributeResyncGeneration.TryGetValue(genKey, out var latest) && latest != generation)
+                        return; // a later drag queued a newer re-sync - let that one run
+
+                    using var scope = _scopeFactory.CreateScope();
+                    var attributeStorage = scope.ServiceProvider.GetRequiredService<AttributeStorage>();
+                    var woo = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
+                    var links = await attributeStorage.GetSiteProductOptionValueLinksAsync(siteId, CancellationToken.None).ConfigureAwait(false);
+                    var productIds = links
+                        .Where(l => NormalizeOptionKey(l.OptionName) == key)
+                        .Select(l => l.ProductId)
+                        .Distinct()
+                        .ToList();
+                    if (productIds.Count == 0) return;
+                    _logger.LogInformation("WooCommerce attribute order: re-syncing {Count} products of site {SiteId} that use attribute {Name}", productIds.Count, siteId, attributeName);
+                    var res = await woo.SyncToWooCommerceAsync(new WooCommerceSyncReq { SiteId = siteId, ProductIds = productIds }, CancellationToken.None).ConfigureAwait(false);
+                    _logger.LogInformation("WooCommerce attribute order: product re-sync for attribute {Name} on site {SiteId} finished: {Message}", attributeName, siteId, res.Data?.Message ?? res.Description);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "WooCommerce attribute order: product re-sync for attribute {Name} on site {SiteId} failed", attributeName, siteId);
+                }
+            });
         }
 
         private static string SlugifyAttributeName(string name)
@@ -1526,19 +1575,34 @@ namespace George.Services
                     if (list.Count < perPage) break;
                 }
 
+                // Store term names can differ from ours in spacing / quote marks (imported "פילה על 2" vs "פילה על  2"),
+                // so match on the same normalized key the order-line display uses, not on the raw text.
                 var termByName = new Dictionary<string, WooCommerceAttributeTermListItem>(StringComparer.OrdinalIgnoreCase);
                 foreach (var term in terms.Where(t => t.id > 0 && !string.IsNullOrWhiteSpace(t.name)))
-                    termByName.TryAdd(System.Net.WebUtility.HtmlDecode(term.name!).Trim(), term);
+                    termByName.TryAdd(OrderItemLineDisplay.OrderItemAttrDedupeKey(System.Net.WebUtility.HtmlDecode(term.name!)), term);
 
                 var updates = new List<object>();
+                var unmatched = new List<string>();
                 for (var i = 0; i < orderedValues.Count; i++)
                 {
                     // 1-based: a term Woo never ordered reads as 0, so it can't tie with the first ordered value.
                     var menuOrder = i + 1;
-                    if (termByName.TryGetValue(orderedValues[i].Trim(), out var term) && term.menu_order != menuOrder)
+                    if (!termByName.TryGetValue(OrderItemLineDisplay.OrderItemAttrDedupeKey(orderedValues[i]), out var term))
+                    {
+                        unmatched.Add(orderedValues[i]);
+                        continue;
+                    }
+                    if (term.menu_order != menuOrder)
                         updates.Add(new { id = term.id, menu_order = menuOrder });
                 }
-                if (updates.Count == 0) return needsCustomOrdering;
+                if (unmatched.Count > 0)
+                    _logger.LogWarning("WooCommerce attribute order: {Count} value(s) of attribute {WooAttrId} ({Name}) have no matching store term and keep their store order: {Values}",
+                        unmatched.Count, wooAttrId, attribute.Name, string.Join(" | ", unmatched));
+                if (updates.Count == 0)
+                {
+                    _logger.LogInformation("WooCommerce attribute order: attribute {WooAttrId} ({Name}) already in order on the store ({Terms} store terms)", wooAttrId, attribute.Name, terms.Count);
+                    return needsCustomOrdering;
+                }
 
                 var batchUrl = $"{baseUrl}/products/attributes/{wooAttrId}/terms/batch";
                 foreach (var chunk in updates.Chunk(100))
@@ -1716,6 +1780,46 @@ namespace George.Services
             }
         }
 
+        /// <summary>
+        /// Pushes a category reorder (categories screen drag and drop) to the stores: one products/categories/batch
+        /// call per store with {id, menu_order}. HTTP only - no DB access - so it can run after the request that
+        /// triggered it has ended. Never throws: the order is cosmetic and already saved in Giorgio.
+        /// </summary>
+        public async Task PushCategoryMenuOrderAsync(List<CategoryStorage.CategoryOrderWooTarget> targets, CancellationToken cancelToken)
+        {
+            foreach (var target in targets)
+            {
+                try
+                {
+                    var baseUrl = $"{target.Url.TrimEnd('/')}/wp-json/wc/v3";
+                    var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{target.Key}:{target.Secret}"));
+                    using var httpClient = _httpClientFactory.CreateClient();
+                    httpClient.Timeout = TimeSpan.FromMinutes(4);
+                    httpClient.DefaultRequestHeaders.Clear();
+                    httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+
+                    foreach (var chunk in target.Items.Chunk(100))
+                    {
+                        var json = JsonSerializer.Serialize(new { update = chunk.Select(x => new { id = x.WooCategoryId, menu_order = x.MenuOrder }).ToList() });
+                        using var content = new StringContent(json, Encoding.UTF8, "application/json");
+                        using var response = await httpClient.PostAsync($"{baseUrl}/products/categories/batch", content, cancelToken).ConfigureAwait(false);
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            var body = await response.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+                            _logger.LogWarning("WooCommerce category order: batch failed for site {SiteId} ({Status}): {Body}",
+                                target.SiteId, (int)response.StatusCode, body.Length > 500 ? body[..500] : body);
+                            break;
+                        }
+                    }
+                    _logger.LogInformation("WooCommerce category order: pushed menu_order of {Count} categories to site {SiteId}", target.Items.Count, target.SiteId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "WooCommerce category order: push failed for site {SiteId}", target.SiteId);
+                }
+            }
+        }
+
         private async Task<int?> SyncCategoryAsync(
     string baseUrl,
     Category category,
@@ -1724,13 +1828,16 @@ namespace George.Services
     HttpClient httpClient,
     CancellationToken cancelToken)
         {
-            var wooCatData = new
+            // menu_order = the drag and drop order of the categories screen (Category.SortOrder). Sent only when the
+            // category was ordered in Giorgio - a category that never was keeps whatever order the store has.
+            var wooCatData = new Dictionary<string, object>
             {
-                name = category.Name,
-                description = category.Description ?? "",
-                parent = parentWooId ?? 0
-                // ?????????: slug = Slugify(category.Name)
+                ["name"] = category.Name,
+                ["description"] = category.Description ?? "",
+                ["parent"] = parentWooId ?? 0,
             };
+            if (category.SortOrder.HasValue)
+                wooCatData["menu_order"] = category.SortOrder.Value;
 
             // 1) When we already know THIS store's category id, update it; otherwise create (find-or-create by
             // name via term_exists below). knownWooId is the per-site id for network accounts, or the legacy
@@ -2615,6 +2722,19 @@ namespace George.Services
                 // For variable products, ensure global attributes exist and use their IDs + actual slugs from WooCommerce
                 var attributeMap = new Dictionary<string, int?>();   // attribute name -> WooCommerce ID
                 var attributeSlugMap = new Dictionary<string, string>(); // attribute name -> WooCommerce taxonomy slug (e.g. pa_xxx)
+                // Manual value order of the site's attributes (attributes screen). The product's own "options" list is
+                // what swatch plugins display in - the term menu_order alone left the product page in the old order
+                // (Zano 22/9) - so the options are sent in that order.
+                Dictionary<string, Dictionary<string, int>> attributeValueOrder;
+                try
+                {
+                    attributeValueOrder = await _attributeStorage.GetAttributeValueOrderMapAsync(siteId, null, cancelToken).ConfigureAwait(false);
+                }
+                catch (Exception orderEx)
+                {
+                    _logger.LogWarning(orderEx, "Woo sync: could not load attribute value order for site {SiteId}; product {ProductId} options keep their stored order", siteId, product.Id);
+                    attributeValueOrder = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
+                }
 
                 // External price management: price fields held out of the UPDATE payload; kept aside so the
                 // create-fallback below still seeds an initial price on a brand-new Woo product.
@@ -2713,7 +2833,7 @@ namespace George.Services
                                 // product page" or Woo also lists the option values in the Additional-information table.
                                 ["visible"] = false,
                                 ["variation"] = true,
-                                ["options"] = GetProductOptionValuesForWooSync(option, product)
+                                ["options"] = SortByAttributeValueOrder(GetProductOptionValuesForWooSync(option, product), option.Name, attributeValueOrder)
                             };
                             if (!string.IsNullOrEmpty(slug))
                                 dict["name"] = slug;
@@ -2890,7 +3010,7 @@ namespace George.Services
                 // Sync variations for variable products (never for bundles - they carry no variants)
                 if (wooCommerceId.HasValue && !isBundleProduct && product.ProductVariant != null && product.ProductVariant.Any(v => !v.IsDeleted))
                 {
-                    await SyncProductVariantsAsync(baseUrl, siteId, wooCommerceId.Value, product, attributeMap, attributeSlugMap, httpClient, cancelToken, siteOverride);
+                    await SyncProductVariantsAsync(baseUrl, siteId, wooCommerceId.Value, product, attributeMap, attributeSlugMap, httpClient, cancelToken, siteOverride, attributeValueOrder);
                 }
 
                 // Store label ACF flags via custom REST namespace ed/v1 (no WooCommerce Basic auth per site plugin).
@@ -3821,6 +3941,47 @@ namespace George.Services
         private static string FormatWooPrice(decimal? price) =>
             price.HasValue ? price.Value.ToString("F2", CultureInfo.InvariantCulture) : "0";
 
+        /// <summary>
+        /// Variation id -> menu_order (1-based). Ranked by the ORDERED attributes first (in product-option order),
+        /// then by the unordered ones: the store's picker lists the cut values regardless of the size, so an ordered
+        /// "סגנון חיתוך" must outrank an unordered "גודל" even when גודל comes first on the product (Zano 22/9:
+        /// "שלם/גדול" ranked 2 and "פילה על 2/בינוני" 5 - by size first). Null when no option is ordered (Woo keeps
+        /// whatever it has). Values the attribute doesn't know rank last, stable.
+        /// </summary>
+        private static Dictionary<int, int>? ResolveVariationMenuOrder(
+            Product product, List<ProductVariant> variants, Dictionary<string, Dictionary<string, int>>? attributeValueOrder)
+        {
+            if (attributeValueOrder == null || attributeValueOrder.Count == 0 || variants.Count < 2) return null;
+            var options = (product.ProductOption ?? new List<ProductOption>())
+                .Where(po => !po.IsDeleted && !string.IsNullOrWhiteSpace(po.Name))
+                .Select(po => (name: po.Name!.Trim(), order: attributeValueOrder.TryGetValue(po.Name!.Trim(), out var o) ? o : null))
+                .ToList();
+            if (options.Count == 0 || options.All(o => o.order == null)) return null;
+            options = options.OrderBy(o => o.order == null ? 1 : 0).ToList();
+
+            int Rank(ProductVariant v, (string name, Dictionary<string, int>? order) opt)
+            {
+                var value = v.ProductVariantOptionValue?
+                    .FirstOrDefault(ov => string.Equals(NormalizeOptionKey(ov.OptionName), NormalizeOptionKey(opt.name), StringComparison.OrdinalIgnoreCase))?
+                    .OptionValue?.Trim();
+                if (string.IsNullOrEmpty(value)) return int.MaxValue;
+                if (opt.order != null) return opt.order.TryGetValue(value, out var r) ? r : int.MaxValue - 1;
+                return 0; // unordered option: does not split the ranking
+            }
+
+            var ordered = variants
+                .Select((v, i) => (v, i, keys: options.Select(o => Rank(v, o)).ToArray()))
+                .OrderBy(x => x.keys, Comparer<int[]>.Create((a, b) =>
+                {
+                    for (var k = 0; k < a.Length; k++) { var c = a[k].CompareTo(b[k]); if (c != 0) return c; }
+                    return 0;
+                }))
+                .ThenBy(x => x.i)
+                .Select((x, pos) => (x.v.Id, pos + 1))
+                .ToList();
+            return ordered.ToDictionary(x => x.Id, x => x.Item2);
+        }
+
         private static readonly JsonSerializerOptions WooVariationJsonOptions = new()
         {
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
@@ -3835,9 +3996,15 @@ namespace George.Services
             Dictionary<string, string> attributeSlugMap,
             HttpClient httpClient,
             CancellationToken cancelToken,
-            SiteOverrideValues? siteOverride = null)
+            SiteOverrideValues? siteOverride = null,
+            Dictionary<string, Dictionary<string, int>>? attributeValueOrder = null)
         {
             var variants = product.ProductVariant?.Where(v => !v.IsDeleted).ToList() ?? new List<ProductVariant>();
+            // Variation menu_order = the attribute's manual value order (attributes screen). The store's variation
+            // picker / swatch plugin lists the cuts in VARIATION order (Zano 22/9: "פילה על 2" first because its two
+            // variations were the newest, menu_order 0), so the term order and the product's options list were not
+            // enough. Ranked by every option in product-option order; null when no attribute of the product is ordered.
+            var variationMenuOrder = ResolveVariationMenuOrder(product, variants, attributeValueOrder);
             // Weighable products normally omit WC native weight (OCWSU meta). Exception: "משקל לפי וריאציה" - OCWSU reads _ocwsu_get_weight_from_variation from each variation's weight field.
             var setupTypeNameForVariants = product.SetupType?.Name ?? "";
             var isWeightedBySetupForVariants = setupTypeNameForVariants is "by_weight" or "by_unit" or "by_unit_and_weight";
@@ -4029,6 +4196,7 @@ namespace George.Services
                     var wooVariation = new Dictionary<string, object>
                     {
                         ["sku"] = variantWooSku,
+                        ["menu_order"] = variationMenuOrder != null && variationMenuOrder.TryGetValue(variant.Id, out var vmo) ? vmo : 0,
                         ["manage_stock"] = manageVariationStockInWoo,
                         ["stock_status"] = variantStockStatus,
                         ["weight"] = variationWeightForWoo,
@@ -5416,6 +5584,18 @@ namespace George.Services
         /// if empty, derive distinct values from <see cref="ProductVariantOptionValue"/> so variable products
         /// still sync when variants exist but option-value rows were never persisted (API shows empty <c>values</c>).
         /// </summary>
+        /// <summary>Option values in the attribute's manual order; values the attribute doesn't know keep their place at the end. Stable: an unordered attribute returns the list as is.</summary>
+        private static List<string> SortByAttributeValueOrder(List<string> values, string? optionName, Dictionary<string, Dictionary<string, int>> orderByAttribute)
+        {
+            if (values.Count < 2 || string.IsNullOrWhiteSpace(optionName) || !orderByAttribute.TryGetValue(optionName.Trim(), out var order))
+                return values;
+            return values
+                .Select((v, i) => (v, i, rank: order.TryGetValue(v.Trim(), out var r) ? r : int.MaxValue))
+                .OrderBy(x => x.rank).ThenBy(x => x.i)
+                .Select(x => x.v)
+                .ToList();
+        }
+
         private static List<string> GetProductOptionValuesForWooSync(ProductOption option, Product product)
         {
             var fromOption = option.ProductOptionValue?

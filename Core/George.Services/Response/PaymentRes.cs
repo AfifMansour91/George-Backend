@@ -13,6 +13,12 @@ public class SendPaymentSmsRes
     public bool Sent { get; set; }
     public string? MaskedPhone { get; set; }
     public string? PaymentUrl { get; set; }
+    /// <summary>
+    /// The order's payment is already authorized / captured, so no link was created and nothing was sent
+    /// (staff re-clicked "send SMS" after the customer had paid) - the caller treats the order as paid.
+    /// </summary>
+    public bool AlreadyPaid { get; set; }
+    public string? PaymentSettleStatus { get; set; }
 }
 
 public class FinalizePickingPaymentRes
