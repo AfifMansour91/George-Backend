@@ -1249,27 +1249,31 @@ public partial class PaymentService : ServiceBase
         if (creds == null)
             return CreateResponse(response, StatusCode.InvalidRequest, "Payment gateway not configured.");
 
-        var orderTotalForPayPlus = order.Total ?? 0m;
-        var amountForPayPlus = req.Amount ?? orderTotalForPayPlus;
-        if (creds.ProviderId == PaymentGatewayProviderId.PayPlus)
+        // A refund draws on what the gateway CHARGED, not on the order header: the two drift by an agora when
+        // picking re-saves the total from rounded lines after the capture (PEPE #20, 23/9: charged 384.85,
+        // header 384.86, PayPlus answered amount-bigger-that-original-transaction and the cancel left the
+        // customer unrefunded). Also ends the "refund the full total after a partial refund" double-credit.
+        var chargedAmount = await ResolveChargedAmountAsync(order, cancelToken);
+        var orderTotal = chargedAmount ?? order.Total ?? 0m;
+        var refundable = Math.Max(0m, orderTotal - (order.RefundedAmount ?? 0m));
+        var amount = req.Amount ?? refundable;
+        if (amount <= 0)
+            return CreateResponse(response, StatusCode.InvalidRequest, "Refund amount must be positive.");
+        if (orderTotal > 0 && amount > refundable)
         {
-            if (amountForPayPlus <= 0)
-                return CreateResponse(response, StatusCode.InvalidRequest, "Refund amount must be positive.");
-            if (orderTotalForPayPlus > 0 && amountForPayPlus > orderTotalForPayPlus)
-                return CreateResponse(response, StatusCode.InvalidRequest, "Refund amount cannot exceed order total.");
-            return await RefundOrderForPayPlusAsync(order, creds, amountForPayPlus, req.Reason, cancelToken);
+            // An explicit amount a few agorot above the charge is the same header-vs-charge drift - clamp it.
+            // Anything larger is a real over-refund request: refuse with the amount that CAN be refunded.
+            if (amount - refundable > 0.05m)
+                return CreateResponse(response, StatusCode.InvalidRequest,
+                    $"סכום הזיכוי ({amount:0.00} ₪) גבוה מהסכום שנותר לזיכוי בעסקה ({refundable:0.00} ₪).");
+            amount = refundable;
         }
+
+        if (creds.ProviderId == PaymentGatewayProviderId.PayPlus)
+            return await RefundOrderForPayPlusAsync(order, creds, amount, req.Reason, orderTotal, cancelToken);
 
         if (creds.ApiPasswordStoredButUnreadable)
             return CardcomApiPasswordUnreadableResponse(response);
-
-        var orderTotal = order.Total ?? 0m;
-        var amount = req.Amount ?? orderTotal;
-        if (amount <= 0)
-            return CreateResponse(response, StatusCode.InvalidRequest, "Refund amount must be positive.");
-
-        if (orderTotal > 0 && amount > orderTotal)
-            return CreateResponse(response, StatusCode.InvalidRequest, "Refund amount cannot exceed order total.");
 
         var originalTxId = order.GatewayPaymentTransactionId ?? order.PaymentReference;
         if (string.IsNullOrWhiteSpace(creds.ApiPassword) && string.IsNullOrWhiteSpace(originalTxId))
@@ -3204,6 +3208,60 @@ public partial class PaymentService : ServiceBase
         if (!int.TryParse(statusCode?.Trim(), out var code))
             return false;
         return CardcomGateway.IsCardcomTransactionResponseSuccess(code);
+    }
+
+    /// <summary>Event types whose <c>Amount</c> is money that actually left the card (never a hold or a document).</summary>
+    private static readonly string[] ChargeEventTypes = { "CaptureAuthorization", "ChargeToken", "ValidateCallback", "ValidateReturn", "Webhook" };
+
+    /// <summary>
+    /// What the gateway actually charged on this order - the ceiling for a refund. Read from the successful charge
+    /// event whose transaction id is the order's charge id (PayPlus ChargeByTransactionUID and Cardcom J5 both
+    /// capture under a NEW id - see [[cardcom-j5-capture-verification]]), else the last successful capture/token
+    /// charge, else Cardcom's verified amount. Null when there is no charge trail (manual "paid" marks, legacy
+    /// orders) - callers fall back to the order total as before.
+    /// </summary>
+    private async Task<decimal?> ResolveChargedAmountAsync(Order order, CancellationToken cancelToken)
+    {
+        List<OrderPaymentEvent> events;
+        try
+        {
+            events = await _paymentStorage.GetPaymentEventsAsync(order.Id, cancelToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "ResolveChargedAmount: could not read payment events for order {OrderId}.", order.Id);
+            events = new List<OrderPaymentEvent>();
+        }
+        return ResolveChargedAmountFromEvents(order, events);
+    }
+
+    /// <summary>Pure core of <see cref="ResolveChargedAmountAsync"/>; <paramref name="eventsNewestFirst"/> as the storage returns them.</summary>
+    public static decimal? ResolveChargedAmountFromEvents(Order order, IReadOnlyList<OrderPaymentEvent> eventsNewestFirst)
+    {
+        var charges = eventsNewestFirst
+            .Where(e => e.Amount is > 0m
+                && IsSuccessfulCardcomEventStatus(e.StatusCode)
+                && ChargeEventTypes.Contains(e.EventType, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        var chargeTxId = CoalesceNonEmpty(order.GatewayPaymentTransactionId, order.PaymentReference)?.Trim();
+        if (!string.IsNullOrWhiteSpace(chargeTxId))
+        {
+            var byTx = charges.FirstOrDefault(e =>
+                string.Equals(e.GatewayTransactionId?.Trim(), chargeTxId, StringComparison.OrdinalIgnoreCase));
+            if (byTx != null)
+                return Math.Round(byTx.Amount!.Value, 2, MidpointRounding.AwayFromZero);
+        }
+
+        // Hosted-page events (ValidateCallback/ValidateReturn) carry the HOLD amount on an auth-then-capture order,
+        // so without a transaction-id match only the capture/token events are trusted.
+        var capture = charges.FirstOrDefault(e =>
+            e.EventType.Equals("CaptureAuthorization", StringComparison.OrdinalIgnoreCase)
+            || e.EventType.Equals("ChargeToken", StringComparison.OrdinalIgnoreCase));
+        if (capture != null)
+            return Math.Round(capture.Amount!.Value, 2, MidpointRounding.AwayFromZero);
+
+        return order.GatewayVerifiedAmount is > 0m ? order.GatewayVerifiedAmount : null;
     }
 
     private static bool IsLikelyJ5AuthorizationEvent(string? rawJson)

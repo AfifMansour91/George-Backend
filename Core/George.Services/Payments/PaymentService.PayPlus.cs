@@ -392,6 +392,8 @@ public partial class PaymentService
             items.Add(new PayPlusDocumentProductLine { Description = "משלוח", Quantity = 1, UnitCost = order.ShippingCost.Value });
         if (productsOverride != null)
             items = productsOverride.ToList();
+        else
+            items = ReconcilePayPlusDocumentLines(items, paymentAmount ?? order.Total);
 
         var (recipientName, recipientTaxId) = InvoiceRecipient.Resolve(order);
         return new PayPlusTransactionDocument
@@ -414,6 +416,55 @@ public partial class PaymentService
             CardLast4 = order.PayPlusCardLast4,
             Installments = order.PayPlusSelectedInstallments is int n and > 1 and <= 36 ? n : 1,
         };
+    }
+
+    /// <summary>
+    /// Makes Σ lines equal the payment the document records - Invoice+ refuses the document otherwise
+    /// ("items-total-not-equal-to-calculated-total"; PEPE #20 23/9 lost its invoice over a 10% manual discount).
+    /// Coupon / manual / promotion discounts are not lines, so lines above the payment are lowered by a per-line
+    /// <c>discount_value</c> spread in proportion to each line's gross (the vendor WooCommerce plugin's own
+    /// invoice shape); the largest line absorbs the rounding remainder. Lines below the payment get one
+    /// "התאמת סכום" line, like the Cardcom document builder.
+    /// </summary>
+    public static List<PayPlusDocumentProductLine> ReconcilePayPlusDocumentLines(List<PayPlusDocumentProductLine> items, decimal? paymentAmount)
+    {
+        if (items.Count == 0 || paymentAmount is not > 0m) return items;
+        var target = Math.Round(paymentAmount.Value, 2, MidpointRounding.AwayFromZero);
+        var gross = items.Select(i => Math.Round(i.Quantity * i.UnitCost, 2, MidpointRounding.AwayFromZero)).ToList();
+        var grossSum = gross.Sum();
+        var diff = Math.Round(grossSum - target, 2, MidpointRounding.AwayFromZero);
+        if (diff == 0m) return items;
+
+        if (diff < 0m)
+        {
+            items.Add(new PayPlusDocumentProductLine { Description = "התאמת סכום", Quantity = 1, UnitCost = -diff });
+            return items;
+        }
+
+        if (grossSum <= 0m || diff >= grossSum) return items;
+        var discounts = gross.Select(g => Math.Round(diff * g / grossSum, 2, MidpointRounding.AwayFromZero)).ToList();
+        var remainder = diff - discounts.Sum();
+        if (remainder != 0m)
+        {
+            var largest = gross.IndexOf(gross.Max());
+            discounts[largest] += remainder;
+        }
+        var result = new List<PayPlusDocumentProductLine>(items.Count);
+        for (var idx = 0; idx < items.Count; idx++)
+        {
+            var i = items[idx];
+            var d = discounts[idx];
+            if (d < 0m || d > gross[idx]) d = Math.Clamp(d, 0m, gross[idx]);
+            result.Add(new PayPlusDocumentProductLine
+            {
+                Description = i.Description,
+                Quantity = i.Quantity,
+                UnitCost = i.UnitCost,
+                IsVatFree = i.IsVatFree,
+                DiscountAmount = d,
+            });
+        }
+        return result;
     }
 
     /// <summary>
@@ -591,6 +642,7 @@ public partial class PaymentService
         SitePaymentCredentials creds,
         decimal amount,
         string? reason,
+        decimal chargedTotal,
         CancellationToken cancelToken)
     {
         var response = new ApiResponse<RefundPaymentRes>();
@@ -621,7 +673,8 @@ public partial class PaymentService
         if (!tx.Success)
             return CreateResponse(response, StatusCode.InvalidRequest, tx.Description ?? "Refund failed.");
 
-        var orderTotal = order.Total ?? 0m;
+        // "Full" is measured against what was charged, not the header total (they can differ by an agora).
+        var orderTotal = chargedTotal > 0m ? chargedTotal : order.Total ?? 0m;
         var previousRefunded = order.RefundedAmount ?? 0m;
         var totalRefunded = previousRefunded + amount;
         order.RefundedAmount = totalRefunded;

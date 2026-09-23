@@ -20,12 +20,17 @@ internal static class PayPlusDocumentPayload
                 // Catalog prices are gross (Israel); say so per line rather than trusting the account default.
                 ["vat_type_code"] = p.IsVatFree ? "vat-type-exempt" : "vat-type-included",
             };
+            if (p.DiscountAmount > 0m)
+            {
+                line["discount_type"] = "amount";
+                line["discount_value"] = p.DiscountAmount;
+            }
             return line;
         }).ToList();
 
         // Invoice+ rejects a document without its total (PEPE 9/9: "missing-totalAmount-param"). The total is
         // the payment recorded when there is one (receipt-type docs), else the sum of the lines.
-        var linesTotal = Math.Round(doc.Products.Sum(p => p.UnitCost * p.Quantity), 2, MidpointRounding.AwayFromZero);
+        var linesTotal = Math.Round(doc.Products.Sum(p => p.NetTotal), 2, MidpointRounding.AwayFromZero);
         var totalAmount = doc.PaymentAmount is > 0m ? doc.PaymentAmount.Value : linesTotal;
 
         var customer = new Dictionary<string, object?>

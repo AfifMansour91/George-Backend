@@ -39,6 +39,14 @@ public sealed class PayPlusDocumentProductLine
     public decimal Quantity { get; init; }
     public decimal UnitCost { get; init; }
     public bool IsVatFree { get; init; }
+    /// <summary>
+    /// Line-level discount in currency (Invoice+ <c>discount_type=amount</c> / <c>discount_value</c>, the same
+    /// field the vendor WooCommerce plugin fills from subtotal − total). The line settles at
+    /// Quantity × UnitCost − DiscountAmount.
+    /// </summary>
+    public decimal DiscountAmount { get; init; }
+
+    public decimal NetTotal => Math.Round(Quantity * UnitCost, 2, MidpointRounding.AwayFromZero) - DiscountAmount;
 }
 
 public sealed class CreatePayPlusDocumentRequest
