@@ -362,6 +362,14 @@ public partial class Order
     public string? PayPlusCardBrand { get; set; }
 
     /// <summary>
+    /// Wallet the customer paid with, when the gateway said so: PayPlus <c>alternative_method_name</c>
+    /// ("apple-pay", "google-pay", "bit"). Null = a plain card (or an older order). The card brand/last4 stay
+    /// in their own columns - an Apple Pay payment still rides on a Mastercard.
+    /// </summary>
+    [StringLength(32)]
+    public string? PaymentWallet { get; set; }
+
+    /// <summary>
     /// Installments (תשלומים) the customer selected on the PayPlus hosted page at order creation. Honored by
     /// the post-picking capture. Null/1 = single payment.
     /// </summary>

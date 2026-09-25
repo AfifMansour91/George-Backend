@@ -40,6 +40,8 @@ public class UpdateSitePaymentSettingsReq
     public int? PayPlusMaxInstallments { get; set; }
     public string? PayPlusCssUrl { get; set; }
     public string? PayPlusLogoUrl { get; set; }
+    /// <summary>Hide the ת.ז (identification number) field on the PayPlus hosted page.</summary>
+    public bool? PayPlusHideIdentificationId { get; set; }
 
     /// <summary>
     /// Confirms a provider switch even though the site has orders with an open authorization hold under

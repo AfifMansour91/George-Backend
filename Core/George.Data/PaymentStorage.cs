@@ -370,6 +370,7 @@ public class PaymentStorage : StorageBase
         tracked.PayPlusPaymentJson = order.PayPlusPaymentJson;
         tracked.PayPlusCardLast4 = order.PayPlusCardLast4;
         tracked.PayPlusCardBrand = order.PayPlusCardBrand;
+        tracked.PaymentWallet = order.PaymentWallet;
         tracked.PayPlusDocumentUrl = order.PayPlusDocumentUrl;
         tracked.PayPlusRefundDocumentUrl = order.PayPlusRefundDocumentUrl;
         if (order.PayPlusSelectedInstallments != null)

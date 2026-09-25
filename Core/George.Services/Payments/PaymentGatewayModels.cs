@@ -24,6 +24,8 @@ public sealed class CreateHostedSessionRequest
     /// <summary>Max installments offered on the hosted page. Only honored for immediate charges - holds force 1.</summary>
     public int MaxInstallments { get; init; } = 1;
     public bool UseAuthorizationHold { get; init; } = true;
+    /// <summary>PayPlus: hide the ת.ז field on the hosted page (generateLink hide_identification_id). Cardcom ignores it.</summary>
+    public bool HideIdentificationId { get; init; }
     /// <summary>Manager MOTO: Cardcom Virtual Terminal iframe (card entry by staff).</summary>
     public bool UseVirtualTerminal { get; init; }
     public string? SuccessRedirectUrl { get; init; }
@@ -73,6 +75,8 @@ public sealed class CardcomCardDisplayFields
 {
     public string? Last4Digits { get; init; }
     public string? CardBrand { get; init; }
+    /// <summary>Wallet behind the card ("apple-pay" / "google-pay" / "bit") when the gateway reports one.</summary>
+    public string? Wallet { get; init; }
     public string? TokenExDate { get; init; }
     public string? CardExpirationMMYY { get; init; }
 
@@ -239,6 +243,8 @@ public sealed class SitePaymentCredentials
     /// </summary>
     public string? TerminalUid { get; init; }
     public string? CashierUid { get; init; }
+    /// <summary>PayPlus: site chose to hide the ת.ז field on the hosted page (extras "hideIdentificationId").</summary>
+    public bool HideIdentificationId { get; init; }
 
     /// <summary>
     /// Optional second Cardcom terminal (configured WITHOUT a CVV requirement) used ONLY for the actual charge

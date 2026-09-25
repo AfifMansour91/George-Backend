@@ -59,10 +59,16 @@ public partial class PaymentService
             InvoiceBrandUid = site.PayPlusInvoiceBrandUid,
             TerminalUid = ReadPayPlusExtra(site.PayPlusProviderExtrasJson, "terminalUid"),
             CashierUid = ReadPayPlusExtra(site.PayPlusProviderExtrasJson, "cashierUid"),
+            HideIdentificationId = ReadPayPlusHideIdentificationId(site.PayPlusProviderExtrasJson),
             SendInvoiceSmsAfterCapture = true,
             Currency = site.Currency,
         };
     }
+
+    private const string PayPlusHideIdentificationIdExtra = "hideIdentificationId";
+
+    private static bool ReadPayPlusHideIdentificationId(string? extrasJson) =>
+        string.Equals(ReadPayPlusExtra(extrasJson, PayPlusHideIdentificationIdExtra), "true", StringComparison.OrdinalIgnoreCase);
 
     private static string? ReadPayPlusExtra(string? extrasJson, string key)
     {
@@ -309,6 +315,7 @@ public partial class PaymentService
             SaveCard = saveCard,
             MaxInstallments = creds.MaxInstallments,
             UseAuthorizationHold = !chargeNow,
+            HideIdentificationId = creds.HideIdentificationId,
             SuccessRedirectUrl = BuildCustomerReturnUrl(order.Id, "success", channel, appOrigin),
             FailedRedirectUrl = BuildCustomerReturnUrl(order.Id, "failed", channel, appOrigin),
             WebHookUrl = $"{apiBase}/Webhooks/PayPlus",
@@ -1137,6 +1144,7 @@ public partial class PaymentService
         var display = _payPlus.ExtractCardDisplayFields(info.RawJson);
         order.PayPlusCardLast4 = CoalesceNonEmpty(display.Last4Digits, order.PayPlusCardLast4);
         order.PayPlusCardBrand = CoalesceNonEmpty(display.CardBrand, order.PayPlusCardBrand);
+        order.PaymentWallet = CoalesceNonEmpty(display.Wallet, order.PaymentWallet);
         order.PayPlusPaymentJson = info.RawJson ?? order.PayPlusPaymentJson;
 
         await TryRememberPayPlusTerminalAsync(creds, info.RawJson, cancelToken).ConfigureAwait(false);

@@ -143,6 +143,8 @@ public class OrderRes
     public string? PayPlusCardLast4 { get; set; }
     /// <summary>Card brand from PayPlus (e.g. Visa).</summary>
     public string? PayPlusCardBrand { get; set; }
+    /// <summary>"apple-pay" / "google-pay" / "bit" when the gateway reported a wallet; null for a plain card.</summary>
+    public string? PaymentWallet { get; set; }
 
     /// <summary>Public Wolt tracking page URL after dispatch.</summary>
     public string? WoltTrackingUrl { get; set; }

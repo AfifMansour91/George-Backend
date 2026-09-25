@@ -129,4 +129,5 @@ public class SitePaymentSettingsRes
     public int PayPlusMaxInstallments { get; set; } = 1;
     public string? PayPlusCssUrl { get; set; }
     public string? PayPlusLogoUrl { get; set; }
+    public bool PayPlusHideIdentificationId { get; set; }
 }

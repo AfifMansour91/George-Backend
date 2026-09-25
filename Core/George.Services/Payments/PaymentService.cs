@@ -1639,6 +1639,9 @@ public partial class PaymentService : ServiceBase
             site.PayPlusCssUrl = req.PayPlusCssUrl;
         if (req.PayPlusLogoUrl != null)
             site.PayPlusLogoUrl = req.PayPlusLogoUrl;
+        if (req.PayPlusHideIdentificationId.HasValue)
+            site.PayPlusProviderExtrasJson = MergePayPlusExtrasJson(site.PayPlusProviderExtrasJson,
+                new Dictionary<string, string> { [PayPlusHideIdentificationIdExtra] = req.PayPlusHideIdentificationId.Value ? "true" : "false" });
         if (req.CardcomTerminalNumber.HasValue)
             site.CardcomTerminalNumber = req.CardcomTerminalNumber;
         // Second (no-CVV) charge terminal: 0 or negative clears back to a single-terminal setup.
@@ -2807,6 +2810,7 @@ public partial class PaymentService : ServiceBase
         order.PayPlusTransactionUid = null;
         order.PayPlusCardLast4 = null;
         order.PayPlusCardBrand = null;
+        order.PaymentWallet = null;
         order.PayPlusSelectedInstallments = null;
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
     }
@@ -3524,6 +3528,7 @@ public partial class PaymentService : ServiceBase
             PayPlusMaxInstallments = site.PayPlusMaxInstallments,
             PayPlusCssUrl = site.PayPlusCssUrl,
             PayPlusLogoUrl = site.PayPlusLogoUrl,
+            PayPlusHideIdentificationId = ReadPayPlusHideIdentificationId(site.PayPlusProviderExtrasJson),
         };
 
     private static string MaskPhone(string phone)

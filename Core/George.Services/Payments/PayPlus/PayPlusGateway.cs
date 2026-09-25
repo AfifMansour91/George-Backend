@@ -101,6 +101,11 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
             ["refURL_callback"] = request.WebHookUrl,
             ["customer"] = customer,
         };
+        // The ת.ז field is a PayPlus page setting the merchant cannot always reach; the API can hide it
+        // ("Option to hide identification id field"). Sent only when the site asked - the acquirer may
+        // require the number on plain card-not-present charges.
+        if (request.HideIdentificationId)
+            body["hide_identification_id"] = true;
 
         // Installments apply only to immediate charges; holds are always single-payment (mirrors Cardcom).
         if (!request.UseAuthorizationHold && request.MaxInstallments > 1)
@@ -574,6 +579,8 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
 
         var last4 = GetDataString(json, "four_digits");
         var brand = GetDataString(json, "brand_name") ?? GetDataString(json, "clearing_name");
+        // "apple-pay" / "google-pay" / "bit" - PEPE pays mostly through Apple Pay (33 of 58 hosted payments by 23/9).
+        var wallet = NormalizeWalletName(GetDataString(json, "alternative_method_name"));
 
         // Transactions/View nests these under data[0].data.card_information.
         if ((last4 == null || brand == null)
@@ -586,8 +593,22 @@ public sealed class PayPlusGateway : IPaymentGatewayProvider
             brand ??= (TryGetStringProperty(card, "brand_name", out var b) ? b : null)
                 ?? (TryGetStringProperty(card, "clearing_name", out var c) ? c : null);
         }
+        if (wallet == null && TryResolveTransactionNodes(json, out var txNode, out _)
+            && txNode.ValueKind == JsonValueKind.Object
+            && TryGetStringProperty(txNode, "alternative_method_name", out var w))
+        {
+            wallet = NormalizeWalletName(w);
+        }
 
-        return new CardcomCardDisplayFields { Last4Digits = last4, CardBrand = brand };
+        return new CardcomCardDisplayFields { Last4Digits = last4, CardBrand = brand, Wallet = wallet };
+    }
+
+    /// <summary>PayPlus spells wallets "apple-pay" / "google-pay" / "bit"; anything else (multipass, valuecard…) is kept as-is, lower-cased.</summary>
+    public static string? NormalizeWalletName(string? raw)
+    {
+        var v = raw?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(v) || v == "null" || v == "credit-card") return null;
+        return v.Length > 32 ? v[..32] : v;
     }
 
     /// <summary>
