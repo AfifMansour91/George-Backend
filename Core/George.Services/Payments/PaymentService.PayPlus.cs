@@ -355,7 +355,8 @@ public partial class PaymentService
         string? uniqueIdentifier = null,
         bool? sendByEmail = null,
         decimal? paymentAmount = null,
-        IReadOnlyList<PayPlusDocumentProductLine>? productsOverride = null)
+        IReadOnlyList<PayPlusDocumentProductLine>? productsOverride = null,
+        PayPlusDiscountShape shape = PayPlusDiscountShape.PerLineDiscount)
     {
         // Same line discipline as the Cardcom document builder: picked quantity, and a unit price re-derived
         // from the charged line total when qty × unit disagrees with it (weighed lines, פחת), so the
@@ -393,7 +394,7 @@ public partial class PaymentService
         if (productsOverride != null)
             items = productsOverride.ToList();
         else
-            items = ReconcilePayPlusDocumentLines(items, paymentAmount ?? order.Total);
+            items = ReconcilePayPlusDocumentLines(items, paymentAmount ?? order.Total, shape);
 
         var (recipientName, recipientTaxId) = InvoiceRecipient.Resolve(order);
         return new PayPlusTransactionDocument
@@ -421,12 +422,17 @@ public partial class PaymentService
     /// <summary>
     /// Makes Σ lines equal the payment the document records - Invoice+ refuses the document otherwise
     /// ("items-total-not-equal-to-calculated-total"; PEPE #20 23/9 lost its invoice over a 10% manual discount).
-    /// Coupon / manual / promotion discounts are not lines, so lines above the payment are lowered by a per-line
-    /// <c>discount_value</c> spread in proportion to each line's gross (the vendor WooCommerce plugin's own
-    /// invoice shape); the largest line absorbs the rounding remainder. Lines below the payment get one
-    /// "התאמת סכום" line, like the Cardcom document builder.
+    /// Coupon / manual / promotion discounts are not lines, so lines above the payment are lowered according
+    /// to <paramref name="shape"/>: a per-line <c>discount_value</c> spread in proportion to each line's gross
+    /// (the vendor WooCommerce plugin's default shape; the largest line absorbs the rounding remainder), one
+    /// negative "הנחה" line (the vendor plugin's coupon-as-product shape, and the Cardcom document shape), or the
+    /// discount folded into rounded-down unit prices plus a positive remainder line. Lines below the payment
+    /// get one "התאמת סכום" line, like the Cardcom document builder.
     /// </summary>
-    public static List<PayPlusDocumentProductLine> ReconcilePayPlusDocumentLines(List<PayPlusDocumentProductLine> items, decimal? paymentAmount)
+    public static List<PayPlusDocumentProductLine> ReconcilePayPlusDocumentLines(
+        List<PayPlusDocumentProductLine> items,
+        decimal? paymentAmount,
+        PayPlusDiscountShape shape = PayPlusDiscountShape.PerLineDiscount)
     {
         if (items.Count == 0 || paymentAmount is not > 0m) return items;
         var target = Math.Round(paymentAmount.Value, 2, MidpointRounding.AwayFromZero);
@@ -442,6 +448,16 @@ public partial class PaymentService
         }
 
         if (grossSum <= 0m || diff >= grossSum) return items;
+
+        if (shape == PayPlusDiscountShape.DiscountLine)
+        {
+            var withDiscountLine = new List<PayPlusDocumentProductLine>(items)
+            {
+                new() { Description = "הנחה", Quantity = 1, UnitCost = -diff },
+            };
+            return withDiscountLine;
+        }
+
         var discounts = gross.Select(g => Math.Round(diff * g / grossSum, 2, MidpointRounding.AwayFromZero)).ToList();
         var remainder = diff - discounts.Sum();
         if (remainder != 0m)
@@ -449,22 +465,122 @@ public partial class PaymentService
             var largest = gross.IndexOf(gross.Max());
             discounts[largest] += remainder;
         }
-        var result = new List<PayPlusDocumentProductLine>(items.Count);
+        for (var idx = 0; idx < discounts.Count; idx++)
+            discounts[idx] = Math.Clamp(discounts[idx], 0m, gross[idx]);
+
+        var result = new List<PayPlusDocumentProductLine>(items.Count + 1);
+        if (shape == PayPlusDiscountShape.NetUnitPrices)
+        {
+            // Unit prices rounded DOWN so every line stays at or below its net share; the agorot left over
+            // become one positive line - the document then has nothing but plain positive lines, the one
+            // shape PayPlus has accepted on every production document so far.
+            for (var idx = 0; idx < items.Count; idx++)
+            {
+                var i = items[idx];
+                var net = gross[idx] - discounts[idx];
+                var unit = i.Quantity > 0m ? Math.Floor(net / i.Quantity * 100m) / 100m : 0m;
+                result.Add(new PayPlusDocumentProductLine
+                {
+                    Description = i.Description,
+                    Quantity = i.Quantity,
+                    UnitCost = unit,
+                    IsVatFree = i.IsVatFree,
+                });
+            }
+            var netSum = result.Sum(l => Math.Round(l.Quantity * l.UnitCost, 2, MidpointRounding.AwayFromZero));
+            var leftover = Math.Round(target - netSum, 2, MidpointRounding.AwayFromZero);
+            if (leftover > 0m)
+                result.Add(new PayPlusDocumentProductLine { Description = "התאמת סכום", Quantity = 1, UnitCost = leftover });
+            return result;
+        }
+
         for (var idx = 0; idx < items.Count; idx++)
         {
             var i = items[idx];
-            var d = discounts[idx];
-            if (d < 0m || d > gross[idx]) d = Math.Clamp(d, 0m, gross[idx]);
             result.Add(new PayPlusDocumentProductLine
             {
                 Description = i.Description,
                 Quantity = i.Quantity,
                 UnitCost = i.UnitCost,
                 IsVatFree = i.IsVatFree,
-                DiscountAmount = d,
+                DiscountAmount = discounts[idx],
             });
         }
         return result;
+    }
+
+    /// <summary>PayPlus's Invoice+ rejection slug for "Σ items ≠ totalAmount" (error_code 47).</summary>
+    public const string PayPlusItemsTotalMismatchError = "items-total-not-equal-to-calculated-total";
+
+    /// <summary>
+    /// Creates the tax-invoice/receipt for an order at PayPlus, trying each <see cref="PayPlusDiscountShape"/>
+    /// in turn when PayPlus answers <see cref="PayPlusItemsTotalMismatchError"/> and the next shape actually
+    /// changes the lines (a document with no discount is sent once). PEPE 24/9: every discounted order (5%
+    /// manual discount on weighed lines) lost its invoice to that answer while the charge itself succeeded -
+    /// 24 documents, the manual retry included. A rejected document creates nothing at PayPlus, and the
+    /// stable unique_identifier dedupes the accepted one, so retrying shapes cannot produce duplicates.
+    /// Every attempt is journaled as a CreateDocument event (shape noted), so production tells us which
+    /// shape PayPlus's calculation agrees with.
+    /// </summary>
+    private async Task<PaymentTransactionResult> CreatePayPlusInvoiceDocumentAsync(
+        Order order,
+        SitePaymentCredentials creds,
+        string? transactionUid,
+        string uniqueIdentifier,
+        bool? sendByEmail,
+        decimal paymentAmount,
+        CancellationToken cancelToken)
+    {
+        PaymentTransactionResult? last = null;
+        string? previousLines = null;
+        foreach (var shape in new[] { PayPlusDiscountShape.PerLineDiscount, PayPlusDiscountShape.DiscountLine, PayPlusDiscountShape.NetUnitPrices })
+        {
+            var document = BuildPayPlusDocumentForOrder(order, creds, "inv_tax_receipt", transactionUid,
+                uniqueIdentifier, sendByEmail, paymentAmount: paymentAmount, shape: shape);
+            var lines = string.Join("|", document.Products.Select(p => $"{p.Description}~{p.Quantity}~{p.UnitCost}~{p.DiscountAmount}"));
+            if (previousLines != null && lines == previousLines)
+                break; // this shape changes nothing - PayPlus already refused these exact lines
+            previousLines = lines;
+
+            var doc = await _payPlus.CreateDocumentAsync(creds, new CreatePayPlusDocumentRequest { Document = document }, cancelToken);
+            var shapeNote = shape == PayPlusDiscountShape.PerLineDiscount ? "" : $" [shape={shape}]";
+            await LogEventAsync(order.Id, "CreateDocument", doc.Success ? "0" : doc.ResponseCode.ToString(),
+                (doc.Success ? doc.DocumentNumber : doc.Description) + shapeNote, doc.TranzactionId ?? transactionUid, null, paymentAmount,
+                doc.RawJson, cancelToken, provider: PaymentGatewayProviderId.PayPlus);
+            last = doc;
+            if (doc.Success)
+                return doc;
+            if (!string.Equals(doc.Description?.Trim(), PayPlusItemsTotalMismatchError, StringComparison.OrdinalIgnoreCase))
+                return doc;
+            _logger.LogWarning(
+                "PayPlus refused the invoice lines for order {OrderId} (shape={Shape}) - trying the next discount shape.",
+                order.Id, shape);
+        }
+        return last ?? new PaymentTransactionResult { Success = false, ResponseCode = -1, Description = "PayPlus document creation failed." };
+    }
+
+    /// <summary>
+    /// Staff-facing Hebrew for an Invoice+ rejection. PayPlus answers with a bare slug
+    /// ("items-total-not-equal-to-calculated-total"), which the archive toast used to show verbatim; the slug is
+    /// kept in parentheses so support can still match it against the payment journal.
+    /// </summary>
+    public static string DescribePayPlusDocumentFailure(string? description)
+    {
+        var slug = (description ?? "").Trim();
+        if (slug.Length == 0)
+            return "הפקת החשבונית נכשלה ב-PayPlus.";
+        var hebrew = slug.ToLowerInvariant() switch
+        {
+            PayPlusItemsTotalMismatchError => "PayPlus דחתה את המסמך - סכום הפריטים אינו תואם לסכום התשלום",
+            "missing-payment-information" => "PayPlus דחתה את המסמך - חסרים פרטי התשלום",
+            "missing-totalamount-param" => "PayPlus דחתה את המסמך - חסר סכום כולל",
+            "brand-not-found" => "PayPlus לא מצאה את העסק המנפיק - יש להגדיר Invoice+ brand בהגדרות PayPlus",
+            "unique-identifier-exists" => "כבר קיימת חשבונית ב-PayPlus להזמנה זו - יש לאתר אותה ב-Invoice+",
+            _ => null,
+        };
+        return hebrew is null
+            ? $"הפקת החשבונית נכשלה ב-PayPlus: {slug}"
+            : $"הפקת החשבונית נכשלה: {hebrew} ({slug})";
     }
 
     /// <summary>
@@ -481,7 +597,23 @@ public partial class PaymentService
         var response = new ApiResponse<OrderInvoiceRes>();
 
         if (order.PaymentSettleStatus != PaymentSettleStatus.Captured)
-            return CreateResponse(response, StatusCode.InvalidRequest, "Order must be paid before issuing an invoice.");
+            return CreateResponse(response, StatusCode.InvalidRequest,
+                "לא ניתן להפיק חשבונית: ההזמנה עדיין לא חויבה. יש להשלים את החיוב קודם.");
+
+        // A flagged order ("חויב בפועל 0 ₪") is re-checked against the charge transaction first: the flag can
+        // be stale (a look at the checkout hold after George captured under its own transaction), and only a
+        // charge PayPlus actually confirms gets a receipt.
+        if (order.GatewayAmountMismatch == true)
+        {
+            await TryVerifyWooGatewayChargeAsync(order, cancelToken).ConfigureAwait(false);
+            if (order.GatewayAmountMismatch == true)
+            {
+                var verified = order.GatewayVerifiedAmount ?? 0m;
+                return CreateResponse(response, StatusCode.InvalidRequest, verified <= 0m
+                    ? "לא ניתן להפיק חשבונית: לפי PayPlus ההזמנה לא חויבה בפועל (נמצאה תפיסת מסגרת בלבד). יש לבדוק את החיוב לפני הפקת חשבונית."
+                    : $"לא ניתן להפיק חשבונית: PayPlus מדווחת על חיוב של {verified:0.##} ₪ לעומת סכום הזמנה של {order.Total:0.##} ₪. יש ליישב את ההפרש לפני הפקת חשבונית.");
+            }
+        }
 
         if (!string.IsNullOrWhiteSpace(order.InvoiceNumber) && !string.IsNullOrWhiteSpace(order.PayPlusDocumentUrl))
         {
@@ -502,19 +634,17 @@ public partial class PaymentService
                 "PayPlus secret key is required to issue invoices. Set it in Integrations → PayPlus settings.");
 
         var txId = CoalesceNonEmpty(order.GatewayPaymentTransactionId, order.PayPlusTransactionUid) ?? order.PaymentReference;
-        var doc = await _payPlus.CreateDocumentAsync(creds, new CreatePayPlusDocumentRequest
-        {
-            // Stable unique_identifier - Invoice+ dedupes on it, so retries never create a second invoice.
-            Document = BuildPayPlusDocumentForOrder(order, creds, "inv_tax_receipt", txId,
-                $"invoice-{order.Id}", sendByEmail, paymentAmount: order.Total),
-        }, cancelToken);
+        // The receipt records what was charged: the verified charge amount when PayPlus confirmed one (it can
+        // differ from the header total by an agora - client-side rounding), else the header total.
+        var paymentAmount = order.GatewayVerifiedAmount is > 0m ? order.GatewayVerifiedAmount.Value : order.Total ?? 0m;
+        if (paymentAmount <= 0m)
+            return CreateResponse(response, StatusCode.InvalidRequest, "לא ניתן להפיק חשבונית: סכום ההזמנה הוא 0.");
 
-        await LogEventAsync(order.Id, "CreateDocument", doc.Success ? "0" : doc.ResponseCode.ToString(),
-            doc.Success ? doc.DocumentNumber : doc.Description, doc.TranzactionId ?? txId, null, order.Total,
-            doc.RawJson, cancelToken, provider: PaymentGatewayProviderId.PayPlus);
+        // Stable unique_identifier - Invoice+ dedupes on it, so retries never create a second invoice.
+        var doc = await CreatePayPlusInvoiceDocumentAsync(order, creds, txId, $"invoice-{order.Id}", sendByEmail, paymentAmount, cancelToken);
 
         if (!doc.Success)
-            return CreateResponse(response, StatusCode.InvalidRequest, doc.Description ?? "Invoice creation failed.");
+            return CreateResponse(response, StatusCode.InvalidRequest, DescribePayPlusDocumentFailure(doc.Description));
 
         if (!string.IsNullOrWhiteSpace(doc.DocumentNumber))
             order.InvoiceNumber = doc.DocumentNumber;
@@ -594,14 +724,8 @@ public partial class PaymentService
 
         try
         {
-            var doc = await _payPlus.CreateDocumentAsync(creds, new CreatePayPlusDocumentRequest
-            {
-                Document = BuildPayPlusDocumentForOrder(order, creds, "inv_tax_receipt",
-                    chargeTxId, externalUniqTranId, paymentAmount: finalAmount),
-            }, cancelToken);
-            await LogEventAsync(order.Id, "CreateDocument", doc.Success ? "0" : doc.ResponseCode.ToString(),
-                doc.Success ? doc.DocumentNumber : doc.Description, doc.TranzactionId, null, finalAmount,
-                doc.RawJson, cancelToken, provider: PaymentGatewayProviderId.PayPlus);
+            var doc = await CreatePayPlusInvoiceDocumentAsync(order, creds, chargeTxId, externalUniqTranId,
+                sendByEmail: null, finalAmount, cancelToken);
             if (doc.Success)
             {
                 if (!string.IsNullOrWhiteSpace(doc.DocumentNumber))
@@ -877,7 +1001,7 @@ public partial class PaymentService
         }
 
         await TryRememberPayPlusTerminalAsync(creds, info.RawJson, cancelToken).ConfigureAwait(false);
-        await ApplyVerifiedPayPlusInfoAsync(order, info, transactionUid, "webhook capture", cancelToken).ConfigureAwait(false);
+        await ApplyVerifiedPayPlusInfoAsync(order, creds, info, transactionUid, "webhook capture", cancelToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -888,12 +1012,31 @@ public partial class PaymentService
     /// </summary>
     private async Task ApplyVerifiedPayPlusInfoAsync(
         Order order,
+        SitePaymentCredentials creds,
         CardcomTransactionInfoResult info,
         string? fallbackTransactionUid,
         string pushReason,
         CancellationToken cancelToken)
     {
         var txId = CoalesceNonEmpty(info.TranzactionId, fallbackTransactionUid);
+
+        // Settled order whose charge lives under its own transaction (ChargeByTransactionUID answers with a
+        // NEW uid): a later look at the checkout session / original approval - the return page polling
+        // again, staff reopening the order - still describes that approval (by now cancelled when the hold
+        // remainder was released) and must not be read as "hold only, never charged". PEPE 24/9: six paid
+        // orders flagged "חויב בפועל 0 ₪" this way. The charge transaction itself is what gets verified.
+        var chargeTxId = order.GatewayPaymentTransactionId?.Trim();
+        var settled = order.PaymentSettleStatus is PaymentSettleStatus.Captured
+            or PaymentSettleStatus.Refunded or PaymentSettleStatus.PartiallyRefunded;
+        if (settled && !info.IsFinalCharge && !string.IsNullOrWhiteSpace(chargeTxId)
+            && !string.Equals(chargeTxId, txId?.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogInformation(
+                "PayPlus {Reason}: order {OrderId} is settled under charge {ChargeTx}; ignoring the approval {ApprovalTx} and verifying the charge.",
+                pushReason, order.Id, chargeTxId, txId);
+            await TryVerifyWooGatewayChargeForPayPlusAsync(order, creds, chargeTxId, cancelToken).ConfigureAwait(false);
+            return;
+        }
 
         if (order.PayPlusTransactionUid == null && !info.IsAuthorizationHold)
             order.PayPlusTransactionUid = txId;
@@ -999,7 +1142,7 @@ public partial class PaymentService
         await TryRememberPayPlusTerminalAsync(creds, info.RawJson, cancelToken).ConfigureAwait(false);
         await TryPersistPayPlusTokenAsync(order, info.RawJson, cancelToken).ConfigureAwait(false);
 
-        await ApplyVerifiedPayPlusInfoAsync(order, info, fallbackTransactionUid: null, "hosted-page charge", cancelToken)
+        await ApplyVerifiedPayPlusInfoAsync(order, creds, info, fallbackTransactionUid: null, "hosted-page charge", cancelToken)
             .ConfigureAwait(false);
     }
 
@@ -1189,8 +1332,10 @@ public partial class PaymentService
             {
                 Outcome = "AlreadyPaid",
                 Message = verifiedMismatch
-                    ? $"Order is marked paid, but PayPlus reports {order.GatewayVerifiedAmount:0.##} ₪ (order total {order.Total:0.##} ₪)."
-                    : "Order is already marked as paid.",
+                    ? (order.GatewayVerifiedAmount is > 0m
+                        ? $"ההזמנה מסומנת כמשולמת, אך PayPlus מדווחת על חיוב של {order.GatewayVerifiedAmount:0.##} ₪ (סכום ההזמנה {order.Total:0.##} ₪)."
+                        : $"ההזמנה מסומנת כמשולמת, אך PayPlus לא מצאה חיוב סופי - תפיסת מסגרת בלבד (סכום ההזמנה {order.Total:0.##} ₪).")
+                    : "ההזמנה כבר מסומנת כמשולמת.",
                 TransactionId = CoalesceNonEmpty(order.PayPlusTransactionUid, order.GatewayPaymentTransactionId) ?? order.PaymentReference,
                 Amount = order.GatewayVerifiedAmount,
                 PaymentStatus = order.PaymentStatus,
@@ -1268,7 +1413,7 @@ public partial class PaymentService
         }
 
         // Applies hold → Authorized / final charge → Captured (+ verification verdict + store push).
-        await ApplyVerifiedPayPlusInfoAsync(order, info, txRaw, "manual sync", cancelToken).ConfigureAwait(false);
+        await ApplyVerifiedPayPlusInfoAsync(order, creds, info, txRaw, "manual sync", cancelToken).ConfigureAwait(false);
 
         if (info.IsFinalCharge)
         {

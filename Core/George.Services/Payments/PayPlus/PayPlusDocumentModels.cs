@@ -33,6 +33,21 @@ public sealed class PayPlusTransactionDocument
     public int Installments { get; init; } = 1;
 }
 
+/// <summary>
+/// How an Invoice+ document carries a discount (payment below the sum of the lines). PayPlus documents
+/// nothing about how it computes the "calculated total" it checks <c>totalAmount</c> against, so the
+/// shapes are tried in this order until PayPlus accepts one (see PaymentService.CreatePayPlusInvoiceDocumentAsync).
+/// </summary>
+public enum PayPlusDiscountShape
+{
+    /// <summary>Per-line <c>discount_type=amount</c>/<c>discount_value</c> - the vendor WooCommerce plugin's default shape.</summary>
+    PerLineDiscount,
+    /// <summary>One "הנחה" line with a negative price (the vendor plugin's "coupon as product" shape; also the Cardcom document shape).</summary>
+    DiscountLine,
+    /// <summary>Discount folded into the unit prices (rounded down) plus a small positive "התאמת סכום" line - only positive lines, no discount fields.</summary>
+    NetUnitPrices,
+}
+
 public sealed class PayPlusDocumentProductLine
 {
     public required string Description { get; init; }

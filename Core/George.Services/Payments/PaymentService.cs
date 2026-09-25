@@ -3877,7 +3877,7 @@ public partial class PaymentService : ServiceBase
                 order.Id,
                 "GatewayVerify",
                 "0",
-                $"Cardcom shows the checkout hold ({info.Amount:0.##} ₪); order carries Cardcom document"
+                $"{(order.PaymentGateway == PaymentGatewayProviderId.PayPlus ? "PayPlus" : "Cardcom")} shows the checkout hold ({info.Amount:0.##} ₪); order carries a charge document"
                     + (string.IsNullOrWhiteSpace(order.InvoiceNumber) ? "" : $" #{order.InvoiceNumber}")
                     + " - charge captured under a separate transaction (J5→capture)."
                     + (hadStaleFlag ? " Cleared stale mismatch flag." : ""),
@@ -3885,7 +3885,8 @@ public partial class PaymentService : ServiceBase
                 null,
                 info.Amount,
                 info.RawJson,
-                cancelToken);
+                cancelToken,
+                provider: order.PaymentGateway == PaymentGatewayProviderId.PayPlus ? PaymentGatewayProviderId.PayPlus : PaymentGatewayProviderId.Cardcom);
             _logger.LogInformation(
                 "Gateway verify: hold with capture evidence orderId={OrderId} tx={TransactionId} invoice={InvoiceNumber} clearedStaleFlag={ClearedStaleFlag}",
                 order.Id, info.TranzactionId ?? order.GatewayPaymentTransactionId, order.InvoiceNumber, hadStaleFlag);
@@ -3903,11 +3904,13 @@ public partial class PaymentService : ServiceBase
         order.GatewayAmountMismatch = mismatch;
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
 
+        var isPayPlusOrder = order.PaymentGateway == PaymentGatewayProviderId.PayPlus;
+        var gatewayName = isPayPlusOrder ? "PayPlus" : "Cardcom";
         var description = holdButMarkedCaptured
-            ? $"Cardcom shows an authorization hold only ({info.Amount:0.##} ₪) - no final charge found, but the order is marked as paid"
+            ? $"{gatewayName} shows an authorization hold only ({info.Amount:0.##} ₪) - no final charge found, but the order is marked as paid"
             : mismatch
-                ? $"Cardcom: {info.Amount:0.##} ₪, expected {order.Total:0.##} ₪" + (info.IsRefund == true ? " (refunded at Cardcom)" : "")
-                : $"Cardcom amount verified ({info.Amount:0.##} ₪)";
+                ? $"{gatewayName}: {info.Amount:0.##} ₪, expected {order.Total:0.##} ₪" + (info.IsRefund == true ? $" (refunded at {gatewayName})" : "")
+                : $"{gatewayName} amount verified ({info.Amount:0.##} ₪)";
         await LogEventAsync(
             order.Id,
             "GatewayVerify",
@@ -3917,7 +3920,8 @@ public partial class PaymentService : ServiceBase
             null,
             info.Amount,
             info.RawJson,
-            cancelToken);
+            cancelToken,
+            provider: isPayPlusOrder ? PaymentGatewayProviderId.PayPlus : PaymentGatewayProviderId.Cardcom);
 
         if (holdButMarkedCaptured)
             _logger.LogWarning(
