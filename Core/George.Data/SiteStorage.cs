@@ -55,6 +55,31 @@ namespace George.Data
             return res;
         }
 
+        /// <summary>Per-city default delivery fee learned from the new-order screen (any customer, any staff member).</summary>
+        public async Task<List<SiteCityShippingCost>> GetCityShippingCostsAsync(int siteId, CancellationToken cancelToken)
+        {
+            return await _dbContext.SiteCityShippingCost.AsNoTracking()
+                .Where(c => c.SiteId == siteId)
+                .OrderBy(c => c.City)
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+        }
+
+        public async Task<SiteCityShippingCost> UpsertCityShippingCostAsync(int siteId, string city, decimal cost, CancellationToken cancelToken)
+        {
+            var key = city.Trim();
+            var row = await _dbContext.SiteCityShippingCost
+                .FirstOrDefaultAsync(c => c.SiteId == siteId && c.City == key, cancelToken).ConfigureAwait(false);
+            if (row == null)
+            {
+                row = new SiteCityShippingCost { SiteId = siteId, City = key };
+                _dbContext.SiteCityShippingCost.Add(row);
+            }
+            row.Cost = cost;
+            row.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            return row;
+        }
+
         public async Task<Site?> GetSiteAsync(int siteId, CancellationToken cancelToken)
         {
             return await _dbContext.Site
@@ -189,6 +214,8 @@ namespace George.Data
             if (updated.IncludeIncompleteOrdersInStats.HasValue) dbSite.IncludeIncompleteOrdersInStats = updated.IncludeIncompleteOrdersInStats;
             if (updated.ShippingCost.HasValue) dbSite.ShippingCost = updated.ShippingCost;
             if (updated.FreeShippingAbove.HasValue) dbSite.FreeShippingAbove = updated.FreeShippingAbove;
+            if (updated.ShippingCostPresets != null)
+                dbSite.ShippingCostPresets = string.IsNullOrWhiteSpace(updated.ShippingCostPresets) ? null : updated.ShippingCostPresets.Trim();
             if (updated.IsraelCityPickerEnabled.HasValue) dbSite.IsraelCityPickerEnabled = updated.IsraelCityPickerEnabled;
             if (updated.ConfirmDeliveryFeePopup.HasValue) dbSite.ConfirmDeliveryFeePopup = updated.ConfirmDeliveryFeePopup;
             if (updated.AutoPrintEnabled.HasValue) dbSite.AutoPrintEnabled = updated.AutoPrintEnabled;

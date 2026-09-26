@@ -1070,6 +1070,7 @@ public partial class PaymentService
             order.PaymentGateway = PaymentGatewayProviderId.PayPlus;
             order.PayPlusTransactionUid ??= txId;
             await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            ScheduleLateHoldCharge(order, pushReason);
         }
 
         await ApplyGatewayVerificationVerdictAsync(order, info, cancelToken).ConfigureAwait(false);
@@ -1129,9 +1130,15 @@ public partial class PaymentService
         var info = await _payPlus.InquirePageRequestAsync(creds, order.PayPlusPageRequestUid.Trim(), cancelToken)
             .ConfigureAwait(false);
 
-        await LogEventAsync(order.Id, "ValidateReturn", info.ResponseCode.ToString(), info.Description,
-            info.TranzactionId, null, info.Amount, info.RawJson, cancelToken,
-            provider: PaymentGatewayProviderId.PayPlus);
+        // "can-not-find-payment_request_uid" is PayPlus still indexing the page (20-30 s after the customer paid,
+        // see CustomerPayReturnPage) - the return page polls until it clears. Journaling each poll painted two red
+        // "אישור תשלום נכשל" rows on orders that were charged without a hitch (PEPE #10, 24/9).
+        var notYetAvailable = !info.Success
+            && (info.Description ?? "").Contains("can-not-find-payment_request_uid", StringComparison.OrdinalIgnoreCase);
+        if (!notYetAvailable)
+            await LogEventAsync(order.Id, "ValidateReturn", info.ResponseCode.ToString(), info.Description,
+                info.TranzactionId, null, info.Amount, info.RawJson, cancelToken,
+                provider: PaymentGatewayProviderId.PayPlus);
 
         if (!info.Success)
         {

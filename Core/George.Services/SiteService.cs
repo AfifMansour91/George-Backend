@@ -108,6 +108,28 @@ namespace George.Services
 
         // 3. Update site settings (kosher/weighted/shop name)
         // Note: siteId comes from route parameter, ensuring updates are always by ID, not by name
+        /// <summary>Per-city default delivery fees learned on the new-order screen (see SiteCityShippingCost).</summary>
+        public async Task<IApiResponse<List<CityShippingCostRes>>> GetCityShippingCostsAsync(int siteId, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<List<CityShippingCostRes>>();
+            var rows = await _siteStorage.GetCityShippingCostsAsync(siteId, cancelToken);
+            response.Data = rows.Select(r => new CityShippingCostRes { City = r.City, Cost = r.Cost }).ToList();
+            return response;
+        }
+
+        public async Task<IApiResponse<CityShippingCostRes>> UpsertCityShippingCostAsync(int siteId, UpsertCityShippingCostReq req, CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<CityShippingCostRes>();
+            var city = (req.City ?? "").Trim();
+            if (city.Length == 0 || city.Length > 120)
+                return CreateResponse(response, StatusCode.InvalidRequest, "City is required.");
+            if (req.Cost < 0m || req.Cost > 10000m)
+                return CreateResponse(response, StatusCode.InvalidRequest, "Cost is out of range.");
+            var row = await _siteStorage.UpsertCityShippingCostAsync(siteId, city, Math.Round(req.Cost, 2, MidpointRounding.AwayFromZero), cancelToken);
+            response.Data = new CityShippingCostRes { City = row.City, Cost = row.Cost };
+            return response;
+        }
+
         public async Task<IApiResponse<SiteRes>> UpdateSiteAsync(int siteId, UpdateSiteReq req, CancellationToken cancelToken)
         {
             var response = new ApiResponse<SiteRes>();

@@ -98,6 +98,13 @@ public partial class Site
     [Column(TypeName = "decimal(18, 2)")]
     public decimal? FreeShippingAbove { get; set; }
 
+    /// <summary>
+    /// Quick delivery-fee choices for the new-order screen, comma separated ("15,30,35"). The fee popup shows
+    /// one button per value plus "+" for a free amount (PEPE 24/9, a stand-in until a real delivery module).
+    /// </summary>
+    [StringLength(200)]
+    public string? ShippingCostPresets { get; set; }
+
     /// <summary>When true, manual/phone order shipping address uses searchable Israel city list. Default true for new sites.</summary>
     public bool? IsraelCityPickerEnabled { get; set; }
 

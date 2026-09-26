@@ -1780,6 +1780,7 @@ public partial class PaymentService : ServiceBase
 
         order.PaymentSettleStatus = PaymentSettleStatus.Authorized;
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        ScheduleLateHoldCharge(order, "hosted-page hold");
 
         try
         {
@@ -2205,6 +2206,37 @@ public partial class PaymentService : ServiceBase
     /// sync) prints the after-picking voucher the picking page could not print (Site.PrintAfterPicking).
     /// Runs in the background; idempotent per order through PrintJobService.
     /// </summary>
+    /// <summary>
+    /// The payment SMS goes out at order creation, but staff do not wait for it: the order can be picked and moved
+    /// to "מוכן" before the customer opens the link. The hold that then landed carried nothing further - the order
+    /// sat in מוכן unpaid with an approval nobody used (PEPE 24/9). Run the regular picking-finish charge for it
+    /// in the background: the picked total is captured against the fresh hold (a total above the hold follows
+    /// the site "חיוב מעל המסגרת" rule and journals a failure otherwise, exactly as at picking finish).
+    /// </summary>
+    private void ScheduleLateHoldCharge(Order order, string reason)
+    {
+        if (!string.Equals(order.Status, "Ready", StringComparison.OrdinalIgnoreCase)) return;
+        if (!IsUnsettledOrderPayment(order.PaymentStatus)) return;
+        if (!string.Equals(order.PaymentSettleStatus, PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase)) return;
+        var orderId = order.Id;
+        _logger.LogInformation("Late hold on a ready order ({Reason}): orderId={OrderId} - charging the picked total now.", reason, orderId);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await using var scope = _serviceScopeFactory.CreateAsyncScope();
+                var payments = scope.ServiceProvider.GetRequiredService<PaymentService>();
+                var res = await payments.FinalizePickingPaymentAsync(orderId, CancellationToken.None).ConfigureAwait(false);
+                _logger.LogInformation("Late hold charge for order {OrderId}: outcome={Outcome} message={Message}",
+                    orderId, res.Data?.Outcome ?? res.StatusCode.ToString(), res.Data?.Message ?? res.StatusMessage);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Late hold charge failed for order {OrderId}", orderId);
+            }
+        }, CancellationToken.None);
+    }
+
     private void ScheduleAfterPickingAutoPrint(Order order)
     {
         if (!string.Equals(order.Status, "Ready", StringComparison.OrdinalIgnoreCase)) return;

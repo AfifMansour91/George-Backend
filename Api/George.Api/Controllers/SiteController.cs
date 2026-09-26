@@ -79,6 +79,21 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _siteSvc.UpdateSiteAsync(siteId, req, cancelToken));
         }
 
+        /// <summary>Per-city default delivery fees (new-order screen quick fee buttons).</summary>
+        [HttpGet("{siteId:int}/CityShippingCosts")]
+        [ProducesResponseType(typeof(IApiResponse<List<CityShippingCostRes>>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> GetCityShippingCostsAsync([FromRoute] int siteId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _siteSvc.GetCityShippingCostsAsync(siteId, cancelToken));
+        }
+
+        [HttpPut("{siteId:int}/CityShippingCosts")]
+        [ProducesResponseType(typeof(IApiResponse<CityShippingCostRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> UpsertCityShippingCostAsync([FromRoute] int siteId, [FromBody] UpsertCityShippingCostReq req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _siteSvc.UpsertCityShippingCostAsync(siteId, req, cancelToken));
+        }
+
         [HttpGet("Account/{accountId:int}")]
         [ProducesResponseType(typeof(IApiResponse<List<SiteRes>>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> GetSitesByAccountAsync([FromRoute] int accountId, CancellationToken cancelToken = default)

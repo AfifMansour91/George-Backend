@@ -3112,6 +3112,9 @@ namespace George.Services
         private static string VoucherPaymentHeadline(Order order, bool settled = true)
         {
             var m = order.PaymentMethod?.Trim() ?? "";
+            // "שולם" only when the order IS paid: the after-picking voucher of a cash order leaves with the goods before
+            // the customer pays and read "שולם במזומן" (PEPE 24/9). Mirrors voucherFigmaLayout.voucherPaymentHeadline.
+            settled = settled && string.Equals(order.PaymentStatus?.Trim(), "Paid", StringComparison.OrdinalIgnoreCase);
             if (string.IsNullOrEmpty(m)) return settled ? "שולם" : "לתשלום";
             if (string.Equals(m, "Cash", StringComparison.OrdinalIgnoreCase) || m == "מזומן")
                 return settled ? "שולם במזומן" : "תשלום במזומן";

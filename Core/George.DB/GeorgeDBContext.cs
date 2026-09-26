@@ -52,6 +52,7 @@ namespace George.DB
 		public virtual DbSet<ProductSiteImage> ProductSiteImage { get; set; }
 		public virtual DbSet<ProductSiteWooId> ProductSiteWooId { get; set; }
 		public virtual DbSet<ProductSiteWooSyncStatus> ProductSiteWooSyncStatus { get; set; }
+		public virtual DbSet<SiteCityShippingCost> SiteCityShippingCost { get; set; }
 		public virtual DbSet<ProductSiteVariantWooId> ProductSiteVariantWooId { get; set; }
 
 		public virtual DbSet<CategorySiteWooId> CategorySiteWooId { get; set; }

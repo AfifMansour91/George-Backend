@@ -40,6 +40,8 @@ namespace George.Services.Request
         public bool? IncludeIncompleteOrdersInStats { get; set; }
         public decimal? ShippingCost { get; set; }
         public decimal? FreeShippingAbove { get; set; }
+        /// <summary>Quick delivery-fee buttons, comma separated ("15,30,35"); empty string clears.</summary>
+        public string? ShippingCostPresets { get; set; }
         /// <summary>When true, manual/phone order uses searchable Israel city picker (default true).</summary>
         public bool? IsraelCityPickerEnabled { get; set; }
         /// <summary>Manual-order delivery: open a confirm popup (city + editable fee) when choosing home delivery (default off).</summary>
