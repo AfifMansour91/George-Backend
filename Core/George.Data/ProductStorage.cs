@@ -1326,21 +1326,53 @@ namespace George.Data
                 ? limitAttributeToSiteIds
                 : (product?.Site?.Select(s => s.Id).ToList() ?? new List<int>());
 
+            // An option sent with NO values while active variants still carry a value for it must not lose its
+            // value list: the edit form shows the option's values as the "which cuts exist" chips, and a variant
+            // can only be removed by unticking one of them - with the list empty the variants become unremovable
+            // and the Woo attribute has to be rebuilt from the variants on every sync (Meshek Basar, 7 products
+            // whose "צורת חיתוך" was saved with values: [] on 2026-07-27, reported 2026-09-27). Fall back to the
+            // distinct values the active variants use, both for a live option and for one about to be created.
+            Dictionary<string, List<string>>? variantValuesByOption = null;
+            async Task<List<string>> ValuesFromVariantsAsync(string optionName)
+            {
+                variantValuesByOption ??= (await _dbContext.ProductVariantOptionValue
+                        .Where(ov => ov.ProductVariant.ProductId == productId && !ov.ProductVariant.IsDeleted)
+                        .Select(ov => new { ov.ProductVariantId, ov.OptionName, ov.OptionValue })
+                        .ToListAsync(cancelToken))
+                    .OrderBy(ov => ov.ProductVariantId)
+                    .GroupBy(ov => NormName(ov.OptionName))
+                    .ToDictionary(g => g.Key, g => DistinctOptionValuesPreserveOrder(g.Select(x => x.OptionValue).ToList()), StringComparer.Ordinal);
+                return variantValuesByOption.TryGetValue(NormName(optionName), out var values) ? values : new List<string>();
+            }
+
             var claimed = new HashSet<int>();
             var toCreate = new List<ProductOptionDto>();
 
             foreach (var opt in options)
             {
                 if (string.IsNullOrWhiteSpace(opt.Name)) continue;
+
+                var wanted = DistinctOptionValuesPreserveOrder(opt.Values);
+                if (wanted.Count == 0)
+                {
+                    var fromVariants = await ValuesFromVariantsAsync(opt.Name);
+                    if (fromVariants.Count > 0)
+                    {
+                        _logger.LogWarning(
+                            "UpdateProductOptions: option '{Option}' of product {ProductId} arrived with no values while {Count} value(s) are still used by its active variants - keeping those.",
+                            opt.Name, productId, fromVariants.Count);
+                        wanted = fromVariants;
+                    }
+                }
+
                 if (!liveByName.TryGetValue(NormName(opt.Name), out var match) || claimed.Contains(match.Id))
                 {
-                    toCreate.Add(opt);
+                    toCreate.Add(new ProductOptionDto { Name = opt.Name, Values = wanted });
                     continue;
                 }
                 claimed.Add(match.Id);
                 if (match.Name != opt.Name) match.Name = opt.Name; // keep the user's current spelling/spacing
 
-                var wanted = DistinctOptionValuesPreserveOrder(opt.Values);
                 var current = match.ProductOptionValue.Select(v => v.Value).ToHashSet(StringComparer.Ordinal);
                 var wantedSet = wanted.ToHashSet(StringComparer.Ordinal);
 
@@ -1529,7 +1561,7 @@ namespace George.Data
         }
 
         /// <summary>Order-independent, whitespace/case-insensitive key of a variant's option values ("name=value" pairs sorted).</summary>
-        private static string VariantOptionKey(IEnumerable<(string Name, string? Value)> pairs)
+        public static string VariantOptionKey(IEnumerable<(string Name, string? Value)> pairs)
         {
             static string Norm(string? s) => Regex.Replace((s ?? "").Trim(), @"\s+", " ").ToLowerInvariant();
             var parts = pairs

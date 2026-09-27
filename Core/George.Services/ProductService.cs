@@ -798,6 +798,28 @@ namespace George.Services
                     var canonicalVariantIds = existingProduct.ProductVariant?.Select(v => v.Id).ToList() ?? new List<int>();
                     var keptIds = new HashSet<int>(req.Variants.Where(v => v.Id.HasValue).Select(v => v.Id!.Value));
 
+                    // A variant sent WITHOUT an id whose option values match a canonical variant is that variant
+                    // re-added in this branch (the form only receives the variants visible here, then rebuilds the
+                    // full option combination), not a new one - un-hide it here instead of creating a duplicate
+                    // canonical variant that is then excluded everywhere else (Meshek Basar "שייטל": a second
+                    // "מדליונים" variant hidden on the main site, 2026-08-25).
+                    var liveCanonicalByKey = new Dictionary<string, List<ProductVariant>>(StringComparer.Ordinal);
+                    foreach (var cv in existingProduct.ProductVariant?.Where(v => !v.IsDeleted) ?? Enumerable.Empty<ProductVariant>())
+                    {
+                        var key = ProductStorage.VariantOptionKey(cv.ProductVariantOptionValue.Select(x => (x.OptionName, (string?)x.OptionValue)));
+                        if (!liveCanonicalByKey.TryGetValue(key, out var list)) liveCanonicalByKey[key] = list = new List<ProductVariant>();
+                        list.Add(cv);
+                    }
+                    foreach (var v in req.Variants.Where(v => !v.Id.HasValue && v.OptionValues != null && v.OptionValues.Count > 0))
+                    {
+                        var key = ProductStorage.VariantOptionKey(v.OptionValues!.Select(kv => (kv.Key, (string?)kv.Value)));
+                        if (!liveCanonicalByKey.TryGetValue(key, out var candidates)) continue;
+                        var same = candidates.FirstOrDefault(c => !keptIds.Contains(c.Id));
+                        if (same == null) continue;
+                        v.Id = same.Id;
+                        keptIds.Add(same.Id);
+                    }
+
                     // 1) Create brand-new variants (no Id) canonically, then exclude them from the other sites.
                     var newVariantReqs = req.Variants.Where(v => !v.Id.HasValue).ToList();
                     if (newVariantReqs.Count > 0)

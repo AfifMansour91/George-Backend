@@ -130,4 +130,43 @@ public class ProductVariantUpsertTests
         Assert.Equal(optId, live[0].Id);
         Assert.Equal(new[] { "טחון", "שלם" }, live[0].ProductOptionValue.Select(v => v.Value).OrderBy(v => v).ToArray());
     }
+
+    /// <summary>
+    /// Meshek Basar 2026-09-27: "צורת חיתוך" saved with values: [] while the variants still used 4-5 cuts → the
+    /// option row survived with no values, the form showed no chips and no variant could be removed.
+    /// </summary>
+    [Fact]
+    public async Task Option_sent_without_values_keeps_the_values_its_variants_still_use()
+    {
+        using var ctx = NewContext();
+        SeedProduct(ctx);
+        var storage = NewStorage(ctx);
+
+        await storage.UpdateProductOptionsAsync(ProductId, new() { new ProductOptionDto { Name = "צורת חיתוך", Values = new() { "נתח שלם", "מינוט" } } }, null, default);
+        await storage.UpdateProductVariantsAsync(ProductId, new()
+        {
+            new ProductVariantDto { Price = 230, OptionValues = new Dictionary<string, string> { ["צורת חיתוך"] = "נתח שלם" } },
+            new ProductVariantDto { Price = 230, OptionValues = new Dictionary<string, string> { ["צורת חיתוך"] = "מינוט" } },
+        }, null, default);
+        var optId = ctx.ProductOption.Single(o => o.ProductId == ProductId && !o.IsDeleted).Id;
+
+        // Live option, empty list → values kept.
+        await storage.UpdateProductOptionsAsync(ProductId, new() { new ProductOptionDto { Name = "צורת חיתוך", Values = new() } }, null, default);
+        var live = ctx.ProductOption.Include(o => o.ProductOptionValue).Single(o => o.ProductId == ProductId && !o.IsDeleted);
+        Assert.Equal(optId, live.Id);
+        Assert.Equal(new[] { "מינוט", "נתח שלם" }, live.ProductOptionValue.Select(v => v.Value).OrderBy(v => v).ToArray());
+
+        // Option row gone (the 2026-07-27 shape), re-sent empty → recreated WITH the variants' values.
+        live.IsDeleted = true;
+        ctx.SaveChanges();
+        await storage.UpdateProductOptionsAsync(ProductId, new() { new ProductOptionDto { Name = "צורת חיתוך", Values = new() } }, null, default);
+        var recreated = ctx.ProductOption.Include(o => o.ProductOptionValue).Single(o => o.ProductId == ProductId && !o.IsDeleted);
+        Assert.Equal(new[] { "מינוט", "נתח שלם" }, recreated.ProductOptionValue.Select(v => v.Value).OrderBy(v => v).ToArray());
+
+        // A product with no variants at all may still clear its values.
+        ctx.ProductVariant.Where(v => v.ProductId == ProductId).ToList().ForEach(v => v.IsDeleted = true);
+        ctx.SaveChanges();
+        await storage.UpdateProductOptionsAsync(ProductId, new() { new ProductOptionDto { Name = "צורת חיתוך", Values = new() } }, null, default);
+        Assert.Empty(ctx.ProductOption.Include(o => o.ProductOptionValue).Single(o => o.ProductId == ProductId && !o.IsDeleted).ProductOptionValue);
+    }
 }
