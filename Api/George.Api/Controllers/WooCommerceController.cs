@@ -327,6 +327,36 @@ namespace George.Api.Controllers
                     cancelToken));
         }
 
+        /// <summary>
+        /// Re-push the manual attribute value order (term menu_order) for one site, or for every WooCommerce-configured
+        /// site (AllSites). Returns immediately; poll AttributeValueOrderPushStatus. Use after the Giorgio WordPress
+        /// plugin update that mirrors the REST term order into the storefront's sort meta.
+        /// </summary>
+        [HttpPost("PushAttributeValueOrder")]
+        [ProducesResponseType(typeof(IApiResponse<AttributeValueOrderPushStatusRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> PushAttributeValueOrderAsync(
+            [FromBody] WooCommercePushAttributeValueOrderReq request,
+            CancellationToken cancelToken = default)
+        {
+            if (request == null || (!request.AllSites && request.SiteId is not > 0))
+                return BadRequest();
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _wooCommerceService.PushAttributeValueOrderToWooCommerceAsync(request, cancelToken));
+        }
+
+        /// <summary>Status of the background attribute value order push (same SiteId / AllSites as the push).</summary>
+        [HttpPost("AttributeValueOrderPushStatus")]
+        [ProducesResponseType(typeof(IApiResponse<AttributeValueOrderPushStatusRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> AttributeValueOrderPushStatusAsync(
+            [FromBody] WooCommercePushAttributeValueOrderReq request,
+            CancellationToken cancelToken = default)
+        {
+            if (request == null || (!request.AllSites && request.SiteId is not > 0))
+                return BadRequest();
+            return await SafeCallWithErrorCatchingAsync(() =>
+                Task.FromResult(_wooCommerceService.GetAttributeValueOrderPushStatus(request.SiteId, request.AllSites)));
+        }
+
         /// <summary>Create or update order from WooCommerce (plugin calls when order is opened/edited). Auth: X-Api-Key or Bearer &lt;key&gt;. TEST: AllowAnonymous + payload.SiteId fallback enabled for Swagger; remove for production.</summary>
         [HttpPost("Order")]
         [AllowAnonymous] // TEST ONLY: remove when done testing so only API key auth is allowed

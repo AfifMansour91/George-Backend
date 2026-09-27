@@ -127,6 +127,19 @@ namespace George.Data
                 .ToListAsync(cancelToken);
         }
 
+        /// <summary>Live sites with WooCommerce enabled and full credentials (cross-account maintenance runs).</summary>
+        public async Task<List<Site>> GetWooCommerceConfiguredSitesAsync(CancellationToken cancelToken)
+        {
+            return await _dbContext.Site
+                .AsNoTracking()
+                .Where(s => !s.IsDeleted && s.WooCommerceEnabled == true
+                    && s.WooCommerceUrl != null && s.WooCommerceUrl != ""
+                    && s.WooCommerceKey != null && s.WooCommerceKey != ""
+                    && s.WooCommerceSecret != null && s.WooCommerceSecret != "")
+                .OrderBy(s => s.SiteName)
+                .ToListAsync(cancelToken);
+        }
+
         public async Task<List<Site>> GetSitesByAccountAsync(int accountId, CancellationToken cancelToken)
         {
             return await _dbContext.Site

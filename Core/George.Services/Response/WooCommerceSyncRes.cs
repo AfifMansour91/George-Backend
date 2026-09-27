@@ -106,6 +106,31 @@ namespace George.Services.Response
         public DateTime? FinishedAtUtc { get; set; }
     }
 
+    /// <summary>
+    /// Status of the background attribute value order push (one site, or all sites). The push endpoint returns this
+    /// immediately in state <c>running</c>; the UI polls until <c>done</c> / <c>failed</c>. In-memory only.
+    /// </summary>
+    public class AttributeValueOrderPushStatusRes
+    {
+        /// <summary><c>idle</c> | <c>running</c> | <c>done</c> | <c>failed</c>.</summary>
+        public string State { get; set; } = "idle";
+        public string Message { get; set; } = string.Empty;
+        public int SitesTotal { get; set; }
+        public int SitesDone { get; set; }
+        /// <summary>Attributes with a manual value order found so far (unordered attributes are not touched).</summary>
+        public int AttributesTotal { get; set; }
+        public int AttributesPushed { get; set; }
+        /// <summary>Attributes with no matching store attribute or whose push failed (see <see cref="Errors"/>).</summary>
+        public int AttributesSkipped { get; set; }
+        public int TermsUpdated { get; set; }
+        /// <summary>"site / attribute" labels left sorting by name in Woo (Hebrew slug); the order shows only after "Custom ordering" is picked in Woo.</summary>
+        public List<string> NeedsCustomOrdering { get; set; } = new();
+        public List<string> Errors { get; set; } = new();
+        public string? Error { get; set; }
+        public DateTime? StartedAtUtc { get; set; }
+        public DateTime? FinishedAtUtc { get; set; }
+    }
+
     /// <summary>Read-only row for comparing product sort order (George vs WooCommerce). No DB writes.</summary>
     public class ProductOrderPreviewItem
     {

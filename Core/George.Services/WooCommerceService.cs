@@ -40,6 +40,17 @@ namespace George.Services
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> AttributeEnsureLocks = new ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.Ordinal);
 
         /// <summary>
+        /// Store terms per Woo attribute ("{baseUrl}|{wooAttrId}"), keyed by the normalized value text -> the term as the
+        /// store spells it. Refreshed by every term fetch (each product sync fetches the attribute's terms right before
+        /// use) and read by <see cref="ToStoreTermName"/> so the product payload names the store's existing term instead
+        /// of a near-duplicate WordPress would turn into a new "-1" term.
+        /// </summary>
+        private static readonly ConcurrentDictionary<string, Dictionary<string, WooCommerceAttributeTermListItem>> StoreTermsByAttribute = new(StringComparer.Ordinal);
+
+        /// <summary>Status of the background attribute value order push, keyed by site id (0 = all sites).</summary>
+        private static readonly ConcurrentDictionary<int, AttributeValueOrderPushStatusRes> AttributeValueOrderPushStatuses = new();
+
+        /// <summary>
         /// Per-site status of the background menu_order push (the push endpoint returns immediately; UI polls GetProductOrderPushStatus).
         /// Entries are replaced wholesale on each state transition so polling readers never see a half-updated status.
         /// </summary>
@@ -1194,11 +1205,11 @@ namespace George.Services
                     // Manual value order (attributes screen drag and drop) -> Woo term menu_order. Only on this explicit
                     // attribute sync, not on the per-product save path, to keep product syncs light.
                     response.Data.ValueOrderNeedsCustomOrdering =
-                        await PushAttributeTermOrderAsync(baseUrl, wooAttrId.Value, attribute, httpClient, cancelToken);
-                    // The product page shows the PRODUCT's own option list (swatch plugins ignore the term order), so
-                    // the products using this attribute are re-synced - in the background, they can be many.
-                    if (attribute.AttributeValue?.Any(av => av.DisplayOrder != null) == true)
-                        QueueResyncOfProductsUsingAttribute(siteId, attribute.Name);
+                        (await PushAttributeTermOrderAsync(baseUrl, wooAttrId.Value, attribute, httpClient, cancelToken)).NeedsCustomOrdering;
+                    // No automatic re-sync of the products using this attribute (removed 2026-09-27): the storefront
+                    // sorts option values by the TERM order (meta "order", mirrored by the Giorgio WP plugin), and the
+                    // per-drag product push cost Zano minutes of syncing per change. The products' variation
+                    // menu_order can still be refreshed explicitly: PushAttributeValueOrder with IncludeProducts.
 
                     await _attributeStorage.UpdateAttributeWooCommerceIdAsync(attributeId, wooAttrId.Value, cancelToken);
                     response.Data.AttributeId = attributeId;
@@ -1222,6 +1233,221 @@ namespace George.Services
             }
         }
 
+        /// <summary>
+        /// On-demand re-push of the manual attribute value order (term menu_order) for one site or for every
+        /// WooCommerce-configured site - e.g. after the Giorgio WordPress plugin update that mirrors the REST
+        /// <c>order_pa_{slug}</c> meta into the storefront's <c>order</c> meta, every store needs the order written
+        /// again. Returns immediately; the work runs in the background (many sites × attributes exceed the proxy
+        /// timeout) and <see cref="GetAttributeValueOrderPushStatus"/> reports progress. Only attributes that were
+        /// ordered in Giorgio are touched; attributes with no matching Woo attribute are counted as skipped.
+        /// </summary>
+        public async Task<IApiResponse<AttributeValueOrderPushStatusRes>> PushAttributeValueOrderToWooCommerceAsync(
+            WooCommercePushAttributeValueOrderReq request,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<AttributeValueOrderPushStatusRes> { Data = new AttributeValueOrderPushStatusRes() };
+            try
+            {
+                List<Site> sites;
+                int statusKey;
+                if (request.AllSites)
+                {
+                    sites = await _siteStorage.GetWooCommerceConfiguredSitesAsync(cancelToken);
+                    statusKey = 0;
+                }
+                else
+                {
+                    if (request.SiteId is not > 0)
+                        return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required unless AllSites is set");
+                    var site = await _siteStorage.GetSiteAsync(request.SiteId.Value, cancelToken);
+                    if (site == null)
+                        return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
+                    if (!IsWooCommerceConfigured(site))
+                        return CreateResponse(response, StatusCode.InvalidRequest, "WooCommerce is not enabled or configured for this site");
+                    sites = new List<Site> { site };
+                    statusKey = site.Id;
+                }
+
+                if (AttributeValueOrderPushStatuses.TryGetValue(statusKey, out var existing) && existing.State == "running")
+                {
+                    response.Data = existing;
+                    response.Data.Message = "An attribute value order push is already running.";
+                    return response;
+                }
+
+                var started = new AttributeValueOrderPushStatusRes
+                {
+                    State = "running",
+                    SitesTotal = sites.Count,
+                    StartedAtUtc = DateTime.UtcNow,
+                    Message = $"Attribute value order push started for {sites.Count} site(s); running in the background.",
+                };
+                AttributeValueOrderPushStatuses[statusKey] = started;
+                var includeProducts = request.IncludeProducts;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        var woo = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
+                        await woo.RunAttributeValueOrderPushAsync(sites, includeProducts, statusKey, started.StartedAtUtc!.Value).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        AttributeValueOrderPushStatuses[statusKey] = new AttributeValueOrderPushStatusRes
+                        {
+                            State = "failed",
+                            SitesTotal = sites.Count,
+                            Error = ex.Message,
+                            StartedAtUtc = started.StartedAtUtc,
+                            FinishedAtUtc = DateTime.UtcNow,
+                        };
+                        _logger.LogError(ex, "Background WooCommerce attribute value order push failed (status key {Key})", statusKey);
+                    }
+                }, CancellationToken.None);
+
+                response.Data = started;
+                _logger.LogInformation("WooCommerce attribute value order push started in background for {Count} site(s) (all sites: {AllSites}, include products: {IncludeProducts})",
+                    sites.Count, request.AllSites, includeProducts);
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Push attribute value order to WooCommerce failed");
+                return CreateResponse(response, StatusCode.UnknownError, ex.Message);
+            }
+        }
+
+        /// <summary>Status of the background attribute value order push (site id, or 0 for the all-sites run). In-memory; idle after restart.</summary>
+        public IApiResponse<AttributeValueOrderPushStatusRes> GetAttributeValueOrderPushStatus(int? siteId, bool allSites)
+        {
+            var key = allSites ? 0 : (siteId ?? 0);
+            return new ApiResponse<AttributeValueOrderPushStatusRes>
+            {
+                Data = AttributeValueOrderPushStatuses.TryGetValue(key, out var status) ? status : new AttributeValueOrderPushStatusRes()
+            };
+        }
+
+        private static bool IsWooCommerceConfigured(Site site) =>
+            site.WooCommerceEnabled == true &&
+            !string.IsNullOrWhiteSpace(site.WooCommerceUrl) &&
+            !string.IsNullOrWhiteSpace(site.WooCommerceKey) &&
+            !string.IsNullOrWhiteSpace(site.WooCommerceSecret);
+
+        /// <summary>Background body of <see cref="PushAttributeValueOrderToWooCommerceAsync"/>: one site after another, status replaced wholesale after every attribute.</summary>
+        private async Task RunAttributeValueOrderPushAsync(List<Site> sites, bool includeProducts, int statusKey, DateTime startedAtUtc)
+        {
+            var status = new AttributeValueOrderPushStatusRes { State = "running", SitesTotal = sites.Count, StartedAtUtc = startedAtUtc };
+            AttributeValueOrderPushStatusRes Snapshot(string state) => new()
+            {
+                State = state,
+                SitesTotal = status.SitesTotal,
+                SitesDone = status.SitesDone,
+                AttributesTotal = status.AttributesTotal,
+                AttributesPushed = status.AttributesPushed,
+                AttributesSkipped = status.AttributesSkipped,
+                TermsUpdated = status.TermsUpdated,
+                NeedsCustomOrdering = status.NeedsCustomOrdering.ToList(),
+                Errors = status.Errors.ToList(),
+                StartedAtUtc = status.StartedAtUtc,
+                FinishedAtUtc = state == "running" ? null : DateTime.UtcNow,
+                Message = status.Message,
+            };
+
+            foreach (var site in sites)
+            {
+                try
+                {
+                    var attributes = await _attributeStorage.GetAttributesAsync(
+                        new AttributeFilter { SiteIds = new List<int> { site.Id } },
+                        new PagingExDto { Skip = 0, Take = 10000, IncludeTotal = false },
+                        CancellationToken.None).ConfigureAwait(false);
+                    var ordered = attributes.Items
+                        .Where(a => !a.IsDeleted && a.AttributeValue != null && a.AttributeValue.Any(av => av.DisplayOrder != null))
+                        .OrderBy(a => a.Name)
+                        .ToList();
+                    status.AttributesTotal += ordered.Count;
+                    AttributeValueOrderPushStatuses[statusKey] = Snapshot("running");
+                    if (ordered.Count == 0) continue;
+
+                    var baseUrl = $"{site.WooCommerceUrl!.TrimEnd('/')}/wp-json/wc/v3";
+                    var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
+                    using var httpClient = _httpClientFactory.CreateClient();
+                    httpClient.Timeout = WooCommerceHttpTimeout;
+                    httpClient.DefaultRequestHeaders.Clear();
+                    httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+
+                    foreach (var attribute in ordered)
+                    {
+                        var label = $"{site.SiteName} / {attribute.Name}";
+                        try
+                        {
+                            // Resolve the store attribute without touching its terms: the stored id when it still exists
+                            // there, otherwise a lookup by name (a stale id is repaired in the DB on the way).
+                            int? wooAttrId = null;
+                            if (attribute.WooCommerceId is > 0)
+                            {
+                                var (exists, _) = await TryGetWooCommerceAttributeSlugAsync(baseUrl, attribute.WooCommerceId.Value, SlugifyAttributeName(attribute.Name), httpClient, CancellationToken.None).ConfigureAwait(false);
+                                if (exists) wooAttrId = attribute.WooCommerceId.Value;
+                            }
+                            if (wooAttrId == null)
+                            {
+                                var (foundId, _) = await FindExistingAttributeAsync(baseUrl, attribute.Name, httpClient, CancellationToken.None).ConfigureAwait(false);
+                                wooAttrId = foundId;
+                                if (foundId.HasValue && foundId != attribute.WooCommerceId)
+                                    await _attributeStorage.UpdateAttributeWooCommerceIdAsync(attribute.Id, foundId.Value, CancellationToken.None).ConfigureAwait(false);
+                            }
+                            if (wooAttrId == null)
+                            {
+                                status.AttributesSkipped++;
+                                status.Errors.Add($"{label}: no matching WooCommerce attribute");
+                                _logger.LogWarning("WooCommerce attribute order push: attribute {AttributeId} ({Name}) of site {SiteId} has no matching store attribute; skipped", attribute.Id, attribute.Name, site.Id);
+                                continue;
+                            }
+
+                            var result = await PushAttributeTermOrderAsync(baseUrl, wooAttrId.Value, attribute, httpClient, CancellationToken.None).ConfigureAwait(false);
+                            if (result.Error != null)
+                            {
+                                status.AttributesSkipped++;
+                                status.Errors.Add($"{label}: {result.Error}");
+                            }
+                            else
+                            {
+                                status.AttributesPushed++;
+                                status.TermsUpdated += result.TermsUpdated;
+                            }
+                            if (result.NeedsCustomOrdering)
+                                status.NeedsCustomOrdering.Add(label);
+                            if (includeProducts && result.Error == null)
+                                QueueResyncOfProductsUsingAttribute(site.Id, attribute.Name);
+                        }
+                        catch (Exception ex)
+                        {
+                            status.AttributesSkipped++;
+                            status.Errors.Add($"{label}: {ex.Message}");
+                            _logger.LogWarning(ex, "WooCommerce attribute order push: attribute {AttributeId} ({Name}) of site {SiteId} failed", attribute.Id, attribute.Name, site.Id);
+                        }
+                        AttributeValueOrderPushStatuses[statusKey] = Snapshot("running");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    status.Errors.Add($"{site.SiteName}: {ex.Message}");
+                    _logger.LogWarning(ex, "WooCommerce attribute order push: site {SiteId} ({Name}) failed", site.Id, site.SiteName);
+                }
+                finally
+                {
+                    status.SitesDone++;
+                    AttributeValueOrderPushStatuses[statusKey] = Snapshot("running");
+                }
+            }
+
+            status.Message = $"Pushed the value order of {status.AttributesPushed}/{status.AttributesTotal} attribute(s) on {status.SitesDone} site(s); {status.TermsUpdated} term(s) written, {status.AttributesSkipped} skipped.";
+            AttributeValueOrderPushStatuses[statusKey] = Snapshot("done");
+            _logger.LogInformation("WooCommerce attribute value order push finished: {Message} Needs custom ordering: {Custom}. Errors: {Errors}",
+                status.Message, string.Join(" | ", status.NeedsCustomOrdering), string.Join(" | ", status.Errors));
+        }
+
         /// <summary>Per (site, attribute): the generation of the last queued re-sync. A newer drag supersedes a waiting one.</summary>
         private static readonly ConcurrentDictionary<string, long> AttributeResyncGeneration = new();
         /// <summary>Wait after the last drag before the products are pushed - one re-sync per burst, not per drag (Zano: 29 products ≈ 4.5 min each).</summary>
@@ -1230,7 +1456,8 @@ namespace George.Services
         /// <summary>
         /// Attribute value order changed: push every product of the site that carries this option (their variation
         /// menu_order follows the new order). Debounced: consecutive drags on the attributes screen each call this,
-        /// and only the last one within <see cref="AttributeResyncDebounce"/> runs. Fire-and-forget on its own
+        /// and only the last one within <see cref="AttributeResyncDebounce"/> runs. Since 2026-09-27 this is called only
+        /// from the explicit PushAttributeValueOrder(IncludeProducts) path, no longer after every attribute save. Fire-and-forget on its own
         /// scope; failures are logged only.
         /// </summary>
         private void QueueResyncOfProductsUsingAttribute(int siteId, string attributeName)
@@ -1418,13 +1645,14 @@ namespace George.Services
         /// <summary>Per-request timeout for attribute term POST so a single slow/hanging request doesn't block sync (default HttpClient timeout is 30 min).</summary>
         private static readonly TimeSpan AttributeTermRequestTimeout = TimeSpan.FromSeconds(220);
 
-        private async Task<HashSet<string>> GetWooCommerceAttributeTermNamesAsync(
+        /// <summary>All terms of a Woo attribute (paged, up to 1,000). Partial on a failed page - callers treat the list as "what we know".</summary>
+        private async Task<List<WooCommerceAttributeTermListItem>> GetWooCommerceAttributeTermsAsync(
             string baseUrl,
             int wooAttrId,
             HttpClient httpClient,
             CancellationToken cancelToken)
         {
-            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var terms = new List<WooCommerceAttributeTermListItem>();
             const int perPage = 100;
             for (var page = 1; page <= 10; page++)
             {
@@ -1436,15 +1664,72 @@ namespace George.Services
                 var list = TryDeserialize<List<WooCommerceAttributeTermListItem>>(body);
                 if (list == null || list.Count == 0)
                     break;
-                foreach (var t in list)
-                {
-                    if (!string.IsNullOrWhiteSpace(t.name))
-                        names.Add(t.name.Trim());
-                }
+                terms.AddRange(list.Where(t => t.id > 0 && !string.IsNullOrWhiteSpace(t.name)));
                 if (list.Count < perPage)
                     break;
             }
-            return names;
+            return terms;
+        }
+
+        /// <summary>Raw store term names (trimmed, as the store spells them) - the import's source for attribute values.</summary>
+        private async Task<HashSet<string>> GetWooCommerceAttributeTermNamesAsync(
+            string baseUrl,
+            int wooAttrId,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            var terms = await GetWooCommerceAttributeTermsAsync(baseUrl, wooAttrId, httpClient, cancelToken);
+            return new HashSet<string>(terms.Select(t => t.name!.Trim()), StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Matching key for a term / option value: whitespace, quote marks and case folded, HTML entities decoded (Woo
+        /// returns term names as stored, e.g. <c>&amp;amp;</c>). Same key the order-line display uses.
+        /// </summary>
+        private static string StoreTermKey(string? name) =>
+            OrderItemLineDisplay.OrderItemAttrDedupeKey(System.Net.WebUtility.HtmlDecode(name ?? string.Empty));
+
+        private static string StoreTermsCacheKey(string baseUrl, int wooAttrId) => $"{baseUrl}|{wooAttrId}";
+
+        /// <summary>
+        /// The store's terms for an attribute keyed by <see cref="StoreTermKey"/>. WordPress creates a NEW term (slug
+        /// "-1", "-2") whenever a POSTed or product-assigned name differs from an existing term by as little as a double
+        /// space, so every comparison against the store goes through this key. Duplicates already on the store (Zano's
+        /// "פורל שלם" ×2) resolve to the term that has products, then the lowest id. Also refreshes
+        /// <see cref="StoreTermsByAttribute"/> for <see cref="ToStoreTermName"/>.
+        /// </summary>
+        private async Task<Dictionary<string, WooCommerceAttributeTermListItem>> GetWooCommerceAttributeTermMapAsync(
+            string baseUrl,
+            int wooAttrId,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            var terms = await GetWooCommerceAttributeTermsAsync(baseUrl, wooAttrId, httpClient, cancelToken);
+            var map = BuildStoreTermMap(terms);
+            StoreTermsByAttribute[StoreTermsCacheKey(baseUrl, wooAttrId)] = map;
+            return map;
+        }
+
+        private static Dictionary<string, WooCommerceAttributeTermListItem> BuildStoreTermMap(IEnumerable<WooCommerceAttributeTermListItem> terms)
+        {
+            var map = new Dictionary<string, WooCommerceAttributeTermListItem>(StringComparer.Ordinal);
+            foreach (var term in terms.OrderByDescending(t => t.count ?? 0).ThenBy(t => t.id))
+                map.TryAdd(StoreTermKey(term.name), term);
+            return map;
+        }
+
+        /// <summary>
+        /// The store's own spelling of an option value (from the last term fetch of that attribute), or the value itself
+        /// when the store has no such term yet. Sent in product / variation payloads: Woo resolves option names with an
+        /// exact <c>get_term_by('name')</c>, and a miss creates a duplicate term instead of reusing the existing one.
+        /// </summary>
+        private static string ToStoreTermName(string baseUrl, int wooAttrId, string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return value;
+            if (!StoreTermsByAttribute.TryGetValue(StoreTermsCacheKey(baseUrl, wooAttrId), out var map)) return value;
+            if (!map.TryGetValue(StoreTermKey(value), out var term) || string.IsNullOrWhiteSpace(term.name)) return value;
+            var storeName = System.Net.WebUtility.HtmlDecode(term.name).Trim();
+            return storeName.Length > 0 ? storeName : value;
         }
 
         /// <summary>
@@ -1493,11 +1778,11 @@ namespace George.Services
                 return (null, null);
             }
 
-            var existingTerms = await GetWooCommerceAttributeTermNamesAsync(baseUrl, wooAttrId, httpClient, cancelToken);
+            var existingTerms = await GetWooCommerceAttributeTermMapAsync(baseUrl, wooAttrId, httpClient, cancelToken);
             var missing = requiredTermValues
                 .Where(v => !string.IsNullOrWhiteSpace(v))
                 .Select(v => v.Trim())
-                .Where(v => !existingTerms.Contains(v))
+                .Where(v => !existingTerms.ContainsKey(StoreTermKey(v)))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
@@ -1506,26 +1791,36 @@ namespace George.Services
                 _logger.LogInformation(
                     "WooCommerce sync: posting {Count} new attribute terms for attribute {WooAttrId} ({Name})",
                     missing.Count, wooAttrId, attributeName);
-                await SyncAttributeTermValuesAsync(baseUrl, wooAttrId, missing, httpClient, cancelToken);
+                await SyncAttributeTermValuesAsync(baseUrl, wooAttrId, missing, existingTerms, httpClient, cancelToken);
             }
 
             return (wooAttrId, slug);
         }
 
+        /// <summary>Outcome of one attribute's value-order push (see <see cref="PushAttributeTermOrderAsync"/>).</summary>
+        private sealed record AttributeTermOrderPushResult(bool NeedsCustomOrdering, int TermsUpdated, int UnmatchedValues, string? Error)
+        {
+            public static readonly AttributeTermOrderPushResult NotOrdered = new(false, 0, 0, null);
+        }
+
         /// <summary>
         /// Pushes the attribute's manual value order to WooCommerce: makes the attribute sort by menu_order (imported
-        /// attributes usually sort by name) and batch-updates the menu_order of the terms whose position differs.
-        /// No-op for attributes that were never ordered in Giorgio. Never throws - the order is cosmetic and must
-        /// not fail the attribute sync. Returns true when the attribute is left on a non-menu_order sorting (the
-        /// store won't show the manual order until "Custom ordering" is chosen for the attribute in Woo).
+        /// attributes usually sort by name) and batch-writes the menu_order of EVERY matched term, 1-based in Giorgio
+        /// order. The full list is sent on purpose: the REST API stores <c>menu_order</c> in term meta
+        /// <c>order_pa_{slug}</c> while the storefront sorts by meta <c>order</c> (WooCommerce 9.8-10.5), so the value
+        /// the API echoes back says nothing about what the store shows - it is never used to skip a term - and the
+        /// Giorgio WordPress plugin mirrors each REST term write into <c>order</c>. No-op for attributes that were never
+        /// ordered in Giorgio. Never throws - the order is cosmetic and must not fail the attribute sync.
+        /// <see cref="AttributeTermOrderPushResult.NeedsCustomOrdering"/> is true when the attribute is left on a
+        /// non-menu_order sorting (the store won't show the manual order until "Custom ordering" is chosen in Woo).
         /// </summary>
-        private async Task<bool> PushAttributeTermOrderAsync(string baseUrl, int wooAttrId, Attribute attribute, HttpClient httpClient, CancellationToken cancelToken)
+        private async Task<AttributeTermOrderPushResult> PushAttributeTermOrderAsync(string baseUrl, int wooAttrId, Attribute attribute, HttpClient httpClient, CancellationToken cancelToken)
         {
             var needsCustomOrdering = false;
             try
             {
                 if (attribute.AttributeValue == null || !attribute.AttributeValue.Any(av => av.DisplayOrder != null))
-                    return false;
+                    return AttributeTermOrderPushResult.NotOrdered;
 
                 var orderedValues = AttributeService.OrderedValues(attribute);
 
@@ -1534,7 +1829,7 @@ namespace George.Services
                 if (!attrResponse.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("WooCommerce attribute order: GET attribute {WooAttrId} failed ({Status}); order not pushed", wooAttrId, (int)attrResponse.StatusCode);
-                    return false;
+                    return new AttributeTermOrderPushResult(false, 0, 0, $"GET attribute failed ({(int)attrResponse.StatusCode})");
                 }
                 var wooAttr = TryDeserialize<WooCommerceAttributeResponse>(await attrResponse.Content.ReadAsStringAsync(cancelToken));
                 if (wooAttr != null && !string.Equals(wooAttr.order_by, "menu_order", StringComparison.OrdinalIgnoreCase))
@@ -1563,23 +1858,16 @@ namespace George.Services
                             wooAttrId, attribute.Name, wooAttr.slug, wooAttr.order_by);
                 }
 
-                var terms = new List<WooCommerceAttributeTermListItem>();
-                const int perPage = 100;
-                for (var page = 1; page <= 10; page++)
-                {
-                    var response = await httpClient.GetAsync($"{baseUrl}/products/attributes/{wooAttrId}/terms?per_page={perPage}&page={page}", cancelToken);
-                    if (!response.IsSuccessStatusCode) break;
-                    var list = TryDeserialize<List<WooCommerceAttributeTermListItem>>(await response.Content.ReadAsStringAsync(cancelToken));
-                    if (list == null || list.Count == 0) break;
-                    terms.AddRange(list);
-                    if (list.Count < perPage) break;
-                }
+                var terms = await GetWooCommerceAttributeTermsAsync(baseUrl, wooAttrId, httpClient, cancelToken);
+                StoreTermsByAttribute[StoreTermsCacheKey(baseUrl, wooAttrId)] = BuildStoreTermMap(terms);
 
                 // Store term names can differ from ours in spacing / quote marks (imported "פילה על 2" vs "פילה על  2"),
-                // so match on the same normalized key the order-line display uses, not on the raw text.
-                var termByName = new Dictionary<string, WooCommerceAttributeTermListItem>(StringComparer.OrdinalIgnoreCase);
-                foreach (var term in terms.Where(t => t.id > 0 && !string.IsNullOrWhiteSpace(t.name)))
-                    termByName.TryAdd(OrderItemLineDisplay.OrderItemAttrDedupeKey(System.Net.WebUtility.HtmlDecode(term.name!)), term);
+                // so match on the same normalized key the order-line display uses, not on the raw text. Duplicate store
+                // terms of one value (slug "-1", "-2") all get that value's position, so whichever one a product carries
+                // sorts in the same place.
+                var termsByKey = terms
+                    .GroupBy(t => StoreTermKey(t.name), StringComparer.Ordinal)
+                    .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
 
                 var updates = new List<object>();
                 var unmatched = new List<string>();
@@ -1587,12 +1875,14 @@ namespace George.Services
                 {
                     // 1-based: a term Woo never ordered reads as 0, so it can't tie with the first ordered value.
                     var menuOrder = i + 1;
-                    if (!termByName.TryGetValue(OrderItemLineDisplay.OrderItemAttrDedupeKey(orderedValues[i]), out var term))
+                    if (!termsByKey.TryGetValue(StoreTermKey(orderedValues[i]), out var matching))
                     {
                         unmatched.Add(orderedValues[i]);
                         continue;
                     }
-                    if (term.menu_order != menuOrder)
+                    // Every matched term is written, even when the API already reports this menu_order: the reported
+                    // value is the REST meta key, not the one the storefront sorts by (see the method summary).
+                    foreach (var term in matching)
                         updates.Add(new { id = term.id, menu_order = menuOrder });
                 }
                 if (unmatched.Count > 0)
@@ -1600,8 +1890,9 @@ namespace George.Services
                         unmatched.Count, wooAttrId, attribute.Name, string.Join(" | ", unmatched));
                 if (updates.Count == 0)
                 {
-                    _logger.LogInformation("WooCommerce attribute order: attribute {WooAttrId} ({Name}) already in order on the store ({Terms} store terms)", wooAttrId, attribute.Name, terms.Count);
-                    return needsCustomOrdering;
+                    _logger.LogWarning("WooCommerce attribute order: attribute {WooAttrId} ({Name}) has no store term matching any of its {Values} ordered values ({Terms} store terms); nothing pushed",
+                        wooAttrId, attribute.Name, orderedValues.Count, terms.Count);
+                    return new AttributeTermOrderPushResult(needsCustomOrdering, 0, unmatched.Count, terms.Count == 0 ? "no store terms" : null);
                 }
 
                 var batchUrl = $"{baseUrl}/products/attributes/{wooAttrId}/terms/batch";
@@ -1617,31 +1908,49 @@ namespace George.Services
                         var err = await batchResponse.Content.ReadAsStringAsync(cancelToken);
                         _logger.LogWarning("WooCommerce attribute order: terms batch for attribute {WooAttrId} ({Name}) failed ({Status}): {Error}",
                             wooAttrId, attribute.Name, (int)batchResponse.StatusCode, err);
-                        return needsCustomOrdering;
+                        return new AttributeTermOrderPushResult(needsCustomOrdering, 0, unmatched.Count, $"terms batch failed ({(int)batchResponse.StatusCode})");
                     }
                 }
-                _logger.LogInformation("WooCommerce attribute order: updated menu_order of {Count} terms for attribute {WooAttrId} ({Name})",
+                _logger.LogInformation("WooCommerce attribute order: wrote menu_order of {Count} terms for attribute {WooAttrId} ({Name})",
                     updates.Count, wooAttrId, attribute.Name);
+                return new AttributeTermOrderPushResult(needsCustomOrdering, updates.Count, unmatched.Count, null);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "WooCommerce attribute order: failed to push term order for attribute {WooAttrId} ({Name})", wooAttrId, attribute.Name);
+                return new AttributeTermOrderPushResult(needsCustomOrdering, 0, 0, ex.Message);
             }
-            return needsCustomOrdering;
         }
 
+        /// <summary>Find / create path: the store's existing terms are fetched first so a value that differs only in spelling reuses its term.</summary>
         private async Task SyncAttributeTermsAsync(string baseUrl, int wooAttrId, Attribute attribute, HttpClient httpClient, CancellationToken cancelToken)
         {
             var values = attribute.AttributeValue?.Select(av => av.Value).Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? new List<string>();
-            await SyncAttributeTermValuesAsync(baseUrl, wooAttrId, values, httpClient, cancelToken);
+            if (values.Count == 0) return;
+            var existingTerms = await GetWooCommerceAttributeTermMapAsync(baseUrl, wooAttrId, httpClient, cancelToken);
+            await SyncAttributeTermValuesAsync(baseUrl, wooAttrId, values, existingTerms, httpClient, cancelToken);
         }
 
-        private async Task SyncAttributeTermValuesAsync(string baseUrl, int wooAttrId, IReadOnlyList<string> values, HttpClient httpClient, CancellationToken cancelToken)
+        /// <summary>
+        /// POSTs the values the store doesn't have yet (matched through <see cref="StoreTermKey"/>, never raw text) and
+        /// records each created term in <paramref name="existingTerms"/>. A <c>term_exists</c> answer means the store
+        /// already holds the term (<c>data.resource_id</c>) - it is adopted, never re-created.
+        /// </summary>
+        private async Task SyncAttributeTermValuesAsync(
+            string baseUrl,
+            int wooAttrId,
+            IReadOnlyList<string> values,
+            Dictionary<string, WooCommerceAttributeTermListItem> existingTerms,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
         {
             foreach (var value in values)
             {
                 var name = value?.Trim();
                 if (string.IsNullOrWhiteSpace(name))
+                    continue;
+                var key = StoreTermKey(name);
+                if (existingTerms.ContainsKey(key))
                     continue;
 
                 var termUrl = $"{baseUrl}/products/attributes/{wooAttrId}/terms";
@@ -1668,21 +1977,30 @@ namespace George.Services
 
                 using (termRes)
                 {
-                    var err = termRes.IsSuccessStatusCode ? null : await termRes.Content.ReadAsStringAsync(cancelToken);
-                    if (!termRes.IsSuccessStatusCode)
+                    var body = await termRes.Content.ReadAsStringAsync(cancelToken);
+                    if (termRes.IsSuccessStatusCode)
                     {
-                        var wooErr = TryDeserialize<WooErrorResponse>(err ?? "{}");
-
-                        if (wooErr?.code == "term_exists")
-                            continue; // OK
-
-                        _logger.LogWarning("Failed to create attribute term. Request body was: {Body}. WooCommerce error: {Error}", termBody, err);
-
-                        if (wooErr?.code == "rest_missing_callback_param")
-                            break;
+                        var created = TryDeserialize<WooCommerceAttributeTermListItem>(body);
+                        existingTerms[key] = created is { id: > 0 } ? created : new WooCommerceAttributeTermListItem { name = name };
+                        continue;
                     }
+
+                    var wooErr = TryDeserialize<WooErrorResponse>(body ?? "{}");
+                    if (wooErr?.code == "term_exists")
+                    {
+                        // The store already has this term (WordPress matched it by name/slug): adopt the existing one.
+                        existingTerms[key] = new WooCommerceAttributeTermListItem { id = wooErr.data?.resource_id ?? 0, name = name };
+                        _logger.LogDebug("WooCommerce sync: term {Name} already exists on attribute {WooAttrId} (term {TermId}); reusing it", name, wooAttrId, wooErr.data?.resource_id);
+                        continue;
+                    }
+
+                    _logger.LogWarning("Failed to create attribute term. Request body was: {Body}. WooCommerce error: {Error}", termBody, body);
+
+                    if (wooErr?.code == "rest_missing_callback_param")
+                        break;
                 }
             }
+            StoreTermsByAttribute[StoreTermsCacheKey(baseUrl, wooAttrId)] = existingTerms;
         }
 
         /// <summary>
@@ -2833,7 +3151,12 @@ namespace George.Services
                                 // product page" or Woo also lists the option values in the Additional-information table.
                                 ["visible"] = false,
                                 ["variation"] = true,
+                                // Spelled the way the store's existing terms are (see ToStoreTermName): a value that differs
+                                // from its term by a double space or quote mark would otherwise become a duplicate "-1" term.
                                 ["options"] = SortByAttributeValueOrder(GetProductOptionValuesForWooSync(option, product), option.Name, attributeValueOrder)
+                                    .Select(v => ToStoreTermName(baseUrl, attrId, v))
+                                    .Distinct(StringComparer.Ordinal)
+                                    .ToList()
                             };
                             if (!string.IsNullOrEmpty(slug))
                                 dict["name"] = slug;
@@ -4144,6 +4467,14 @@ namespace George.Services
                             x => NormalizeOptionKey(x.OptionName),
                             x => (x.OptionValue ?? "").Trim()
                         ) ?? new Dictionary<string, string>();
+                    // Variation option names go through Woo's exact get_term_by('name') too (a miss falls back to a slug that
+                    // may not exist); use the store's spelling so the variation lands on the existing term and the
+                    // signature below compares like with like against the store's variations.
+                    foreach (var optionKey in variantOptionValues.Keys.ToList())
+                    {
+                        if (attributeMap.TryGetValue(optionKey, out var mappedAttrId) && mappedAttrId.HasValue)
+                            variantOptionValues[optionKey] = ToStoreTermName(baseUrl, mappedAttrId.Value, variantOptionValues[optionKey]);
+                    }
 
                     var variationAttributesList = new List<object>();
                     foreach (var kvp in variantOptionValues)
@@ -5448,6 +5779,9 @@ namespace George.Services
         {
             public int id { get; set; }
             public string? name { get; set; }
+            public string? slug { get; set; }
+            /// <summary>Products carrying the term - picks the "real" one among store duplicates ("-1" slugs with 0 products).</summary>
+            public int? count { get; set; }
             public int? menu_order { get; set; }
         }
 
