@@ -84,6 +84,12 @@ namespace George.Services
                     httpClient,
                     cancelToken);
 
+                // The order the storefront shows ("Custom ordering" attributes only; empty otherwise) becomes Giorgio's
+                // manual order, so a later drag in Giorgio starts from the store's order instead of an alphabetical one.
+                var storeOrderKeys = await GetStorefrontAttributeValueOrderKeysAsync(siteForImport, wooAttr.id, wooAttr.order_by, cancelToken);
+                var storePosition = storeOrderKeys.Select((k, i) => (k, i)).ToDictionary(x => x.k, x => (int?)x.i, StringComparer.Ordinal);
+                int? StoreOrderOf(string term) => storePosition.TryGetValue(StoreTermKey(term), out var pos) ? pos : null;
+
                 if (local == null)
                 {
                     local = new Attribute
@@ -105,6 +111,7 @@ namespace George.Services
                         {
                             AttributeId = local.Id,
                             Value = term,
+                            DisplayOrder = StoreOrderOf(term),
                         });
                     }
                     if (termNames.Count > 0)
@@ -127,6 +134,22 @@ namespace George.Services
                     changed = true;
                 }
 
+                // An attribute already ordered in Giorgio keeps its order (Giorgio is the truth once someone dragged it);
+                // a never-ordered one adopts the store's order on re-import.
+                var adoptStoreOrder = storeOrderKeys.Count > 0 && local.AttributeValue.All(v => v.DisplayOrder == null);
+                if (adoptStoreOrder)
+                {
+                    foreach (var row in local.AttributeValue)
+                    {
+                        var order = StoreOrderOf(row.Value ?? string.Empty);
+                        if (row.DisplayOrder != order)
+                        {
+                            row.DisplayOrder = order;
+                            changed = true;
+                        }
+                    }
+                }
+
                 var existingValues = local.AttributeValue
                     .Select(v => v.Value?.Trim() ?? string.Empty)
                     .Where(v => v.Length > 0)
@@ -139,6 +162,7 @@ namespace George.Services
                     {
                         AttributeId = local.Id,
                         Value = term,
+                        DisplayOrder = adoptStoreOrder ? StoreOrderOf(term) : null,
                     });
                     changed = true;
                 }

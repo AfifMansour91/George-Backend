@@ -1448,6 +1448,327 @@ namespace George.Services
                 status.Message, string.Join(" | ", status.NeedsCustomOrdering), string.Join(" | ", status.Errors));
         }
 
+        /// <summary>Status of the background attribute value order IMPORT (store -> Giorgio), keyed by site id (0 = all sites).</summary>
+        private static readonly ConcurrentDictionary<int, AttributeValueOrderImportStatusRes> AttributeValueOrderImportStatuses = new();
+
+        private static readonly TimeSpan StoreApiRequestTimeout = TimeSpan.FromSeconds(60);
+
+        /// <summary>
+        /// The attribute's terms in the order the STOREFRONT shows them, read through WooCommerce's public Store API
+        /// (<c>wc/store/v1/products/attributes/{id}/terms?orderby=menu_order</c>, which sorts by term meta <c>order</c>).
+        /// The wc/v3 REST API cannot provide this: its <c>menu_order</c> is the <c>order_pa_*</c> meta (see
+        /// <see cref="PushAttributeTermOrderAsync"/>) and it has no menu_order sorting. Empty on any failure.
+        /// </summary>
+        private async Task<List<WooCommerceAttributeTermListItem>> GetStorefrontAttributeTermOrderAsync(Site site, int wooAttrId, CancellationToken cancelToken)
+        {
+            var terms = new List<WooCommerceAttributeTermListItem>();
+            var siteUrl = site.WooCommerceUrl ?? string.Empty;
+            try
+            {
+                using var client = _httpClientFactory.CreateClient();
+                client.Timeout = StoreApiRequestTimeout;
+                client.DefaultRequestHeaders.Clear();
+                // The endpoint is public, but the stores' bot-protection layer (503 "server_busy" / browser check) lets
+                // the authenticated wc/v3 traffic through, so the same credentials go on this request too - WooCommerce
+                // accepts consumer-key Basic auth on every wc/* namespace, wc/store included.
+                if (!string.IsNullOrWhiteSpace(site.WooCommerceKey) && !string.IsNullOrWhiteSpace(site.WooCommerceSecret))
+                {
+                    var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
+                    client.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+                }
+                client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/json");
+                var storeBase = $"{siteUrl.TrimEnd('/')}/wp-json/wc/store/v1";
+                const int perPage = 100;
+                for (var page = 1; page <= 10; page++)
+                {
+                    var url = $"{storeBase}/products/attributes/{wooAttrId}/terms?orderby=menu_order&order=asc&hide_empty=false&per_page={perPage}&page={page}";
+                    using var response = await client.GetAsync(url, cancelToken);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        _logger.LogWarning("Store API: GET attribute {WooAttrId} terms failed ({Status}) on {Site}", wooAttrId, (int)response.StatusCode, siteUrl);
+                        return new List<WooCommerceAttributeTermListItem>();
+                    }
+                    var list = TryDeserialize<List<WooCommerceAttributeTermListItem>>(await response.Content.ReadAsStringAsync(cancelToken));
+                    if (list == null || list.Count == 0) break;
+                    terms.AddRange(list.Where(t => t.id > 0 && !string.IsNullOrWhiteSpace(t.name)));
+                    if (list.Count < perPage) break;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Store API: reading the term order of attribute {WooAttrId} on {Site} failed", wooAttrId, siteUrl);
+                terms.Clear();
+            }
+            return terms;
+        }
+
+        /// <summary>
+        /// Distinct match keys of the storefront's term order for an attribute (first occurrence wins, so a duplicate
+        /// "-1" term never shifts the position of the value). Empty when the attribute is not on "Custom ordering" in
+        /// Woo (then the store sorts by name and there is no manual order to import) or the store could not be read.
+        /// </summary>
+        private async Task<List<string>> GetStorefrontAttributeValueOrderKeysAsync(Site site, int wooAttrId, string? wooOrderBy, CancellationToken cancelToken)
+        {
+            if (!string.Equals(wooOrderBy, "menu_order", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(site.WooCommerceUrl))
+                return new List<string>();
+            var terms = await GetStorefrontAttributeTermOrderAsync(site, wooAttrId, cancelToken);
+            var keys = new List<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var term in terms)
+            {
+                var key = StoreTermKey(term.name);
+                if (key.Length > 0 && seen.Add(key)) keys.Add(key);
+            }
+            return keys;
+        }
+
+        /// <summary>
+        /// One-time seeding of Giorgio's manual value order from what the stores already show (George, 2026-09-27:
+        /// "pull the order from Woo into Giorgio first, then Giorgio drives Woo"). Without it, the first drag on an
+        /// imported attribute would mark the whole attribute as ordered and push Giorgio's alphabetical order over an
+        /// order curated in wp-admin. Runs in the background like the push; <see cref="GetAttributeValueOrderImportStatus"/>
+        /// reports progress. Rules: attributes already ordered in Giorgio are kept (unless <c>Overwrite</c>), attributes
+        /// sorted by name in Woo are skipped, and only values that exist on the store get a position.
+        /// </summary>
+        public async Task<IApiResponse<AttributeValueOrderImportStatusRes>> ImportAttributeValueOrderFromWooCommerceAsync(
+            WooCommerceImportAttributeValueOrderReq request,
+            CancellationToken cancelToken)
+        {
+            var response = new ApiResponse<AttributeValueOrderImportStatusRes> { Data = new AttributeValueOrderImportStatusRes() };
+            try
+            {
+                List<Site> sites;
+                int statusKey;
+                if (request.AllSites)
+                {
+                    sites = await _siteStorage.GetWooCommerceConfiguredSitesAsync(cancelToken);
+                    statusKey = 0;
+                }
+                else
+                {
+                    if (request.SiteId is not > 0)
+                        return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required unless AllSites is set");
+                    var site = await _siteStorage.GetSiteAsync(request.SiteId.Value, cancelToken);
+                    if (site == null)
+                        return CreateResponse(response, StatusCode.ItemNotFound, "Site not found");
+                    if (!IsWooCommerceConfigured(site))
+                        return CreateResponse(response, StatusCode.InvalidRequest, "WooCommerce is not enabled or configured for this site");
+                    sites = new List<Site> { site };
+                    statusKey = site.Id;
+                }
+
+                if (AttributeValueOrderImportStatuses.TryGetValue(statusKey, out var existing) && existing.State == "running")
+                {
+                    response.Data = existing;
+                    response.Data.Message = "An attribute value order import is already running.";
+                    return response;
+                }
+
+                var started = new AttributeValueOrderImportStatusRes
+                {
+                    State = "running",
+                    SitesTotal = sites.Count,
+                    StartedAtUtc = DateTime.UtcNow,
+                    Message = $"Attribute value order import started for {sites.Count} site(s); running in the background.",
+                };
+                AttributeValueOrderImportStatuses[statusKey] = started;
+                var overwrite = request.Overwrite;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        var woo = scope.ServiceProvider.GetRequiredService<WooCommerceService>();
+                        await woo.RunAttributeValueOrderImportAsync(sites, overwrite, statusKey, started.StartedAtUtc!.Value).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        AttributeValueOrderImportStatuses[statusKey] = new AttributeValueOrderImportStatusRes
+                        {
+                            State = "failed",
+                            SitesTotal = sites.Count,
+                            Error = ex.Message,
+                            StartedAtUtc = started.StartedAtUtc,
+                            FinishedAtUtc = DateTime.UtcNow,
+                        };
+                        _logger.LogError(ex, "Background WooCommerce attribute value order import failed (status key {Key})", statusKey);
+                    }
+                }, CancellationToken.None);
+
+                response.Data = started;
+                _logger.LogInformation("WooCommerce attribute value order import started in background for {Count} site(s) (all sites: {AllSites}, overwrite: {Overwrite})",
+                    sites.Count, request.AllSites, overwrite);
+                return response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Import attribute value order from WooCommerce failed");
+                return CreateResponse(response, StatusCode.UnknownError, ex.Message);
+            }
+        }
+
+        /// <summary>Status of the background attribute value order import (site id, or 0 for the all-sites run). In-memory; idle after restart.</summary>
+        public IApiResponse<AttributeValueOrderImportStatusRes> GetAttributeValueOrderImportStatus(int? siteId, bool allSites)
+        {
+            var key = allSites ? 0 : (siteId ?? 0);
+            return new ApiResponse<AttributeValueOrderImportStatusRes>
+            {
+                Data = AttributeValueOrderImportStatuses.TryGetValue(key, out var status) ? status : new AttributeValueOrderImportStatusRes()
+            };
+        }
+
+        /// <summary>Background body of <see cref="ImportAttributeValueOrderFromWooCommerceAsync"/>.</summary>
+        private async Task RunAttributeValueOrderImportAsync(List<Site> sites, bool overwrite, int statusKey, DateTime startedAtUtc)
+        {
+            var status = new AttributeValueOrderImportStatusRes { State = "running", SitesTotal = sites.Count, StartedAtUtc = startedAtUtc };
+            AttributeValueOrderImportStatusRes Snapshot(string state) => new()
+            {
+                State = state,
+                SitesTotal = status.SitesTotal,
+                SitesDone = status.SitesDone,
+                AttributesTotal = status.AttributesTotal,
+                AttributesImported = status.AttributesImported,
+                AttributesKeptManual = status.AttributesKeptManual,
+                AttributesSortedByName = status.AttributesSortedByName,
+                AttributesSkipped = status.AttributesSkipped,
+                ValuesOrdered = status.ValuesOrdered,
+                Imported = status.Imported.ToList(),
+                Errors = status.Errors.ToList(),
+                StartedAtUtc = status.StartedAtUtc,
+                FinishedAtUtc = state == "running" ? null : DateTime.UtcNow,
+                Message = status.Message,
+            };
+
+            foreach (var site in sites)
+            {
+                try
+                {
+                    var attributes = await _attributeStorage.GetAttributesAsync(
+                        new AttributeFilter { SiteIds = new List<int> { site.Id } },
+                        new PagingExDto { Skip = 0, Take = 10000, IncludeTotal = false },
+                        CancellationToken.None).ConfigureAwait(false);
+                    var candidates = attributes.Items
+                        .Where(a => !a.IsDeleted && a.AttributeValue != null && a.AttributeValue.Count > 1)
+                        .OrderBy(a => a.Name)
+                        .ToList();
+                    status.AttributesTotal += candidates.Count;
+                    AttributeValueOrderImportStatuses[statusKey] = Snapshot("running");
+                    if (candidates.Count == 0) continue;
+
+                    var baseUrl = $"{site.WooCommerceUrl!.TrimEnd('/')}/wp-json/wc/v3";
+                    var auth = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{site.WooCommerceKey}:{site.WooCommerceSecret}"));
+                    using var httpClient = _httpClientFactory.CreateClient();
+                    httpClient.Timeout = WooCommerceHttpTimeout;
+                    httpClient.DefaultRequestHeaders.Clear();
+                    httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {auth}");
+
+                    foreach (var attribute in candidates)
+                    {
+                        var label = $"{site.SiteName} / {attribute.Name}";
+                        try
+                        {
+                            if (!overwrite && attribute.AttributeValue!.Any(av => av.DisplayOrder != null))
+                            {
+                                status.AttributesKeptManual++; // Giorgio already has a deliberate order - it is the truth from here on
+                                continue;
+                            }
+
+                            // Resolve the store attribute (stored id when it still exists there, else by name).
+                            WooCommerceAttributeResponse? wooAttr = null;
+                            if (attribute.WooCommerceId is > 0)
+                            {
+                                using var attrResponse = await httpClient.GetAsync($"{baseUrl}/products/attributes/{attribute.WooCommerceId.Value}", CancellationToken.None).ConfigureAwait(false);
+                                if (attrResponse.IsSuccessStatusCode)
+                                    wooAttr = TryDeserialize<WooCommerceAttributeResponse>(await attrResponse.Content.ReadAsStringAsync(CancellationToken.None).ConfigureAwait(false));
+                            }
+                            if (wooAttr == null)
+                            {
+                                var (foundId, _) = await FindExistingAttributeAsync(baseUrl, attribute.Name, httpClient, CancellationToken.None).ConfigureAwait(false);
+                                if (foundId.HasValue)
+                                {
+                                    using var attrResponse = await httpClient.GetAsync($"{baseUrl}/products/attributes/{foundId.Value}", CancellationToken.None).ConfigureAwait(false);
+                                    if (attrResponse.IsSuccessStatusCode)
+                                        wooAttr = TryDeserialize<WooCommerceAttributeResponse>(await attrResponse.Content.ReadAsStringAsync(CancellationToken.None).ConfigureAwait(false));
+                                    if (wooAttr != null && foundId != attribute.WooCommerceId)
+                                        await _attributeStorage.UpdateAttributeWooCommerceIdAsync(attribute.Id, foundId.Value, CancellationToken.None).ConfigureAwait(false);
+                                }
+                            }
+                            if (wooAttr == null)
+                            {
+                                status.AttributesSkipped++;
+                                status.Errors.Add($"{label}: no matching WooCommerce attribute");
+                                continue;
+                            }
+                            if (!string.Equals(wooAttr.order_by, "menu_order", StringComparison.OrdinalIgnoreCase))
+                            {
+                                status.AttributesSortedByName++; // the store sorts by name: nothing manual to import
+                                continue;
+                            }
+
+                            var orderedKeys = await GetStorefrontAttributeValueOrderKeysAsync(site, wooAttr.id, wooAttr.order_by, CancellationToken.None).ConfigureAwait(false);
+                            if (orderedKeys.Count == 0)
+                            {
+                                status.AttributesSkipped++;
+                                status.Errors.Add($"{label}: the store returned no terms");
+                                continue;
+                            }
+
+                            var position = orderedKeys.Select((k, i) => (k, i)).ToDictionary(x => x.k, x => x.i, StringComparer.Ordinal);
+                            var orderByValue = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
+                            var matched = 0;
+                            foreach (var av in attribute.AttributeValue!)
+                            {
+                                var valueKey = (av.Value ?? string.Empty).Trim();
+                                if (valueKey.Length == 0) continue;
+                                if (position.TryGetValue(StoreTermKey(av.Value), out var pos))
+                                {
+                                    orderByValue[valueKey] = pos;
+                                    matched++;
+                                }
+                                else
+                                {
+                                    orderByValue[valueKey] = null; // not on the store: sorts last, alphabetically
+                                }
+                            }
+                            if (matched < 2)
+                            {
+                                status.AttributesSkipped++;
+                                status.Errors.Add($"{label}: only {matched} value(s) match the store's terms");
+                                continue;
+                            }
+
+                            await _attributeStorage.SetAttributeValueDisplayOrderAsync(attribute.Id, orderByValue, CancellationToken.None).ConfigureAwait(false);
+                            status.AttributesImported++;
+                            status.ValuesOrdered += matched;
+                            status.Imported.Add(label);
+                            _logger.LogInformation("WooCommerce attribute order import: {Label} - {Matched}/{Total} values ordered from the store", label, matched, attribute.AttributeValue!.Count);
+                        }
+                        catch (Exception ex)
+                        {
+                            status.AttributesSkipped++;
+                            status.Errors.Add($"{label}: {ex.Message}");
+                            _logger.LogWarning(ex, "WooCommerce attribute order import: attribute {AttributeId} ({Name}) of site {SiteId} failed", attribute.Id, attribute.Name, site.Id);
+                        }
+                        AttributeValueOrderImportStatuses[statusKey] = Snapshot("running");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    status.Errors.Add($"{site.SiteName}: {ex.Message}");
+                    _logger.LogWarning(ex, "WooCommerce attribute order import: site {SiteId} ({Name}) failed", site.Id, site.SiteName);
+                }
+                finally
+                {
+                    status.SitesDone++;
+                    AttributeValueOrderImportStatuses[statusKey] = Snapshot("running");
+                }
+            }
+
+            status.Message = $"Imported the store order of {status.AttributesImported}/{status.AttributesTotal} attribute(s) on {status.SitesDone} site(s); {status.ValuesOrdered} value(s) ordered, {status.AttributesKeptManual} kept Giorgio's order, {status.AttributesSortedByName} sorted by name in Woo, {status.AttributesSkipped} skipped.";
+            AttributeValueOrderImportStatuses[statusKey] = Snapshot("done");
+            _logger.LogInformation("WooCommerce attribute value order import finished: {Message} Errors: {Errors}", status.Message, string.Join(" | ", status.Errors));
+        }
+
         /// <summary>Per (site, attribute): the generation of the last queued re-sync. A newer drag supersedes a waiting one.</summary>
         private static readonly ConcurrentDictionary<string, long> AttributeResyncGeneration = new();
         /// <summary>Wait after the last drag before the products are pushed - one re-sync per burst, not per drag (Zano: 29 products ≈ 4.5 min each).</summary>

@@ -1285,7 +1285,13 @@ namespace George.Data
         }
 
         /// <param name="limitAttributeToSiteIds">When set, create attributes only for these site IDs (e.g. bulk import target site). When null, create for all sites the product is on.</param>
-        public async Task UpdateProductOptionsAsync(int productId, List<ProductOptionDto>? options, List<int>? limitAttributeToSiteIds = null, CancellationToken cancelToken = default)
+        /// <param name="variantsBeingCleared">
+        /// True when the same save also sends an EMPTY variants list (the user removed every variation): the
+        /// "keep values the variants still use" guards below read the variants from the DB, which are only
+        /// soft-deleted after this call, so without the flag the options would keep values for variants that
+        /// are about to disappear.
+        /// </param>
+        public async Task UpdateProductOptionsAsync(int productId, List<ProductOptionDto>? options, List<int>? limitAttributeToSiteIds = null, CancellationToken cancelToken = default, bool variantsBeingCleared = false)
         {
             if (options == null) return;
 
@@ -1301,7 +1307,7 @@ namespace George.Data
             // sync then pushes a variable product with no attributes and skips all its variations - the store shows
             // it "out of stock" no matter what stock is pushed (Meshek Basar PT "צלעות טלה", 2026-09-09). Options
             // are only cleared together with the variants (a variant-less product, or a request that clears them).
-            if (options.Count == 0 && live.Count > 0)
+            if (options.Count == 0 && live.Count > 0 && !variantsBeingCleared)
             {
                 var variantsStillUseOptions = await _dbContext.ProductVariantOptionValue
                     .AnyAsync(ov => ov.ProductVariant.ProductId == productId && !ov.ProductVariant.IsDeleted, cancelToken);
@@ -1353,7 +1359,7 @@ namespace George.Data
                 if (string.IsNullOrWhiteSpace(opt.Name)) continue;
 
                 var wanted = DistinctOptionValuesPreserveOrder(opt.Values);
-                if (wanted.Count == 0)
+                if (wanted.Count == 0 && !variantsBeingCleared)
                 {
                     var fromVariants = await ValuesFromVariantsAsync(opt.Name);
                     if (fromVariants.Count > 0)

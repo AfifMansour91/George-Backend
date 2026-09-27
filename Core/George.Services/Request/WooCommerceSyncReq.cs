@@ -28,5 +28,14 @@ namespace George.Services.Request
         /// <summary>Also queue the background re-sync of the products using each ordered attribute (variation menu_order). Heavy; off by default.</summary>
         public bool IncludeProducts { get; set; }
     }
+
+    /// <summary>Seed Giorgio's manual attribute value order from the order the stores display (one site, or every WooCommerce-configured site).</summary>
+    public class WooCommerceImportAttributeValueOrderReq
+    {
+        public int? SiteId { get; set; }
+        public bool AllSites { get; set; }
+        /// <summary>Also replace attributes that were already ordered in Giorgio. Off by default: a Giorgio order is deliberate.</summary>
+        public bool Overwrite { get; set; }
+    }
 }
 

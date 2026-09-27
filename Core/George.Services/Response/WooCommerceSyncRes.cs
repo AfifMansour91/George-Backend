@@ -131,6 +131,35 @@ namespace George.Services.Response
         public DateTime? FinishedAtUtc { get; set; }
     }
 
+    /// <summary>
+    /// Status of the background attribute value order IMPORT (the storefront order, via the Store API, into
+    /// Giorgio's DisplayOrder). Returned in state <c>running</c> by the import endpoint; polled until done/failed.
+    /// </summary>
+    public class AttributeValueOrderImportStatusRes
+    {
+        /// <summary><c>idle</c> | <c>running</c> | <c>done</c> | <c>failed</c>.</summary>
+        public string State { get; set; } = "idle";
+        public string Message { get; set; } = string.Empty;
+        public int SitesTotal { get; set; }
+        public int SitesDone { get; set; }
+        /// <summary>Attributes with more than one value found so far.</summary>
+        public int AttributesTotal { get; set; }
+        public int AttributesImported { get; set; }
+        /// <summary>Already ordered in Giorgio and left alone (Overwrite off).</summary>
+        public int AttributesKeptManual { get; set; }
+        /// <summary>Sorted by name in Woo - no manual store order to import.</summary>
+        public int AttributesSortedByName { get; set; }
+        /// <summary>No matching store attribute, store unreadable, or fewer than two values matched (see <see cref="Errors"/>).</summary>
+        public int AttributesSkipped { get; set; }
+        public int ValuesOrdered { get; set; }
+        /// <summary>"site / attribute" labels whose order was imported.</summary>
+        public List<string> Imported { get; set; } = new();
+        public List<string> Errors { get; set; } = new();
+        public string? Error { get; set; }
+        public DateTime? StartedAtUtc { get; set; }
+        public DateTime? FinishedAtUtc { get; set; }
+    }
+
     /// <summary>Read-only row for comparing product sort order (George vs WooCommerce). No DB writes.</summary>
     public class ProductOrderPreviewItem
     {

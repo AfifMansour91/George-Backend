@@ -1015,7 +1015,8 @@ namespace George.Services
                 if (req.ProductOptions != null)
                 {
                     var optionDtos = req.ProductOptions.Select(o => new ProductOptionDto { Name = o.Name, Values = o.Values ?? new List<string>() }).ToList();
-                    await _productStorage.UpdateProductOptionsAsync(productId, optionDtos, cancelToken: cancelToken);
+                    await _productStorage.UpdateProductOptionsAsync(productId, optionDtos, cancelToken: cancelToken,
+                        variantsBeingCleared: req.Variants != null && req.Variants.Count == 0);
                 }
                 if (req.Variants != null)
                 {
@@ -1503,7 +1504,8 @@ namespace George.Services
                             if (productReq.ProductOptions != null)
                             {
                                 var optionDtos = productReq.ProductOptions.Select(o => new ProductOptionDto { Name = o.Name, Values = o.Values ?? new List<string>() }).ToList();
-                                await _productStorage.UpdateProductOptionsAsync(product.Id, optionDtos, limitAttributeToSiteIds: targetSiteIds, cancelToken);
+                                await _productStorage.UpdateProductOptionsAsync(product.Id, optionDtos, limitAttributeToSiteIds: targetSiteIds, cancelToken,
+                                    variantsBeingCleared: productReq.Variants != null && productReq.Variants.Count == 0);
                             }
 
                             if (productReq.Variants != null)

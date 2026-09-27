@@ -162,6 +162,32 @@ namespace George.Data
             return dbAttr;
         }
 
+        /// <summary>
+        /// Sets the manual display order of an attribute's values directly, keyed by value text (the row key is
+        /// AttributeId + Value; null = never ordered, sorts last alphabetically). Used by the store-order import;
+        /// values missing from the dictionary are left as they are.
+        /// </summary>
+        public async Task<int> SetAttributeValueDisplayOrderAsync(int attributeId, IReadOnlyDictionary<string, int?> orderByValue, CancellationToken cancelToken)
+        {
+            var rows = await _dbContext.AttributeValue
+                .Where(av => av.AttributeId == attributeId)
+                .ToListAsync(cancelToken);
+            var changed = 0;
+            foreach (var row in rows)
+            {
+                if (!orderByValue.TryGetValue(row.Value.Trim(), out var order) || row.DisplayOrder == order) continue;
+                row.DisplayOrder = order;
+                changed++;
+            }
+            if (changed > 0)
+            {
+                var attr = await _dbContext.Attribute.FirstOrDefaultAsync(a => a.Id == attributeId, cancelToken);
+                if (attr != null) attr.UpdatedDate = DateTime.UtcNow;
+                await _dbContext.SaveChangesAsync(cancelToken);
+            }
+            return changed;
+        }
+
         /// <summary>Trimmed, non-empty, de-duplicated (case-insensitive, first wins) values in their original order.</summary>
         private static List<string> NormalizeOrderedValues(List<string>? values)
         {

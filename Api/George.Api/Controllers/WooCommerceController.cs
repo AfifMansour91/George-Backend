@@ -344,6 +344,36 @@ namespace George.Api.Controllers
                 _wooCommerceService.PushAttributeValueOrderToWooCommerceAsync(request, cancelToken));
         }
 
+        /// <summary>
+        /// Seed Giorgio's manual attribute value order from the order the store displays (Store API, orderby=menu_order),
+        /// for one site or all sites. Attributes already ordered in Giorgio are kept unless Overwrite. Background; poll
+        /// AttributeValueOrderImportStatus. Run BEFORE the first PushAttributeValueOrder on a store with a hand-made order.
+        /// </summary>
+        [HttpPost("ImportAttributeValueOrder")]
+        [ProducesResponseType(typeof(IApiResponse<AttributeValueOrderImportStatusRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> ImportAttributeValueOrderAsync(
+            [FromBody] WooCommerceImportAttributeValueOrderReq request,
+            CancellationToken cancelToken = default)
+        {
+            if (request == null || (!request.AllSites && request.SiteId is not > 0))
+                return BadRequest();
+            return await SafeCallWithErrorCatchingAsync(() =>
+                _wooCommerceService.ImportAttributeValueOrderFromWooCommerceAsync(request, cancelToken));
+        }
+
+        /// <summary>Status of the background attribute value order import (same SiteId / AllSites as the import).</summary>
+        [HttpPost("AttributeValueOrderImportStatus")]
+        [ProducesResponseType(typeof(IApiResponse<AttributeValueOrderImportStatusRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> AttributeValueOrderImportStatusAsync(
+            [FromBody] WooCommerceImportAttributeValueOrderReq request,
+            CancellationToken cancelToken = default)
+        {
+            if (request == null || (!request.AllSites && request.SiteId is not > 0))
+                return BadRequest();
+            return await SafeCallWithErrorCatchingAsync(() =>
+                Task.FromResult(_wooCommerceService.GetAttributeValueOrderImportStatus(request.SiteId, request.AllSites)));
+        }
+
         /// <summary>Status of the background attribute value order push (same SiteId / AllSites as the push).</summary>
         [HttpPost("AttributeValueOrderPushStatus")]
         [ProducesResponseType(typeof(IApiResponse<AttributeValueOrderPushStatusRes>), (int)HttpStatusCode.OK)]
