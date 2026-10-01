@@ -114,6 +114,17 @@ public partial class PaymentService : ServiceBase
         order.PaymentSettleStatus = PaymentSettleStatus.Initiated;
     }
 
+    /// <summary>
+    /// Real charge evidence for <see cref="OrderChargeEvidence"/>: a settled gateway state, or a successful
+    /// charge/capture event in the order's payment trail.
+    /// </summary>
+    public async Task<bool> HasSuccessfulChargeAsync(Order order, CancellationToken cancelToken = default)
+    {
+        if (OrderChargeEvidence.HasSettledCharge(order)) return true;
+        var events = await _paymentStorage.GetPaymentEventsAsync(order.Id, cancelToken).ConfigureAwait(false);
+        return events.Any(OrderChargeEvidence.IsSuccessfulChargeEvent);
+    }
+
     private static bool IsCardcomCreditPaymentMethod(string? method)
     {
         if (string.IsNullOrWhiteSpace(method)) return false;

@@ -89,6 +89,15 @@ namespace George.Services
             var baselineAll = await _storage.GetOrdersInWindowAsync(siteId, baselineFrom, baselineToEx, byCharge, cancelToken)
                 .ConfigureAwait(false);
 
+            // "Paid" with no charge behind it (staff flag on a gateway credit order) is not income: a shop
+            // reconciling against its acquirer statement found 3 such orders on one site in one month. They
+            // leave every figure here and come back as a separate "שולם ללא חיוב" block (current window only).
+            var chargedIds = await _storage.GetOrderIdsWithSuccessfulChargeAsync(
+                currentAll.Select(o => o.Id).Concat(baselineAll.Select(o => o.Id)), cancelToken).ConfigureAwait(false);
+            var unchargedCurrent = currentAll.Where(o => IsPaidWithoutCharge(o, chargedIds)).ToList();
+            currentAll = currentAll.Where(o => !IsPaidWithoutCharge(o, chargedIds)).ToList();
+            baselineAll = baselineAll.Where(o => !IsPaidWithoutCharge(o, chargedIds)).ToList();
+
             var allProductIds = currentAll.SelectMany(o => o.OrderItem).Select(i => i.ProductId ?? 0)
                 .Concat(baselineAll.SelectMany(o => o.OrderItem).Select(i => i.ProductId ?? 0))
                 .Where(id => id > 0).Distinct();
@@ -131,6 +140,9 @@ namespace George.Services
                 var pipelineOrders = await _storage.GetPipelineOrdersAsync(siteId, cancelToken).ConfigureAwait(false);
                 res.Pipeline = BuildPipeline(pipelineOrders);
             }
+            res.UnchargedPaid = BuildUnchargedPaid(
+                ApplyFilters(unchargedCurrent, search, channelFilter, paymentFilter, statusFilter, cityFilter, categoryFilter, products),
+                byCharge);
 
             res.TrendPoints = BuildTrend(current, fromUtc, toUtcExclusive, grouping, byCharge, products, categoryFilter, refunds);
             res.BaselineTrendPoints = BuildTrend(baseline, baselineFrom, baselineToEx, grouping, byCharge, products, categoryFilter, refunds);
@@ -464,6 +476,31 @@ namespace George.Services
                 CancellationsAmount = Round2(cancels),
                 CancellationsOrderPct = cancelPct,
                 CancellationsAmountBaseline = Round2(bCancels),
+            };
+        }
+
+        private static bool IsPaidWithoutCharge(Order o, HashSet<int> chargedIds) =>
+            Payments.OrderChargeEvidence.IsPaidWithoutCharge(o, chargedIds.Contains(o.Id));
+
+        private static RevenueReportUnchargedPaidDto? BuildUnchargedPaid(List<Order> orders, bool byCharge)
+        {
+            if (orders.Count == 0)
+                return null;
+            return new RevenueReportUnchargedPaidDto
+            {
+                Count = orders.Count,
+                Amount = Round2(orders.Sum(OrderTotal)),
+                Orders = orders
+                    .OrderByDescending(o => ReportDate(o, byCharge))
+                    .Select(o => new RevenueReportUnchargedPaidOrderDto
+                    {
+                        OrderId = o.Id,
+                        OrderNumber = o.OrderNumber ?? "",
+                        CustomerName = o.CustomerName ?? "",
+                        Total = Round2(OrderTotal(o)),
+                        PaidAt = o.PaidAt == null ? null : AssumeUtc(o.PaidAt.Value),
+                    })
+                    .ToList(),
             };
         }
 

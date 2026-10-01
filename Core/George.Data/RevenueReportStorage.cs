@@ -120,6 +120,28 @@ namespace George.Data
             return products.ToDictionary(p => p.Id);
         }
 
+        /// <summary>Orders (of the given ids) with at least one successful charge/capture event - see OrderChargeEvidence.</summary>
+        public async Task<HashSet<int>> GetOrderIdsWithSuccessfulChargeAsync(
+            IEnumerable<int> orderIds,
+            CancellationToken cancelToken)
+        {
+            var ids = orderIds.Where(id => id > 0).Distinct().ToList();
+            if (ids.Count == 0)
+                return new HashSet<int>();
+
+            var rows = await _dbContext.OrderPaymentEvent
+                .AsNoTracking()
+                .Where(e => ids.Contains(e.OrderId)
+                    && (e.EventType == "ChargeToken" || e.EventType == "CaptureAuthorization")
+                    && (e.StatusCode == "0" || e.StatusCode == "000" || e.StatusCode == "Success"))
+                .Select(e => e.OrderId)
+                .Distinct()
+                .ToListAsync(cancelToken)
+                .ConfigureAwait(false);
+
+            return rows.ToHashSet();
+        }
+
         /// <summary>Sum of successful refund event amounts per order (for revenue credits KPI).</summary>
         public async Task<Dictionary<int, decimal>> GetSuccessfulRefundTotalsByOrderIdsAsync(
             IEnumerable<int> orderIds,

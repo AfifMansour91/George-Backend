@@ -40,6 +40,24 @@ namespace George.Services.Response
         public decimal AvgDaysToCharge { get; set; }
     }
 
+    /// <summary>A gateway credit order flagged "Paid" by staff with no charge behind it (see OrderChargeEvidence).</summary>
+    public class RevenueReportUnchargedPaidOrderDto
+    {
+        public int OrderId { get; set; }
+        public string OrderNumber { get; set; } = "";
+        public string CustomerName { get; set; } = "";
+        public decimal Total { get; set; }
+        public DateTime? PaidAt { get; set; }
+    }
+
+    /// <summary>"שולם ללא חיוב" - excluded from every revenue figure, surfaced so the shop collects the money.</summary>
+    public class RevenueReportUnchargedPaidDto
+    {
+        public int Count { get; set; }
+        public decimal Amount { get; set; }
+        public List<RevenueReportUnchargedPaidOrderDto> Orders { get; set; } = new();
+    }
+
     public class RevenueReportTrendPointDto
     {
         public string Date { get; set; } = "";
@@ -120,6 +138,8 @@ namespace George.Services.Response
         public List<RevenueReportFilterOptionDto> Statuses { get; set; } = new();
         public RevenueReportKpisDto Kpis { get; set; } = new();
         public RevenueReportPipelineDto? Pipeline { get; set; }
+        /// <summary>Paid-without-charge orders in the current window (after filters); null when there are none.</summary>
+        public RevenueReportUnchargedPaidDto? UnchargedPaid { get; set; }
         public List<RevenueReportTrendPointDto> TrendPoints { get; set; } = new();
         public List<RevenueReportTrendPointDto> BaselineTrendPoints { get; set; } = new();
         public List<RevenueReportDayRowDto> DayRows { get; set; } = new();

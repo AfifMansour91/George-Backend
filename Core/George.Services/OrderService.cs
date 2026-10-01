@@ -596,6 +596,21 @@ namespace George.Services
             {
                 return CreateResponse(response, StatusCode.InvalidRequest, "ההזמנה כבר שולמה - לא ניתן להחזיר לליקוט הזמנה ששולמה.");
             }
+            // "Paid" from the client is a flag, not a charge. On a gateway credit order it is accepted only with
+            // real charge evidence (settled state or a successful charge event); switching the method to a
+            // cash-like one in the same request is the staff's explicit "collected outside the gateway".
+            // Hinnawi Jaffa #76/#79/#80 (Sept 2026) were delivered, reported as income and never charged.
+            if (beforeUpdate != null
+                && string.Equals(req.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(beforeUpdate.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase)
+                && Payments.OrderChargeEvidence.IsGatewayCreditMethod(req.PaymentMethod ?? beforeUpdate.PaymentMethod)
+                && Payments.OrderChargeEvidence.IsGatewayCreditOrder(beforeUpdate)
+                && !await _paymentService.HasSuccessfulChargeAsync(beforeUpdate, cancelToken).ConfigureAwait(false))
+            {
+                _logger.LogWarning("Refused to mark order {OrderId} Paid without a successful charge (user {UserId}, method {Method}, settle {Settle}).",
+                    orderId, AuthUser.Id, beforeUpdate.PaymentMethod, beforeUpdate.PaymentSettleStatus);
+                return CreateResponse(response, StatusCode.InvalidRequest, Payments.OrderChargeEvidence.MarkPaidRefusedMessage);
+            }
             // המטפל: the first user to take the order into treatment (fills website orders, which have
             // no creating user). Never overwrites a handler stamped at manual-order creation.
             var stampHandler = string.Equals(req.Status, "InTreatment", StringComparison.OrdinalIgnoreCase)
