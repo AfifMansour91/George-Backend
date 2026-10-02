@@ -151,6 +151,10 @@ public class CustomerService : ServiceBase
             AddressLines = BuildAddressLinesFromCustomer(c),
             MarketingEmail = c.MarketingEmail,
             MarketingSms = c.MarketingSms,
+            ConsentSource = c.ConsentSource,
+            ConsentAt = c.ConsentAt.HasValue ? ToUtcIsoString(c.ConsentAt.Value) : null,
+            OptedOutAt = c.OptedOutAt.HasValue ? ToUtcIsoString(c.OptedOutAt.Value) : null,
+            OptedOutSource = c.OptedOutSource,
             LastOrderDate = lastOrderAt?.ToString("dd/MM/yyyy"),
             AverageReturnDays = averageReturnDays,
             Activity = new List<CustomerActivityItem>(),
@@ -238,6 +242,8 @@ public class CustomerService : ServiceBase
             return CreateResponse(response, StatusCode.InvalidRequest, "SiteId is required");
         if (req == null || req.Rows.Count == 0)
             return CreateResponse(response, StatusCode.InvalidRequest, "No rows to import");
+        if (!req.MarketingConsentConfirmed && req.Rows.Any(r => r.MarketingApproval))
+            return CreateResponse(response, StatusCode.InvalidRequest, "הקובץ מסמן לקוחות כמאושרים לדיוור. כדי לייבא אותם יש לאשר שההסכמות נאספו על ידך.");
 
         var actorId = AuthUser.Id;
         var rows = req.Rows.Select(r => new CustomerStorage.ImportRow
@@ -290,6 +296,8 @@ public class CustomerService : ServiceBase
             return CreateResponse(response, StatusCode.ItemNotFound);
         var (orderCount, totalRevenue, lastOrderId, lastOrderAt, averageReturnDays) = await _customerStorage.GetCustomerGlobalStatsAsync(id, cancelToken).ConfigureAwait(false);
         response.Data = MapCustomerToDetailRes(customer, orderCount, totalRevenue, lastOrderId, lastOrderAt, averageReturnDays);
+        if (customer.OptedOutDeliveryId.HasValue)
+            response.Data.OptedOutSendName = await _customerStorage.GetMarketingSendNameByDeliveryAsync(customer.OptedOutDeliveryId.Value, cancelToken).ConfigureAwait(false);
         response.Data.Activity = await BuildActivityAsync(id, cancelToken).ConfigureAwait(false);
         return response;
     }

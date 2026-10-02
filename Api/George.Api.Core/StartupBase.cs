@@ -397,6 +397,7 @@ namespace George.Api.Core
 			services.AddScoped<DeliveryDispatchStorage>();
 			services.AddScoped<PromotionStorage>();
 			services.AddScoped<BundleStorage>();
+			services.AddScoped<MarketingStorage>();
 			services.AddScoped<IntegrationLogStorage>();
 			services.AddSingleton<George.Services.IntegrationLogQueue>();
 			services.AddSingleton<George.Services.IIntegrationLogQueue>(sp => sp.GetRequiredService<George.Services.IntegrationLogQueue>());
@@ -466,6 +467,13 @@ namespace George.Api.Core
 			services.AddScoped<George.Services.Delivery.DeliveryDispatchService>();
 			services.AddScoped<George.Services.Delivery.IDeliveryProvider, George.Services.Delivery.LionWheelDeliveryProvider>();
 			services.AddScoped<KioskCustomerService>();
+			// Marketing module (שיווק): message log queue, API service, dispatcher (driven by MarketingDispatchHostedService).
+			services.AddSingleton<George.Services.Marketing.MessageLogQueue>();
+			services.AddSingleton<George.Services.Marketing.IMessageLogQueue>(sp => sp.GetRequiredService<George.Services.Marketing.MessageLogQueue>());
+			services.AddScoped<George.Services.Marketing.MarketingService>();
+			services.AddScoped<George.Services.Marketing.MarketingDispatchService>();
+			services.AddScoped<George.Services.Marketing.MarketingDeliveryReportService>();
+			services.AddScoped<George.Services.Marketing.InforuQuotaService>();
 
 			// Let the derived add its own dependencies.
 			AddCustomDependencies(services);
@@ -568,15 +576,40 @@ namespace George.Api.Core
 
 
             // System-wide (default) SMS account; per-account overrides live in AccountSmsSettings (see AccountSmsService).
-            // Configuration wins; hard-coded values remain as fallback for environments without an Sms section.
+            // ActiveTrail settings: Sms:ActiveTrail:* (preferred, mirrors Sms:Inforu:*), else the legacy flat Sms:* keys,
+            // else the historical hard-coded values for the NON-secret fields. The AuthToken has no fallback any more (removed 10/2026):
+            // without Sms:ActiveTrail:AuthToken (or legacy Sms:AuthToken) the system account is simply not initialized.
+            string ActiveTrailSetting(string key, string fallback)
+            {
+                var nested = Configuration[$"Sms:ActiveTrail:{key}"];
+                if (!string.IsNullOrWhiteSpace(nested)) return nested.Trim();
+                var flat = Configuration[$"Sms:{key}"];
+                return string.IsNullOrWhiteSpace(flat) ? fallback : flat.Trim();
+            }
             SmsProvider.Init(
-                Configuration["Sms:ApiBaseUrl"] ?? "https://webapi.mymarketing.co.il/api/smscampaign/OperationalMessage",
-                Configuration["Sms:AuthToken"] ?? "0X614FC42DF9E797A0738F2BC8F3211E35EBC29E247603CDFBD9865FC00C7FF0ECEBE00C4034D90AEAF27B45498AF9453C",
-                Configuration["Sms:Username"] ?? "StoreOS",
-                Configuration["Sms:SourcePhone"] ?? "0545555555",
-                Configuration["Sms:CampaignUrl"] ?? "StoreOS",
-                Configuration["Sms:DisplayName"] ?? "StoreOS",
+                ActiveTrailSetting("ApiBaseUrl", "https://webapi.mymarketing.co.il/api/smscampaign/OperationalMessage"),
+                ActiveTrailSetting("AuthToken", string.Empty),
+                ActiveTrailSetting("Username", "StoreOS"),
+                ActiveTrailSetting("SourcePhone", "0545555555"),
+                ActiveTrailSetting("CampaignUrl", "StoreOS"),
+                ActiveTrailSetting("DisplayName", "StoreOS"),
                 otpWebOriginHost: Configuration["Auth:OtpSmsWebOriginHost"]);
+
+            // Which provider the system account uses: "ActiveTrail" (default, the block above) or "Inforu" (Sms:Inforu:Username/ApiToken/Sender).
+            // Shops with their own row are unaffected; this is OTP + every account that has no row / chose "system account".
+            var smsSystemProblem = SmsProvider.InitSystemProvider(
+                Configuration["Sms:Provider"],
+                Configuration["Sms:Inforu:Username"],
+                Configuration["Sms:Inforu:ApiToken"],
+                Configuration["Sms:Inforu:Sender"],
+                Configuration["Sms:Inforu:ApiBaseUrl"]);
+            var smsLogger = service.GetRequiredService<ILoggerFactory>().CreateLogger("SmsProvider");
+            if (smsSystemProblem != null)
+                smsLogger.LogError("System SMS account misconfigured: {Problem} (ActiveTrail needs Sms:ActiveTrail:AuthToken; Inforu needs Sms:Inforu:Username/ApiToken/Sender). OTP and operational SMS for accounts without their own SMS row will fail.", smsSystemProblem);
+            else if (SmsProvider.SystemIsInforu && !AccountSmsService.IsValidInforuSender(Configuration["Sms:Inforu:Sender"]))
+                smsLogger.LogWarning("Sms:Inforu:Sender '{Sender}' is not a valid Inforu sender (up to 11 Latin letters/digits, no spaces, or a whitelisted phone) - Inforu will reject system sends.", Configuration["Sms:Inforu:Sender"]);
+            else
+                smsLogger.LogInformation("System SMS account provider: {Provider}.", SmsProvider.SystemProviderName);
  
 
             // Set globals.

@@ -91,6 +91,7 @@ namespace George.Services
                     dest.AllowWeighted = src.AllowWeighted;
                     dest.KioskEnabled = src.KioskEnabled;
                     dest.BundlesEnabled = src.BundlesEnabled;
+                    dest.MarketingEnabled = src.MarketingEnabled;
                     if (src.KioskSettings != null)
                     {
                         dest.KioskSettings = context.Mapper.Map<KioskSettingsRes>(src.KioskSettings);

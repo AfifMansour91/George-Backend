@@ -5,8 +5,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace George.DB;
 
-/// <summary>Per-account SMS provider credentials. No row (or IsEnabled=false / empty token) = account uses the system-wide SMS account.</summary>
-[Index("AccountId", Name = "UQ_AccountSmsSettings_AccountId", IsUnique = true)]
+/// <summary>
+/// Per-account SMS provider credentials, one row per provider: the shop's own ActiveTrail and the Inforu sub-account
+/// Giorgio opened for it can coexist. <see cref="IsEnabled"/> marks the ACTIVE row (at most one per account);
+/// no enabled row = the account uses the system-wide SMS account.
+/// </summary>
+[Index("AccountId", "Provider", Name = "UQ_AccountSmsSettings_AccountId_Provider", IsUnique = true)]
 public partial class AccountSmsSettings
 {
     [Key]
@@ -24,16 +28,20 @@ public partial class AccountSmsSettings
 
     public int? UpdateUserId { get; set; }
 
-    /// <summary>Master switch: false keeps the saved credentials but sends through the system default account.</summary>
+    /// <summary>This row is the account's active SMS provider. False keeps the credentials for later; no enabled row = system default.</summary>
     public bool IsEnabled { get; set; }
 
-    /// <summary>SMS provider name. Currently only &quot;ActiveTrail&quot; is supported; column exists so more providers can be added without a schema change.</summary>
+    /// <summary>SMS provider name: &quot;ActiveTrail&quot; or &quot;Inforu&quot;.</summary>
     [StringLength(20)]
     public string Provider { get; set; } = "ActiveTrail";
 
-    /// <summary>Optional provider API URL override; NULL = system default URL.</summary>
+    /// <summary>Optional provider API URL override; NULL = provider default URL.</summary>
     [StringLength(500)]
     public string? ApiBaseUrl { get; set; }
+
+    /// <summary>Inforu API username (Basic auth = username:token). Not used by ActiveTrail.</summary>
+    [StringLength(100)]
+    public string? Username { get; set; }
 
     [StringLength(500)]
     public string? ApiToken { get; set; }
@@ -45,6 +53,17 @@ public partial class AccountSmsSettings
     /// <summary>Reserved for providers that send from a phone number (ActiveTrail uses FromName).</summary>
     [StringLength(50)]
     public string? SourcePhone { get; set; }
+
+    /// <summary>
+    /// The credentials are a SUB-ACCOUNT the platform opened for this shop under its own provider account (Inforu
+    /// parent → child). The platform pays the provider, so the shop is still metered by George's marketing bank -
+    /// unlike a shop that brought its own provider account. Super-admin only.
+    /// </summary>
+    public bool BilledByPlatform { get; set; }
+
+    /// <summary>The sub-account's numeric customer id in Inforu - the LevelValue of Admin/CreateOrAddQuota. Learned automatically from GetQuota; editable by super-admin.</summary>
+    [StringLength(50)]
+    public string? InforuCustomerId { get; set; }
 
     [ForeignKey("AccountId")]
     [InverseProperty("AccountSmsSettings")]

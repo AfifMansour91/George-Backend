@@ -109,6 +109,9 @@ public class CustomerStorage : StorageBase
             MarketingApproval = false,
             MarketingEmail = false,
             MarketingSms = marketingSms ?? false,
+            // Consent evidence (when + where) is what the law asks for, not just the flag.
+            ConsentSource = marketingSms == true ? "checkout" : null,
+            ConsentAt = marketingSms == true ? DateTime.UtcNow : null,
             IsDeleted = false,
             CreationTime = DateTime.UtcNow
         };
@@ -184,7 +187,18 @@ public class CustomerStorage : StorageBase
         if (deliveryFloor != null && existing.DeliveryFloor != deliveryFloor) { existing.DeliveryFloor = deliveryFloor; updated = true; }
         if (deliveryEntranceCode != null && existing.DeliveryEntranceCode != deliveryEntranceCode) { existing.DeliveryEntranceCode = deliveryEntranceCode; updated = true; }
         if (notes != null && existing.Notes != notes) { existing.Notes = notes; updated = true; }
-        if (marketingSms.HasValue && existing.MarketingSms != marketingSms.Value) { existing.MarketingSms = marketingSms.Value; updated = true; }
+        // A checkout box (possibly pre-ticked) must never undo an explicit unsubscribe: while OptedOutAt is set the
+        // flag stays off and the card keeps showing the opt-out. Only the shop re-enabling by hand clears it (UpdateCustomerAsync).
+        if (marketingSms.HasValue && existing.MarketingSms != marketingSms.Value && !(marketingSms.Value && existing.OptedOutAt != null))
+        {
+            existing.MarketingSms = marketingSms.Value;
+            if (marketingSms.Value)
+            {
+                existing.ConsentSource = "checkout";
+                existing.ConsentAt = DateTime.UtcNow;
+            }
+            updated = true;
+        }
         if (updated)
         {
             existing.UpdatedDate = DateTime.UtcNow;
@@ -579,6 +593,15 @@ public class CustomerStorage : StorageBase
     }
 
     /// <summary>Bulk import spreadsheet rows. Rows with a phone (≥4 digits after canonicalization) are matched by (SiteId, NormalizedPhone); phone-less rows are matched by email. Existing customers are ENRICHED only - empty fields filled, marketing consent OR-ed in - never overwritten. Soft-deleted matches are skipped (import must not resurrect deleted customers). Returns null when the site does not exist.</summary>
+    /// <summary>Name of the marketing send whose link a customer used to opt out (for the customer card).</summary>
+    public async Task<string?> GetMarketingSendNameByDeliveryAsync(long deliveryId, CancellationToken cancelToken = default)
+    {
+        return await _dbContext.MarketingDelivery.AsNoTracking()
+            .Where(d => d.Id == deliveryId)
+            .Join(_dbContext.MarketingSend.AsNoTracking(), d => d.SendId, s => s.Id, (d, s) => s.Name)
+            .FirstOrDefaultAsync(cancelToken).ConfigureAwait(false);
+    }
+
     public async Task<ImportResult?> ImportCustomersAsync(
         int siteId,
         IReadOnlyList<ImportRow> rows,
@@ -681,6 +704,9 @@ public class CustomerStorage : StorageBase
                     MarketingApproval = row.MarketingApproval,
                     MarketingEmail = row.MarketingApproval,
                     MarketingSms = row.MarketingApproval,
+                    // Consent provenance (spec 02): the shop vouched for these when it confirmed the import.
+                    ConsentSource = row.MarketingApproval ? "import" : null,
+                    ConsentAt = row.MarketingApproval ? DateTime.UtcNow : null,
                     IsDeleted = false,
                     CreationTime = DateTime.UtcNow
                 };
@@ -780,7 +806,13 @@ public class CustomerStorage : StorageBase
         {
             if (!existing.MarketingApproval) { existing.MarketingApproval = true; updated = true; }
             if (!existing.MarketingEmail) { existing.MarketingEmail = true; updated = true; }
-            if (!existing.MarketingSms) { existing.MarketingSms = true; updated = true; }
+            if (!existing.MarketingSms && existing.OptedOutAt == null) // an import never overrides an unsubscribe
+            {
+                existing.MarketingSms = true;
+                existing.ConsentSource = "import";
+                existing.ConsentAt = DateTime.UtcNow;
+                updated = true;
+            }
         }
         if (updated) existing.UpdatedDate = DateTime.UtcNow;
     }
@@ -864,7 +896,23 @@ public class CustomerStorage : StorageBase
         if (deliveryFloor != null) c.DeliveryFloor = string.IsNullOrWhiteSpace(deliveryFloor) ? null : deliveryFloor.Trim();
         if (deliveryEntranceCode != null) c.DeliveryEntranceCode = string.IsNullOrWhiteSpace(deliveryEntranceCode) ? null : deliveryEntranceCode.Trim();
         if (marketingEmail.HasValue) c.MarketingEmail = marketingEmail.Value;
-        if (marketingSms.HasValue) c.MarketingSms = marketingSms.Value;
+        if (marketingSms.HasValue && c.MarketingSms != marketingSms.Value)
+        {
+            c.MarketingSms = marketingSms.Value;
+            if (marketingSms.Value)
+            {
+                c.ConsentSource = "manual";
+                c.ConsentAt = DateTime.UtcNow;
+                c.OptedOutAt = null;
+                c.OptedOutSource = null;
+                c.OptedOutDeliveryId = null;
+            }
+            else
+            {
+                c.OptedOutAt = DateTime.UtcNow;
+                c.OptedOutSource = "manual";
+            }
+        }
 
         if (phone != null)
         {

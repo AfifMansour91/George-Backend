@@ -19,6 +19,10 @@ public class AccountSmsServiceTests
     public void MapToConfig_valid_enabled_row_returns_config()
     {
         var config = AccountSmsService.MapToConfig(ValidSettings());
+        Assert.False(config!.BilledByPlatform);
+        var sub = ValidSettings();
+        sub.BilledByPlatform = true;
+        Assert.True(AccountSmsService.MapToConfig(sub)!.BilledByPlatform);
         Assert.NotNull(config);
         Assert.Equal("0Xtoken1234", config!.ApiToken);
         Assert.Equal("MyShop", config.FromName);
@@ -62,8 +66,41 @@ public class AccountSmsServiceTests
     public void MapToConfig_unknown_provider_returns_null()
     {
         var settings = ValidSettings();
-        settings.Provider = "Inforu";
+        settings.Provider = "Twilio";
         Assert.Null(AccountSmsService.MapToConfig(settings));
+    }
+
+    [Fact]
+    public void MapToConfig_inforu_with_username_returns_config()
+    {
+        var settings = ValidSettings();
+        settings.Provider = "inforu"; // case-insensitive
+        settings.Username = "myshop-user";
+        var config = AccountSmsService.MapToConfig(settings);
+        Assert.NotNull(config);
+        Assert.True(config!.IsInforu);
+        Assert.Equal("Inforu", config.Provider);
+        Assert.Equal("myshop-user", config.Username);
+    }
+
+    [Fact]
+    public void MapToConfig_inforu_without_username_returns_null()
+    {
+        var settings = ValidSettings();
+        settings.Provider = "Inforu";
+        settings.Username = " ";
+        Assert.Null(AccountSmsService.MapToConfig(settings));
+    }
+
+    [Theory]
+    [InlineData(null, "ActiveTrail")]
+    [InlineData("", "ActiveTrail")]
+    [InlineData("activetrail", "ActiveTrail")]
+    [InlineData("INFORU", "Inforu")]
+    [InlineData("Twilio", null)]
+    public void NormalizeProvider_maps_supported_names(string? input, string? expected)
+    {
+        Assert.Equal(expected, AccountSmsService.NormalizeProvider(input));
     }
 
     [Fact]

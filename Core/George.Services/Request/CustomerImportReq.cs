@@ -4,6 +4,12 @@ namespace George.Services.Request;
 public class CustomerImportReq
 {
     public List<CustomerImportRowReq> Rows { get; set; } = new();
+
+    /// <summary>
+    /// The shop owner confirms the marketing consents in the file were collected by them (חוק הספאם). Required when any row
+    /// carries MarketingApproval; without it the import is refused rather than silently importing unproven consents.
+    /// </summary>
+    public bool MarketingConsentConfirmed { get; set; }
 }
 
 /// <summary>One spreadsheet row. Phone is canonicalized server-side (leading-0 restore, +972 → 0); rows are matched to existing customers by phone, or by email when there is no phone. Existing customers are enriched only (empty fields filled, marketing consent OR-ed) - never overwritten.</summary>

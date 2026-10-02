@@ -4,6 +4,7 @@ using George.Common.Payment;
 using George.Data;
 using George.DB;
 using George.Providers;
+using George.Services.Marketing;
 using George.Services.Payments.Cardcom;
 using George.Services.Payments.PayPlus;
 using George.Services.Request;
@@ -358,7 +359,7 @@ public partial class PaymentService : ServiceBase
         if (!SmsProvider.CanSendWith(smsConfig))
             return CreateResponse(new ApiResponse<SendPaymentSmsRes>(), StatusCode.InvalidRequest, "SMS provider is not configured.");
 
-        var sent = await _smsProvider.SendTextAsync(phone, body, smsConfig, cancelToken);
+        var sent = await _accountSmsService.SendLoggedAsync(SmsLogContext.Operational(MessageCategory.PaymentLink, order.AccountId, order.SiteId, order.Id), phone, body, smsConfig, cancelToken);
         if (!sent)
             return CreateResponse(new ApiResponse<SendPaymentSmsRes>(), StatusCode.InvalidRequest, "SMS send failed.");
 
@@ -564,7 +565,7 @@ public partial class PaymentService : ServiceBase
                 return;
             }
 
-            var sent = await _smsProvider.SendTextAsync(order.CustomerPhone, body, smsConfig, cancelToken);
+            var sent = await _accountSmsService.SendLoggedAsync(SmsLogContext.Operational(MessageCategory.OrderConfirmation, order.AccountId, order.SiteId, order.Id), order.CustomerPhone, body, smsConfig, cancelToken);
             if (sent)
             {
                 await LogEventAsync(order.Id, "NewOrderSms", "0", MaskPhone(order.CustomerPhone.Trim()), null, null,
@@ -1123,7 +1124,7 @@ public partial class PaymentService : ServiceBase
         if (!body.Contains(url, StringComparison.OrdinalIgnoreCase))
             body = $"{body.TrimEnd()}\n{url}";
 
-        var sent = await _smsProvider.SendTextAsync(phone, body, smsConfig, cancelToken);
+        var sent = await _accountSmsService.SendLoggedAsync(SmsLogContext.Operational(MessageCategory.Refund, order.AccountId, order.SiteId, order.Id), phone, body, smsConfig, cancelToken);
         if (!sent)
             return CreateResponse(response, StatusCode.InvalidRequest,
                 "Could not send credit invoice SMS. Check customer phone and SMS provider configuration.");
@@ -2688,7 +2689,7 @@ public partial class PaymentService : ServiceBase
             body = $"{body.TrimEnd()}\n{url.Trim()}";
         }
 
-        var sent = await _smsProvider.SendTextAsync(phone, body, smsConfig, cancelToken);
+        var sent = await _accountSmsService.SendLoggedAsync(SmsLogContext.Operational(MessageCategory.Invoice, order.AccountId, order.SiteId, order.Id), phone, body, smsConfig, cancelToken);
         return sent ? (true, MaskPhone(phone)) : (false, null);
     }
 
@@ -2711,7 +2712,7 @@ public partial class PaymentService : ServiceBase
         try
         {
             var body = await BuildRefundSmsBodyAsync(order, refundDocumentUrl ?? "", refundAmount, cancelToken);
-            var sent = await _smsProvider.SendTextAsync(phone, body, smsConfig, cancelToken);
+            var sent = await _accountSmsService.SendLoggedAsync(SmsLogContext.Operational(MessageCategory.Refund, order.AccountId, order.SiteId, order.Id), phone, body, smsConfig, cancelToken);
             if (sent)
             {
                 await LogEventAsync(order.Id, "RefundSms", "0", MaskPhone(phone), refundTransactionId, null,

@@ -70,6 +70,29 @@ public partial class Customer
 
     public bool MarketingSms { get; set; }
 
+    /// <summary>Marketing module: birthday segment / automation. Date only.</summary>
+    [Column(TypeName = "date")]
+    public DateTime? BirthDate { get; set; }
+
+    /// <summary>Where the marketing consent came from: <c>checkout</c> | <c>club</c> | <c>pos</c> | <c>import</c> | <c>manual</c> | <c>legacy</c>.</summary>
+    [StringLength(20)]
+    public string? ConsentSource { get; set; }
+
+    /// <summary>When consent was given - legal evidence (חוק הספאם).</summary>
+    [Precision(0)]
+    public DateTime? ConsentAt { get; set; }
+
+    /// <summary>Set when the customer removed themselves. Wins over <see cref="MarketingSms"/> until a NEW consent arrives.</summary>
+    [Precision(0)]
+    public DateTime? OptedOutAt { get; set; }
+
+    /// <summary><c>link</c> | <c>manual</c> | <c>reply</c>.</summary>
+    [StringLength(20)]
+    public string? OptedOutSource { get; set; }
+
+    /// <summary>The marketing delivery whose unsubscribe link was used.</summary>
+    public long? OptedOutDeliveryId { get; set; }
+
     /// <summary>Phone order: default manual discount type (<c>percent</c> | <c>amount</c>) for this customer at this site.</summary>
     [StringLength(20)]
     public string? PermanentDiscountType { get; set; }

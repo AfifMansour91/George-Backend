@@ -143,6 +143,7 @@ namespace George.Data
             dbAcc.AllowWeighted = updated.AllowWeighted;
             dbAcc.KioskEnabled = updated.KioskEnabled;
             dbAcc.BundlesEnabled = updated.BundlesEnabled;
+            dbAcc.MarketingEnabled = updated.MarketingEnabled;
 
             // Update address and website fields
             dbAcc.Address = updated.Address;
@@ -289,23 +290,78 @@ namespace George.Data
             return true;
         }
 
+        /// <summary>The account's ACTIVE SMS row (IsEnabled), or null = system default. Sends resolve through this.</summary>
         public async Task<AccountSmsSettings?> GetSmsSettingsAsync(int accountId, CancellationToken cancelToken)
         {
             return await _dbContext.AccountSmsSettings
                 .AsNoTracking()
-                .FirstOrDefaultAsync(s => s.AccountId == accountId, cancelToken);
+                .Where(s => s.AccountId == accountId && s.IsEnabled)
+                .OrderBy(s => s.Id)
+                .FirstOrDefaultAsync(cancelToken);
         }
 
+        /// <summary>Every SMS row of the account (one per provider), active or not - for the settings screens.</summary>
+        public async Task<List<AccountSmsSettings>> GetSmsSettingsRowsAsync(int accountId, CancellationToken cancelToken)
+        {
+            return await _dbContext.AccountSmsSettings
+                .AsNoTracking()
+                .Where(s => s.AccountId == accountId)
+                .OrderBy(s => s.Id)
+                .ToListAsync(cancelToken);
+        }
+
+        public async Task<AccountSmsSettings?> GetSmsSettingsRowAsync(int accountId, string provider, CancellationToken cancelToken)
+        {
+            return await _dbContext.AccountSmsSettings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.AccountId == accountId && s.Provider == provider, cancelToken);
+        }
+
+        /// <summary>Marks one provider row active and every other row of the account inactive; null = system default.</summary>
+        public async Task<bool> SetActiveSmsProviderAsync(int accountId, string? provider, CancellationToken cancelToken)
+        {
+            var rows = await _dbContext.AccountSmsSettings.Where(s => s.AccountId == accountId).ToListAsync(cancelToken);
+            if (provider != null && rows.All(r => !string.Equals(r.Provider, provider, StringComparison.OrdinalIgnoreCase)))
+                return false;
+            foreach (var r in rows)
+            {
+                var active = provider != null && string.Equals(r.Provider, provider, StringComparison.OrdinalIgnoreCase);
+                if (r.IsEnabled != active)
+                {
+                    r.IsEnabled = active;
+                    r.UpdatedDate = DateTime.UtcNow;
+                }
+            }
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return true;
+        }
+
+        /// <summary>Upsert by (AccountId, Provider). Saving a row as enabled makes it the only active one.</summary>
         public async Task<AccountSmsSettings> UpsertSmsSettingsAsync(AccountSmsSettings settings, CancellationToken cancelToken)
         {
+            if (settings.IsEnabled)
+            {
+                // At most one active row per account (tracked update - the InMemory test provider has no ExecuteUpdate).
+                var others = await _dbContext.AccountSmsSettings
+                    .Where(s => s.AccountId == settings.AccountId && s.Provider != settings.Provider && s.IsEnabled)
+                    .ToListAsync(cancelToken);
+                foreach (var o in others)
+                {
+                    o.IsEnabled = false;
+                    o.UpdatedDate = DateTime.UtcNow;
+                }
+            }
+
             var existing = await _dbContext.AccountSmsSettings
-                .FirstOrDefaultAsync(s => s.AccountId == settings.AccountId, cancelToken);
+                .FirstOrDefaultAsync(s => s.AccountId == settings.AccountId && s.Provider == settings.Provider, cancelToken);
             if (existing != null)
             {
                 existing.IsEnabled = settings.IsEnabled;
-                existing.Provider = settings.Provider;
                 existing.ApiBaseUrl = settings.ApiBaseUrl;
+                existing.Username = settings.Username;
                 existing.ApiToken = settings.ApiToken;
+                existing.BilledByPlatform = settings.BilledByPlatform;
+                existing.InforuCustomerId = settings.InforuCustomerId;
                 existing.FromName = settings.FromName;
                 existing.SourcePhone = settings.SourcePhone;
                 existing.UpdatedDate = DateTime.UtcNow;
@@ -320,11 +376,19 @@ namespace George.Data
             return settings;
         }
 
-        /// <summary>Remove the account's SMS credentials row so it goes back to the system-wide SMS account. Hard delete - the unique AccountId index must stay free for a future row.</summary>
-        public async Task<bool> DeleteSmsSettingsAsync(int accountId, CancellationToken cancelToken)
+        /// <summary>Remember the Inforu customer id the sub-account reported about itself.</summary>
+        public async Task SetInforuCustomerIdAsync(int accountId, string customerId, CancellationToken cancelToken)
+        {
+            await _dbContext.AccountSmsSettings
+                .Where(s => s.AccountId == accountId && s.Provider == "Inforu")
+                .ExecuteUpdateAsync(u => u.SetProperty(s => s.InforuCustomerId, customerId), cancelToken);
+        }
+
+        /// <summary>Remove one provider's credentials row (hard delete - the unique index must stay free for a future row).</summary>
+        public async Task<bool> DeleteSmsSettingsAsync(int accountId, string provider, CancellationToken cancelToken)
         {
             var existing = await _dbContext.AccountSmsSettings
-                .FirstOrDefaultAsync(s => s.AccountId == accountId, cancelToken);
+                .FirstOrDefaultAsync(s => s.AccountId == accountId && s.Provider == provider, cancelToken);
             if (existing == null)
                 return false;
             _dbContext.AccountSmsSettings.Remove(existing);

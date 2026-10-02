@@ -100,12 +100,20 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _accountSmsSvc.UpsertSettingsAsync(accountId, req, cancelToken));
         }
 
-        /// <summary>Remove the account's SMS credentials; it goes back to the system-wide SMS account.</summary>
+        /// <summary>Remove one provider's SMS credentials (?provider=ActiveTrail|Inforu). The shop may remove only its own ActiveTrail.</summary>
         [HttpDelete("{accountId:int}/sms-settings")]
         [ProducesResponseType(typeof(IApiResponse<AccountSmsSettingsRes>), (int)HttpStatusCode.OK)]
-        public async Task<IActionResult> DeleteSmsSettingsAsync([FromRoute] int accountId, CancellationToken cancelToken = default)
+        public async Task<IActionResult> DeleteSmsSettingsAsync([FromRoute] int accountId, [FromQuery] string? provider, CancellationToken cancelToken = default)
         {
-            return await SafeCallWithErrorCatchingAsync(() => _accountSmsSvc.DeleteSettingsAsync(accountId, cancelToken));
+            return await SafeCallWithErrorCatchingAsync(() => _accountSmsSvc.DeleteSettingsAsync(accountId, provider, cancelToken));
+        }
+
+        /// <summary>Choose the account's active SMS provider: {"provider": "ActiveTrail" | "Inforu" | null (system default)}.</summary>
+        [HttpPut("{accountId:int}/sms-settings/active")]
+        [ProducesResponseType(typeof(IApiResponse<AccountSmsSettingsRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> SetActiveSmsProviderAsync([FromRoute] int accountId, [FromBody] AccountSmsActiveProviderReq req, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _accountSmsSvc.SetActiveProviderAsync(accountId, req, cancelToken));
         }
 
         /// <summary>Send a test SMS using the account's saved SMS settings (save first, then test).</summary>
@@ -134,6 +142,8 @@ namespace George.Api.Controllers
         public void SetAuthUser()
         {
             SetAuthUser(_accountSvc);
+            // The SMS-settings endpoints decide super-admin-only fields (BilledByPlatform, InforuCustomerId) by the caller.
+            SetAuthUser(_accountSmsSvc);
         }
     }
 }

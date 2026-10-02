@@ -32,6 +32,8 @@ namespace George.Api
 			services.AddHostedService<IntegrationLogBackgroundWriter>();
 			services.AddHostedService<ExternalPriceSyncHostedService>();
 			services.AddHostedService<FutureOrdersAtTimePrintHostedService>();
+			services.AddHostedService<George.Services.Marketing.MessageLogBackgroundWriter>();
+			services.AddHostedService<George.Services.Marketing.MarketingDispatchHostedService>();
 		}
 
 		protected override void Initialize(IServiceCollection services)

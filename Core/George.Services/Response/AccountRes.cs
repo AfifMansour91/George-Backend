@@ -48,6 +48,9 @@ namespace George.Services.Response
         /// <summary>Bundles (מארזים) feature gate (FE <c>allowBundles</c>).</summary>
         public bool BundlesEnabled { get; set; }
 
+        /// <summary>Marketing module (שיווק) feature gate (FE <c>allowMarketing</c>).</summary>
+        public bool MarketingEnabled { get; set; }
+
         /// <summary>Kiosk design and behavior settings (logo override, colors, home bg, payment toggles).</summary>
         public KioskSettingsRes? KioskSettings { get; set; }
 

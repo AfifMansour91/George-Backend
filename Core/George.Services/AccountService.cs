@@ -105,6 +105,7 @@ namespace George.Services
                 AllowWeighted = req.AllowWeighted,
                 KioskEnabled = req.KioskEnabled,
                 BundlesEnabled = req.BundlesEnabled,
+                MarketingEnabled = req.MarketingEnabled,
                 IsActive = true,
                 CreationTime = DateTime.UtcNow,
             };
@@ -240,6 +241,7 @@ namespace George.Services
                 // used to carry the flags of a stale client copy and once switched the bundles module OFF.
                 KioskEnabled = canSetModules ? (req.KioskEnabled ?? existingAccount.KioskEnabled) : existingAccount.KioskEnabled,
                 BundlesEnabled = canSetModules ? (req.BundlesEnabled ?? existingAccount.BundlesEnabled) : existingAccount.BundlesEnabled,
+                MarketingEnabled = canSetModules ? (req.MarketingEnabled ?? existingAccount.MarketingEnabled) : existingAccount.MarketingEnabled,
                 // Address fields: use request value if provided, otherwise preserve existing
                 Address = req.Address ?? existingAccount.Address,
                 City = req.City ?? existingAccount.City,

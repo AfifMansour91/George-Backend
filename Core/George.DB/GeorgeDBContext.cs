@@ -62,6 +62,15 @@ namespace George.DB
 		public virtual DbSet<ProductBundleComponent> ProductBundleComponent { get; set; }
 		public virtual DbSet<ProductBundleComponentSwap> ProductBundleComponentSwap { get; set; }
 
+		// Marketing module (שיווק) - Marketing_Phase0to2_Install.sql. Plain FK ints, no navigations.
+		public virtual DbSet<MessageLog> MessageLog { get; set; }
+		public virtual DbSet<MarketingSettings> MarketingSettings { get; set; }
+		public virtual DbSet<MarketingSegment> MarketingSegment { get; set; }
+		public virtual DbSet<MarketingSend> MarketingSend { get; set; }
+		public virtual DbSet<MarketingDelivery> MarketingDelivery { get; set; }
+		public virtual DbSet<MarketingAttribution> MarketingAttribution { get; set; }
+		public virtual DbSet<MarketingQuotaLedger> MarketingQuotaLedger { get; set; }
+
 		// DB Views mapping
 
 
@@ -453,6 +462,7 @@ namespace George.DB
             // Bundles: soft-deleted slots/swaps stay in the DB (order lines reference them) but never surface in reads.
             modelBuilder.Entity<ProductBundleComponent>().HasQueryFilter(a => a.IsDeleted == false);
             modelBuilder.Entity<ProductBundleComponentSwap>().HasQueryFilter(a => a.IsDeleted == false);
+            modelBuilder.Entity<MarketingSegment>().HasQueryFilter(a => a.IsDeleted == false);
             //modelBuilder.Entity<Account>().HasQueryFilter(ent => EF.Property<bool>(ent, PROP_IS_DELETED) == false);
 
         }

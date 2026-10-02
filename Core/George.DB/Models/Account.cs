@@ -84,6 +84,9 @@ public partial class Account
     /// <summary>Bundles (מארזים) feature gate - super-admin switch (nav item, settings, /Bundle API). Pattern: <see cref="KioskEnabled"/>.</summary>
     public bool BundlesEnabled { get; set; }
 
+    /// <summary>Marketing module (שיווק) feature gate - super-admin switch (nav section, /Marketing API). Pattern: <see cref="BundlesEnabled"/>.</summary>
+    public bool MarketingEnabled { get; set; }
+
     /// <summary>Default low-stock threshold for weighted-style (kg) products in this account.</summary>
     [Column(TypeName = "decimal(18, 4)")]
     public decimal? DefaultLowStockThresholdWeighted { get; set; }

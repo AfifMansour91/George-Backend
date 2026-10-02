@@ -237,6 +237,8 @@ namespace George.Common.Request
         /// account name) can never switch the module off by omission.
         /// </summary>
         public bool? BundlesEnabled { get; set; }
+        /// <summary>Marketing module (שיווק) feature gate (FE <c>allowMarketing</c>). Super-admin switch; null = keep the current value.</summary>
+        public bool? MarketingEnabled { get; set; }
         public int? WizardStep { get; set; }
         public string? WizardStatus { get; set; }
         /// <summary>Wizard type: "all_sites", "per_site", or "none" (no client-facing wizard).</summary>
@@ -517,6 +519,8 @@ namespace George.Common.Request
         public bool KioskEnabled { get; set; } = false;
         /// <summary>Bundles (מארזים) feature gate (FE <c>allowBundles</c>). ON by default for new accounts.</summary>
         public bool BundlesEnabled { get; set; } = true;
+        /// <summary>Marketing module (שיווק) feature gate (FE <c>allowMarketing</c>). OFF by default - opened per account.</summary>
+        public bool MarketingEnabled { get; set; } = false;
 
         public string? LogoUrl { get; set; }
         public string? Website { get; set; }
