@@ -287,9 +287,9 @@ public class MarketingSegmentDefinitionTests
 public class MarketingSendErrorTextTests
 {
     [Theory]
-    [InlineData(-13, "Inforu -13: quota", "מכסת ההודעות אצל הספק נגמרה — Inforu -13: quota")]
-    [InlineData(-21, "Inforu -21: sender", "שם השולח לא מאושר אצל הספק — Inforu -21: sender")]
-    [InlineData(null, "ActiveTrail HTTP 503", "הספק לא היה זמין — ActiveTrail HTTP 503")]
+    [InlineData(-13, "Inforu -13: quota", "מכסת ההודעות אצל הספק נגמרה - Inforu -13: quota")]
+    [InlineData(-21, "Inforu -21: sender", "שם השולח לא מאושר אצל הספק - Inforu -21: sender")]
+    [InlineData(null, "ActiveTrail HTTP 503", "הספק לא היה זמין - ActiveTrail HTTP 503")]
     [InlineData(null, null, "הספק דחה את ההודעה")]
     public void Provider_failures_are_described_in_Hebrew_with_the_raw_text_kept(int? statusId, string? raw, string expected)
     {

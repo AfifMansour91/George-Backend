@@ -17,11 +17,11 @@ namespace George.Services;
 /// <summary>
 /// Lean order-driven stock push: sends ONLY stock fields via WooCommerce batch endpoints, and only for
 /// products/variations whose Woo-side values actually differ. Replaces the full per-product PUT that the
-/// order flows (picking / completion / line removal) used to trigger — a full product save on every picked
+/// order flows (picking / completion / line removal) used to trigger - a full product save on every picked
 /// line purged the store's page cache all day and multiplied load at purchase peaks (Zano 502 incident,
 /// 2026-08-31: ~2,900 full syncs/day collapsed to ~a few dozen batch calls).
 ///
-/// The stock values are computed EXACTLY as the full sync computes them — the parent-product fields mirror
+/// The stock values are computed EXACTLY as the full sync computes them - the parent-product fields mirror
 /// <see cref="SyncProductAsync"/> and the per-variation fields mirror <see cref="SyncProductVariantsAsync"/>.
 /// If either of those changes its stock logic, this file must change with it (both sides carry this note).
 /// Products this push cannot address safely (no Woo id yet, or a variation without a mapped Woo id) fall
@@ -54,7 +54,7 @@ public partial class WooCommerceService
         public int ProductId { get; init; }
         public int WooProductId { get; init; }
         public Dictionary<string, object> ParentFields { get; } = new();
-        /// <summary>Quantity participates in the unchanged-check only when Woo actually manages it (manage_stock on) — Woo ignores the field otherwise, so comparing it would defeat every skip.</summary>
+        /// <summary>Quantity participates in the unchanged-check only when Woo actually manages it (manage_stock on) - Woo ignores the field otherwise, so comparing it would defeat every skip.</summary>
         public bool CompareParentQuantity { get; set; }
         public List<Dictionary<string, object>>? VariationFields { get; set; }
         public bool CompareVariationQuantity { get; set; }
@@ -116,7 +116,7 @@ public partial class WooCommerceService
         }
 
         // Delta check: read the store's current stock fields once, then push only real differences.
-        // A failed/partial read is treated as "different" — when in doubt, push (never silently skip).
+        // A failed/partial read is treated as "different" - when in doubt, push (never silently skip).
         var currentByWooId = await FetchCurrentWooStockAsync(baseUrl, plans.Select(p => p.WooProductId).ToList(), httpClient, cancelToken).ConfigureAwait(false);
 
         var parentsToUpdate = new List<WooStockPushPlan>();
@@ -187,7 +187,7 @@ public partial class WooCommerceService
             ?? product.WooCommerceId;
         if (wooId is not > 0)
         {
-            // Not linked to this store yet — the full sync owns SKU matching and product creation.
+            // Not linked to this store yet - the full sync owns SKU matching and product creation.
             fallbackProductIds.Add(productId);
             return null;
         }
@@ -203,7 +203,7 @@ public partial class WooCommerceService
             _logger.LogWarning(ovEx, "Catalog stock push: failed to load per-site override for product {ProductId} site {SiteId}; using canonical values", product.Id, siteId);
         }
 
-        // Effective stock status — mirrors SyncProductAsync ("Map stock status" + per-site override).
+        // Effective stock status - mirrors SyncProductAsync ("Map stock status" + per-site override).
         var stockStatus = "instock";
         if (product.StockStatus?.Name == "out_of_stock" || product.Status?.Name == "outOfStock")
             stockStatus = "outofstock";
@@ -223,7 +223,7 @@ public partial class WooCommerceService
         var activeVariants = product.ProductVariant?.Where(v => !v.IsDeleted).ToList() ?? new List<ProductVariant>();
         if (activeVariants.Count == 0)
         {
-            // Simple product — mirrors SyncProductAsync's simple-product stock block, including the
+            // Simple product - mirrors SyncProductAsync's simple-product stock block, including the
             // forced quantity 0 on an explicit out-of-stock (Woo derives status from quantity, MultiSite #14).
             var manageStock = !string.IsNullOrEmpty(siteOverride?.StockManagementType)
                 ? IsStockQuantityManagementName(siteOverride!.StockManagementType)
@@ -238,7 +238,7 @@ public partial class WooCommerceService
             return plan;
         }
 
-        // Variable product — parent block mirrors SyncProductAsync's variable-product stock branches.
+        // Variable product - parent block mirrors SyncProductAsync's variable-product stock branches.
         var smt = product.StockManagementType?.Name;
         if (IsStockQuantityManagementName(smt))
         {
@@ -256,7 +256,7 @@ public partial class WooCommerceService
             plan.ParentFields["backorders"] = backorders;
         }
 
-        // Per-variation stock — mirrors SyncProductVariantsAsync (status derivation, forced out-of-stock,
+        // Per-variation stock - mirrors SyncProductVariantsAsync (status derivation, forced out-of-stock,
         // per-site variant overrides, and integer quantity conversion).
         var stockManagedPerVariation = string.Equals(smt, "variation", StringComparison.OrdinalIgnoreCase);
         var variationTrackQuantity = stockManagedPerVariation && product.VariationStockByQuantity == true;

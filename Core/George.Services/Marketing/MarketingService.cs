@@ -392,7 +392,7 @@ public class MarketingService : ServiceBase
         var (clockNow, clockToday) = Clock();
         var (_, consentNow) = await _storage.CountSegmentAsync(scope.AccountId, scope.SiteIds, conditions, clockNow, clockToday, cancelToken);
         if (consentNow == 0)
-            return CreateResponse(response, StatusCode.InvalidRequest, "אין למי לשלוח — אין בקהל לקוחות שאישרו דיוור");
+            return CreateResponse(response, StatusCode.InvalidRequest, "אין למי לשלוח - אין בקהל לקוחות שאישרו דיוור");
 
         var settings = await _storage.GetSettingsAsync(scope.AccountId, cancelToken);
         var now = DateTime.UtcNow;

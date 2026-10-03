@@ -22,7 +22,7 @@ namespace George.Services
         private const string DefaultTestMessage = "הודעת בדיקה: חשבון ה-SMS שלך מוגדר ופעיל.";
         public const string ErrManagedByPlatform = "חשבון ה-SMS של העסק מנוהל על ידי ג'ורג'יו ולא ניתן לשינוי מכאן.";
         public const string ErrSystemAccountPlatformOnly = "רק מנהל המערכת יכול להעביר את העסק לחשבון ה-SMS של המערכת.";
-        public const string ErrInforuPlatformOnly = "InforU זמין רק כתת-חשבון שג'ורג'יו פותחת עבור העסק — לא ניתן לחבר חשבון InforU עצמאי.";
+        public const string ErrInforuPlatformOnly = "InforU זמין רק כתת-חשבון שג'ורג'יו פותחת עבור העסק - לא ניתן לחבר חשבון InforU עצמאי.";
 
         private readonly AccountStorage _accountStorage;
         private readonly UserStorage? _userStorage;

@@ -614,7 +614,7 @@ public class MarketingStorage : StorageBase
             .Where(d => d.Status == DeliveryStatus.Sending && d.SentAt != null && d.SentAt < olderThanUtc)
             .ExecuteUpdateAsync(u => u
                 .SetProperty(d => d.Status, DeliveryStatus.Failed)
-                .SetProperty(d => d.Error, "השליחה נותקה באמצע — לא נשלח שוב כדי לא לשלוח פעמיים"), cancelToken).ConfigureAwait(false);
+                .SetProperty(d => d.Error, "השליחה נותקה באמצע - לא נשלח שוב כדי לא לשלוח פעמיים"), cancelToken).ConfigureAwait(false);
     }
 
     public async Task<bool> HasQueuedDeliveriesAsync(int sendId, CancellationToken cancelToken)

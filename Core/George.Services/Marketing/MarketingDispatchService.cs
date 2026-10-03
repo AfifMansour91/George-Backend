@@ -381,7 +381,7 @@ public class MarketingDispatchService
             _ when raw != null && raw.Contains("HTTP", StringComparison.OrdinalIgnoreCase) => "הספק לא היה זמין",
             _ => "הספק דחה את ההודעה",
         };
-        return string.IsNullOrEmpty(raw) ? head : $"{head} — {raw}";
+        return string.IsNullOrEmpty(raw) ? head : $"{head} - {raw}";
     }
 
     private async Task SetPausedAsync(MarketingSend send, string reason, CancellationToken cancelToken)

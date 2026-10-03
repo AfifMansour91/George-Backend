@@ -92,26 +92,26 @@ public class InforuQuotaService
     {
         var parent = ParentCredentials;
         if (parent == null)
-            return ("חשבון-האב של InforU לא מוגדר בשרת (Sms:Inforu:Username / ApiToken) — המכסה נטענה בג'ורג'יו בלבד.", null);
+            return ("חשבון-האב של InforU לא מוגדר בשרת (Sms:Inforu:Username / ApiToken) - המכסה נטענה בג'ורג'יו בלבד.", null);
 
         if (string.IsNullOrWhiteSpace(config.InforuCustomerId))
         {
             var probe = await GetAsync(accountId, config, cancelToken).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(config.InforuCustomerId))
-                return ($"לא הצלחתי לזהות את מספר הלקוח של החנות ב-InforU ({probe.Error ?? "אין תשובה"}) — המכסה נטענה בג'ורג'יו בלבד.", null);
+                return ($"לא הצלחתי לזהות את מספר הלקוח של החנות ב-InforU ({probe.Error ?? "אין תשובה"}) - המכסה נטענה בג'ורג'יו בלבד.", null);
         }
 
         // CreateOrAddQuota ADDS only to a "Packages" quota; on a monthly-renewal quota the amount would OVERWRITE the
         // monthly allowance (Inforu docs). Those sub-accounts are topped up in the Inforu portal - never blindly from here.
         var current = await GetAsync(accountId, config, cancelToken).ConfigureAwait(false);
         if (current.Available && !string.IsNullOrWhiteSpace(current.QuotaType) && !current.QuotaType.StartsWith("Package", StringComparison.OrdinalIgnoreCase))
-            return ($"המכסה של תת-החשבון ב-InforU היא מסוג \"{current.QuotaType}\" (לא חבילה) — טעינה מכאן הייתה דורסת את ההקצאה החודשית. יש לטעון בפורטל InforU.", null);
+            return ($"המכסה של תת-החשבון ב-InforU היא מסוג \"{current.QuotaType}\" (לא חבילה) - טעינה מכאן הייתה דורסת את ההקצאה החודשית. יש לטעון בפורטל InforU.", null);
 
         try
         {
             var outcome = await _smsProvider.AddInforuQuotaAsync(parent, LevelCustomer, config.InforuCustomerId!, amount, cancelToken).ConfigureAwait(false);
             if (!outcome.Success)
-                return ($"InforU דחתה את הטעינה: {outcome.Error} — המכסה נטענה בג'ורג'יו בלבד.", null);
+                return ($"InforU דחתה את הטעינה: {outcome.Error} - המכסה נטענה בג'ורג'יו בלבד.", null);
             _logger.LogInformation("Inforu quota +{Amount} for account {AccountId} (customer {CustomerId}): {Before} → {After}.",
                 amount, accountId, config.InforuCustomerId, outcome.RemainingBefore, outcome.RemainingAfter);
             return (null, outcome.RemainingAfter);
@@ -119,7 +119,7 @@ public class InforuQuotaService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Inforu CreateOrAddQuota failed for account {AccountId}.", accountId);
-            return ($"שגיאה בטעינה ל-InforU: {ex.Message} — המכסה נטענה בג'ורג'יו בלבד.", null);
+            return ($"שגיאה בטעינה ל-InforU: {ex.Message} - המכסה נטענה בג'ורג'יו בלבד.", null);
         }
     }
 }

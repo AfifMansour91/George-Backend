@@ -2882,7 +2882,7 @@ namespace George.Services
 
                 // Map stock status
                 // NOTE: the stock fields computed here (and in SyncProductVariantsAsync) are mirrored by the
-                // lean order-driven push in WooCommerceService.CatalogStockPush.cs — change both together.
+                // lean order-driven push in WooCommerceService.CatalogStockPush.cs - change both together.
                 var stockStatus = "instock";
                 if (product.StockStatus?.Name == "out_of_stock" || product.Status?.Name == "outOfStock")
                     stockStatus = "outofstock";
@@ -3813,7 +3813,7 @@ namespace George.Services
         /// POSTs <c>display_price_per_fixed_unit</c> and label to
         /// <c>{site}/wp-json/ed/v1/product-ocwsu-fixed-unit-price-display</c>.
         /// Uses site <see cref="Site.InternalApiKey"/> as Giorgio API token (<c>X-Api-Key</c>),
-        /// same as <see cref="SyncProductEdAcfStoreLabelsAsync"/> — the ed/v1 routes share one
+        /// same as <see cref="SyncProductEdAcfStoreLabelsAsync"/> - the ed/v1 routes share one
         /// <c>permission_callback</c>, so an unauthenticated call is a guaranteed 401.
         /// </summary>
         private async Task SyncProductOcwsuFixedUnitPriceDisplayAsync(string wcV3BaseUrl, int siteId, int wooProductId, Product product, CancellationToken cancelToken)
@@ -4720,7 +4720,7 @@ namespace George.Services
 
             // Per-variation stock in Woo only when George tracks numeric quantity per variation.
             // Binary in/out per variation uses stock_status only (no manage_stock / stock_quantity in Woo).
-            // NOTE: mirrored by the lean stock push in WooCommerceService.CatalogStockPush.cs — change both together.
+            // NOTE: mirrored by the lean stock push in WooCommerceService.CatalogStockPush.cs - change both together.
             var stockManagedPerVariation = string.Equals(product.StockManagementType?.Name, "variation", StringComparison.OrdinalIgnoreCase);
             var variationTrackQuantity = stockManagedPerVariation && product.VariationStockByQuantity == true;
             var manageVariationStockInWoo = variationTrackQuantity;
