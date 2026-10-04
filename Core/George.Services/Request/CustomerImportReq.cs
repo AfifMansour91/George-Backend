@@ -22,6 +22,8 @@ public class CustomerImportRowReq
     public string? DeliveryStreet { get; set; }
     public string? DeliveryApartment { get; set; }
     public string? DeliveryFloor { get; set; }
+    /// <summary>Spreadsheet text as-is (yyyy-MM-dd / dd/MM/yyyy / dd.MM.yyyy); unparseable values are ignored, never fail the row.</summary>
+    public string? BirthDate { get; set; }
     public string? DeliveryEntranceCode { get; set; }
     public string? Notes { get; set; }
     /// <summary>Marketing consent from the source file - when true sets MarketingApproval + MarketingEmail + MarketingSms.</summary>

@@ -162,6 +162,7 @@ public class CustomerService : ServiceBase
             PermanentDiscountValue = c.PermanentDiscountValue,
             InvoiceName = c.InvoiceName,
             InvoiceTaxId = c.InvoiceTaxId,
+            BirthDate = c.BirthDate?.ToString("yyyy-MM-dd"),
         };
     }
 
@@ -257,7 +258,8 @@ public class CustomerService : ServiceBase
             DeliveryFloor = r.DeliveryFloor,
             DeliveryEntranceCode = r.DeliveryEntranceCode,
             Notes = r.Notes,
-            MarketingApproval = r.MarketingApproval
+            MarketingApproval = r.MarketingApproval,
+            BirthDate = CustomerStorage.ParseBirthDate(r.BirthDate),
         }).ToList();
 
         var result = await _customerStorage.ImportCustomersAsync(
@@ -348,7 +350,7 @@ public class CustomerService : ServiceBase
             id, siteId, req.Name.Trim(), req.Notes, req.Email, req.Phone, req.City,
             req.DeliveryStreet, req.DeliveryApartment, req.DeliveryFloor, req.DeliveryEntranceCode,
             req.MarketingEmail, req.MarketingSms, cancelToken,
-            invoiceName: req.InvoiceName, invoiceTaxId: req.InvoiceTaxId).ConfigureAwait(false);
+            invoiceName: req.InvoiceName, invoiceTaxId: req.InvoiceTaxId, birthDate: req.BirthDate).ConfigureAwait(false);
         if (phoneConflict)
             return CreateResponse(response, StatusCode.InvalidRequest, "Phone number already in use by another customer");
         if (updated == null)

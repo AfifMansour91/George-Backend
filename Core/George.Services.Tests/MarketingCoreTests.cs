@@ -329,3 +329,42 @@ public class MarketingResendAndEditRulesTests
         Assert.False(George.Services.Marketing.MarketingService.IsEditable(send, now));
     }
 }
+
+public class CustomerBirthDateParsingTests
+{
+    [Theory]
+    [InlineData("1990-05-09", 1990, 5, 9)]
+    [InlineData("09/05/1990", 1990, 5, 9)]
+    [InlineData("9.5.1990", 1990, 5, 9)]
+    [InlineData("9/5/90", 1990, 5, 9)]
+    public void Day_first_formats_parse(string text, int y, int m, int d)
+    {
+        Assert.Equal(new DateTime(y, m, d), George.Data.CustomerStorage.ParseBirthDate(text));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("abc")]
+    [InlineData("1850-01-01")]
+    [InlineData("2099-01-01")]
+    public void Empty_nonsense_or_impossible_dates_are_ignored(string text)
+    {
+        Assert.Null(George.Data.CustomerStorage.ParseBirthDate(text));
+    }
+}
+
+public class MarketingPickedCustomersTests
+{
+    [Fact]
+    public void Picked_customers_axis_is_system_only_and_capped()
+    {
+        var ok = new[] { new George.Data.SegmentCondition { Axis = George.Data.SegmentAxis.Customers, Operator = George.Data.SegmentOperator.Ids, Value = "1, 2,3,x,0" } };
+        Assert.NotNull(George.Data.MarketingSegmentQuery.Validate(ok));                        // a shop cannot save it as a segment
+        Assert.Null(George.Data.MarketingSegmentQuery.Validate(ok, allowSystemAxes: true));     // the service may build it
+        Assert.Equal(new[] { 1, 2, 3 }, George.Data.MarketingSegmentQuery.ParseIds("1, 2,3,x,0"));
+        var tooMany = new[] { new George.Data.SegmentCondition { Axis = George.Data.SegmentAxis.Customers, Operator = George.Data.SegmentOperator.Ids, Value = string.Join(",", Enumerable.Range(1, 501)) } };
+        Assert.Contains("500", George.Data.MarketingSegmentQuery.Validate(tooMany, allowSystemAxes: true));
+        var empty = new[] { new George.Data.SegmentCondition { Axis = George.Data.SegmentAxis.Customers, Operator = George.Data.SegmentOperator.Ids, Value = "" } };
+        Assert.NotNull(George.Data.MarketingSegmentQuery.Validate(empty, allowSystemAxes: true));
+    }
+}

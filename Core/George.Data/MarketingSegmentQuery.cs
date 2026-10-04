@@ -51,6 +51,9 @@ public static class SegmentAxis
     public const string Risk = "risk";
     /// <summary>"שלח שוב למי שלא הזמין": recipients of an earlier send (Value = its id) without an attributed order. System-only.</summary>
     public const string Resend = "resend";
+    /// <summary>An explicit list of customer ids (picked in the customers list / sent from a customer card). System-only; Value = "1,2,3".</summary>
+    public const string Customers = "customers";
+    public const int MaxPickedCustomers = 500;
 }
 
 public static class SegmentOperator
@@ -70,6 +73,7 @@ public static class SegmentOperator
     public const string BirthdayToday = "birthday_today";
     public const string PaceExceeded = "pace_exceeded";
     public const string NonBuyers = "non_buyers";
+    public const string Ids = "ids";
 }
 
 /// <summary>Order-source buckets of the <c>channel</c> axis. <c>Order.Source</c> holds magic strings; anything that is not Kiosk/Phone came from the website.</summary>
@@ -209,6 +213,15 @@ public static class MarketingSegmentQuery
                     if (op != SegmentOperator.NonBuyers || !int.TryParse(c.Value, out var sourceSend) || sourceSend <= 0)
                         return "תנאי 'שליחה חוזרת' לא חוקי";
                     break;
+                case SegmentAxis.Customers when allowSystemAxes:
+                {
+                    var ids = ParseIds(c.Value);
+                    if (op != SegmentOperator.Ids || ids.Count == 0)
+                        return "לא נבחרו לקוחות";
+                    if (ids.Count > SegmentAxis.MaxPickedCustomers)
+                        return $"אפשר לבחור עד {SegmentAxis.MaxPickedCustomers} לקוחות בשליחה אחת";
+                    break;
+                }
                 default:
                     return $"ציר לא מוכר: {c.Axis}";
             }
@@ -356,6 +369,12 @@ public static class MarketingSegmentQuery
                         : query.Where(r => r.Customer.BirthDate != null && r.Customer.BirthDate.Value.Month == month);
                     break;
                 }
+                case SegmentAxis.Customers:
+                {
+                    var ids = ParseIds(c.Value);
+                    query = query.Where(r => ids.Contains(r.Customer.Id));
+                    break;
+                }
                 case SegmentAxis.Resend:
                 {
                     // Who actually got the earlier message (sent/delivered), minus whoever it was credited with an order.
@@ -385,6 +404,10 @@ public static class MarketingSegmentQuery
 
         return query;
     }
+
+    public static List<int> ParseIds(string? value) =>
+        (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(p => int.TryParse(p, out var id) && id > 0 ? id : 0).Where(id => id > 0).Distinct().ToList();
 
     public static string? NormalizeChannel(string? value)
     {

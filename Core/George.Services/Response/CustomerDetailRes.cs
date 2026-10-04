@@ -33,6 +33,8 @@ public class CustomerDetailRes : CustomerRes
     /// <summary>"חשבונית על שם אחר": business name printed on invoices instead of the customer name (null = off).</summary>
     public string? InvoiceName { get; set; }
     public string? InvoiceTaxId { get; set; }
+    /// <summary>yyyy-MM-dd, for the "birthday this month" segment.</summary>
+    public string? BirthDate { get; set; }
 }
 
 /// <summary>CRM: Activity timeline item.</summary>

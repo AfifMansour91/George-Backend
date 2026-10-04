@@ -19,7 +19,10 @@ public static class MarketingMessageRenderer
 
     // No vowels and no look-alikes (0/o, 1/l/i): tokens are typed from a phone now and then, and must never spell a word.
     private const string TokenAlphabet = "bcdfghjkmnpqrstvwxz23456789";
-    public const int TokenLength = 7;
+    /// <summary>5 chars × 27 symbols ≈ 14M tokens per shop - plenty, and two characters shorter in every SMS. Tokens issued before 10/2026 were 7 chars; both lengths stay valid.</summary>
+    public const int TokenLength = 5;
+    public const int MinTokenLength = 5;
+    public const int MaxTokenLength = 8;
 
     public static string Render(string body, string? customerName, string? storeName, string? trackedLinkUrl, string unsubscribeUrl)
     {
@@ -65,7 +68,7 @@ public static class MarketingMessageRenderer
 
     public static bool IsValidToken(string? token)
     {
-        if (string.IsNullOrEmpty(token) || token.Length != TokenLength)
+        if (string.IsNullOrEmpty(token) || token.Length < MinTokenLength || token.Length > MaxTokenLength)
             return false;
         foreach (var ch in token)
             if (TokenAlphabet.IndexOf(ch) < 0)

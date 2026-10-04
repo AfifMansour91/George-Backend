@@ -20,4 +20,6 @@ public class CustomerUpdateReq
     public string? InvoiceName { get; set; }
     /// <summary>ח.פ / ע.מ printed with <see cref="InvoiceName"/>. Null = unchanged; "" = clear.</summary>
     public string? InvoiceTaxId { get; set; }
+    /// <summary>yyyy-MM-dd (also accepts dd/MM/yyyy). null = unchanged; "" = clear. Feeds the "birthday this month" marketing segment.</summary>
+    public string? BirthDate { get; set; }
 }

@@ -12,6 +12,8 @@ namespace George.Services.Request
         public List<SegmentCondition>? Conditions { get; set; }
         /// <summary>For <c>resend</c>: the earlier send whose non-buying recipients make the audience.</summary>
         public int? SourceSendId { get; set; }
+        /// <summary>For <c>customers</c>: the picked customer ids (up to 500).</summary>
+        public List<int>? CustomerIds { get; set; }
     }
 
     /// <summary>Common scope of every marketing call. <c>AccountId</c> is honoured only for unrestricted callers (impersonation).</summary>
@@ -25,6 +27,8 @@ namespace George.Services.Request
     public class MarketingSegmentPreviewReq : MarketingScopeReq
     {
         public MarketingAudienceReq Audience { get; set; } = new();
+        /// <summary>Optional name / phone search inside the audience (the "specific customers" picker).</summary>
+        public string? Search { get; set; }
         public int Skip { get; set; }
         public int Take { get; set; } = 10;
     }

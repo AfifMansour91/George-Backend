@@ -25,9 +25,9 @@ public class MarketingService : ServiceBase
     public const int MaxPinnedSegments = 5;
     private const int MaxAttributionWindowHours = 168;
     private const string SampleCustomerName = "דנה";
-    private const string SampleToken = "xxxxxxx";
+    private const string SampleToken = "xxxxx";
     /// <summary>Token placed in "שלח לעצמי לבדיקה" messages; the public pages recognise it and explain instead of failing.</summary>
-    public const string TestToken = "test000";
+    public const string TestToken = "tst00";
 
     private readonly MarketingStorage _storage;
     private readonly UserStorage _userStorage;
@@ -150,6 +150,13 @@ public class MarketingService : ServiceBase
                     return (new List<SegmentCondition>(), "השליחה המקורית לא נמצאה");
                 return (new List<SegmentCondition> { new() { Axis = SegmentAxis.Resend, Operator = SegmentOperator.NonBuyers, Value = source.Id.ToString() } }, null);
             }
+            case "customers":
+            {
+                var ids = (audience!.CustomerIds ?? new List<int>()).Where(id => id > 0).Distinct().ToList();
+                var condition = new SegmentCondition { Axis = SegmentAxis.Customers, Operator = SegmentOperator.Ids, Value = string.Join(",", ids) };
+                var error = MarketingSegmentQuery.Validate(new[] { condition }, allowSystemAxes: true);
+                return (new List<SegmentCondition> { condition }, error);
+            }
             default:
                 return (new List<SegmentCondition>(), "סוג קהל לא מוכר");
         }
@@ -210,6 +217,13 @@ public class MarketingService : ServiceBase
 
         var (now, today) = Clock();
         var query = await _storage.BuildAudienceQueryAsync(scope.AccountId, scope.SiteIds, conditions, now, today, cancelToken);
+        if (!string.IsNullOrWhiteSpace(req.Search))
+        {
+            var term = req.Search.Trim();
+            var digits = new string(term.Where(char.IsDigit).ToArray());
+            var byPhone = digits.Length >= 3;
+            query = query.Where(r => (r.Customer.Name != null && r.Customer.Name.Contains(term)) || (byPhone && r.Customer.NormalizedPhone.Contains(digits)));
+        }
         var count = await query.CountAsync(cancelToken);
         var consent = count == 0 ? 0 : await MarketingSegmentQuery.WhereSmsConsent(query).CountAsync(cancelToken);
 

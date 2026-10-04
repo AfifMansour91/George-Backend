@@ -559,6 +559,20 @@ public class CustomerStorage : StorageBase
     }
 
 
+    /// <summary>Lenient day-first parser for a birth date typed by a person or coming from a spreadsheet. Null when empty or nonsense (future, before 1900).</summary>
+    public static DateTime? ParseBirthDate(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var s = text.Trim();
+        var formats = new[] { "yyyy-MM-dd", "yyyy-MM-ddTHH:mm:ss", "dd/MM/yyyy", "d/M/yyyy", "dd.MM.yyyy", "d.M.yyyy", "dd-MM-yyyy", "d-M-yyyy", "dd/MM/yy", "d/M/yy" };
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        if (!DateTime.TryParseExact(s, formats, inv, System.Globalization.DateTimeStyles.None, out var d)
+            && !DateTime.TryParse(s, System.Globalization.CultureInfo.GetCultureInfo("he-IL"), System.Globalization.DateTimeStyles.None, out d))
+            return null;
+        d = d.Date;
+        return d.Year < 1900 || d > DateTime.UtcNow.Date ? null : d;
+    }
+
     public class ImportRow
     {
         public string Name { get; set; } = "";
@@ -571,6 +585,7 @@ public class CustomerStorage : StorageBase
         public string? DeliveryEntranceCode { get; set; }
         public string? Notes { get; set; }
         public bool MarketingApproval { get; set; }
+        public DateTime? BirthDate { get; set; }
     }
 
     public class ImportRowIssue
@@ -701,6 +716,7 @@ public class CustomerStorage : StorageBase
                     DeliveryEntranceCode = Capped(row.DeliveryEntranceCode, 64),
                     DefaultAddress = Capped(street != null && city != null ? $"{street}, {city}" : street, 500),
                     Notes = Capped(row.Notes, 2000),
+                    BirthDate = row.BirthDate,
                     MarketingApproval = row.MarketingApproval,
                     MarketingEmail = row.MarketingApproval,
                     MarketingSms = row.MarketingApproval,
@@ -781,6 +797,7 @@ public class CustomerStorage : StorageBase
     private static void EnrichCustomerFromImport(Customer existing, ImportRow row, string? email)
     {
         var updated = false;
+        if (existing.BirthDate == null && row.BirthDate != null) { existing.BirthDate = row.BirthDate; updated = true; }
         void Fill(string? current, string? incoming, int max, Action<string> set)
         {
             var capped = Capped(incoming, max);
@@ -877,7 +894,7 @@ public class CustomerStorage : StorageBase
         string? deliveryStreet, string? deliveryApartment, string? deliveryFloor, string? deliveryEntranceCode,
         bool? marketingEmail, bool? marketingSms,
         CancellationToken cancelToken,
-        string? invoiceName = null, string? invoiceTaxId = null)
+        string? invoiceName = null, string? invoiceTaxId = null, string? birthDate = null)
     {
         var query = _dbContext.Set<Customer>().Where(x => x.Id == customerId && !x.IsDeleted);
         if (siteId.HasValue && siteId.Value > 0)
@@ -888,6 +905,7 @@ public class CustomerStorage : StorageBase
         c.Name = string.IsNullOrWhiteSpace(name) ? "" : name.Trim();
         if (invoiceName != null) c.InvoiceName = string.IsNullOrWhiteSpace(invoiceName) ? null : invoiceName.Trim();
         if (invoiceTaxId != null) c.InvoiceTaxId = string.IsNullOrWhiteSpace(invoiceTaxId) ? null : invoiceTaxId.Trim();
+        if (birthDate != null) c.BirthDate = ParseBirthDate(birthDate);
         if (notes != null) c.Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
         if (email != null) c.Email = string.IsNullOrWhiteSpace(email) ? null : email.Trim();
         if (city != null) c.City = string.IsNullOrWhiteSpace(city) ? null : city.Trim();
