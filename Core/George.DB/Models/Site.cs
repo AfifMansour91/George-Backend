@@ -281,6 +281,20 @@ public partial class Site
     /// </summary>
     public bool? ShowPickingExceptionsPopup { get; set; }
 
+    /// <summary>
+    /// What picking does when a weighed line ends up BELOW the ordered weight (beyond
+    /// <see cref="UnderweightPickingThresholdPercent"/>): off / null (nothing), confirm (the picker may finish the
+    /// line short after an explicit approval) or block (the line cannot be finished short).
+    /// </summary>
+    [StringLength(16)]
+    public string? UnderweightPickingMode { get; set; }
+
+    /// <summary>
+    /// Shortage (% of the ordered weight) from which the underweight alert appears. 0 / null = any shortage.
+    /// </summary>
+    [Column(TypeName = "decimal(5, 2)")]
+    public decimal? UnderweightPickingThresholdPercent { get; set; }
+
     /// <summary>When true, this branch uses a connected RS232 scale (ScaleAgent → live weight in picking). Off by default.</summary>
     public bool? ScaleEnabled { get; set; }
 

@@ -268,6 +268,13 @@ namespace George.Data
             if (updated.UseStructuredOrderLineDisplay.HasValue) dbSite.UseStructuredOrderLineDisplay = updated.UseStructuredOrderLineDisplay;
             if (updated.FastPickingScan.HasValue) dbSite.FastPickingScan = updated.FastPickingScan;
             if (updated.ShowPickingExceptionsPopup.HasValue) dbSite.ShowPickingExceptionsPopup = updated.ShowPickingExceptionsPopup;
+            if (updated.UnderweightPickingMode != null)
+            {
+                var underweightMode = updated.UnderweightPickingMode.Trim().ToLowerInvariant();
+                dbSite.UnderweightPickingMode = underweightMode is "confirm" or "block" ? underweightMode : "off";
+            }
+            if (updated.UnderweightPickingThresholdPercent.HasValue)
+                dbSite.UnderweightPickingThresholdPercent = Math.Clamp(updated.UnderweightPickingThresholdPercent.Value, 0m, 100m);
             if (updated.ScaleEnabled.HasValue) dbSite.ScaleEnabled = updated.ScaleEnabled;
             if (updated.ScaleBarcodeEmbedMode != null) dbSite.ScaleBarcodeEmbedMode = updated.ScaleBarcodeEmbedMode;
             if (updated.ExternalPriceManagement.HasValue) dbSite.ExternalPriceManagement = updated.ExternalPriceManagement;
