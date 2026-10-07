@@ -123,6 +123,14 @@ public partial class Site
     /// <summary>When true, order printouts (thermal voucher + A4, manual + auto) omit the delivery/pickup time - only the date is printed.</summary>
     public bool? VoucherHideDeliveryTime { get; set; }
 
+    /// <summary>
+    /// Scope of <see cref="VoucherHideDeliveryTime"/>: "all" (NULL/default) hides the time on every order,
+    /// "shipping" hides it on delivery orders only - pickup orders keep printing their time
+    /// (Zano 2026-10-07: the manual-order form forces a slot on deliveries and the store read it as a commitment).
+    /// </summary>
+    [StringLength(20)]
+    public string? VoucherHideDeliveryTimeScope { get; set; }
+
     /// <summary>When true, the manual customer sticker (LabelCustomer) uses the wide 120mm pre-printed branded label layout (order info beside the branding column) instead of the default 58x40mm sticker. Off by default.</summary>
     public bool? CustomerLabelWideFormat { get; set; }
 

@@ -2358,7 +2358,7 @@ namespace George.Services
             // The ":A4" JobType suffix makes PrintJobService deliver the payload as an A4 PDF (existing
             // agents print PDFs via Sumatra onto the printer's paper - no agent update needed).
             var useA4 = site.VoucherPrintA4 == true;
-            var hideDeliveryTime = site.VoucherHideDeliveryTime == true;
+            var hideDeliveryTime = VoucherHidesDeliveryTime(site, orderForPrint);
             var hideUnitWeight = site.HideUnitWeightInOrders == true;
             var useStructuredLines = site.UseStructuredOrderLineDisplay == true;
             // Site.ShowCustomerProfileNoteInPrints (opt-in): include הערה קבועה מכרטיס הלקוח in the printed order notes.
@@ -2503,6 +2503,13 @@ namespace George.Services
             it.ProductId is > 0 && _voucherPrintNames != null && _voucherPrintNames.TryGetValue(it.ProductId.Value, out var printName)
                 ? printName
                 : OrderItemLineDisplay.GetOrderItemProductName(it);
+
+        /// <summary>
+        /// Site.VoucherHideDeliveryTime + VoucherHideDeliveryTimeScope: "all" hides the time on every printout,
+        /// "shipping" hides it on delivery orders only (pickup orders keep their time).
+        /// </summary>
+        internal static bool VoucherHidesDeliveryTime(Site site, Order order) =>
+            VoucherDeliveryTimeVisibility.HidesTime(site.VoucherHideDeliveryTime, site.VoucherHideDeliveryTimeScope, IsVoucherShipping(order));
 
         private string BuildAutoVoucherA4Html(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false, bool showHandler = false, bool showBundleComponents = true)
         {
