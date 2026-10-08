@@ -331,6 +331,9 @@ public class PaymentStorage : StorageBase
         tracked.CardcomApprovalNumber = order.CardcomApprovalNumber;
         tracked.CardcomTokenLast4 = order.CardcomTokenLast4;
         tracked.CardcomCardBrand = order.CardcomCardBrand;
+        // Set by the saved-card hold; a stale instance saved later must not clear it (the void needs it).
+        if (order.CardcomHoldTerminalNumber != null)
+            tracked.CardcomHoldTerminalNumber = order.CardcomHoldTerminalNumber;
         // Write-once guard: the installments selection is stored by the payment webhook, but many
         // flows load an Order, spend seconds on a Cardcom roundtrip, then save - a stale instance
         // here must not regress the selection back to NULL (lost update → charge as 1 payment).

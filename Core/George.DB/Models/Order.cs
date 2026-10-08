@@ -326,6 +326,12 @@ public partial class Order
     public int? CardcomSelectedInstallments { get; set; }
 
     /// <summary>
+    /// Cardcom terminal that placed the saved-card J5 hold (the no-CVV charge terminal since 2026-10-08). The void
+    /// (MTI 420) must go to the same terminal. Null = primary terminal: hosted-page holds and older saved-card holds.
+    /// </summary>
+    public int? CardcomHoldTerminalNumber { get; set; }
+
+    /// <summary>
     /// Website orders: who charges the card after picking - null/"Plugin" = the store's Cardcom gateway
     /// plugin (webhook reports back), "Giorgio" = the plugin handed us the token at checkout and Giorgio
     /// charges at picking like a phone order. See George.Common.Payment.PaymentCaptureOwner.
