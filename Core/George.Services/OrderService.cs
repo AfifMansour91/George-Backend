@@ -39,6 +39,7 @@ namespace George.Services
         private readonly Payments.PaymentService _paymentService;
         private readonly IOrderRealtimeNotifier _orderRealtimeNotifier;
         private readonly IIntegrationLogQueue _integrationLogQueue;
+        private readonly Partner.PartnerWebhookDispatcher _partnerWebhooks;
         private readonly string? _publicAppBaseUrl;
         private static readonly Dictionary<string, string> VoucherSourceLabels = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -46,6 +47,8 @@ namespace George.Services
             ["WooCommerce"] = "אתר",
             ["Kiosk"] = "קיוסק",
             ["Phone"] = "טלפוני",
+            ["WhatsApp"] = "וואטסאפ",
+            ["Partner"] = "שותף",
         };
         private const string VoucherQrCaption = "פתיחת הזמנה";
         private const string VoucherStatusLabel = "סטטוס:";
@@ -77,13 +80,15 @@ namespace George.Services
             IIntegrationLogQueue integrationLogQueue,
             IConfiguration configuration,
             BundleStorage bundleStorage,
-            BundleService bundleService)
+            BundleService bundleService,
+            Partner.PartnerWebhookDispatcher partnerWebhooks)
             : base(logger, mapper, cache)
         {
             _orderStorage = orderStorage;
             _integrationLogQueue = integrationLogQueue;
             _bundleStorage = bundleStorage;
             _bundleService = bundleService;
+            _partnerWebhooks = partnerWebhooks;
             _customerStorage = customerStorage;
             _siteStorage = siteStorage;
             _accountStorage = accountStorage;
@@ -3881,6 +3886,7 @@ namespace George.Services
             if (s == "kiosk") return "store";
             if (s == "phone" || s == "manual") return "phone";
             if (s == "woocommerce" || s == "website" || s == "web") return "web";
+            if (s == "whatsapp" || s == "partner") return "web"; // remote self-service like the website
             if (s == "mobile" || s == "app") return "mobile";
             return null;
         }

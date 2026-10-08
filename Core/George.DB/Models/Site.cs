@@ -77,6 +77,21 @@ public partial class Site
     [StringLength(100)]
     public string? InternalApiKey { get; set; }
 
+    /// <summary>API key for the Partner API (/Partner/v1/*, e.g. WhatsApp ordering agent). Per-site, independent of InternalApiKey so each can be rotated separately.</summary>
+    [StringLength(100)]
+    public string? PartnerApiKey { get; set; }
+
+    /// <summary>
+    /// Partner API outbound webhook: URL that receives order events (status / payment / delivery changes) for orders
+    /// placed through the Partner API (Source WhatsApp / Partner). Null = no webhooks. See docs/PARTNER_API.md.
+    /// </summary>
+    [StringLength(500)]
+    public string? PartnerWebhookUrl { get; set; }
+
+    /// <summary>Shared secret for HMAC-SHA256 signing of Partner webhook bodies (header <c>X-Partner-Signature</c>). Write-only in the API.</summary>
+    [StringLength(200)]
+    public string? PartnerWebhookSecret { get; set; }
+
     public int? WeightTolerancePercent { get; set; }
 
     public bool? DepreciationEnabled { get; set; }

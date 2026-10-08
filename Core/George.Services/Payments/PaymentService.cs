@@ -28,6 +28,7 @@ public partial class PaymentService : ServiceBase
     private readonly PayPlusGateway _payPlus;
     private readonly IIntegrationLogQueue _integrationLogQueue;
     private readonly IServiceScopeFactory _serviceScopeFactory;
+    private readonly Partner.PartnerWebhookDispatcher _partnerWebhooks;
     private readonly string? _publicAppBaseUrl;
     private readonly string? _publicApiBaseUrl;
 
@@ -46,9 +47,11 @@ public partial class PaymentService : ServiceBase
         PayPlusGateway payPlus,
         IIntegrationLogQueue integrationLogQueue,
         IServiceScopeFactory serviceScopeFactory,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        Partner.PartnerWebhookDispatcher partnerWebhooks)
         : base(logger, mapper, cache)
     {
+        _partnerWebhooks = partnerWebhooks;
         _paymentStorage = paymentStorage;
         _orderStorage = orderStorage;
         _accountStorage = accountStorage;
@@ -254,7 +257,7 @@ public partial class PaymentService : ServiceBase
         order.PaymentAuthorizedAmount = sessionAmount;
         order.PaymentGateway = PaymentGatewayProviderId.Cardcom;
         order.ExternalPaymentStatus = null;
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
 
         response.Data = new PaymentSessionRes
         {
@@ -518,7 +521,7 @@ public partial class PaymentService : ServiceBase
         {
             order.PaymentSettleStatus = PaymentSettleStatus.Failed;
             order.ExternalPaymentStatus = TruncatePaymentStatusMessage(hold.Description ?? "Authorization hold failed");
-            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
             return;
         }
 
@@ -531,7 +534,7 @@ public partial class PaymentService : ServiceBase
         order.CustomerPaymentMethodId = pm.Id;
         order.CardcomTokenLast4 = pm.Last4Digits ?? order.CardcomTokenLast4;
         order.CardcomCardBrand = pm.CardBrand ?? order.CardcomCardBrand;
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
         await TrySendPhoneNewOrderSmsAfterSavedCardHoldAsync(order, cancelToken);
     }
 
@@ -590,7 +593,7 @@ public partial class PaymentService : ServiceBase
         order.PaymentSettleStatus = PaymentSettleStatus.Failed;
         order.ExternalPaymentStatus = TruncatePaymentStatusMessage(message);
         order.PaymentGateway = provider;
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
         var logDescription = message.Length > 500 ? message[..500] : message;
         await LogEventAsync(order.Id, "TokenAuthorizationHold", "-1", logDescription, null, null, order.Total, null,
             cancelToken, provider: provider);
@@ -815,7 +818,7 @@ public partial class PaymentService : ServiceBase
             {
                 order.PaymentSettleStatus = PaymentSettleStatus.Failed;
                 order.ExternalPaymentStatus = TruncatePaymentStatusMessage(txCapture.Description);
-                await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+                await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
                 response.Data = new FinalizePickingPaymentRes
                 {
                     Outcome = "GatewayDeclined",
@@ -893,7 +896,7 @@ public partial class PaymentService : ServiceBase
                 TruncatePaymentStatusMessage(tx.Description));
             order.PaymentSettleStatus = PaymentSettleStatus.Failed;
             order.ExternalPaymentStatus = TruncatePaymentStatusMessage(tx.Description);
-            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
             response.Data = new FinalizePickingPaymentRes
             {
                 Outcome = "GatewayDeclined",
@@ -927,7 +930,7 @@ public partial class PaymentService : ServiceBase
         order.ExternalPaymentStatus = "success";
         ApplyCardDisplayFieldsFromTransaction(order, tx);
         await TryPatchLinkedPaymentMethodFromOrderAsync(order, cancelToken);
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
         ScheduleStorePaymentPush(order, "capture");
         ScheduleAfterPickingAutoPrint(order);
         await TrySendInvoiceSmsAfterCaptureAsync(order, creds, cancelToken);
@@ -993,7 +996,7 @@ public partial class PaymentService : ServiceBase
             return CreateResponse(response, StatusCode.InvalidRequest, result.Description ?? "Invoice creation failed.");
 
         ApplyInvoiceFromTransaction(order, result);
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
 
         response.Data = new OrderInvoiceRes
         {
@@ -1074,7 +1077,7 @@ public partial class PaymentService : ServiceBase
                     created.Description ?? "Invoice must be issued before sending SMS.");
 
             ApplyInvoiceFromTransaction(order, created);
-            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
         }
 
         var (sent, masked) = await TrySendInvoiceSmsAsync(order, overridePhone, cancelToken);
@@ -1365,7 +1368,7 @@ public partial class PaymentService : ServiceBase
             }
         }
 
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
         ScheduleStorePaymentPush(order, "refund");
 
         await TrySendRefundSmsAsync(order, creds, amount, tx.TranzactionId, order.CardcomRefundDocumentUrl, cancelToken);
@@ -1476,7 +1479,7 @@ public partial class PaymentService : ServiceBase
         order.PaymentAuthorizedAmount = null;
         order.CardcomApprovalNumber = null;
         order.PaymentGateway = PaymentGatewayProviderId.None;
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken).ConfigureAwait(false);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken).ConfigureAwait(false);
         await LogEventAsync(order.Id, "Void", "OrderCancel", logDescription, null, null, null, null, cancelToken)
             .ConfigureAwait(false);
     }
@@ -1725,7 +1728,7 @@ public partial class PaymentService : ServiceBase
             {
                 order.PaymentSettleStatus = PaymentSettleStatus.Failed;
                 order.ExternalPaymentStatus = payload.Description;
-                await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+                await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
             }
 
             return;
@@ -1767,13 +1770,13 @@ public partial class PaymentService : ServiceBase
             order.PaymentSettleStatus = PaymentSettleStatus.Captured;
             order.PaidAt = DateTime.UtcNow;
             order.ExternalPaymentStatus = "success";
-            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
             ScheduleAfterPickingAutoPrint(order);
 
             try
             {
                 await PersistCardcomTokenAsync(order, payload, payload.RawJson ?? callbackJson, cancelToken);
-                await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+                await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
                 await TryBackfillPaymentMethodDisplayForOrderAsync(order, cancelToken);
             }
             catch (Exception ex)
@@ -1790,13 +1793,13 @@ public partial class PaymentService : ServiceBase
         }
 
         order.PaymentSettleStatus = PaymentSettleStatus.Authorized;
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
         ScheduleLateHoldCharge(order, "hosted-page hold");
 
         try
         {
             await PersistCardcomTokenAsync(order, payload, payload.RawJson ?? callbackJson, cancelToken);
-            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
             await TryBackfillPaymentMethodDisplayForOrderAsync(order, cancelToken);
         }
         catch (Exception ex)
@@ -1955,7 +1958,7 @@ public partial class PaymentService : ServiceBase
         try
         {
             await PersistCardcomTokenAsync(order, payload, successEvent.RawResponseJson, cancelToken);
-            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
             await LogEventAsync(order.Id, "TokenPersisted", "0",
                 order.CustomerPaymentMethodId?.ToString() ?? "order-credentials-only",
                 payload.TranzactionId, MaskToken(payload.Token), payload.Amount, null, cancelToken);
@@ -2629,7 +2632,7 @@ public partial class PaymentService : ServiceBase
         order.CardcomDocumentUrl = info.DocumentUrl.Trim();
         if (string.IsNullOrWhiteSpace(order.InvoiceNumber) && !string.IsNullOrWhiteSpace(info.DocumentNumber))
             order.InvoiceNumber = info.DocumentNumber;
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
     }
 
     private async Task TryEnsureInvoiceDocumentUrlAsync(
@@ -2650,7 +2653,7 @@ public partial class PaymentService : ServiceBase
         await TryCreateInvoiceAfterCaptureIfMissingAsync(order, creds, document, txId, cancelToken);
 
         if (!string.IsNullOrWhiteSpace(order.CardcomDocumentUrl))
-            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
     }
 
     private async Task<string> DescribeInvoiceSmsSkipReasonAsync(Order order, CancellationToken cancelToken)
@@ -2855,7 +2858,7 @@ public partial class PaymentService : ServiceBase
         order.PayPlusCardBrand = null;
         order.PaymentWallet = null;
         order.PayPlusSelectedInstallments = null;
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
     }
 
     private async Task<AccountNotificationSettings?> GetPaymentNotificationSettingsAsync(
@@ -3392,7 +3395,7 @@ public partial class PaymentService : ServiceBase
                 order.Id,
                 CardcomGateway.DescribeTokenShape(payload.Token));
             await PersistCardcomTokenAsync(order, payload, payload.RawJson, cancelToken);
-            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
             return;
         }
 
@@ -3426,7 +3429,7 @@ public partial class PaymentService : ServiceBase
         if (!string.IsNullOrWhiteSpace(reparsed.Token))
         {
             await PersistCardcomTokenAsync(order, reparsed, lastCallback.RawResponseJson, cancelToken);
-            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
         }
     }
 
@@ -3829,7 +3832,7 @@ public partial class PaymentService : ServiceBase
             gatewayOrderId: null,
             gatewayExternalOrderId: null,
             gatewaySiteId: null);
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
         await LogWooCommerceGatewayPaymentEventAsync(order.Id, payment, gatewayStatus, isFinished, failureReason: null, cancelToken);
         // Checkout-paid website order: send the invoice SMS like a StoreOS capture (no-op unless Paid+Captured).
         await TrySendInvoiceSmsForWooCapturedOrderAsync(order, cancelToken);
@@ -3904,7 +3907,7 @@ public partial class PaymentService : ServiceBase
         if (outcome is GatewayVerifyOutcome.Inconclusive or GatewayVerifyOutcome.HoldOnly)
         {
             if (invoiceBackfilled)
-                await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+                await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
             _logger.LogInformation(
                 "Gateway verify inconclusive orderId={OrderId} outcome={Outcome} responseCode={ResponseCode} dealType={DealType}",
                 order.Id, outcome, info.ResponseCode, info.DealType);
@@ -3920,7 +3923,7 @@ public partial class PaymentService : ServiceBase
             order.GatewayAmountMismatch = false;
             order.GatewayVerifiedAmount = null; // actual charge amount is unknown from the hold row
             order.GatewayVerifiedAt = DateTime.UtcNow;
-            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
             await LogEventAsync(
                 order.Id,
                 "GatewayVerify",
@@ -3950,7 +3953,7 @@ public partial class PaymentService : ServiceBase
         order.GatewayVerifiedAmount = holdButMarkedCaptured ? 0m : info.Amount;
         order.GatewayVerifiedAt = DateTime.UtcNow;
         order.GatewayAmountMismatch = mismatch;
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
 
         var isPayPlusOrder = order.PaymentGateway == PaymentGatewayProviderId.PayPlus;
         var gatewayName = isPayPlusOrder ? "PayPlus" : "Cardcom";
@@ -4010,9 +4013,19 @@ public partial class PaymentService : ServiceBase
         return changed;
     }
 
+    /// <summary>
+    /// Every payment-state save goes through here so Partner API integrations get an <c>order.payment_changed</c>
+    /// webhook (the dispatcher de-duplicates unchanged payment snapshots and ignores non-partner orders).
+    /// </summary>
+    private async Task SaveOrderPaymentStateAndNotifyAsync(Order order, CancellationToken cancelToken)
+    {
+        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken).ConfigureAwait(false);
+        _partnerWebhooks.FireOrderEvent(order.Id, Partner.PartnerWebhookDispatcher.EventPaymentChanged);
+    }
+
     /// <summary>Persist payment columns after WooCommerce gateway update.</summary>
     public Task PersistOrderPaymentStateAsync(Order order, CancellationToken cancelToken) =>
-        _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
 
     /// <summary>
     /// Website/Woo order stuck unpaid after picking: query Cardcom by stored transaction id and mark Paid when charged.
@@ -4219,7 +4232,7 @@ public partial class PaymentService : ServiceBase
             gatewayExternalOrderId: order.GatewayPaymentExternalOrderId,
             gatewaySiteId: order.GatewayPaymentSiteId);
 
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken).ConfigureAwait(false);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken).ConfigureAwait(false);
         ScheduleAfterPickingAutoPrint(order);
 
         await LogEventAsync(

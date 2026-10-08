@@ -24,6 +24,8 @@ public partial class OrderService
         await _orderStorage
             .AppendOrderStatusHistoryAsync(orderId, newStatus.Trim(), occurredAtUtc, cancelToken)
             .ConfigureAwait(false);
+        // Partner API: tell the integration that placed the order (no-op for other sources / no webhook URL).
+        _partnerWebhooks.FireOrderEvent(orderId, Partner.PartnerWebhookDispatcher.EventStatusChanged);
     }
 
     private async Task EnrichOrderResAsync(OrderRes res, Order order, CancellationToken cancelToken)

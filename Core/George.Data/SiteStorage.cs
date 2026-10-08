@@ -103,6 +103,15 @@ namespace George.Data
                 .FirstOrDefaultAsync(s => !s.IsDeleted && s.InternalApiKey == apiKey.Trim(), cancelToken);
         }
 
+        /// <summary>Get site by Partner API key (auth for /Partner/v1/* integrations, e.g. WhatsApp ordering agent).</summary>
+        public async Task<Site?> GetSiteByPartnerApiKeyAsync(string? apiKey, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(apiKey)) return null;
+            return await _dbContext.Site
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => !s.IsDeleted && s.PartnerApiKey == apiKey.Trim(), cancelToken);
+        }
+
         /// <summary>Site ids with WooCommerce configured AND external price management enabled (targets of the daily price-pull job).</summary>
         public async Task<List<int>> GetExternalPriceManagedSiteIdsAsync(CancellationToken cancelToken)
         {
@@ -337,6 +346,36 @@ namespace George.Data
             dbSite.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
             return dbSite.InternalApiKey;
+        }
+
+        /// <summary>Set or clear the Partner API key for a site (e.g. when generating a new key).</summary>
+        public async Task<string?> SetPartnerApiKeyAsync(int siteId, string? apiKey, CancellationToken cancelToken)
+        {
+            var dbSite = await _dbContext.Site.FirstOrDefaultAsync(s => s.Id == siteId && !s.IsDeleted, cancelToken);
+            if (dbSite == null) return null;
+            dbSite.PartnerApiKey = apiKey;
+            dbSite.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            return dbSite.PartnerApiKey;
+        }
+
+        /// <summary>
+        /// Set the Partner webhook target. <paramref name="url"/> null/empty clears the webhook (and its secret);
+        /// <paramref name="secret"/> null keeps the current secret, empty clears it.
+        /// </summary>
+        public async Task<Site?> SetPartnerWebhookAsync(int siteId, string? url, string? secret, CancellationToken cancelToken)
+        {
+            var dbSite = await _dbContext.Site.FirstOrDefaultAsync(s => s.Id == siteId && !s.IsDeleted, cancelToken);
+            if (dbSite == null) return null;
+            var trimmedUrl = string.IsNullOrWhiteSpace(url) ? null : url.Trim();
+            dbSite.PartnerWebhookUrl = trimmedUrl;
+            if (trimmedUrl == null)
+                dbSite.PartnerWebhookSecret = null;
+            else if (secret != null)
+                dbSite.PartnerWebhookSecret = string.IsNullOrWhiteSpace(secret) ? null : secret.Trim();
+            dbSite.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            return dbSite;
         }
 
         public async Task<Site?> DeleteSiteAsync(int id, CancellationToken cancelToken = default)

@@ -342,7 +342,7 @@ public partial class PaymentService
         order.PaymentAuthorizedAmount = sessionAmount;
         order.PaymentGateway = PaymentGatewayProviderId.PayPlus;
         order.ExternalPaymentStatus = null;
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
 
         response.Data = new PaymentSessionRes
         {
@@ -657,7 +657,7 @@ public partial class PaymentService
             order.InvoiceNumber = doc.DocumentNumber;
         if (!string.IsNullOrWhiteSpace(doc.DocumentUrl))
             order.PayPlusDocumentUrl = doc.DocumentUrl;
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
 
         response.Data = new OrderInvoiceRes
         {
@@ -705,7 +705,7 @@ public partial class PaymentService
         {
             order.PaymentSettleStatus = PaymentSettleStatus.Failed;
             order.ExternalPaymentStatus = TruncatePaymentStatusMessage(txCapture.Description);
-            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
             response.Data = new FinalizePickingPaymentRes
             {
                 Outcome = "GatewayDeclined",
@@ -746,7 +746,7 @@ public partial class PaymentService
             _logger.LogWarning(docEx,
                 "PayPlus invoice creation failed for order {OrderId}; charge was saved.", order.Id);
         }
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
         ScheduleStorePaymentPush(order, "capture");
         ScheduleAfterPickingAutoPrint(order);
         await TrySendInvoiceSmsAfterCaptureAsync(order, creds, cancelToken);
@@ -846,7 +846,7 @@ public partial class PaymentService
                 order.Id);
         }
 
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
         ScheduleStorePaymentPush(order, "refund");
         await TrySendRefundSmsAsync(order, creds, amount, tx.TranzactionId, order.PayPlusRefundDocumentUrl, cancelToken);
 
@@ -904,7 +904,7 @@ public partial class PaymentService
         order.PayPlusPageRequestUid = null;
         order.PaymentAuthorizedAmount = null;
         order.PaymentGateway = PaymentGatewayProviderId.None;
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken).ConfigureAwait(false);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken).ConfigureAwait(false);
         await LogEventAsync(order.Id, "Void", "OrderCancel", logDescription, null, null, null, null, cancelToken,
             provider: PaymentGatewayProviderId.PayPlus).ConfigureAwait(false);
     }
@@ -1057,7 +1057,7 @@ public partial class PaymentService
             order.GatewayPaymentTransactionId = txId;
             order.PaymentGateway = PaymentGatewayProviderId.PayPlus;
             order.ExternalPaymentStatus = "success";
-            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
             ScheduleStorePaymentPush(order, pushReason);
             ScheduleAfterPickingAutoPrint(order);
         }
@@ -1069,7 +1069,7 @@ public partial class PaymentService
             order.PaymentSettleStatus = PaymentSettleStatus.Authorized;
             order.PaymentGateway = PaymentGatewayProviderId.PayPlus;
             order.PayPlusTransactionUid ??= txId;
-            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
             ScheduleLateHoldCharge(order, pushReason);
         }
 
@@ -1306,7 +1306,7 @@ public partial class PaymentService
         {
             order.PaymentSettleStatus = PaymentSettleStatus.Failed;
             order.ExternalPaymentStatus = TruncatePaymentStatusMessage(hold.Description ?? "Authorization hold failed");
-            await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+            await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
             return;
         }
 
@@ -1319,7 +1319,7 @@ public partial class PaymentService
         order.CustomerPaymentMethodId = pm.Id;
         order.PayPlusCardLast4 = pm.Last4Digits ?? order.PayPlusCardLast4;
         order.PayPlusCardBrand = pm.CardBrand ?? order.PayPlusCardBrand;
-        await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken);
+        await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
         await TrySendPhoneNewOrderSmsAfterSavedCardHoldAsync(order, cancelToken);
     }
 

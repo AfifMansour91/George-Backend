@@ -21,6 +21,7 @@ public class DeliveryDispatchService : ServiceBase
 
     private readonly OrderStorage _orderStorage;
     private readonly DeliveryDispatchStorage _dispatchStorage;
+    private readonly Partner.PartnerWebhookDispatcher _partnerWebhooks;
     private readonly IReadOnlyDictionary<string, IDeliveryProvider> _providers;
 
     public DeliveryDispatchService(
@@ -29,9 +30,11 @@ public class DeliveryDispatchService : ServiceBase
         CacheManager cache,
         OrderStorage orderStorage,
         DeliveryDispatchStorage dispatchStorage,
-        IEnumerable<IDeliveryProvider> providers)
+        IEnumerable<IDeliveryProvider> providers,
+        Partner.PartnerWebhookDispatcher partnerWebhooks)
         : base(logger, mapper, cache)
     {
+        _partnerWebhooks = partnerWebhooks;
         _orderStorage = orderStorage;
         _dispatchStorage = dispatchStorage;
         _providers = providers.ToDictionary(p => p.ProviderKey, StringComparer.OrdinalIgnoreCase);
@@ -427,6 +430,8 @@ public class DeliveryDispatchService : ServiceBase
             o.DeliveryProviderError = row.ErrorMessage;
             o.DeliveryProviderDispatchedAt = row.DispatchedAt;
         }, cancelToken).ConfigureAwait(false);
+        // Partner API: courier status / tracking link changed (no-op for non-partner orders).
+        _partnerWebhooks.FireOrderEvent(orderId, Partner.PartnerWebhookDispatcher.EventDeliveryChanged);
     }
 
     private static OrderDeliveryDispatchRes MapDispatch(OrderDeliveryDispatch d) => new()

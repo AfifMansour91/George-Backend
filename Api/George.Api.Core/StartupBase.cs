@@ -14,6 +14,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Mvc.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,6 +37,8 @@ namespace George.Api.Core
 	{
 		//*********************  Data members/Constants  *********************//
 		protected bool _enableSwagger = true;
+		/// <summary>Rate-limit policy applied to /Partner/v1 (per API key). See ConfigurePartnerRateLimiting.</summary>
+		public const string PartnerRateLimitPolicy = "partner";
 
 		//**************************    Construction    **************************//
 		public StartupBase(IConfiguration configuration)
@@ -158,6 +162,7 @@ namespace George.Api.Core
 				// specifying the Swagger JSON endpoint.
 				app.UseSwaggerUI(c => {
 					c.SwaggerEndpoint("/swagger/v1/swagger.json", $"{this.Name} V1");
+					c.SwaggerEndpoint("/swagger/partner/swagger.json", "Partner API");
 					c.RoutePrefix = "swagger";// string.Empty;
 					c.DocumentTitle = $"{this.Name} API";
 					c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
@@ -168,6 +173,7 @@ namespace George.Api.Core
 			app.UseAuthentication();
 
 			app.UseRouting();
+			app.UseRateLimiter();
 #if DEBUG
             //// Serve C:\FileStorage as /files
             //app.UseStaticFiles(new StaticFileOptions
@@ -301,6 +307,8 @@ namespace George.Api.Core
 			string offsetText = offset.TotalHours >= 0 ? $"UTC+{offset.TotalHours}" : $"UTC{offset.TotalHours}";
 
 			// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+			ConfigurePartnerRateLimiting(services);
+
 			services.AddEndpointsApiExplorer();
 
 			services.AddSwaggerGen(options => {
@@ -317,6 +325,15 @@ namespace George.Api.Core
 														 //}
 					}
 				);
+
+				// Partner API (/Partner/v1) gets its own document for external integrators; the default document keeps everything else.
+				options.SwaggerDoc("partner", new OpenApiInfo {
+					Title = "Giorgio Partner API",
+					Version = "v1",
+					Description = "External ordering integrations (WhatsApp agent etc.). Auth: X-Api-Key (or Authorization: Bearer <pk_ key>). Contract: docs/PARTNER_API.md",
+				});
+				options.DocInclusionPredicate((docName, apiDesc) =>
+					docName == "partner" ? apiDesc.GroupName == "partner" : apiDesc.GroupName == null);
 
 				options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme() {
 					In = ParameterLocation.Header,
@@ -466,6 +483,9 @@ namespace George.Api.Core
 			services.AddScoped<George.Services.Delivery.DeliveryDispatchService>();
 			services.AddScoped<George.Services.Delivery.IDeliveryProvider, George.Services.Delivery.LionWheelDeliveryProvider>();
 			services.AddScoped<KioskCustomerService>();
+			services.AddScoped<George.Services.Partner.PartnerService>();
+			services.AddSingleton<George.Services.Partner.PartnerWebhookDispatcher>();
+			services.AddScoped<PartnerRequestLogActionFilter>();
 
 			// Let the derived add its own dependencies.
 			AddCustomDependencies(services);
@@ -509,7 +529,8 @@ namespace George.Api.Core
 					};
 				})
 				.AddScheme<AuthenticationSchemeOptions, PrintAgentApiKeyAuthenticationHandler>(PrintAgentApiKeyAuthenticationHandler.SchemeName, _ => { })
-				.AddScheme<AuthenticationSchemeOptions, WooCommerceApiKeyAuthenticationHandler>(WooCommerceApiKeyAuthenticationHandler.SchemeName, _ => { });
+				.AddScheme<AuthenticationSchemeOptions, WooCommerceApiKeyAuthenticationHandler>(WooCommerceApiKeyAuthenticationHandler.SchemeName, _ => { })
+				.AddScheme<AuthenticationSchemeOptions, PartnerApiKeyAuthenticationHandler>(PartnerApiKeyAuthenticationHandler.SchemeName, _ => { });
 
 			//// Authorization
 			//ServiceProvider sp = services.BuildServiceProvider();
@@ -551,6 +572,36 @@ namespace George.Api.Core
 
 		protected virtual void MapSignalRHubs(IEndpointRouteBuilder endpoints)
 		{
+		}
+
+		/// <summary>
+		/// Partner API throttling: a sliding window per API key (falls back to the caller IP when no key was sent).
+		/// Generous enough for an ordering agent (catalog + quote + create per conversation), tight enough that a
+		/// runaway client cannot hammer the catalog query. 429 with Retry-After when exceeded.
+		/// </summary>
+		protected virtual void ConfigurePartnerRateLimiting(IServiceCollection services)
+		{
+			var perMinute = Configuration.GetValue<int?>("Partner:RateLimitPerMinute") ?? 300;
+			services.AddRateLimiter(options => {
+				options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+				options.OnRejected = (ctx, _) => {
+					ctx.HttpContext.Response.Headers["Retry-After"] = "10";
+					return ValueTask.CompletedTask;
+				};
+				options.AddPolicy(PartnerRateLimitPolicy, httpContext => {
+					string? key = httpContext.Request.Headers[PartnerApiKeyAuthenticationHandler.HeaderName].FirstOrDefault();
+					if (string.IsNullOrWhiteSpace(key))
+						key = httpContext.Request.Headers.Authorization.FirstOrDefault();
+					if (string.IsNullOrWhiteSpace(key))
+						key = "ip:" + (httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+					return RateLimitPartition.GetSlidingWindowLimiter(key, _ => new SlidingWindowRateLimiterOptions {
+						PermitLimit = perMinute,
+						Window = TimeSpan.FromMinutes(1),
+						SegmentsPerWindow = 6,
+						QueueLimit = 0,
+					});
+				});
+			});
 		}
 
 		protected virtual void AddHostedServices(IServiceCollection services)
