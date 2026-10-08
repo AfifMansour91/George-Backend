@@ -77,6 +77,21 @@ public partial class Site
     [StringLength(100)]
     public string? InternalApiKey { get; set; }
 
+    /// <summary>API key for the Partner API (/Partner/v1/*, e.g. WhatsApp ordering agent). Per-site, independent of InternalApiKey so each can be rotated separately.</summary>
+    [StringLength(100)]
+    public string? PartnerApiKey { get; set; }
+
+    /// <summary>
+    /// Partner API outbound webhook: URL that receives order events (status / payment / delivery changes) for orders
+    /// placed through the Partner API (Source WhatsApp / Partner). Null = no webhooks. See docs/PARTNER_API.md.
+    /// </summary>
+    [StringLength(500)]
+    public string? PartnerWebhookUrl { get; set; }
+
+    /// <summary>Shared secret for HMAC-SHA256 signing of Partner webhook bodies (header <c>X-Partner-Signature</c>). Write-only in the API.</summary>
+    [StringLength(200)]
+    public string? PartnerWebhookSecret { get; set; }
+
     public int? WeightTolerancePercent { get; set; }
 
     public bool? DepreciationEnabled { get; set; }
@@ -122,6 +137,14 @@ public partial class Site
 
     /// <summary>When true, order printouts (thermal voucher + A4, manual + auto) omit the delivery/pickup time - only the date is printed.</summary>
     public bool? VoucherHideDeliveryTime { get; set; }
+
+    /// <summary>
+    /// Scope of <see cref="VoucherHideDeliveryTime"/>: "all" (NULL/default) hides the time on every order,
+    /// "shipping" hides it on delivery orders only - pickup orders keep printing their time
+    /// (Zano 2026-10-07: the manual-order form forces a slot on deliveries and the store read it as a commitment).
+    /// </summary>
+    [StringLength(20)]
+    public string? VoucherHideDeliveryTimeScope { get; set; }
 
     /// <summary>When true, the manual customer sticker (LabelCustomer) uses the wide 120mm pre-printed branded label layout (order info beside the branding column) instead of the default 58x40mm sticker. Off by default.</summary>
     public bool? CustomerLabelWideFormat { get; set; }
@@ -280,6 +303,20 @@ public partial class Site
     /// exceeds tolerance. When false, over-tolerance scans are applied silently with no popup.
     /// </summary>
     public bool? ShowPickingExceptionsPopup { get; set; }
+
+    /// <summary>
+    /// What picking does when a weighed line ends up BELOW the ordered weight (beyond
+    /// <see cref="UnderweightPickingThresholdPercent"/>): off / null (nothing), confirm (the picker may finish the
+    /// line short after an explicit approval) or block (the line cannot be finished short).
+    /// </summary>
+    [StringLength(16)]
+    public string? UnderweightPickingMode { get; set; }
+
+    /// <summary>
+    /// Shortage (% of the ordered weight) from which the underweight alert appears. 0 / null = any shortage.
+    /// </summary>
+    [Column(TypeName = "decimal(5, 2)")]
+    public decimal? UnderweightPickingThresholdPercent { get; set; }
 
     /// <summary>When true, this branch uses a connected RS232 scale (ScaleAgent → live weight in picking). Off by default.</summary>
     public bool? ScaleEnabled { get; set; }

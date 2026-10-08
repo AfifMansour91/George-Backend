@@ -48,6 +48,8 @@ namespace George.Services.Response
         public bool? VoucherPrintA4 { get; set; }
         /// <summary>Omit the delivery/pickup time from order printouts (date only).</summary>
         public bool? VoucherHideDeliveryTime { get; set; }
+        /// <summary>"all" (default) or "shipping" - which orders VoucherHideDeliveryTime applies to.</summary>
+        public string? VoucherHideDeliveryTimeScope { get; set; }
         /// <summary>Customer sticker uses the wide 120mm pre-printed branded label layout (default off).</summary>
         public bool? CustomerLabelWideFormat { get; set; }
         public bool? PrintNewOrderImmediate { get; set; }
@@ -135,6 +137,12 @@ namespace George.Services.Response
 
         /// <summary>When true (default), show the deviation (חריגה) popup when a scan exceeds tolerance.</summary>
         public bool? ShowPickingExceptionsPopup { get; set; }
+
+        /// <summary>Underweight picking alert: off (default) | confirm | block.</summary>
+        public string? UnderweightPickingMode { get; set; }
+
+        /// <summary>Shortage (% of the ordered weight) from which the underweight alert appears; 0 = any shortage.</summary>
+        public decimal? UnderweightPickingThresholdPercent { get; set; }
 
         /// <summary>When true, this branch uses a connected RS232 scale (live weight in picking). Off by default.</summary>
         public bool? ScaleEnabled { get; set; }

@@ -40,6 +40,7 @@ namespace George.Services
         private readonly Payments.PaymentService _paymentService;
         private readonly IOrderRealtimeNotifier _orderRealtimeNotifier;
         private readonly IIntegrationLogQueue _integrationLogQueue;
+        private readonly Partner.PartnerWebhookDispatcher _partnerWebhooks;
         private readonly string? _publicAppBaseUrl;
         private static readonly Dictionary<string, string> VoucherSourceLabels = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -47,6 +48,8 @@ namespace George.Services
             ["WooCommerce"] = "אתר",
             ["Kiosk"] = "קיוסק",
             ["Phone"] = "טלפוני",
+            ["WhatsApp"] = "וואטסאפ",
+            ["Partner"] = "שותף",
         };
         private const string VoucherQrCaption = "פתיחת הזמנה";
         private const string VoucherStatusLabel = "סטטוס:";
@@ -78,13 +81,15 @@ namespace George.Services
             IIntegrationLogQueue integrationLogQueue,
             IConfiguration configuration,
             BundleStorage bundleStorage,
-            BundleService bundleService)
+            BundleService bundleService,
+            Partner.PartnerWebhookDispatcher partnerWebhooks)
             : base(logger, mapper, cache)
         {
             _orderStorage = orderStorage;
             _integrationLogQueue = integrationLogQueue;
             _bundleStorage = bundleStorage;
             _bundleService = bundleService;
+            _partnerWebhooks = partnerWebhooks;
             _customerStorage = customerStorage;
             _siteStorage = siteStorage;
             _accountStorage = accountStorage;
@@ -2359,7 +2364,7 @@ namespace George.Services
             // The ":A4" JobType suffix makes PrintJobService deliver the payload as an A4 PDF (existing
             // agents print PDFs via Sumatra onto the printer's paper - no agent update needed).
             var useA4 = site.VoucherPrintA4 == true;
-            var hideDeliveryTime = site.VoucherHideDeliveryTime == true;
+            var hideDeliveryTime = VoucherHidesDeliveryTime(site, orderForPrint);
             var hideUnitWeight = site.HideUnitWeightInOrders == true;
             var useStructuredLines = site.UseStructuredOrderLineDisplay == true;
             // Site.ShowCustomerProfileNoteInPrints (opt-in): include הערה קבועה מכרטיס הלקוח in the printed order notes.
@@ -2504,6 +2509,13 @@ namespace George.Services
             it.ProductId is > 0 && _voucherPrintNames != null && _voucherPrintNames.TryGetValue(it.ProductId.Value, out var printName)
                 ? printName
                 : OrderItemLineDisplay.GetOrderItemProductName(it);
+
+        /// <summary>
+        /// Site.VoucherHideDeliveryTime + VoucherHideDeliveryTimeScope: "all" hides the time on every printout,
+        /// "shipping" hides it on delivery orders only (pickup orders keep their time).
+        /// </summary>
+        internal static bool VoucherHidesDeliveryTime(Site site, Order order) =>
+            VoucherDeliveryTimeVisibility.HidesTime(site.VoucherHideDeliveryTime, site.VoucherHideDeliveryTimeScope, IsVoucherShipping(order));
 
         private string BuildAutoVoucherA4Html(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false, bool showHandler = false, bool showBundleComponents = true)
         {
@@ -3875,6 +3887,7 @@ namespace George.Services
             if (s == "kiosk") return "store";
             if (s == "phone" || s == "manual") return "phone";
             if (s == "woocommerce" || s == "website" || s == "web") return "web";
+            if (s == "whatsapp" || s == "partner") return "web"; // remote self-service like the website
             if (s == "mobile" || s == "app") return "mobile";
             return null;
         }

@@ -103,6 +103,15 @@ namespace George.Data
                 .FirstOrDefaultAsync(s => !s.IsDeleted && s.InternalApiKey == apiKey.Trim(), cancelToken);
         }
 
+        /// <summary>Get site by Partner API key (auth for /Partner/v1/* integrations, e.g. WhatsApp ordering agent).</summary>
+        public async Task<Site?> GetSiteByPartnerApiKeyAsync(string? apiKey, CancellationToken cancelToken)
+        {
+            if (string.IsNullOrWhiteSpace(apiKey)) return null;
+            return await _dbContext.Site
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => !s.IsDeleted && s.PartnerApiKey == apiKey.Trim(), cancelToken);
+        }
+
         /// <summary>Site ids with WooCommerce configured AND external price management enabled (targets of the daily price-pull job).</summary>
         public async Task<List<int>> GetExternalPriceManagedSiteIdsAsync(CancellationToken cancelToken)
         {
@@ -233,6 +242,10 @@ namespace George.Data
             if (updated.ConfirmDeliveryFeePopup.HasValue) dbSite.ConfirmDeliveryFeePopup = updated.ConfirmDeliveryFeePopup;
             if (updated.AutoPrintEnabled.HasValue) dbSite.AutoPrintEnabled = updated.AutoPrintEnabled;
             if (updated.VoucherPrintA4.HasValue) dbSite.VoucherPrintA4 = updated.VoucherPrintA4;
+            // VoucherHideDeliveryTime was never copied here (2026-10-07) - the settings toggle silently never persisted.
+            if (updated.VoucherHideDeliveryTime.HasValue) dbSite.VoucherHideDeliveryTime = updated.VoucherHideDeliveryTime;
+            if (updated.VoucherHideDeliveryTimeScope != null)
+                dbSite.VoucherHideDeliveryTimeScope = string.Equals(updated.VoucherHideDeliveryTimeScope.Trim(), "shipping", StringComparison.OrdinalIgnoreCase) ? "shipping" : "all";
             if (updated.CustomerLabelWideFormat.HasValue) dbSite.CustomerLabelWideFormat = updated.CustomerLabelWideFormat;
             if (updated.PrintNewOrderImmediate.HasValue) dbSite.PrintNewOrderImmediate = updated.PrintNewOrderImmediate;
             if (updated.PrintMovedToTreatment.HasValue) dbSite.PrintMovedToTreatment = updated.PrintMovedToTreatment;
@@ -268,6 +281,13 @@ namespace George.Data
             if (updated.UseStructuredOrderLineDisplay.HasValue) dbSite.UseStructuredOrderLineDisplay = updated.UseStructuredOrderLineDisplay;
             if (updated.FastPickingScan.HasValue) dbSite.FastPickingScan = updated.FastPickingScan;
             if (updated.ShowPickingExceptionsPopup.HasValue) dbSite.ShowPickingExceptionsPopup = updated.ShowPickingExceptionsPopup;
+            if (updated.UnderweightPickingMode != null)
+            {
+                var underweightMode = updated.UnderweightPickingMode.Trim().ToLowerInvariant();
+                dbSite.UnderweightPickingMode = underweightMode is "confirm" or "block" ? underweightMode : "off";
+            }
+            if (updated.UnderweightPickingThresholdPercent.HasValue)
+                dbSite.UnderweightPickingThresholdPercent = Math.Clamp(updated.UnderweightPickingThresholdPercent.Value, 0m, 100m);
             if (updated.ScaleEnabled.HasValue) dbSite.ScaleEnabled = updated.ScaleEnabled;
             if (updated.ScaleBarcodeEmbedMode != null) dbSite.ScaleBarcodeEmbedMode = updated.ScaleBarcodeEmbedMode;
             if (updated.ExternalPriceManagement.HasValue) dbSite.ExternalPriceManagement = updated.ExternalPriceManagement;
@@ -326,6 +346,36 @@ namespace George.Data
             dbSite.UpdatedDate = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
             return dbSite.InternalApiKey;
+        }
+
+        /// <summary>Set or clear the Partner API key for a site (e.g. when generating a new key).</summary>
+        public async Task<string?> SetPartnerApiKeyAsync(int siteId, string? apiKey, CancellationToken cancelToken)
+        {
+            var dbSite = await _dbContext.Site.FirstOrDefaultAsync(s => s.Id == siteId && !s.IsDeleted, cancelToken);
+            if (dbSite == null) return null;
+            dbSite.PartnerApiKey = apiKey;
+            dbSite.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            return dbSite.PartnerApiKey;
+        }
+
+        /// <summary>
+        /// Set the Partner webhook target. <paramref name="url"/> null/empty clears the webhook (and its secret);
+        /// <paramref name="secret"/> null keeps the current secret, empty clears it.
+        /// </summary>
+        public async Task<Site?> SetPartnerWebhookAsync(int siteId, string? url, string? secret, CancellationToken cancelToken)
+        {
+            var dbSite = await _dbContext.Site.FirstOrDefaultAsync(s => s.Id == siteId && !s.IsDeleted, cancelToken);
+            if (dbSite == null) return null;
+            var trimmedUrl = string.IsNullOrWhiteSpace(url) ? null : url.Trim();
+            dbSite.PartnerWebhookUrl = trimmedUrl;
+            if (trimmedUrl == null)
+                dbSite.PartnerWebhookSecret = null;
+            else if (secret != null)
+                dbSite.PartnerWebhookSecret = string.IsNullOrWhiteSpace(secret) ? null : secret.Trim();
+            dbSite.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            return dbSite;
         }
 
         public async Task<Site?> DeleteSiteAsync(int id, CancellationToken cancelToken = default)
