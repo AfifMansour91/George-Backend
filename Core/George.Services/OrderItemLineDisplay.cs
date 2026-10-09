@@ -826,12 +826,32 @@ public static class OrderItemLineDisplay
         return null;
     }
 
+    /// <summary>
+    /// ₪/ק"ג that was actually billed for a line picked by weight: TotalPrice ÷ billed kg (picked × (1 + פחת)).
+    /// Null until the line is meaningfully picked with a positive total. Matches TS <c>getOrderItemBilledRatePerKg</c>.
+    /// </summary>
+    public static decimal? GetOrderItemBilledRatePerKg(OrderItem item)
+    {
+        if (!IsOrderItemPickedByWeight(item) || !OrderMeaningfulPick(item)) return null;
+        var picked = item.PickedQuantity ?? 0m;
+        var total = item.TotalPrice ?? 0m;
+        if (picked <= 0m || total <= 0m) return null;
+        var billedKg = item.DepreciationPercent is > 0m ? picked * (1 + item.DepreciationPercent.Value / 100m) : picked;
+        return billedKg > 0m ? total / billedKg : null;
+    }
+
     /// <summary>תצוגת מחיר לעמודת "מחיר" בבון אחרי ליקוט.</summary>
     public static string? FormatOrderLinePricePerKgForPicking(OrderItem item)
     {
         if (IsOrderItemPickedByWeight(item))
         {
-            var perKg = GetOrderItemPricePerKgNumeric(item);
+            // Prefer the rate the customer was actually billed at, so מחיר × לוקט = סה"כ on the voucher. The
+            // derivation below assumes PricePerUnit is a per-PIECE price and divides it by the piece weight,
+            // but George's weighted-by-unit lines store the catalog ₪/kg there (picking charges picked kg ×
+            // PricePerUnit): Dubi Dagim order 13151 printed "₪12.55 / ק"ג" (69 ÷ 5.5) next to 5.87 ק"ג and
+            // ₪405.03 (= 5.87 × 69). The browser voucher avoids this via the catalog; the backend after-picking
+            // voucher has no catalog, so it uses the billed amounts.
+            var perKg = GetOrderItemBilledRatePerKg(item) ?? GetOrderItemPricePerKgNumeric(item);
             if (perKg.HasValue)
                 return $"₪{perKg.Value.ToString("0.00", CultureInfo.InvariantCulture)} / ק\"ג";
         }

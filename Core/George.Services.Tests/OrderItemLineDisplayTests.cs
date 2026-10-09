@@ -534,3 +534,54 @@ public class OrderItemLineDisplayTests
         Assert.Contains("2-3 קילו", line, StringComparison.Ordinal);
     }
 }
+
+/// <summary>
+/// Dubi Dagim order 13151 (2026-10-09): whole salmon, weighted product priced 69 ₪/kg, variant "בין 5-6 ק"ג" (5.5 kg),
+/// picked 5.87 kg, billed 405.03. The backend after-picking voucher printed "₪12.55 / ק"ג" (69 ÷ 5.5) because the
+/// per-kg derivation treated PricePerUnit as a per-piece price. The voucher must print the billed rate.
+/// </summary>
+public class OrderItemLineDisplayBilledRateTests
+{
+    private static OrderItem DubiDagimSalmon() => new()
+    {
+        Title = "דג סלמון שלם טרי",
+        VariantTitle = "בין 5-6 ק״ג פילה פרוס בלי עור",
+        Quantity = 1.0000m,
+        PickedQuantity = 5.8700m,
+        UnitWeightGrams = 5500.0000m,
+        PricePerUnit = 69.0000m,
+        TotalPrice = 405.03m,
+        SaleUnits = "1 יח'",
+        OrderLineQuantityMode = "units",
+        OrderLinePerUnitWeightLabel = "5.5 ק\"ג ליח'",
+        OrderLineSizeLabel = "בין 5-6 ק״ג (כ 5.5 ק\"ג)",
+        OrderLineCuttingLabel = "פילה פרוס בלי עור",
+        PickingUserConfirmed = true,
+    };
+
+    [Fact]
+    public void Picked_weighted_by_unit_line_prints_the_billed_rate_not_price_divided_by_piece_weight()
+    {
+        var item = DubiDagimSalmon();
+        Assert.Equal(69.00m, Math.Round(OrderItemLineDisplay.GetOrderItemBilledRatePerKg(item)!.Value, 2));
+        Assert.Equal("₪69.00 / ק\"ג", OrderItemLineDisplay.FormatOrderLinePricePerKgForPicking(item));
+    }
+
+    [Fact]
+    public void Billed_rate_accounts_for_depreciation_so_price_times_billed_weight_equals_total()
+    {
+        var item = DubiDagimSalmon();
+        item.DepreciationPercent = 10m;
+        item.TotalPrice = Math.Round(5.87m * 1.10m * 69m, 2); // 445.53
+        Assert.Equal(69.00m, Math.Round(OrderItemLineDisplay.GetOrderItemBilledRatePerKg(item)!.Value, 2));
+    }
+
+    [Fact]
+    public void Unpicked_line_has_no_billed_rate()
+    {
+        var item = DubiDagimSalmon();
+        item.PickedQuantity = null;
+        item.PickingUserConfirmed = false;
+        Assert.Null(OrderItemLineDisplay.GetOrderItemBilledRatePerKg(item));
+    }
+}
