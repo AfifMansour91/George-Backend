@@ -181,6 +181,12 @@ public sealed class VoidAuthorizationRequest
     public string? ApprovalNumber { get; init; }
     /// <summary>PayPlus: the transaction_uid to cancel via Transactions/Cancel.</summary>
     public string? ProviderTransactionId { get; init; }
+    /// <summary>
+    /// Cardcom only: the terminal that PLACED the hold being voided (Order.CardcomHoldTerminalNumber). A void must
+    /// hit the same terminal as its J5. Null = the primary terminal (hosted-page holds, and saved-card holds placed
+    /// before the hold moved to the no-CVV charge terminal).
+    /// </summary>
+    public int? TerminalNumber { get; init; }
     public string ExternalUniqTranId { get; init; } = Guid.NewGuid().ToString("N");
 }
 
@@ -194,6 +200,8 @@ public sealed class PaymentTransactionResult
     public string? DocumentNumber { get; init; }
     public string? DocumentUrl { get; init; }
     public string? RawJson { get; init; }
+    /// <summary>Cardcom only: the terminal number the request was sent to (null for other providers).</summary>
+    public int? TerminalNumber { get; init; }
 }
 
 public sealed class TestConnectionResult

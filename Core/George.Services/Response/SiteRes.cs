@@ -55,6 +55,8 @@ namespace George.Services.Response
         public bool? PrintNewOrderImmediate { get; set; }
         public bool? PrintMovedToTreatment { get; set; }
         public bool? PrintAfterPicking { get; set; }
+        /// <summary>Sub-option of PrintAfterPicking: also print at finish when a credit order was not charged. Off by default.</summary>
+        public bool? PrintAfterPickingUnpaidCredit { get; set; }
         public bool? PrintFutureImmediate { get; set; }
         public bool? PrintFutureAtTimeEnabled { get; set; }
         public string? PrintFutureAtTime { get; set; }
@@ -122,6 +124,9 @@ namespace George.Services.Response
 
         /// <summary>When true, hide per-unit / size approximate weight on printouts, order cards and picking. Off by default.</summary>
         public bool? HideUnitWeightInOrders { get; set; }
+
+        /// <summary>Digits after the point for kilograms on the picking screens: 2 (default) or 3.</summary>
+        public int? PickingWeightDecimals { get; set; }
 
         /// <summary>When true, printouts include the permanent customer note (הערה קבועה). Off by default.</summary>
         public bool? ShowCustomerProfileNoteInPrints { get; set; }

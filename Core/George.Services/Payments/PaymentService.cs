@@ -530,6 +530,8 @@ public partial class PaymentService : ServiceBase
         order.PaymentSettleStatus = PaymentSettleStatus.Authorized;
         order.PaymentAuthorizedAmount = authAmount;
         order.CardcomApprovalNumber = hold.ApprovalNumber;
+        // Remember which terminal holds the J5 (the no-CVV charge terminal) so the void goes to the same one.
+        order.CardcomHoldTerminalNumber = hold.TerminalNumber;
         order.GatewayPaymentTransactionId = hold.TranzactionId;
         order.PaymentReference = hold.TranzactionId;
         order.CustomerPaymentMethodId = pm.Id;
@@ -1449,6 +1451,7 @@ public partial class PaymentService : ServiceBase
                 Token = token,
                 CardExpirationMMYY = cardExp,
                 ApprovalNumber = approval,
+                TerminalNumber = order.CardcomHoldTerminalNumber,
                 ExternalUniqTranId = $"void-cancel-{order.Id}",
             }, cancelToken).ConfigureAwait(false);
 
@@ -3499,6 +3502,7 @@ public partial class PaymentService : ServiceBase
             Token = token,
             CardExpirationMMYY = cardExp,
             ApprovalNumber = approval,
+            TerminalNumber = order.CardcomHoldTerminalNumber,
             ExternalUniqTranId = $"void-before-charge-{order.Id}",
         }, cancelToken);
 

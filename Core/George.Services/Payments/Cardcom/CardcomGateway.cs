@@ -390,7 +390,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         CancellationToken cancelToken = default)
         => await DoTransactionAsync(credentials, request.Amount, request.Token, request.CardExpirationMMYY,
             request.ApprovalNumber, isRefund: false, mtiVoid: true, jValidateHold: false, request.ExternalUniqTranId,
-            document: null, cardOwner: null, cancelToken)
+            document: null, cardOwner: null, cancelToken, holdTerminalNumber: request.TerminalNumber)
             .ConfigureAwait(false);
 
     /// <summary>
@@ -686,16 +686,19 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         CardcomTransactionDocument? document,
         CardcomCardOwnerContact? cardOwner,
         CancellationToken cancelToken,
-        int numOfPayments = 1)
+        int numOfPayments = 1,
+        int? holdTerminalNumber = null)
     {
         // Terminal routing with a second (no-CVV) charge terminal configured:
-        // - ONLY the actual charge (J4 capture / direct token charge) and its token-refund go to the charge
-        //   terminal - these are the operations a CVV-requiring terminal rejects for token transactions.
-        // - Authorization holds (J5) stay on the PRIMARY terminal (token creation + hold work there today),
-        //   and voiding a hold must hit the terminal that placed it - also the primary.
-        // The hosted payment page (card entry, with CVV) stays on the primary too - see CreateHostedSessionAsync.
-        var useChargeTerminal = !jValidateHold && !mtiVoid;
-        var terminal = (useChargeTerminal ? credentials.EffectiveChargeTerminalNumber : credentials.TerminalNumber) ?? 0;
+        // - Every TOKEN operation goes to the charge terminal: the charge (J4 capture / direct token charge), its
+        //   token-refund, and - since 2026-10-08 - the saved-card J5 hold too. The primary terminal requires a CVV
+        //   and declines token J5s for CAL / Max cards (Zano main terminal: 0/36 CAL+Max holds while the same
+        //   cards charged fine on the second terminal). Cardcom confirmed the hold must not go to the main terminal.
+        // - Voiding a hold (MTI 420) must hit the terminal that PLACED it: the caller passes it
+        //   (Order.CardcomHoldTerminalNumber); null = primary, which is where hosted-page J5s (card entry with CVV)
+        //   and pre-change saved-card holds live. The hosted payment page itself stays on the primary - see
+        //   CreateHostedSessionAsync.
+        var terminal = ResolveTransactionTerminal(credentials, mtiVoid, holdTerminalNumber);
         // Installments apply ONLY to the actual charge; holds, voids and refunds are always single-payment.
         var effectivePayments = (!isRefund && !mtiVoid && !jValidateHold) ? Math.Clamp(numOfPayments, 1, 36) : 1;
         var body = new Dictionary<string, object?>
@@ -770,7 +773,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
             return new PaymentTransactionResult { Success = false, ResponseCode = -1, Description = "Empty response" };
         }
 
-        var result = ParseTransactionResult(json);
+        var result = ParseTransactionResult(json, terminal);
         _logger.LogInformation(
             "Cardcom Transactions/Transaction response: externalId={ExternalUniqTranId}, success={Success}, " +
             "responseCode={ResponseCode}, description={Description}, txId={TxId}",
@@ -781,6 +784,16 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
             result.TranzactionId);
         return result;
     }
+
+    /// <summary>
+    /// Terminal for a Transactions/Transaction call: every token operation (charge, refund, saved-card J5 hold)
+    /// goes to the no-CVV charge terminal (= primary when none is configured); a void goes to the terminal that
+    /// placed the hold, defaulting to the primary.
+    /// </summary>
+    public static int ResolveTransactionTerminal(SitePaymentCredentials credentials, bool mtiVoid, int? holdTerminalNumber) =>
+        mtiVoid
+            ? (holdTerminalNumber is > 0 ? holdTerminalNumber : credentials.TerminalNumber) ?? 0
+            : credentials.EffectiveChargeTerminalNumber ?? 0;
 
     private static string? MaskTokenForLog(string? token) =>
         string.IsNullOrWhiteSpace(token) || token.Length < 4 ? null : $"****{token.Trim()[^4..]}";
@@ -803,7 +816,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
     public static bool IsCardcomTransactionResponseSuccess(int responseCode) =>
         responseCode is 0 or 700 or 701;
 
-    private static PaymentTransactionResult ParseTransactionResult(string json)
+    private static PaymentTransactionResult ParseTransactionResult(string json, int? terminalNumber = null)
     {
         var responseCode = GetInt(json, "ResponseCode");
         var success = IsCardcomTransactionResponseSuccess(responseCode);
@@ -832,6 +845,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
             DocumentNumber = docNum,
             DocumentUrl = docUrl,
             RawJson = json,
+            TerminalNumber = terminalNumber,
         };
     }
 
