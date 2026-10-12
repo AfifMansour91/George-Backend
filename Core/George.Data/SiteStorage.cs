@@ -250,6 +250,7 @@ namespace George.Data
             if (updated.PrintNewOrderImmediate.HasValue) dbSite.PrintNewOrderImmediate = updated.PrintNewOrderImmediate;
             if (updated.PrintMovedToTreatment.HasValue) dbSite.PrintMovedToTreatment = updated.PrintMovedToTreatment;
             if (updated.PrintAfterPicking.HasValue) dbSite.PrintAfterPicking = updated.PrintAfterPicking;
+            if (updated.PrintAfterPickingUnpaidCredit.HasValue) dbSite.PrintAfterPickingUnpaidCredit = updated.PrintAfterPickingUnpaidCredit;
             if (updated.PrintFutureImmediate.HasValue) dbSite.PrintFutureImmediate = updated.PrintFutureImmediate;
             if (updated.PrintFutureAtTimeEnabled.HasValue) dbSite.PrintFutureAtTimeEnabled = updated.PrintFutureAtTimeEnabled;
             if (updated.PrintFutureAtTime != null) dbSite.PrintFutureAtTime = updated.PrintFutureAtTime;
@@ -276,6 +277,8 @@ namespace George.Data
             if (updated.PaymentOnAccountEnabled.HasValue) dbSite.PaymentOnAccountEnabled = updated.PaymentOnAccountEnabled;
             if (updated.PaymentBankTransferEnabled.HasValue) dbSite.PaymentBankTransferEnabled = updated.PaymentBankTransferEnabled;
             if (updated.HideUnitWeightInOrders.HasValue) dbSite.HideUnitWeightInOrders = updated.HideUnitWeightInOrders;
+            // Only 2 or 3 are meaningful; anything else keeps the stored value (NULL = 2).
+            if (updated.PickingWeightDecimals is 2 or 3) dbSite.PickingWeightDecimals = updated.PickingWeightDecimals;
             if (updated.ShowCustomerProfileNoteInPrints.HasValue) dbSite.ShowCustomerProfileNoteInPrints = updated.ShowCustomerProfileNoteInPrints;
             if (updated.ShowOrderHandler.HasValue) dbSite.ShowOrderHandler = updated.ShowOrderHandler;
             if (updated.UseStructuredOrderLineDisplay.HasValue) dbSite.UseStructuredOrderLineDisplay = updated.UseStructuredOrderLineDisplay;

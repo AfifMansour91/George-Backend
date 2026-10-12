@@ -1266,7 +1266,8 @@ namespace George.Services
         private static bool ShouldAutoPrintAfterPickingOnUpdate(string? previousStatus, Order? before, Order updated, UpdateOrderReq req)
         {
             if (!string.Equals(updated.Status, "Ready", StringComparison.OrdinalIgnoreCase)) return false;
-            if (IsCreditAwaitingPayment(updated)) return false;
+            // Unpaid credit orders are filtered in TryEnqueueAfterPickingAutoPrintAsync, where the site's
+            // PrintAfterPickingUnpaidCredit sub-option is known.
             var becameReady = !string.Equals(previousStatus, "Ready", StringComparison.OrdinalIgnoreCase);
             var methodChanged = before != null && req.PaymentMethod != null
                 && !string.Equals(before.PaymentMethod, updated.PaymentMethod, StringComparison.OrdinalIgnoreCase);
@@ -1288,6 +1289,11 @@ namespace George.Services
                     return;
                 var site = await _siteStorage.GetSiteAsync(order.SiteId, cancelToken).ConfigureAwait(false);
                 if (site == null || site.AutoPrintEnabled != true || site.PrintAfterPicking != true)
+                    return;
+                // A credit order whose charge has not landed gets its voucher only when the site opted in
+                // (PrintAfterPickingUnpaidCredit); otherwise the print waits for the charge / a method change,
+                // which re-enters here through UpdateOrder or the PaymentService hook.
+                if (IsCreditAwaitingPayment(order) && site.PrintAfterPickingUnpaidCredit != true)
                     return;
                 await EnqueueAutoVoucherPrintAsync(site, order, "VoucherAuto:AfterPicking", "AfterPicking",
                     "Backend:OrderService", cancelToken).ConfigureAwait(false);

@@ -156,6 +156,13 @@ public partial class Site
     /// <summary>When true, print voucher automatically when picking is completed (with weights and final price).</summary>
     public bool? PrintAfterPicking { get; set; }
 
+    /// <summary>
+    /// Sub-option of <see cref="PrintAfterPicking"/>: a credit order whose charge did NOT land at picking finish
+    /// (declined, timed out, over the hold, or finished without a hold). True = print the after-picking voucher
+    /// anyway at finish; NULL/false = hold it until the charge lands / the method changes (current behavior).
+    /// </summary>
+    public bool? PrintAfterPickingUnpaidCredit { get; set; }
+
     public bool? PrintFutureImmediate { get; set; }
 
     public bool? PrintFutureAtTimeEnabled { get; set; }
@@ -271,6 +278,12 @@ public partial class Site
     /// NULL/0 = show (current behavior).
     /// </summary>
     public bool? HideUnitWeightInOrders { get; set; }
+
+    /// <summary>
+    /// Digits after the point for kilograms on the picking screens (ordered / picked columns, manual weight
+    /// modal): 2 or 3. NULL = 2 (current behavior). Requested by shops whose scales and price tags work in grams.
+    /// </summary>
+    public int? PickingWeightDecimals { get; set; }
 
     /// <summary>
     /// When true, order printouts (voucher/A4) include the permanent customer note (הערה קבועה,
