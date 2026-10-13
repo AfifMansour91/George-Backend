@@ -279,6 +279,7 @@ namespace George.Data
             if (updated.HideUnitWeightInOrders.HasValue) dbSite.HideUnitWeightInOrders = updated.HideUnitWeightInOrders;
             // Only 2 or 3 are meaningful; anything else keeps the stored value (NULL = 2).
             if (updated.PickingWeightDecimals is 2 or 3) dbSite.PickingWeightDecimals = updated.PickingWeightDecimals;
+            if (updated.InvoicePromotionAsLinePrice.HasValue) dbSite.InvoicePromotionAsLinePrice = updated.InvoicePromotionAsLinePrice;
             if (updated.ShowCustomerProfileNoteInPrints.HasValue) dbSite.ShowCustomerProfileNoteInPrints = updated.ShowCustomerProfileNoteInPrints;
             if (updated.ShowOrderHandler.HasValue) dbSite.ShowOrderHandler = updated.ShowOrderHandler;
             if (updated.UseStructuredOrderLineDisplay.HasValue) dbSite.UseStructuredOrderLineDisplay = updated.UseStructuredOrderLineDisplay;
