@@ -286,6 +286,13 @@ public partial class Site
     public int? PickingWeightDecimals { get; set; }
 
     /// <summary>
+    /// Cardcom invoice layout for promotion lines. NULL/false = catalog ₪/unit per line and one "הנחה" adjustment
+    /// line (current behavior). True = each discounted line is printed at its net price per unit with the
+    /// promotion name in the description, and no separate discount line (הקצב בעיר, 2026-10-13).
+    /// </summary>
+    public bool? InvoicePromotionAsLinePrice { get; set; }
+
+    /// <summary>
     /// When true, order printouts (voucher/A4) include the permanent customer note (הערה קבועה,
     /// Customer.Notes) in the order-notes line. NULL/0 = not printed (default).
     /// </summary>

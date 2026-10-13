@@ -145,6 +145,9 @@ namespace George.Services.Request
         /// <summary>Digits after the point for kilograms on the picking screens: 2 (default) or 3.</summary>
         public int? PickingWeightDecimals { get; set; }
 
+        /// <summary>Cardcom invoice: print promotion lines at their net price per unit with the promotion name (no separate discount line). Off by default.</summary>
+        public bool? InvoicePromotionAsLinePrice { get; set; }
+
         /// <summary>When true, printouts include the permanent customer note (הערה קבועה). Off by default.</summary>
         public bool? ShowCustomerProfileNoteInPrints { get; set; }
 

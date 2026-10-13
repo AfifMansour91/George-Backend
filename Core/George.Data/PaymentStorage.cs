@@ -17,6 +17,8 @@ public class PaymentStorage : StorageBase
             .Include(o => o.Customer)
             .Include(o => o.CustomerPaymentMethod)
             .Include(o => o.OrderItem.Where(i => !i.IsDeleted))
+                // Promotion name for the invoice line description (Site.InvoicePromotionAsLinePrice).
+                .ThenInclude(i => i.Promotion)
             .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, cancelToken);
 
     /// <summary>Site has an order with an open (uncaptured) authorization hold - used to guard a provider switch.</summary>

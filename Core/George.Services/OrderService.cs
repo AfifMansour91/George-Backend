@@ -3720,7 +3720,11 @@ namespace George.Services
         /// each line with the PromotionId + DiscountAmount it earned. Spec:
         /// <c>Sprint4/מבצעים.md</c> → "סיכום אחריות".
         /// </summary>
-        private async Task ApplyPromotionsToOrderItemsAsync(
+        /// <summary>
+        /// Evaluator cart for an order's lines (product categories from the cache, else loaded). Null when no line
+        /// is evaluable. Shared by the stamping re-evaluation and by the Woo-payload promotion targeting.
+        /// </summary>
+        private async Task<EvaluatePromotionsReq?> BuildPromotionEvalRequestAsync(
             int siteId,
             string? orderSource,
             int customerId,
@@ -3728,27 +3732,9 @@ namespace George.Services
             string? customerPhone,
             List<OrderItem> items,
             IReadOnlyDictionary<int, Product?>? productCache,
-            CancellationToken cancelToken,
-            Func<OrderItem, OrderPromotionEvalLine?>? resolveEvalLine = null)
+            Func<OrderItem, OrderPromotionEvalLine?>? resolveEvalLine,
+            CancellationToken cancelToken)
         {
-            if (items.Count == 0) return;
-
-            var utcNow = DateTime.UtcNow;
-            var candidates = await _promotionStorage
-                .GetActivePromotionsForEvaluationAsync(siteId, utcNow, cancelToken)
-                .ConfigureAwait(false);
-            if (candidates.Count == 0) return;
-
-            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken).ConfigureAwait(false);
-            var defaults = new PromotionEvaluator.SiteEvaluationDefaults
-            {
-                OveragePolicyDefault = string.IsNullOrWhiteSpace(site?.PromotionOveragePolicyDefault)
-                    ? "full_price"
-                    : site!.PromotionOveragePolicyDefault!,
-                ApplyOnPhoneOrders = site?.PromotionsApplyToPhoneOrders ?? true,
-                ApplyOnDiscountedProducts = site?.PromotionsApplyToDiscountedProducts ?? false,
-            };
-
             var cache = productCache != null
                 ? new Dictionary<int, Product?>(productCache)
                 : new Dictionary<int, Product?>();
@@ -3771,10 +3757,9 @@ namespace George.Services
                 if (eval is not { } line || line.Quantity <= 0m || line.LineTotal <= 0m) continue;
                 evalLines.Add((it, line));
             }
+            if (evalLines.Count == 0) return null;
 
-            if (evalLines.Count == 0) return;
-
-            var evalReq = new EvaluatePromotionsReq
+            return new EvaluatePromotionsReq
             {
                 SiteId = siteId,
                 Channel = MapOrderSourceToPromotionChannel(orderSource),
@@ -3804,6 +3789,42 @@ namespace George.Services
                 }).ToList(),
                 CartTotal = evalLines.Sum(p => p.Line.LineTotal),
             };
+        }
+
+        private async Task ApplyPromotionsToOrderItemsAsync(
+            int siteId,
+            string? orderSource,
+            int customerId,
+            string? couponCode,
+            string? customerPhone,
+            List<OrderItem> items,
+            IReadOnlyDictionary<int, Product?>? productCache,
+            CancellationToken cancelToken,
+            Func<OrderItem, OrderPromotionEvalLine?>? resolveEvalLine = null)
+        {
+            if (items.Count == 0) return;
+
+            var utcNow = DateTime.UtcNow;
+            var candidates = await _promotionStorage
+                .GetActivePromotionsForEvaluationAsync(siteId, utcNow, cancelToken)
+                .ConfigureAwait(false);
+            if (candidates.Count == 0) return;
+
+            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken).ConfigureAwait(false);
+            var defaults = new PromotionEvaluator.SiteEvaluationDefaults
+            {
+                OveragePolicyDefault = string.IsNullOrWhiteSpace(site?.PromotionOveragePolicyDefault)
+                    ? "full_price"
+                    : site!.PromotionOveragePolicyDefault!,
+                ApplyOnPhoneOrders = site?.PromotionsApplyToPhoneOrders ?? true,
+                ApplyOnDiscountedProducts = site?.PromotionsApplyToDiscountedProducts ?? false,
+            };
+
+            var built = await BuildPromotionEvalRequestAsync(
+                siteId, orderSource, customerId, couponCode, customerPhone, items, productCache, resolveEvalLine, cancelToken)
+                .ConfigureAwait(false);
+            if (built == null) return;
+            var evalReq = built;
 
             IReadOnlyDictionary<int, int>? priorRedemptions = null;
             if (customerId > 0)

@@ -283,5 +283,7 @@ public sealed class SitePaymentCredentials
     public string DocumentTypeToCreate { get; init; } = CardcomDocumentBuilder.DefaultDocumentType;
     /// <summary>Send invoice link via internal SMS after successful capture (ProviderExtrasJson: cardcomSendInvoiceSmsAfterCapture).</summary>
     public bool SendInvoiceSmsAfterCapture { get; init; } = true;
+    /// <summary>Site.InvoicePromotionAsLinePrice - Cardcom invoice prints promotion lines at net ₪/unit + promotion name. Off by default.</summary>
+    public bool InvoicePromotionAsLinePrice { get; init; }
     public string Currency { get; init; } = "ILS";
 }

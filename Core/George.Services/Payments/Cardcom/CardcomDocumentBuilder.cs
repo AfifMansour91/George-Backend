@@ -15,7 +15,8 @@ public static class CardcomDocumentBuilder
         bool sendByEmail = false,
         bool sendBySms = false,
         int isoCoinId = 1,
-        decimal? amountOverride = null)
+        decimal? amountOverride = null,
+        bool promotionAsLinePrice = false)
     {
         List<CardcomDocumentProductLine> lines;
         if (amountOverride is > 0)
@@ -36,7 +37,7 @@ public static class CardcomDocumentBuilder
         }
         else
         {
-            lines = BuildProductLines(order, items).ToList();
+            lines = BuildProductLines(order, items, promotionAsLinePrice).ToList();
             if (lines.Count == 0)
             {
                 var amount = order.Total ?? order.SubTotal ?? 0m;
@@ -153,7 +154,13 @@ public static class CardcomDocumentBuilder
             _ => 1,
         };
 
-    private static IEnumerable<CardcomDocumentProductLine> BuildProductLines(Order order, IEnumerable<OrderItem> items)
+    /// <param name="promotionAsLinePrice">
+    /// Site.InvoicePromotionAsLinePrice: a line with a stamped discount is printed at its NET price per unit
+    /// (net ÷ quantity, TotalLineCost = net) with the promotion name appended, e.g. "בשר טחון - 2 ק"ג ב-120 ₪",
+    /// 2.17 × 60.00 = 130.20 - so the document needs no "הנחה" adjustment line for promotions. Off (default) keeps
+    /// the catalog price per unit on every line and reconciles through the ADJUSTMENT line.
+    /// </param>
+    private static IEnumerable<CardcomDocumentProductLine> BuildProductLines(Order order, IEnumerable<OrderItem> items, bool promotionAsLinePrice = false)
     {
         // Bundle children are informational (the parent line carries the bundle money) - never invoice them.
         foreach (var item in BundleOrderLines.WithoutChildren(items.Where(i => !i.IsDeleted)).OrderBy(i => i.SortOrder).ThenBy(i => i.Id))
@@ -194,6 +201,17 @@ public static class CardcomDocumentBuilder
                 description += depreciationNet.HasValue
                     ? $" (כולל פחת {item.DepreciationPercent.Value:0.##}%, משקל נטו {depreciationNet.Value:0.###} ק\"ג)"
                     : $" (כולל פחת {item.DepreciationPercent.Value:0.##}%)";
+
+            // Promotion line as net price: the customer reads the deal's ₪/unit, not catalog price + a
+            // document-level discount. Net = TotalPrice − DiscountAmount (George's line net everywhere).
+            if (promotionAsLinePrice && item.DiscountAmount is > 0m && lineTotal is > 0m && qty > 0m)
+            {
+                var net = Math.Max(0m, Math.Round(lineTotal.Value - item.DiscountAmount.Value, 2, MidpointRounding.AwayFromZero));
+                lineTotal = net;
+                unitCost = Math.Round(net / qty, 2, MidpointRounding.AwayFromZero);
+                var promotionName = item.Promotion?.Name?.Trim();
+                description += string.IsNullOrEmpty(promotionName) ? " - מבצע" : $" - {promotionName}";
+            }
 
             if (description.Length > 250)
                 description = description[..250];

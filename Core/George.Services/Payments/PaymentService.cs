@@ -1163,7 +1163,8 @@ public partial class PaymentService : ServiceBase
     {
         var items = order.OrderItem?.Where(i => !i.IsDeleted) ?? Enumerable.Empty<OrderItem>();
         var isoCoinId = CardcomDocumentBuilder.MapCurrencyToIsoCoinId(creds.Currency);
-        return CardcomDocumentBuilder.Build(order, items, creds.DocumentTypeToCreate, sendByEmail, sendBySms, isoCoinId);
+        return CardcomDocumentBuilder.Build(order, items, creds.DocumentTypeToCreate, sendByEmail, sendBySms, isoCoinId,
+            promotionAsLinePrice: creds.InvoicePromotionAsLinePrice);
     }
 
     private static CardcomTransactionDocument BuildRefundDocumentForOrder(
@@ -2512,6 +2513,7 @@ public partial class PaymentService : ServiceBase
             ProviderExtrasJson = site.CardcomProviderExtrasJson,
             DocumentTypeToCreate = ResolveDocumentTypeFromExtras(site.CardcomProviderExtrasJson),
             SendInvoiceSmsAfterCapture = ResolveSendInvoiceSmsAfterCaptureFromExtras(site.CardcomProviderExtrasJson),
+            InvoicePromotionAsLinePrice = site.InvoicePromotionAsLinePrice == true,
             Currency = site.Currency,
         };
     }

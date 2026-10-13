@@ -112,8 +112,10 @@ public partial class OrderService
     /// </summary>
     private async Task<IReadOnlyList<ResolvedOrderPromotion>> StampPromotionsFromPayloadAsync(
         int siteId,
+        string? source,
         List<OrderItem> items,
         WooCommerceOrderPayload payload,
+        IReadOnlyDictionary<int, Product?>? productCache,
         CancellationToken cancelToken)
     {
         var resolved = new List<ResolvedOrderPromotion>();
@@ -124,6 +126,15 @@ public partial class OrderService
         // promotions are negative fees). A promotion covered by this pool is stamped as-is; anything
         // beyond it is baked into the lines and must be grossed up when stamped.
         var offLinePool = ComputeWooPayloadOffLineDiscount(items, payload);
+
+        // Multi-promotion orders arrive with lines[] empty for EVERY promotion (the plugin cannot attribute
+        // line discounts per promotion). Spreading each promotion over all lines grossed up lines the
+        // promotion never touched: הקצב בעיר #3386 - two non-promo lines were charged ×1.15 at picking
+        // (97.64 instead of 85 ₪/kg) after the evaluator re-derived the discounts per product. Resolve
+        // which lines each George promotion actually targets (evaluator, prices as hints) and spread the
+        // baked discount over those lines only.
+        var linkedPromos = new Dictionary<int, Promotion>();
+        Dictionary<int, HashSet<int>>? targetsByPromotion = null;
 
         foreach (var promo in applied)
         {
@@ -141,6 +152,7 @@ public partial class OrderService
                 else
                 {
                     linkedPromotionId = promotionId;
+                    linkedPromos[promotionId] = georgePromo;
                 }
             }
 
@@ -173,7 +185,19 @@ public partial class OrderService
                 if (feePortion > 0m)
                     revenue += DistributeOrderLevelPromotionDiscount(items, linkedPromotionId, feePortion, grossUpLineTotals: false);
                 if (bakedPortion > 0m)
-                    revenue += DistributeOrderLevelPromotionDiscount(items, linkedPromotionId, bakedPortion, grossUpLineTotals: true);
+                {
+                    // A baked (per-line) discount belongs to the lines the promotion targets; only when the
+                    // promotion is unlinked or targets nothing recognizable does it fall back to all lines.
+                    var targetLines = items;
+                    if (linkedPromotionId.HasValue && linkedPromos.Count > 0)
+                    {
+                        targetsByPromotion ??= await ResolvePayloadPromotionTargetLinesAsync(
+                            siteId, source, items, linkedPromos.Values.ToList(), productCache, cancelToken).ConfigureAwait(false);
+                        if (targetsByPromotion.TryGetValue(linkedPromotionId.Value, out var targetProductIds))
+                            targetLines = SelectPromotionTargetLines(items, targetProductIds);
+                    }
+                    revenue += DistributeOrderLevelPromotionDiscount(targetLines, linkedPromotionId, bakedPortion, grossUpLineTotals: true);
+                }
             }
 
             if (linkedPromotionId.HasValue)
@@ -188,6 +212,67 @@ public partial class OrderService
         }
 
         return resolved;
+    }
+
+    /// <summary>
+    /// Lines a promotion targets, for spreading its baked discount: the order lines whose George product id
+    /// the evaluator reported as eligible/trigger for that promotion. Falls back to ALL lines when none match
+    /// (unknown products, evaluator disagreement) - the pre-2026-10-12 behavior, money stays right.
+    /// </summary>
+    public static List<OrderItem> SelectPromotionTargetLines(List<OrderItem> items, IReadOnlySet<int> targetProductIds)
+    {
+        if (targetProductIds.Count == 0) return items;
+        var targeted = items.Where(i => !i.IsDeleted && i.ProductId is > 0 && targetProductIds.Contains(i.ProductId.Value)).ToList();
+        return targeted.Count > 0 ? targeted : items;
+    }
+
+    /// <summary>
+    /// George product ids each payload-linked promotion applies to on this order, from the evaluator run over
+    /// the order lines (payload net prices are only hints; quantities decide). Promotions the evaluator does
+    /// not apply get no entry → caller falls back to all lines.
+    /// </summary>
+    private async Task<Dictionary<int, HashSet<int>>> ResolvePayloadPromotionTargetLinesAsync(
+        int siteId,
+        string? source,
+        List<OrderItem> items,
+        IReadOnlyList<Promotion> linkedPromotions,
+        IReadOnlyDictionary<int, Product?>? productCache,
+        CancellationToken cancelToken)
+    {
+        var map = new Dictionary<int, HashSet<int>>();
+        try
+        {
+            var evalReq = await BuildPromotionEvalRequestAsync(
+                siteId, source, customerId: 0, couponCode: null, customerPhone: null, items, productCache,
+                resolveEvalLine: null, cancelToken).ConfigureAwait(false);
+            if (evalReq == null) return map;
+            var site = await _siteStorage.GetSiteAsync(siteId, cancelToken).ConfigureAwait(false);
+            var defaults = new PromotionEvaluator.SiteEvaluationDefaults
+            {
+                OveragePolicyDefault = string.IsNullOrWhiteSpace(site?.PromotionOveragePolicyDefault)
+                    ? "full_price"
+                    : site!.PromotionOveragePolicyDefault!,
+                ApplyOnPhoneOrders = true,
+                // Woo already applied these promotions; catalog-sale gating must not hide their targets here.
+                ApplyOnDiscountedProducts = true,
+            };
+            var result = PromotionEvaluator.Evaluate(linkedPromotions, evalReq, defaults, DateTime.UtcNow);
+            foreach (var appliedPromo in result.PromotionsApplied)
+            {
+                var ids = new HashSet<int>();
+                foreach (var ei in appliedPromo.EligibleItems ?? new List<EligibleItem>())
+                    if (int.TryParse(ei.ProductId, out var pid)) ids.Add(pid);
+                foreach (var tp in appliedPromo.TriggerProductIds ?? new List<string>())
+                    if (int.TryParse(tp, out var pid)) ids.Add(pid);
+                if (appliedPromo.WholeCart) ids.Clear(); // whole-cart → all lines
+                map[appliedPromo.PromotionId] = ids;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Payload promotion targeting failed for site {SiteId}; falling back to all lines.", siteId);
+        }
+        return map;
     }
 
     /// <summary>
@@ -229,7 +314,7 @@ public partial class OrderService
     /// totals: each line is grossed back up by its share so net stays what Woo charged.
     /// Returns the post-discount revenue of the stamped lines (for redemption metrics).
     /// </summary>
-    private static decimal DistributeOrderLevelPromotionDiscount(
+    public static decimal DistributeOrderLevelPromotionDiscount(
         List<OrderItem> items,
         int? promotionId,
         decimal discountAmount,
@@ -290,7 +375,7 @@ public partial class OrderService
         CancellationToken cancelToken)
     {
         if (payload.AppliedPromotions != null)
-            return await StampPromotionsFromPayloadAsync(siteId, items, payload, cancelToken).ConfigureAwait(false);
+            return await StampPromotionsFromPayloadAsync(siteId, source, items, payload, productCache, cancelToken).ConfigureAwait(false);
 
         await ApplyPromotionsToOrderItemsAsync(
             siteId, source, customerId, couponCode, customerPhone, items, productCache, cancelToken)
