@@ -392,29 +392,31 @@ public class MarketingService : ServiceBase
         if (scope == null)
             return CreateResponse(response, status, error);
 
-        var contentError = ValidateContent(req.Body, req.LinkUrl);
+        // A draft keeps whatever the shop typed so far; only a real send is validated (George, 15.10).
+        var contentError = req.SaveAsDraft ? null : ValidateContent(req.Body, req.LinkUrl);
         if (contentError != null)
             return CreateResponse(response, StatusCode.InvalidRequest, contentError);
 
         var (conditions, audienceError) = await ResolveAudienceAsync(scope.AccountId, req.Audience, cancelToken);
-        if (audienceError != null)
+        if (audienceError != null && !req.SaveAsDraft)
             return CreateResponse(response, StatusCode.InvalidRequest, audienceError);
 
         var config = await _accountSms.GetAccountConfigAsync(scope.AccountId, cancelToken);
-        if (!SmsProvider.CanSendWith(config))
+        if (!req.SaveAsDraft && !SmsProvider.CanSendWith(config))
             return CreateResponse(response, StatusCode.InvalidRequest, "לא מוגדר חשבון SMS לשליחה");
 
         var (clockNow, clockToday) = Clock();
         var (_, consentNow) = await _storage.CountSegmentAsync(scope.AccountId, scope.SiteIds, conditions, clockNow, clockToday, cancelToken);
-        if (consentNow == 0)
+        if (!req.SaveAsDraft && consentNow == 0)
             return CreateResponse(response, StatusCode.InvalidRequest, "אין למי לשלוח - אין בקהל לקוחות שאישרו דיוור");
 
         var settings = await _storage.GetSettingsAsync(scope.AccountId, cancelToken);
         var now = DateTime.UtcNow;
         var requestedAt = req.ScheduledAt.HasValue && req.ScheduledAt.Value > now ? DateTime.SpecifyKind(req.ScheduledAt.Value, DateTimeKind.Utc) : now;
-        var allowedAt = MarketingSendWindow.NextAllowed(requestedAt, settings);
+        // "שלח עכשיו" is the shop's own call: no deferral. A scheduled send is deferred unless the shop said "שלח בכל זאת".
+        var allowedAt = req.BypassSendWindow || req.SaveAsDraft ? requestedAt : MarketingSendWindow.NextAllowed(requestedAt, settings);
 
-        var body = req.Body.Trim();
+        var body = (req.Body ?? string.Empty).Trim();
         var audienceType = (req.Audience?.Type ?? "all").Trim().ToLowerInvariant();
         var name = string.IsNullOrWhiteSpace(req.Name) ? DefaultSendName(body) : req.Name.Trim();
 
@@ -424,7 +426,8 @@ public class MarketingService : ServiceBase
             Type = "manual",
             Name = name.Length > 200 ? name.Substring(0, 200) : name,
             Channel = "sms",
-            Status = MarketingStorage.SendStatus.Scheduled,
+            Status = req.SaveAsDraft ? MarketingStorage.SendStatus.Draft : MarketingStorage.SendStatus.Scheduled,
+            BypassSendWindow = req.BypassSendWindow,
             AudienceType = audienceType,
             SegmentId = audienceType == "segment" ? req.Audience!.SegmentId : null,
             SystemSegmentKey = audienceType == "system" ? req.Audience!.SystemKey : null,
@@ -448,7 +451,8 @@ public class MarketingService : ServiceBase
     public const int EditCutoffMinutes = 10;
 
     public static bool IsEditable(MarketingSend send, DateTime utcNow) =>
-        send.Status == MarketingStorage.SendStatus.Scheduled && send.StartedAt == null && send.ScheduledAt > utcNow.AddMinutes(EditCutoffMinutes);
+        send.Status == MarketingStorage.SendStatus.Draft
+        || (send.Status == MarketingStorage.SendStatus.Scheduled && send.StartedAt == null && send.ScheduledAt > utcNow.AddMinutes(EditCutoffMinutes));
 
     public async Task<IApiResponse<MarketingSendRes>> UpdateSendAsync(int sendId, MarketingSendCreateReq req, CancellationToken cancelToken)
     {
@@ -464,22 +468,35 @@ public class MarketingService : ServiceBase
         if (!IsEditable(existing, now))
             return CreateResponse(response, StatusCode.InvalidRequest, $"אפשר לערוך שליחה מתוזמנת רק עד {EditCutoffMinutes} דקות לפני המועד. אפשר לבטל אותה וליצור חדשה.");
 
-        var contentError = ValidateContent(req.Body, req.LinkUrl);
+        var contentError = req.SaveAsDraft ? null : ValidateContent(req.Body, req.LinkUrl);
         if (contentError != null)
             return CreateResponse(response, StatusCode.InvalidRequest, contentError);
         var (conditions, audienceError) = await ResolveAudienceAsync(scope.AccountId, req.Audience, cancelToken);
-        if (audienceError != null)
+        if (audienceError != null && !req.SaveAsDraft)
             return CreateResponse(response, StatusCode.InvalidRequest, audienceError);
+        if (!req.SaveAsDraft && existing.Status == MarketingStorage.SendStatus.Draft)
+        {
+            // A draft becoming a real send gets the same checks as a new one.
+            var sendConfig = await _accountSms.GetAccountConfigAsync(scope.AccountId, cancelToken);
+            if (!SmsProvider.CanSendWith(sendConfig))
+                return CreateResponse(response, StatusCode.InvalidRequest, "לא מוגדר חשבון SMS לשליחה");
+            var (clockNow, clockToday) = Clock();
+            var (_, consentNow) = await _storage.CountSegmentAsync(scope.AccountId, scope.SiteIds, conditions, clockNow, clockToday, cancelToken);
+            if (consentNow == 0)
+                return CreateResponse(response, StatusCode.InvalidRequest, "אין למי לשלוח — אין בקהל לקוחות שאישרו דיוור");
+        }
 
         var settings = await _storage.GetSettingsAsync(scope.AccountId, cancelToken);
         var requestedAt = req.ScheduledAt.HasValue && req.ScheduledAt.Value > now ? DateTime.SpecifyKind(req.ScheduledAt.Value, DateTimeKind.Utc) : now;
-        var allowedAt = MarketingSendWindow.NextAllowed(requestedAt, settings);
-        var body = req.Body.Trim();
+        var allowedAt = req.BypassSendWindow || req.SaveAsDraft ? requestedAt : MarketingSendWindow.NextAllowed(requestedAt, settings);
+        var body = (req.Body ?? string.Empty).Trim();
         var audienceType = (req.Audience?.Type ?? "all").Trim().ToLowerInvariant();
         var name = string.IsNullOrWhiteSpace(req.Name) ? DefaultSendName(body) : req.Name.Trim();
 
-        var ok = await _storage.UpdateSendAsync(sendId, MarketingStorage.SendStatus.Scheduled, s =>
+        var ok = await _storage.UpdateSendAsync(sendId, existing.Status, s =>
         {
+            s.Status = req.SaveAsDraft ? MarketingStorage.SendStatus.Draft : MarketingStorage.SendStatus.Scheduled;
+            s.BypassSendWindow = req.BypassSendWindow;
             s.Name = name.Length > 200 ? name.Substring(0, 200) : name;
             s.AudienceType = audienceType;
             s.SegmentId = audienceType == "segment" ? req.Audience!.SegmentId : null;
@@ -513,31 +530,36 @@ public class MarketingService : ServiceBase
         if (contentError != null)
             return CreateResponse(response, StatusCode.InvalidRequest, contentError);
 
-        var phone = MarketingStorage.NormalizePhone(req.Phone);
-        if (!MarketingStorage.IsSmsCapablePhone(phone))
-            return CreateResponse(response, StatusCode.InvalidRequest, "מספר הטלפון אינו מספר נייד תקין");
+        // "שלח לעצמי" to one number or a few (George: "לשלוח לכמה בפסיקים"). Free, and allowed with an empty balance.
+        var phones = (req.Phone ?? string.Empty).Split(new[] { ',', ';', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(MarketingStorage.NormalizePhone).Distinct().ToList();
+        if (phones.Count == 0 || phones.Any(p => !MarketingStorage.IsSmsCapablePhone(p)))
+            return CreateResponse(response, StatusCode.InvalidRequest, "אחד המספרים אינו מספר נייד תקין");
+        if (phones.Count > 5)
+            return CreateResponse(response, StatusCode.InvalidRequest, "עד 5 מספרים בהודעת בדיקה אחת");
 
         var config = await _accountSms.GetAccountConfigAsync(scope.AccountId, cancelToken);
         if (!SmsProvider.CanSendWith(config))
             return CreateResponse(response, StatusCode.InvalidRequest, "לא מוגדר חשבון SMS לשליחה");
 
         var text = await RenderSampleAsync(scope, req.Body, req.LinkUrl, cancelToken, useRealLink: true);
-        bool sent;
-        try
+        var sentCount = 0;
+        foreach (var phone in phones)
         {
-            sent = await _accountSms.SendLoggedAsync(
-                new SmsLogContext { Kind = MessageKind.System, Category = MessageCategory.MarketingTest, AccountId = scope.AccountId },
-                phone, text, config, cancelToken);
+            try
+            {
+                if (await _accountSms.SendLoggedAsync(new SmsLogContext { Kind = MessageKind.System, Category = MessageCategory.MarketingTest, AccountId = scope.AccountId }, phone, text, config, cancelToken))
+                    sentCount++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Marketing test SMS to {Phone} failed for account {AccountId}.", phone, scope.AccountId);
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Marketing test SMS failed for account {AccountId}.", scope.AccountId);
-            sent = false;
-        }
-        if (!sent)
+        if (sentCount == 0)
             return CreateResponse(response, StatusCode.InvalidRequest, "שליחת הודעת הבדיקה נכשלה");
 
-        response.Data = new MarketingTestSendRes { Sent = true, Preview = text };
+        response.Data = new MarketingTestSendRes { Sent = true, SentCount = sentCount, Preview = text };
         return response;
     }
 
@@ -977,6 +999,7 @@ public class MarketingService : ServiceBase
         var totals = await _storage.GetQuotaTotalsAsync(accountId, DateTime.UtcNow, cancelToken);
         var res = new MarketingQuotaRes
         {
+            PurchaseUrl = string.IsNullOrWhiteSpace(_configuration["Marketing:PurchaseUrl"]) ? null : _configuration["Marketing:PurchaseUrl"]!.Trim(),
             // Own provider account = the shop pays the provider directly. A platform-opened sub-account is still ours to meter.
             IsExempt = config != null && !config.BilledByPlatform,
             Balance = totals.Purchased - totals.Consumed,
@@ -1088,6 +1111,7 @@ public class MarketingService : ServiceBase
             LinkUrl = s.LinkUrl,
             ScheduledAt = s.ScheduledAt,
             OriginalScheduledAt = s.OriginalScheduledAt,
+            BypassSendWindow = s.BypassSendWindow,
             StartedAt = s.StartedAt,
             CompletedAt = s.CompletedAt,
             AttributionWindowHours = s.AttributionWindowHours,

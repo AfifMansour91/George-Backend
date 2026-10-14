@@ -198,6 +198,7 @@ BEGIN
         [LinkUrl] NVARCHAR(1000) NULL,
         [ScheduledAt] DATETIME2(0) NOT NULL,    -- UTC; "send now" = creation time
         [OriginalScheduledAt] DATETIME2(0) NULL,-- set when the send was deferred (Shabbat / quiet hours)
+        [BypassSendWindow] BIT NOT NULL CONSTRAINT [DF_MarketingSend_BypassSendWindow] DEFAULT (0),-- "שלח עכשיו" / "שלח בכל זאת": ignore hours + Shabbat
         [StartedAt] DATETIME2(0) NULL,
         [CompletedAt] DATETIME2(0) NULL,
         [AttributionWindowHours] INT NOT NULL CONSTRAINT [DF_MarketingSend_AttributionWindowHours] DEFAULT (72),
@@ -302,4 +303,12 @@ BEGIN
     PRINT 'Created MarketingQuotaLedger';
 END
 ELSE PRINT 'MarketingQuotaLedger already exists';
+GO
+
+-- 15.10.2026: BypassSendWindow for databases that ran the table creation before it existed.
+IF COL_LENGTH(N'dbo.MarketingSend', N'BypassSendWindow') IS NULL
+BEGIN
+    ALTER TABLE [dbo].[MarketingSend] ADD [BypassSendWindow] BIT NOT NULL CONSTRAINT [DF_MarketingSend_BypassSendWindow] DEFAULT (0);
+    PRINT 'Added MarketingSend.BypassSendWindow';
+END
 GO

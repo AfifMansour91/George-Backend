@@ -59,12 +59,17 @@ namespace George.Services.Request
         public string? LinkUrl { get; set; }
         /// <summary>UTC. Null = send now.</summary>
         public DateTime? ScheduledAt { get; set; }
+        /// <summary>Keep as a draft (status draft): nothing is validated beyond the scope, nothing is dispatched.</summary>
+        public bool SaveAsDraft { get; set; }
+        /// <summary>Ignore the hours / Shabbat rule. The wizard sets it for "שלח עכשיו" and for a scheduled send the shop marked "שלח בכל זאת".</summary>
+        public bool BypassSendWindow { get; set; }
     }
 
     public class MarketingTestSendReq : MarketingScopeReq
     {
         public string Body { get; set; } = string.Empty;
         public string? LinkUrl { get; set; }
+        /// <summary>One number, or several separated by commas (max 5).</summary>
         public string Phone { get; set; } = string.Empty;
     }
 

@@ -68,6 +68,8 @@ namespace George.Services.Response
         public MarketingProviderQuotaRes? ProviderQuota { get; set; }
         /// <summary>Inforu's own threshold (WarningLevel) was reached - the sub-account is about to run dry.</summary>
         public bool LowBalanceWarning { get; set; }
+        /// <summary>Where a shop buys SMS packages (config Marketing:PurchaseUrl); null = "contact us".</summary>
+        public string? PurchaseUrl { get; set; }
         /// <summary>After an allocation: why the provider side was NOT topped up (George's bank was). Null = synced or not applicable.</summary>
     }
 
@@ -148,6 +150,7 @@ namespace George.Services.Response
         public string? LinkUrl { get; set; }
         public DateTime ScheduledAt { get; set; }
         public DateTime? OriginalScheduledAt { get; set; }
+        public bool BypassSendWindow { get; set; }
         public DateTime? StartedAt { get; set; }
         public DateTime? CompletedAt { get; set; }
         public int AttributionWindowHours { get; set; }
@@ -260,6 +263,7 @@ namespace George.Services.Response
     public class MarketingTestSendRes
     {
         public bool Sent { get; set; }
+        public int SentCount { get; set; }
         public string Preview { get; set; } = string.Empty;
     }
 

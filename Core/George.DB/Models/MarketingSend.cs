@@ -71,6 +71,9 @@ public partial class MarketingSend
     [Precision(0)]
     public DateTime? OriginalScheduledAt { get; set; }
 
+    /// <summary>"שלח עכשיו" (always) or a scheduled send the shop marked "שלח בכל זאת": the dispatcher ignores the hours / Shabbat rule. Never set by automations.</summary>
+    public bool BypassSendWindow { get; set; }
+
     [Precision(0)]
     public DateTime? StartedAt { get; set; }
 

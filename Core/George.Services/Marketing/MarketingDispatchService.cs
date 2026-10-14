@@ -112,7 +112,8 @@ public class MarketingDispatchService
         var settings = await _storage.GetSettingsAsync(send.AccountId, cancelToken).ConfigureAwait(false);
 
         // The window is checked again at the moment of truth: settings may have changed since the send was created.
-        var allowedAt = MarketingSendWindow.NextAllowed(now, settings);
+        // Not for "שלח עכשיו" / "שלח בכל זאת" - that was the shop's explicit decision.
+        var allowedAt = send.BypassSendWindow ? now : MarketingSendWindow.NextAllowed(now, settings);
         if (allowedAt > now)
         {
             await _storage.UpdateSendAsync(send.Id, MarketingStorage.SendStatus.Scheduled, s =>
@@ -229,7 +230,7 @@ public class MarketingDispatchService
     private async Task<bool> DispatchBatchAsync(MarketingSend send, CancellationToken cancelToken)
     {
         var settings = await _storage.GetSettingsAsync(send.AccountId, cancelToken).ConfigureAwait(false);
-        if (!MarketingSendWindow.IsAllowed(DateTime.UtcNow, settings))
+        if (!send.BypassSendWindow && !MarketingSendWindow.IsAllowed(DateTime.UtcNow, settings))
         {
             // A long send that ran into 20:00 (or into Shabbat) waits; it continues by itself when the window reopens.
             await SetPausedAsync(send, PausedSendWindow, cancelToken).ConfigureAwait(false);

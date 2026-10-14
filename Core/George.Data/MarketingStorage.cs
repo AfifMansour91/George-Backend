@@ -9,6 +9,8 @@ public class MarketingStorage : StorageBase
 {
     public static class SendStatus
     {
+        /// <summary>Saved from the wizard, never dispatched until the shop sends it.</summary>
+        public const string Draft = "draft";
         public const string Scheduled = "scheduled";
         public const string Sending = "sending";
         public const string Sent = "sent";
@@ -242,7 +244,8 @@ public class MarketingStorage : StorageBase
         if (toUtc.HasValue) query = query.Where(s => (s.StartedAt ?? s.ScheduledAt) < toUtc.Value);
         if (!string.IsNullOrWhiteSpace(type)) query = query.Where(s => s.Type == type);
         if (statusFilter == "scheduled") query = query.Where(s => s.Status == SendStatus.Scheduled);
-        else if (statusFilter == "finished") query = query.Where(s => s.Status != SendStatus.Scheduled);
+        else if (statusFilter == "draft") query = query.Where(s => s.Status == SendStatus.Draft);
+        else if (statusFilter == "finished") query = query.Where(s => s.Status != SendStatus.Scheduled && s.Status != SendStatus.Draft);
 
         var total = await query.CountAsync(cancelToken).ConfigureAwait(false);
         var items = await query.OrderByDescending(s => s.ScheduledAt).ThenByDescending(s => s.Id)
@@ -412,7 +415,7 @@ public class MarketingStorage : StorageBase
     public async Task<bool> CancelSendAsync(int accountId, int sendId, CancellationToken cancelToken)
     {
         var changed = await _dbContext.MarketingSend
-            .Where(s => s.AccountId == accountId && s.Id == sendId && (s.Status == SendStatus.Scheduled || s.Status == SendStatus.Sending))
+            .Where(s => s.AccountId == accountId && s.Id == sendId && (s.Status == SendStatus.Scheduled || s.Status == SendStatus.Sending || s.Status == SendStatus.Draft))
             .ExecuteUpdateAsync(u => u
                 .SetProperty(s => s.Status, SendStatus.Canceled)
                 .SetProperty(s => s.PausedReason, (string?)null)

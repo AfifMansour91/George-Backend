@@ -368,3 +368,16 @@ public class MarketingPickedCustomersTests
         Assert.NotNull(George.Data.MarketingSegmentQuery.Validate(empty, allowSystemAxes: true));
     }
 }
+
+public class MarketingDraftRulesTests
+{
+    [Fact]
+    public void Drafts_are_always_editable_scheduled_only_until_the_cutoff()
+    {
+        var now = new DateTime(2026, 10, 15, 8, 0, 0, DateTimeKind.Utc);
+        var draft = new George.DB.MarketingSend { Status = George.Data.MarketingStorage.SendStatus.Draft, ScheduledAt = now.AddDays(-3) };
+        Assert.True(George.Services.Marketing.MarketingService.IsEditable(draft, now));
+        var late = new George.DB.MarketingSend { Status = George.Data.MarketingStorage.SendStatus.Scheduled, ScheduledAt = now.AddMinutes(5) };
+        Assert.False(George.Services.Marketing.MarketingService.IsEditable(late, now));
+    }
+}
