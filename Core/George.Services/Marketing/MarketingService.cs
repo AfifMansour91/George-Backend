@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AutoMapper;
 using George.Common;
+using George.Common.Request;
 using George.Data;
 using George.DB;
 using George.Providers;
@@ -749,6 +750,99 @@ public class MarketingService : ServiceBase
         return response;
     }
 
+    /// <summary>Super-admin: open the Inforu sub-account for a shop and store it as its platform-billed SMS account, in one step.</summary>
+    public async Task<IApiResponse<AccountSmsSettingsRes>> ProvisionInforuSubAccountAsync(int accountId, MarketingInforuProvisionReq req, CancellationToken cancelToken)
+    {
+        var response = new ApiResponse<AccountSmsSettingsRes>();
+        var (scope, status, error) = await ResolveScopeAsync(accountId, null, cancelToken);
+        if (scope == null)
+            return CreateResponse(response, status, error);
+        if (!scope.Unrestricted)
+            return CreateResponse(response, StatusCode.UnauthorizedData, "רק מנהל מערכת יכול לפתוח תת-חשבון InforU");
+        if (string.IsNullOrWhiteSpace(req.CustomerName) || string.IsNullOrWhiteSpace(req.Username) || string.IsNullOrWhiteSpace(req.Password))
+            return CreateResponse(response, StatusCode.InvalidRequest, "שם לקוח, שם משתמש וסיסמה הם חובה");
+        if (!AccountSmsService.IsValidInforuSender(req.Sender))
+            return CreateResponse(response, StatusCode.InvalidRequest, "שם השולח חייב להיות עד 11 אותיות או ספרות באנגלית, בלי רווחים");
+        if (req.QuotaTypeId is not (InforuQuotaService.QuotaTypeMonthly or InforuQuotaService.QuotaTypePackages))
+            return CreateResponse(response, StatusCode.InvalidRequest, "סוג מכסה לא חוקי");
+        if (req.QuotaAmount < 0 || req.QuotaAmount > 1_000_000)
+            return CreateResponse(response, StatusCode.InvalidRequest, "כמות לא חוקית");
+        var existing = await _accountStorage.GetSmsSettingsRowAsync(scope.AccountId, SmsProviderNames.Inforu, cancelToken);
+        if (existing != null && !string.IsNullOrWhiteSpace(existing.ApiToken))
+            return CreateResponse(response, StatusCode.InvalidRequest, "לחשבון הזה כבר שמור תת-חשבון InforU. כדי לפתוח חדש יש למחוק אותו קודם.");
+
+        var apiToken = string.IsNullOrWhiteSpace(req.ApiToken) ? NewApiToken() : req.ApiToken.Trim();
+        var spec = new InforuSubAccountSpec
+        {
+            CustomerName = req.CustomerName.Trim(), Username = req.Username.Trim(), Password = req.Password, ApiToken = apiToken,
+            Email = req.Email?.Trim(), PhoneNumber = req.PhoneNumber?.Trim(),
+            QuotaTypeId = req.QuotaTypeId, QuotaAmount = req.QuotaAmount, WarningLevel = Math.Max(0, req.WarningLevel),
+        };
+        var (createError, customerId) = await _inforuQuota.CreateSubAccountAsync(scope.AccountId, spec, cancelToken);
+        if (createError != null)
+            return CreateResponse(response, StatusCode.InvalidRequest, createError);
+
+        // The sub-account exists now - whatever happens next, its credentials must land in our DB.
+        var saved = await _accountSms.UpsertSettingsAsync(scope.AccountId, new AccountSmsSettingsReq
+        {
+            IsEnabled = true, Provider = SmsProviderNames.Inforu, Username = spec.Username, ApiToken = apiToken, FromName = req.Sender.Trim(),
+            BilledByPlatform = true, InforuCustomerId = customerId,
+        }, cancelToken);
+        if (!saved.IsSuccessful)
+            return CreateResponse(response, StatusCode.GeneralError, $"תת-החשבון נפתח ב-InforU (משתמש {spec.Username}) אבל השמירה בג'ורג'יו נכשלה: {saved.Description}. יש להזין את הפרטים ידנית.");
+
+        if (req.QuotaAmount > 0)
+        {
+            await _storage.AddLedgerEntryAsync(new MarketingQuotaLedger
+            {
+                AccountId = scope.AccountId, EntryType = MarketingStorage.LedgerEntryType.Purchase, Bucket = MarketingStorage.BucketBank, Amount = req.QuotaAmount,
+                Note = req.QuotaTypeId == InforuQuotaService.QuotaTypeMonthly ? "מכסה חודשית התחלתית (פתיחת תת-חשבון)" : "חבילה התחלתית (פתיחת תת-חשבון)",
+                CreationUserId = AuthUser.Id > 0 ? AuthUser.Id : null,
+            }, cancelToken);
+        }
+        return saved;
+    }
+
+    /// <summary>Super-admin: give the sub-account a monthly renewing quota (or re-set its package amount) through Inforu's Customer/Update.</summary>
+    public async Task<IApiResponse<MarketingQuotaRes>> SetInforuQuotaAsync(int accountId, MarketingInforuQuotaReq req, CancellationToken cancelToken)
+    {
+        var response = new ApiResponse<MarketingQuotaRes>();
+        var (scope, status, error) = await ResolveScopeAsync(accountId, null, cancelToken);
+        if (scope == null)
+            return CreateResponse(response, status, error);
+        if (!scope.Unrestricted)
+            return CreateResponse(response, StatusCode.UnauthorizedData, "רק מנהל מערכת יכול לקבוע מכסה");
+        if (req.QuotaTypeId is not (InforuQuotaService.QuotaTypeMonthly or InforuQuotaService.QuotaTypePackages))
+            return CreateResponse(response, StatusCode.InvalidRequest, "סוג מכסה לא חוקי");
+        if (req.Amount <= 0 || req.Amount > 1_000_000)
+            return CreateResponse(response, StatusCode.InvalidRequest, "כמות לא חוקית");
+        var config = await _accountSms.GetAccountConfigAsync(scope.AccountId, cancelToken);
+        if (config is not { IsInforu: true, BilledByPlatform: true })
+            return CreateResponse(response, StatusCode.InvalidRequest, "לחשבון אין תת-חשבון InforU פעיל של ג'ורג'יו");
+
+        var setError = await _inforuQuota.SetQuotaAsync(scope.AccountId, config, req.QuotaTypeId, req.Amount, req.WarningLevel, cancelToken);
+        if (setError != null)
+            return CreateResponse(response, StatusCode.InvalidRequest, setError);
+
+        await _storage.AddLedgerEntryAsync(new MarketingQuotaLedger
+        {
+            AccountId = scope.AccountId, EntryType = MarketingStorage.LedgerEntryType.Allocation, Bucket = MarketingStorage.BucketBank, Amount = req.Amount,
+            Note = Truncate((req.QuotaTypeId == InforuQuotaService.QuotaTypeMonthly ? "מכסה חודשית מתחדשת נקבעה ב-InforU" : "מכסת חבילה נקבעה ב-InforU") + (string.IsNullOrWhiteSpace(req.Note) ? string.Empty : " · " + req.Note.Trim()), 300),
+            CreationUserId = AuthUser.Id > 0 ? AuthUser.Id : null,
+        }, cancelToken);
+        response.Data = await BuildQuotaAsync(scope.AccountId, includeLedger: true, cancelToken);
+        return response;
+    }
+
+    private static string NewApiToken()
+    {
+        const string alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+        Span<char> chars = stackalloc char[32];
+        for (var i = 0; i < chars.Length; i++)
+            chars[i] = alphabet[System.Security.Cryptography.RandomNumberGenerator.GetInt32(alphabet.Length)];
+        return new string(chars);
+    }
+
     public async Task<IApiResponse<MarketingSettingsRes>> GetSettingsAsync(int? accountId, CancellationToken cancelToken)
     {
         var response = new ApiResponse<MarketingSettingsRes>();
@@ -894,6 +988,7 @@ public class MarketingService : ServiceBase
         if (config is { IsInforu: true })
         {
             res.ProviderQuota = await _inforuQuota.GetAsync(accountId, config, cancelToken);
+            res.LowBalanceWarning = res.ProviderQuota.Available && res.ProviderQuota.WarningLevel is > 0 && res.ProviderQuota.Remaining is int rem && rem <= res.ProviderQuota.WarningLevel;
             // A platform-opened sub-account has ONE balance - the one Inforu enforces. Our ledger stays as the audit trail.
             if (config.BilledByPlatform)
             {

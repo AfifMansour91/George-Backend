@@ -94,6 +94,40 @@ public class InforuQuotaProviderTests
 public class InforuQuotaServiceConfigTests
 {
     [Fact]
+    public async Task Customer_Create_goes_to_the_cloud_api_with_parent_credentials_and_reads_the_new_customer_id()
+    {
+        var http = new FakeInforu();
+        http.Answer = path => path.Contains("/Customer/Create") ? @"{""StatusId"":1,""StatusDescription"":""OK"",""Data"":{""CustomerId"":1088001}}" : "{}";
+        var provider = new SmsProvider(NullLoggerFactory.Instance, NullLogger<SmsProvider>.Instance, new George.Common.HttpHelper(new HttpClient(http)));
+        var parent = new InforuParentCredentials { Username = "giorgio", ApiToken = "parent-tok" };
+
+        var outcome = await provider.CreateInforuSubAccountAsync(parent, "https://cloud.inforu.co.il/api", new InforuSubAccountSpec
+        {
+            CustomerName = "דובי דגים", Username = "giorgio.dubi.18", Password = "Pw1", ApiToken = "sub-tok", QuotaTypeId = 2, QuotaAmount = 1000, WarningLevel = 100,
+        });
+
+        Assert.True(outcome.Success);
+        Assert.Equal("1088001", outcome.CustomerId);
+        var req = Assert.Single(http.Requests);
+        Assert.StartsWith("https://cloud.inforu.co.il/api/Customer/Create/?json=", req.Url);
+        Assert.Contains("\"Username\":\"giorgio\"", req.Body);          // parent in the User block
+        Assert.Contains("\"Token\":\"parent-tok\"", req.Body);
+        Assert.Contains("\"QuotaTypeId\":\"2\"", req.Body);
+        Assert.Contains("\"ApiToken\":\"sub-tok\"", req.Body);
+    }
+
+    [Fact]
+    public async Task Customer_Update_rejection_is_reported_not_thrown()
+    {
+        var http = new FakeInforu();
+        http.Answer = _ => @"{""StatusId"":-3,""StatusDescription"":""Customer not found""}";
+        var provider = new SmsProvider(NullLoggerFactory.Instance, NullLogger<SmsProvider>.Instance, new George.Common.HttpHelper(new HttpClient(http)));
+        var outcome = await provider.SetInforuSubAccountQuotaAsync(new InforuParentCredentials { Username = "g", ApiToken = "t" }, "https://cloud.inforu.co.il/api", "42", 2, 500, null);
+        Assert.False(outcome.Success);
+        Assert.Contains("Customer not found", outcome.Error);
+    }
+
+    [Fact]
     public async Task AddQuota_refuses_to_top_up_a_monthly_renewal_sub_account()
     {
         // QA finding 2026-10-01: the Inforu sub-account quota type was "Monthly renewal". CreateOrAddQuota only ADDS to

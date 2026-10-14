@@ -156,6 +156,22 @@ public class MarketingController : GeorgeControllerBase, IAuthUserProvider
     }
 
     /// <summary>POST /Marketing/Quota/{accountId}/Allocate - super-admin: load the account's marketing bank.</summary>
+    /// <summary>Super-admin: open an Inforu sub-account for the shop and save it (one step).</summary>
+    [HttpPost("Quota/{accountId:int}/Inforu/Provision")]
+    [ProducesResponseType(typeof(IApiResponse<AccountSmsSettingsRes>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> ProvisionInforuAsync([FromRoute] int accountId, [FromBody] MarketingInforuProvisionReq req, CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() => _marketingService.ProvisionInforuSubAccountAsync(accountId, req ?? new MarketingInforuProvisionReq(), cancelToken));
+    }
+
+    /// <summary>Super-admin: set the sub-account's quota type (monthly renewal / packages) and amount in Inforu.</summary>
+    [HttpPost("Quota/{accountId:int}/Inforu/SetQuota")]
+    [ProducesResponseType(typeof(IApiResponse<MarketingQuotaRes>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> SetInforuQuotaAsync([FromRoute] int accountId, [FromBody] MarketingInforuQuotaReq req, CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() => _marketingService.SetInforuQuotaAsync(accountId, req ?? new MarketingInforuQuotaReq(), cancelToken));
+    }
+
     [HttpPost("Quota/{accountId:int}/Allocate")]
     [ProducesResponseType(typeof(IApiResponse<MarketingQuotaRes>), (int)HttpStatusCode.OK)]
     public async Task<IActionResult> AllocateQuotaAsync([FromRoute] int accountId, [FromBody] MarketingQuotaAllocateReq req, CancellationToken cancelToken = default)

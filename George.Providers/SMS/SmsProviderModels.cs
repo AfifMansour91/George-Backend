@@ -64,6 +64,30 @@ namespace George.Providers
 	}
 
 	/// <summary>Inforu Admin/CreateOrAddQuota.</summary>
+	/// <summary>What Giorgio asks Inforu to open for a shop (super-admin card "פתח תת-חשבון").</summary>
+	public class InforuSubAccountSpec
+	{
+		public string CustomerName { get; set; } = string.Empty;
+		public string Username { get; set; } = string.Empty;
+		public string Password { get; set; } = string.Empty;
+		public string ApiToken { get; set; } = string.Empty;
+		public string? Email { get; set; }
+		public string? PhoneNumber { get; set; }
+		/// <summary>2 = monthly renewal, 3 = packages.</summary>
+		public int QuotaTypeId { get; set; } = 3;
+		public int QuotaAmount { get; set; }
+		public int WarningLevel { get; set; }
+	}
+
+	public class InforuCustomerOutcome
+	{
+		public bool Success { get; set; }
+		public string? CustomerId { get; set; }
+		public string? Error { get; set; }
+		/// <summary>Raw provider answer for the log - the v1 API's response shape is not fully documented.</summary>
+		public string? Raw { get; set; }
+	}
+
 	public class InforuAddQuotaOutcome
 	{
 		public bool Success { get; set; }

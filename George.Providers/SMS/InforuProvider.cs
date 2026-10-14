@@ -143,6 +143,61 @@ namespace George.Providers
             };
         }
 
+        /// <summary>Customer/Create on the v1 cloud API with the PARENT credentials. The request travels both as the documented ?json= query and as the body.</summary>
+        public Task<InforuCustomerOutcome> CreateCustomerAsync(string cloudApiBaseUrl, string parentUsername, string parentToken, InforuSubAccountSpec spec, CancellationToken cancelToken = default)
+        {
+            var names = (spec.CustomerName ?? string.Empty).Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            var req = new InforuCloudCustomerCreateRequest
+            {
+                User = new InforuCloudUser { Username = parentUsername, Token = parentToken },
+                Data = new InforuCloudCustomerCreateRequest.DataBlock
+                {
+                    CustomerName = spec.CustomerName, Username = spec.Username, Password = spec.Password, ApiToken = spec.ApiToken,
+                    FirstName = names.Length > 0 ? names[0] : spec.CustomerName, LastName = names.Length > 1 ? names[1] : null,
+                    Email = spec.Email, PhoneNumber = spec.PhoneNumber,
+                    QuotaTypeId = spec.QuotaTypeId.ToString(), QuotaAmount = spec.QuotaAmount.ToString(), WarningLevel = spec.WarningLevel.ToString(),
+                },
+            };
+            return CloudCallAsync(cloudApiBaseUrl, "Customer/Create", parentUsername, parentToken, req, cancelToken);
+        }
+
+        /// <summary>Customer/Update on the v1 cloud API: sets the SMS quota type (2 monthly / 3 packages) and amount of a sub-account.</summary>
+        public Task<InforuCustomerOutcome> UpdateCustomerQuotaAsync(string cloudApiBaseUrl, string parentUsername, string parentToken, string customerId, int quotaTypeId, int amount, int? warningLevel, CancellationToken cancelToken = default)
+        {
+            var req = new InforuCloudCustomerUpdateRequest
+            {
+                User = new InforuCloudUser { Username = parentUsername, Token = parentToken },
+                Data = new InforuCloudCustomerUpdateRequest.DataBlock { CustomerId = customerId, QuotaTypeId = quotaTypeId.ToString(), QuotaAmount = amount.ToString(), WarningLevel = warningLevel?.ToString() },
+            };
+            return CloudCallAsync(cloudApiBaseUrl, "Customer/Update", parentUsername, parentToken, req, cancelToken);
+        }
+
+        private async Task<InforuCustomerOutcome> CloudCallAsync<TReq>(string cloudApiBaseUrl, string path, string parentUsername, string parentToken, TReq req, CancellationToken cancelToken)
+        {
+            var json = Newtonsoft.Json.JsonConvert.SerializeObject(req);
+            var url = cloudApiBaseUrl.TrimEnd('/') + "/" + path + "/?json=" + Uri.EscapeDataString(json);
+            SetBasicAuth(parentUsername, parentToken);
+            var res = await _httpHelper.HttpPostAsync(req, url, cancelToken); // string overload: the v1 answer is parsed by hand below
+            var raw = res.Data ?? string.Empty;
+            if (!res.IsSuccessful)
+                return new InforuCustomerOutcome { Error = $"HTTP {(res.HttpResponse != null ? (int)res.HttpResponse.StatusCode : 0)}", Raw = raw };
+            InforuCloudResponse? body = null;
+            try { body = Newtonsoft.Json.JsonConvert.DeserializeObject<InforuCloudResponse>(raw); } catch (Newtonsoft.Json.JsonException) { /* reported below */ }
+            if (body == null)
+                return new InforuCustomerOutcome { Error = "תשובה לא צפויה מ-InforU", Raw = raw };
+            if (body.StatusId != 1)
+                return new InforuCustomerOutcome { Error = Describe(body.StatusId, body.StatusDescription, body.DetailedDescription), Raw = raw };
+            string? customerId = null;
+            if (body.Data is Newtonsoft.Json.Linq.JObject data)
+            {
+                foreach (var key in new[] { "CustomerId", "customerId", "Id", "id" })
+                    if (data.TryGetValue(key, StringComparison.OrdinalIgnoreCase, out var v) && v.Type != Newtonsoft.Json.Linq.JTokenType.Null) { customerId = v.ToString(); break; }
+            }
+            else if (body.Data != null && body.Data.Type is Newtonsoft.Json.Linq.JTokenType.Integer or Newtonsoft.Json.Linq.JTokenType.String)
+                customerId = body.Data.ToString();
+            return new InforuCustomerOutcome { Success = true, CustomerId = customerId, Raw = raw };
+        }
+
         private void SetBasicAuth(string username, string apiToken)
         {
             var basicToken = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{username}:{apiToken}"));

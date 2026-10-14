@@ -169,6 +169,14 @@ namespace George.Providers
             return _inforuProvider.GetQuotaAsync(apiBaseUrl, config.Username, config.ApiToken, level: null, levelValue: null, cancelToken);
         }
 
+        /// <summary>Open an Inforu sub-account under the platform's parent account (v1 cloud API).</summary>
+        public Task<InforuCustomerOutcome> CreateInforuSubAccountAsync(InforuParentCredentials parent, string cloudApiBaseUrl, InforuSubAccountSpec spec, CancellationToken cancelToken = default) =>
+            _inforuProvider.CreateCustomerAsync(cloudApiBaseUrl, parent.Username, parent.ApiToken, spec, cancelToken);
+
+        /// <summary>Set a sub-account's SMS quota type and amount (v1 cloud API, parent credentials).</summary>
+        public Task<InforuCustomerOutcome> SetInforuSubAccountQuotaAsync(InforuParentCredentials parent, string cloudApiBaseUrl, string customerId, int quotaTypeId, int amount, int? warningLevel, CancellationToken cancelToken = default) =>
+            _inforuProvider.UpdateCustomerQuotaAsync(cloudApiBaseUrl, parent.Username, parent.ApiToken, customerId, quotaTypeId, amount, warningLevel, cancelToken);
+
         /// <summary>Top up a sub-account's Inforu quota using the PLATFORM's parent credentials.</summary>
         public Task<InforuAddQuotaOutcome> AddInforuQuotaAsync(InforuParentCredentials parent, string level, string levelValue, int amount, CancellationToken cancelToken = default)
         {

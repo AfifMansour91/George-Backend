@@ -66,6 +66,8 @@ namespace George.Services.Response
         public List<MarketingLedgerEntryRes> Ledger { get; set; } = new();
         /// <summary>Live balance at the SMS provider (Inforu sub-account); null when the account is not on Inforu.</summary>
         public MarketingProviderQuotaRes? ProviderQuota { get; set; }
+        /// <summary>Inforu's own threshold (WarningLevel) was reached - the sub-account is about to run dry.</summary>
+        public bool LowBalanceWarning { get; set; }
         /// <summary>After an allocation: why the provider side was NOT topped up (George's bank was). Null = synced or not applicable.</summary>
     }
 

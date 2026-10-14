@@ -15,6 +15,12 @@ namespace George.Services.Marketing;
 public class InforuQuotaService
 {
     public const string LevelCustomer = "Customer";
+    public const int QuotaTypeMonthly = 2;
+    public const int QuotaTypePackages = 3;
+    private const string DefaultCloudApiBaseUrl = "https://cloud.inforu.co.il/api";
+
+    /// <summary>v1 "cloud" API root (Customer/Create, Customer/Update); <c>Sms:Inforu:CloudApiBaseUrl</c> overrides.</summary>
+    public string CloudApiBaseUrl => string.IsNullOrWhiteSpace(_configuration["Sms:Inforu:CloudApiBaseUrl"]) ? DefaultCloudApiBaseUrl : _configuration["Sms:Inforu:CloudApiBaseUrl"]!.Trim();
 
     private readonly SmsProvider _smsProvider;
     private readonly AccountStorage _accountStorage;
@@ -85,6 +91,50 @@ public class InforuQuotaService
         }
         res.CanAllocate = res.CanAllocate && !string.IsNullOrWhiteSpace(res.CustomerId);
         return res;
+    }
+
+    /// <summary>Opens the sub-account in Inforu. Returns the new customer id (may be null when the answer carries none - GetQuota discovers it later) or a user-facing error.</summary>
+    public async Task<(string? Error, string? CustomerId)> CreateSubAccountAsync(int accountId, InforuSubAccountSpec spec, CancellationToken cancelToken)
+    {
+        var parent = ParentCredentials;
+        if (parent == null)
+            return ("חשבון-האב של InforU לא מוגדר בשרת (Sms:Inforu:Username / ApiToken) — אי אפשר לפתוח תת-חשבון מכאן.", null);
+        try
+        {
+            var outcome = await _smsProvider.CreateInforuSubAccountAsync(parent, CloudApiBaseUrl, spec, cancelToken).ConfigureAwait(false);
+            _logger.LogInformation("Inforu Customer/Create for account {AccountId} ({Username}): success={Success} customer={CustomerId} raw={Raw}", accountId, spec.Username, outcome.Success, outcome.CustomerId, outcome.Raw);
+            return outcome.Success ? (null, outcome.CustomerId) : ($"InforU דחתה את פתיחת תת-החשבון: {outcome.Error}", null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Inforu Customer/Create failed for account {AccountId}.", accountId);
+            return ($"שגיאה בפתיחת תת-החשבון ב-InforU: {ex.Message}", null);
+        }
+    }
+
+    /// <summary>Sets the sub-account's SMS quota (type + amount) through Customer/Update - the way to give a shop a monthly renewing quota.</summary>
+    public async Task<string?> SetQuotaAsync(int accountId, SmsAccountConfig config, int quotaTypeId, int amount, int? warningLevel, CancellationToken cancelToken)
+    {
+        var parent = ParentCredentials;
+        if (parent == null)
+            return "חשבון-האב של InforU לא מוגדר בשרת (Sms:Inforu:Username / ApiToken).";
+        if (string.IsNullOrWhiteSpace(config.InforuCustomerId))
+        {
+            var probe = await GetAsync(accountId, config, cancelToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(config.InforuCustomerId))
+                return $"לא הצלחתי לזהות את מספר הלקוח של החנות ב-InforU ({probe.Error ?? "אין תשובה"}).";
+        }
+        try
+        {
+            var outcome = await _smsProvider.SetInforuSubAccountQuotaAsync(parent, CloudApiBaseUrl, config.InforuCustomerId!, quotaTypeId, amount, warningLevel, cancelToken).ConfigureAwait(false);
+            _logger.LogInformation("Inforu Customer/Update quota for account {AccountId} (customer {CustomerId}): type={Type} amount={Amount} success={Success} raw={Raw}", accountId, config.InforuCustomerId, quotaTypeId, amount, outcome.Success, outcome.Raw);
+            return outcome.Success ? null : $"InforU דחתה את עדכון המכסה: {outcome.Error}";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Inforu Customer/Update failed for account {AccountId}.", accountId);
+            return $"שגיאה בעדכון המכסה ב-InforU: {ex.Message}";
+        }
     }
 
     /// <summary>Adds <paramref name="amount"/> SMS to the sub-account's package quota in Inforu. Returns a user-facing error, or null on success.</summary>

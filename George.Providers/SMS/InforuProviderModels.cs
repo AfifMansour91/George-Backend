@@ -185,4 +185,61 @@ namespace George.Providers
         [JsonProperty("DetailedDescription")]
         public string? DetailedDescription { get; set; }
     }
+
+    /// <summary>cloud.inforu.co.il/api/Customer/Create - opens a sub-account under the parent (Inforu support, 11.10.2026).</summary>
+    internal class InforuCloudCustomerCreateRequest
+    {
+        [JsonProperty("User")] public InforuCloudUser User { get; set; } = new();
+        [JsonProperty("Data")] public DataBlock Data { get; set; } = new();
+
+        internal class DataBlock
+        {
+            [JsonProperty("CustomerName")] public string CustomerName { get; set; } = string.Empty;
+            [JsonProperty("Username")] public string Username { get; set; } = string.Empty;
+            [JsonProperty("Password")] public string Password { get; set; } = string.Empty;
+            [JsonProperty("FirstName")] public string? FirstName { get; set; }
+            [JsonProperty("LastName")] public string? LastName { get; set; }
+            [JsonProperty("ApiToken")] public string ApiToken { get; set; } = string.Empty;
+            [JsonProperty("Culture")] public string Culture { get; set; } = "HE";
+            [JsonProperty("Email")] public string? Email { get; set; }
+            [JsonProperty("PhoneNumber")] public string? PhoneNumber { get; set; }
+            /// <summary>1 = SMS.</summary>
+            [JsonProperty("QuotaUsageTypeId")] public string QuotaUsageTypeId { get; set; } = "1";
+            /// <summary>1 = Unrestricted, 2 = Monthly Renewal, 3 = Packages.</summary>
+            [JsonProperty("QuotaTypeId")] public string QuotaTypeId { get; set; } = "3";
+            [JsonProperty("QuotaAmount")] public string QuotaAmount { get; set; } = "0";
+            [JsonProperty("WarningLevel")] public string WarningLevel { get; set; } = "0";
+        }
+    }
+
+    /// <summary>cloud.inforu.co.il/api/Customer/Update - sets the quota type/amount of an existing sub-account.</summary>
+    internal class InforuCloudCustomerUpdateRequest
+    {
+        [JsonProperty("User")] public InforuCloudUser User { get; set; } = new();
+        [JsonProperty("Data")] public DataBlock Data { get; set; } = new();
+
+        internal class DataBlock
+        {
+            [JsonProperty("CustomerId")] public string CustomerId { get; set; } = string.Empty;
+            [JsonProperty("QuotaUsageTypeId")] public string QuotaUsageTypeId { get; set; } = "1";
+            [JsonProperty("QuotaTypeId")] public string QuotaTypeId { get; set; } = "3";
+            [JsonProperty("QuotaAmount")] public string QuotaAmount { get; set; } = "0";
+            [JsonProperty("WarningLevel", NullValueHandling = NullValueHandling.Ignore)] public string? WarningLevel { get; set; }
+        }
+    }
+
+    internal class InforuCloudUser
+    {
+        [JsonProperty("Username")] public string Username { get; set; } = string.Empty;
+        [JsonProperty("Token")] public string Token { get; set; } = string.Empty;
+    }
+
+    /// <summary>Loose shape: the v1 API answers with StatusId/StatusDescription and a Data object whose keys differ per call.</summary>
+    internal class InforuCloudResponse
+    {
+        [JsonProperty("StatusId")] public int? StatusId { get; set; }
+        [JsonProperty("StatusDescription")] public string? StatusDescription { get; set; }
+        [JsonProperty("DetailedDescription")] public string? DetailedDescription { get; set; }
+        [JsonProperty("Data")] public Newtonsoft.Json.Linq.JToken? Data { get; set; }
+    }
 }

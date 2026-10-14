@@ -96,4 +96,31 @@ namespace George.Services.Request
         public int Amount { get; set; }
         public string? Note { get; set; }
     }
+
+    /// <summary>Super-admin: open an Inforu sub-account for the shop and save it as its platform-billed SMS account.</summary>
+    public class MarketingInforuProvisionReq
+    {
+        public string CustomerName { get; set; } = string.Empty;
+        public string Username { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+        /// <summary>Empty = Giorgio generates one.</summary>
+        public string? ApiToken { get; set; }
+        public string? Email { get; set; }
+        public string? PhoneNumber { get; set; }
+        /// <summary>Sender id shown to recipients (≤11 Latin chars).</summary>
+        public string Sender { get; set; } = "giorgio";
+        /// <summary>2 = monthly renewal, 3 = packages.</summary>
+        public int QuotaTypeId { get; set; } = 3;
+        public int QuotaAmount { get; set; }
+        public int WarningLevel { get; set; }
+    }
+
+    /// <summary>Super-admin: set the sub-account's quota type/amount in Inforu (Customer/Update).</summary>
+    public class MarketingInforuQuotaReq
+    {
+        public int QuotaTypeId { get; set; } = 2;
+        public int Amount { get; set; }
+        public int? WarningLevel { get; set; }
+        public string? Note { get; set; }
+    }
 }
