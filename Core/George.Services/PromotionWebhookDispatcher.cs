@@ -199,15 +199,30 @@ public class PromotionWebhookDispatcher
         // scope (and its GeorgeDBContext) has been disposed, so the request-scoped storages
         // cannot be reused - doing so throws "Cannot access a disposed context instance".
         using var scope = _scopeFactory.CreateScope();
-        var productStorage = scope.ServiceProvider.GetRequiredService<ProductStorage>();
+        var bundleStorage = scope.ServiceProvider.GetRequiredService<BundleStorage>();
+        var overrideStorage = scope.ServiceProvider.GetRequiredService<ProductSiteOverrideStorage>();
         var categoryStorage = scope.ServiceProvider.GetRequiredService<CategoryStorage>();
 
-        var productMap = await productStorage
-            .GetWooCommerceIdMapForProductIdsAsync(productIds.ToList(), CancellationToken.None)
+        // Map to THIS store's ids (ProductSiteWooId / CategorySiteWooId), not the legacy single Product.WooCommerceId:
+        // the legacy column goes stale when a product is re-created in the store (Deliz 2026-10-15: George 4949 →
+        // legacy 2391 no longer exists, the live post is 3702), and the plugin then saves a promotion whose
+        // product_ids point at nothing - "the promotion synced but the product is not in it". Legacy ids remain
+        // the fallback for products/categories without a per-site row.
+        var productMap = await bundleStorage
+            .GetSiteWooProductIdMapAsync(productIds.ToList(), promotion.SiteId, CancellationToken.None)
             .ConfigureAwait(false);
         var categoryMap = await categoryStorage
             .GetWooCommerceIdMapForCategoryIdsAsync(categoryIds.ToList(), CancellationToken.None)
             .ConfigureAwait(false);
+        if (categoryIds.Count > 0)
+        {
+            var perSiteCategories = await overrideStorage
+                .GetSiteCategoryWooIdMapAsync(promotion.SiteId, CancellationToken.None)
+                .ConfigureAwait(false);
+            foreach (var cid in categoryIds)
+                if (perSiteCategories.TryGetValue(cid, out var wooCatId) && wooCatId > 0)
+                    categoryMap[cid] = wooCatId;
+        }
 
         var upsert = PromotionPromengWireMapper.ToUpsertBody(promotion, eventName, productMap, categoryMap);
         var body = JsonSerializer.Serialize(new { promotions = new[] { upsert } });
