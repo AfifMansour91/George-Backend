@@ -421,17 +421,32 @@ namespace George.Services.Partner
                 return Fail(response, StatusCode.InvalidRequest, first.Code, prefix + first.Message);
             }
 
-            var lines = quote.Lines.Select(l => new CreateOrderItemReq
+            var lines = quote.Lines.Select(l =>
             {
-                ProductId = l.ProductId,
-                ProductVariantId = l.ProductVariantId,
-                Title = l.Title,
-                VariantTitle = l.VariantTitle,
-                Quantity = l.Quantity,
-                PricePerUnit = l.UnitPrice,
-                TotalPrice = l.LineTotal,
-                Notes = l.Notes,
-                SortOrder = l.Line - 1,
+                var line = new CreateOrderItemReq
+                {
+                    ProductId = l.ProductId,
+                    ProductVariantId = l.ProductVariantId,
+                    Title = l.Title,
+                    VariantTitle = l.VariantTitle,
+                    Quantity = l.Quantity,
+                    PricePerUnit = l.UnitPrice,
+                    TotalPrice = l.LineTotal,
+                    Notes = l.Notes,
+                    SortOrder = l.Line - 1,
+                };
+                // Weighed pieces: the same shape the manual-order screen writes (units + grams per piece +
+                // labels), so picking shows "2 יח' · כ 0.5 ק"ג ליח'", weighs, and charges picked kg × ₪/kg.
+                if (l.PricePerKg && l.SoldBy == "unit" && l.ApproxUnitWeightGrams is > 0m)
+                {
+                    var grams = l.ApproxUnitWeightGrams.Value;
+                    line.UnitWeightGrams = grams;
+                    line.OrderLineQuantityMode = "units";
+                    line.SaleUnits = $"{l.Quantity.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} יח'";
+                    line.OrderLinePerUnitWeightLabel = FormatPerUnitWeightLabel(grams);
+                    line.OrderLineSizeLabel = FormatSizeWithApproxWeight(l.VariantTitle, grams);
+                }
+                return line;
             }).ToList();
 
             var createReq = new CreateOrderReq
@@ -615,6 +630,13 @@ namespace George.Services.Partner
                 }
 
                 var lineTotal = Math.Round(unitPrice.Value * item.Quantity, 2, MidpointRounding.AwayFromZero);
+                // Weighed pieces (whole fish, trays): quantity = pieces, unitPrice = ₪/kg → estimate by the approx
+                // piece weight; picking re-prices by the scale. Without a catalog weight the estimate degrades to
+                // price × pieces (still re-priced at picking).
+                var weighedPieces = product.PricePerKg && product.SoldBy == "unit";
+                var approxGrams = weighedPieces ? (variant?.ApproxUnitWeightGrams ?? product.ApproxUnitWeightGrams) : null;
+                var estimate = weighedPieces ? EstimateWeighedPieces(item.Quantity, approxGrams, unitPrice.Value) : null;
+                if (estimate.HasValue) lineTotal = estimate.Value.LineTotal;
                 quote.Lines.Add(new PartnerQuoteLineRes
                 {
                     Line = lineNo,
@@ -627,11 +649,14 @@ namespace George.Services.Partner
                     UnitPrice = unitPrice.Value,
                     LineTotal = lineTotal,
                     Notes = item.Notes,
+                    PricePerKg = product.PricePerKg,
+                    ApproxUnitWeightGrams = approxGrams,
+                    EstimatedWeightKg = estimate?.EstimatedKg,
                 });
             }
 
             quote.SubTotal = Math.Round(quote.Lines.Sum(l => l.LineTotal), 2, MidpointRounding.AwayFromZero);
-            quote.HasWeightLines = quote.Lines.Any(l => l.SoldBy == "weight");
+            quote.HasWeightLines = quote.Lines.Any(l => l.SoldBy == "weight" || l.PricePerKg);
 
             if (quote.Lines.Count > 0)
                 await ApplyPromotionsToQuoteAsync(siteId, quote, productCategoryIds, customerPhone, cancelToken).ConfigureAwait(false);
@@ -671,7 +696,9 @@ namespace George.Services.Partner
                         {
                             ProductId = l.ProductId.ToString(),
                             Quantity = l.Quantity,
-                            PricePerUnit = l.UnitPrice,
+                            // Per-piece price for weighed pieces (estimate ÷ pieces) - what the manual-order evaluator
+                            // sees for such lines; for kg / plain unit lines this equals UnitPrice.
+                            PricePerUnit = l.Quantity > 0m ? Math.Round(l.LineTotal / l.Quantity, 4, MidpointRounding.AwayFromZero) : l.UnitPrice,
                             CategoryId = catStrings.FirstOrDefault(),
                             CategoryIds = catStrings.Count > 0 ? catStrings : null,
                             Unit = l.SoldBy == "weight" ? "kg" : "unit",
@@ -856,10 +883,16 @@ namespace George.Services.Partner
             return true;
         }
 
-        private static PartnerProductRes MapProductToPartner(ProductRes p)
+        public static PartnerProductRes MapProductToPartner(ProductRes p)
         {
             var saleActive = IsSaleActive(p.SalePrice, p.SalePriceStartDate, p.SalePriceEndDate);
-            var soldByWeight = string.Equals(p.SetupType, "by_weight", StringComparison.OrdinalIgnoreCase) || p.IsWeighted == true;
+            // Quantity is kg only for loose-weight products (by_weight). A weighed product sold by the piece
+            // (by_unit + IsWeighted - a whole fish, a tray) is ordered in PIECES and priced per kg: the quote
+            // estimates piece × approx weight × ₪/kg and picking re-weighs (Zano "3 דניס בינוניים", 2026-10-19).
+            var soldByWeight = string.Equals(p.SetupType, "by_weight", StringComparison.OrdinalIgnoreCase);
+            var pricePerKg = soldByWeight || p.IsWeighted == true;
+            var weightByVariant = p.WeightConfig?.WeightByVariant == true
+                || string.Equals(p.WeightConfig?.UnitWeightMode, "by_variant", StringComparison.OrdinalIgnoreCase);
             var stockByQuantity = string.Equals(p.StockManagementType, "quantity", StringComparison.OrdinalIgnoreCase);
             var stockByVariation = string.Equals(p.StockManagementType, "variation", StringComparison.OrdinalIgnoreCase);
             // Status-managed products keep stale StockQuantity residues (99,999,999 on some sites) - only a
@@ -886,6 +919,9 @@ namespace George.Services.Partner
                         EffectivePrice = variantSale ?? basePrice,
                         Sku = v.Sku,
                         InStock = variantInStock,
+                        ApproxUnitWeightGrams = pricePerKg && !soldByWeight
+                            ? (weightByVariant ? ToGrams(v.Weight, p) : ApproxUnitWeightGrams(p))
+                            : null,
                     };
                 })
                 .ToList();
@@ -902,8 +938,9 @@ namespace George.Services.Partner
                 SalePrice = saleActive ? p.SalePrice : null,
                 EffectivePrice = saleActive ? p.SalePrice : p.Price,
                 SoldBy = soldByWeight ? "weight" : "unit",
+                PricePerKg = pricePerKg,
                 WeightUnit = p.WeightUnit,
-                ApproxUnitWeightGrams = ApproxUnitWeightGrams(p),
+                ApproxUnitWeightGrams = pricePerKg && !soldByWeight && !weightByVariant ? ApproxUnitWeightGrams(p) : null,
                 InStock = inStock,
                 RequiresVariant = variants.Count > 0,
                 CategoryIds = (p.CategoryIds ?? new List<int>()).Concat(p.SubcategoryIds ?? new List<int>()).Distinct().ToList(),
@@ -924,8 +961,41 @@ namespace George.Services.Partner
             if (string.IsNullOrWhiteSpace(raw)) return null;
             if (!decimal.TryParse(raw.Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var value) || value <= 0m)
                 return null;
+            return ToGrams(value, p);
+        }
+
+        /// <summary>A catalog weight (variant or config) in grams, honouring the product's weight unit (kg unless g/ml).</summary>
+        private static decimal? ToGrams(decimal? value, ProductRes p)
+        {
+            if (value is not > 0m) return null;
             var unit = (p.WeightConfig?.Unit ?? p.WeightUnit ?? "kg").Trim().ToLowerInvariant();
             return unit == "g" || unit == "ml" ? value : value * 1000m;
+        }
+
+        /// <summary>
+        /// Line estimate for a weighed product ordered by the piece: pieces × approx piece weight (kg) × price per kg.
+        /// Null when the catalog has no approx weight for the piece (caller falls back to price × pieces).
+        /// </summary>
+        public static (decimal LineTotal, decimal EstimatedKg)? EstimateWeighedPieces(decimal pieces, decimal? approxUnitWeightGrams, decimal pricePerKg)
+        {
+            if (pieces <= 0m || approxUnitWeightGrams is not > 0m || pricePerKg <= 0m) return null;
+            var kg = Math.Round(pieces * approxUnitWeightGrams.Value / 1000m, 3, MidpointRounding.AwayFromZero);
+            return (Math.Round(kg * pricePerKg, 2, MidpointRounding.AwayFromZero), kg);
+        }
+
+        /// <summary>"0.5 ק"ג ליח'" / "700 גרם ליח'" - the per-piece weight label the manual-order screen writes on such lines.</summary>
+        public static string FormatPerUnitWeightLabel(decimal grams) =>
+            grams >= 1000m
+                ? $"{(grams / 1000m).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} ק\"ג ליח'"
+                : $"{Math.Round(grams).ToString("0", System.Globalization.CultureInfo.InvariantCulture)} גרם ליח'";
+
+        /// <summary>"בינוני (כ 0.5 ק"ג)" - size label with the approximate piece weight, as the manual-order screen writes it.</summary>
+        public static string FormatSizeWithApproxWeight(string? sizeTitle, decimal grams)
+        {
+            var approx = grams >= 1000m
+                ? $"כ {(grams / 1000m).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} ק\"ג"
+                : $"כ {Math.Round(grams).ToString("0", System.Globalization.CultureInfo.InvariantCulture)} גרם";
+            return string.IsNullOrWhiteSpace(sizeTitle) ? $"({approx})" : $"{sizeTitle.Trim()} ({approx})";
         }
 
         private async Task<IApiResponse<PartnerOrderRes>> BuildPartnerOrderResponseAsync(

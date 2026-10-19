@@ -13,7 +13,11 @@
 2. **המחירים נקבעים בשרת בלבד.** שורות הזמנה מכילות `productId`, `productVariantId`, `quantity`, `notes`. שדות מחיר אינם קיימים בבקשה. מבצעים, קופונים ודמי משלוח מחושבים על ידי Giorgio. הסוכן מציג ללקוח את מה שחוזר מ-`POST Orders/Quote`.
 3. **Quote לפני Create.** תמיד הציגו ללקוח סיכום מתוך Quote וקבלו אישור מפורש לפני `POST Orders`. שני ה-endpoints משתמשים באותו מנוע תמחור, לכן הסכומים זהים.
 4. **Idempotency.** שלחו `partnerRef` ייחודי לכל הזמנה (למשל מזהה השיחה + גרסת העגלה). שליחה חוזרת של אותו `partnerRef` מחזירה את ההזמנה הקיימת עם `alreadyExisted: true` ולא יוצרת כפילות. Retry הוא בטוח.
-5. **מוצרים במשקל.** `soldBy: "weight"` → `quantity` בק"ג (1.5 = קילו וחצי). הסכום הסופי נקבע בליקוט לפי המשקל בפועל, לכן `hasWeightLines: true` בסיכום = "הסכום הסופי עשוי להשתנות מעט".
+5. **מוצרים במשקל.** שני סוגים:
+   - `soldBy: "weight"` - משקל חופשי (טחון, פילה במשקל): `quantity` בק"ג (1.5 = קילו וחצי).
+   - `soldBy: "unit"` עם `pricePerKg: true` - יחידות שנשקלות בליקוט (דג שלם, מגש): `quantity` = מספר יחידות ("3 דניס בינוניים" = `quantity: 3` עם ה-`productVariantId` של "בינוני"). `effectivePrice` הוא מחיר לק"ג, ו-`approxUnitWeightGrams` (על המוצר, או על הווריאציה כשהמשקל תלוי בגודל) הוא המשקל המשוער ליחידה. ה-Quote מחזיר הערכה: יחידות × משקל משוער × מחיר לק"ג (`estimatedWeightKg` בשורה).
+
+   בשני המקרים הסכום הסופי נקבע בליקוט לפי המשקל בפועל, לכן `hasWeightLines: true` בסיכום = "הסכום הסופי עשוי להשתנות מעט". מוצר עם `pricePerKg: false` הוא יחידה במחיר קבוע.
 6. **וריאציות.** `requiresVariant: true` → חובה `productVariantId` מתוך `variants[]`. אחרת שגיאה `VARIANT_REQUIRED` (עם רשימת האפשרויות בטקסט השגיאה).
 7. **מארזים (Bundles) אינם נתמכים ב-v1** ואינם מופיעים בקטלוג.
 
@@ -60,7 +64,7 @@
 | GET | `/Products?search=&categoryId=&inStockOnly=false&skip=0&take=50` | קטלוג הסניף במחירים אפקטיביים. `take` עד 500. מומלץ למשוך את כל הקטלוג פעם בשעה ולשמור בקאש; החיפוש בטקסט חופשי אינו סמנטי |
 | GET | `/Products/{productId}` | מוצר בודד |
 
-שדות מוצר חשובים: `effectivePrice` (המחיר לחיוב עכשיו, כולל מבצע קטלוגי פעיל), `soldBy` (`unit`/`weight`), `inStock`, `requiresVariant`, `variants[]` (`id`, `title`, `effectivePrice`, `inStock`), `options[]` (שם התכונה והערכים, למשל "צורת חיתוך": פרוסות / שלם), `imageUrl`, `approxUnitWeightGrams` (משקל משוער ליחידה כשידוע).
+שדות מוצר חשובים: `effectivePrice` (המחיר לחיוב עכשיו, כולל מבצע קטלוגי פעיל; לק"ג כש-`pricePerKg: true`), `soldBy` (`unit`/`weight`), `pricePerKg` (המחיר לק"ג והשורה נשקלת בליקוט), `inStock`, `requiresVariant`, `variants[]` (`id`, `title`, `effectivePrice`, `inStock`, `approxUnitWeightGrams` כשהמשקל תלוי בגודל), `options[]` (שם התכונה והערכים, למשל "צורת חיתוך": פרוסות / שלם), `imageUrl`, `approxUnitWeightGrams` (משקל משוער ליחידה כשהוא קבוע למוצר).
 
 ### 3.3 לקוחות
 
@@ -105,10 +109,13 @@
   "customerNote": "לצלצל לפני",
   "items": [
     { "productId": 12673, "productVariantId": 14488, "quantity": 1.5, "notes": "בלי עור" },
-    { "productId": 13197, "quantity": 2 }
+    { "productId": 13197, "quantity": 2 },
+    { "productId": 11941, "productVariantId": 501, "quantity": 3, "notes": "ראש לשתיים" }
   ]
 }
 ```
+
+השורה השלישית היא "3 דניס בינוניים": מוצר `soldBy: "unit"` עם `pricePerKg: true`, הווריאציה "בינוני" נושאת `approxUnitWeightGrams: 500`. ב-Quote היא חוזרת כ-`quantity: 3`, `unitPrice: 140.00` (לק"ג), `estimatedWeightKg: 1.5`, `lineTotal: 210.00` (הערכה), ואחרי הליקוט `pickedQuantity` הוא המשקל שנשקל בק"ג והחיוב לפיו.
 
 כללים:
 

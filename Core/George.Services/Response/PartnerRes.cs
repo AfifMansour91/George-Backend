@@ -112,11 +112,19 @@ public class PartnerProductRes
     public decimal? SalePrice { get; set; }
     /// <summary>The price to charge right now (active sale price, else regular price).</summary>
     public decimal? EffectivePrice { get; set; }
-    /// <summary>unit | weight - how Quantity is interpreted on order lines (weight = kg).</summary>
+    /// <summary>
+    /// unit | weight - how Quantity is interpreted on order lines. weight = kg (loose weight, e.g. minced meat);
+    /// unit = number of pieces, also for pieces that are weighed at picking (a whole fish) - see <see cref="PricePerKg"/>.
+    /// </summary>
     public string SoldBy { get; set; } = "unit";
+    /// <summary>
+    /// True when <see cref="EffectivePrice"/> is a price per kg and the final charge follows the actual weight at
+    /// picking. With <c>soldBy: "unit"</c> the quote estimates each piece as approxUnitWeightGrams × price per kg.
+    /// </summary>
+    public bool PricePerKg { get; set; }
     /// <summary>kg | g | ml (weight-sold products).</summary>
     public string? WeightUnit { get; set; }
-    /// <summary>Approximate weight of one unit in grams for unit-sold products that are weighed (e.g. a whole fish). Null when unknown.</summary>
+    /// <summary>Approximate weight of one unit in grams for unit-sold products that are weighed (e.g. a whole fish). Null when unknown or when it depends on the variant (then see variants[].approxUnitWeightGrams).</summary>
     public decimal? ApproxUnitWeightGrams { get; set; }
     public bool InStock { get; set; }
     /// <summary>True when the product has variants: order lines must carry a ProductVariantId.</summary>
@@ -146,6 +154,8 @@ public class PartnerProductVariantRes
     public decimal? EffectivePrice { get; set; }
     public string? Sku { get; set; }
     public bool InStock { get; set; }
+    /// <summary>Approximate weight of one piece in grams for this size/variant of a weighed, unit-sold product (e.g. "בינוני" = 500). Null when the product is not weighed per piece.</summary>
+    public decimal? ApproxUnitWeightGrams { get; set; }
 }
 
 public class PartnerCategoryRes
@@ -226,11 +236,19 @@ public class PartnerQuoteLineRes
     public decimal Quantity { get; set; }
     /// <summary>unit | weight.</summary>
     public string SoldBy { get; set; } = "unit";
+    /// <summary>Price per unit (soldBy unit) or per kg (soldBy weight, or <see cref="PricePerKg"/> pieces).</summary>
     public decimal UnitPrice { get; set; }
+    /// <summary>Line amount. For <see cref="PricePerKg"/> pieces this is an ESTIMATE (quantity × approx weight × price per kg); picking re-prices by the actual weight.</summary>
     public decimal LineTotal { get; set; }
     public decimal DiscountAmount { get; set; }
     public string? PromotionName { get; set; }
     public string? Notes { get; set; }
+    /// <summary>True when the pieces are weighed at picking and <see cref="UnitPrice"/> is per kg.</summary>
+    public bool PricePerKg { get; set; }
+    /// <summary>Approximate weight of one piece in grams used for the estimate (null when the catalog has none).</summary>
+    public decimal? ApproxUnitWeightGrams { get; set; }
+    /// <summary>Estimated total weight in kg of this line (quantity × approx piece weight) when <see cref="PricePerKg"/>.</summary>
+    public decimal? EstimatedWeightKg { get; set; }
 }
 
 public class PartnerAppliedPromotionRes
@@ -312,12 +330,14 @@ public class PartnerOrderItemRes
     public string? Title { get; set; }
     public string? VariantTitle { get; set; }
     public decimal Quantity { get; set; }
-    /// <summary>Quantity / weight actually picked (null until picking).</summary>
+    /// <summary>Quantity / weight actually picked (null until picking). For weighed pieces this is the picked weight in kg.</summary>
     public decimal? PickedQuantity { get; set; }
     public decimal? PricePerUnit { get; set; }
     public decimal? TotalPrice { get; set; }
     public decimal? DiscountAmount { get; set; }
     public string? Notes { get; set; }
+    /// <summary>Approximate weight per piece in grams for weighed, unit-sold lines (null otherwise).</summary>
+    public decimal? UnitWeightGrams { get; set; }
 }
 
 public class PartnerPaymentLinkRes

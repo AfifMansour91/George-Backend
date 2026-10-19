@@ -113,6 +113,7 @@ public static class PartnerOrderMapper
         TotalPrice = i.TotalPrice,
         DiscountAmount = i.DiscountAmount,
         Notes = i.Notes,
+        UnitWeightGrams = i.UnitWeightGrams,
     };
 
     private static string? FirstNonEmpty(params string?[] values) =>
