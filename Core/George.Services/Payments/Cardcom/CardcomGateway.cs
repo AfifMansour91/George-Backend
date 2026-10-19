@@ -76,6 +76,8 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
 
         ApplyAdvancedDefinition(body, request);
         ApplyUiDefinition(body, credentials, request);
+        if (request.Document != null)
+            body["Document"] = CardcomDocumentPayload.ToDictionary(request.Document);
         MergeProviderExtrasJson(body, credentials.ProviderExtrasJson);
 
         var json = await PostJsonAsync("LowProfile/Create", body, cancelToken).ConfigureAwait(false);

@@ -70,7 +70,110 @@ namespace George.Services.Response
         public bool LowBalanceWarning { get; set; }
         /// <summary>Where a shop buys SMS packages (config Marketing:PurchaseUrl); null = "contact us".</summary>
         public string? PurchaseUrl { get; set; }
-        /// <summary>After an allocation: why the provider side was NOT topped up (George's bank was). Null = synced or not applicable.</summary>
+        /// <summary>The platform's Cardcom terminal is configured (Billing:Cardcom:*) - the shop can buy a package from inside Giorgio.</summary>
+        public bool CanPurchase { get; set; }
+    }
+
+    /// <summary>A package the shop can buy. Prices are ILS; <see cref="Total"/> is what the card is charged.</summary>
+    public class MarketingPackageRes
+    {
+        public int Id { get; set; }
+        public string? Name { get; set; }
+        public int Messages { get; set; }
+        /// <summary>Before VAT, as in the price list.</summary>
+        public decimal Price { get; set; }
+        public decimal VatPercent { get; set; }
+        /// <summary>Price + VAT, rounded to agorot.</summary>
+        public decimal Total { get; set; }
+        /// <summary>Agorot per message before VAT (price list column "מחיר להודעה").</summary>
+        public decimal PricePerMessageAgorot { get; set; }
+        public bool IsActive { get; set; }
+        public int SortOrder { get; set; }
+        public string? Badge { get; set; }
+    }
+
+    public class MarketingPackagesRes
+    {
+        public List<MarketingPackageRes> Packages { get; set; } = new();
+        public decimal VatPercent { get; set; }
+        /// <summary>False = the platform terminal is not configured; the list is for display only.</summary>
+        public bool CanPurchase { get; set; }
+        public string? PurchaseUrl { get; set; }
+    }
+
+    /// <summary>Super-admin SMS screen: one row per account.</summary>
+    public class MarketingAdminAccountRes
+    {
+        public int AccountId { get; set; }
+        public string AccountName { get; set; } = string.Empty;
+        public bool IsActive { get; set; }
+        public bool MarketingEnabled { get; set; }
+        /// <summary>system | inforu_platform (Giorgio's sub-account) | own (shop's own provider account).</summary>
+        public string SmsAccountKind { get; set; } = "system";
+        public string? SmsProvider { get; set; }
+        public int OperationalMessages { get; set; }
+        public int OperationalUnits { get; set; }
+        public int MarketingMessages { get; set; }
+        public int MarketingUnits { get; set; }
+        public int SystemUnits { get; set; }
+        public int TotalUnits => OperationalUnits + MarketingUnits + SystemUnits;
+        public int BankBalance { get; set; }
+        public int BankPurchased { get; set; }
+        public int PurchasesInPeriod { get; set; }
+        public decimal RevenueInPeriod { get; set; }
+        public int PurchasesTotal { get; set; }
+        public decimal RevenueTotal { get; set; }
+        public DateTime? LastPurchaseAt { get; set; }
+    }
+
+    public class MarketingAdminOverviewRes
+    {
+        public DateTime FromUtc { get; set; }
+        public DateTime ToUtc { get; set; }
+        public List<MarketingAdminAccountRes> Accounts { get; set; } = new();
+        public int OperationalUnits { get; set; }
+        public int MarketingUnits { get; set; }
+        public int SystemUnits { get; set; }
+        public int PurchasesInPeriod { get; set; }
+        public decimal RevenueInPeriod { get; set; }
+        public decimal RevenueTotal { get; set; }
+        /// <summary>Accounts that sent at least one SMS in the period.</summary>
+        public int ActiveAccounts { get; set; }
+        /// <summary>Billing:Cardcom configured on the server.</summary>
+        public bool PurchaseConfigured { get; set; }
+    }
+
+    public class MarketingPurchaseStartRes
+    {
+        public int PurchaseId { get; set; }
+        /// <summary>Cardcom hosted payment page - the browser navigates there.</summary>
+        public string PaymentUrl { get; set; } = string.Empty;
+        public decimal Total { get; set; }
+    }
+
+    public class MarketingPurchaseRes
+    {
+        public int Id { get; set; }
+        public DateTime CreationTime { get; set; }
+        public int? PackageId { get; set; }
+        public string? PackageName { get; set; }
+        public int Messages { get; set; }
+        public decimal Price { get; set; }
+        public decimal VatPercent { get; set; }
+        public decimal Total { get; set; }
+        public string Currency { get; set; } = "ILS";
+        /// <summary>initiated | paid | failed | canceled.</summary>
+        public string Status { get; set; } = string.Empty;
+        public DateTime? PaidAt { get; set; }
+        public string? CardLast4 { get; set; }
+        public string? CardBrand { get; set; }
+        public string? DocumentNumber { get; set; }
+        public string? DocumentUrl { get; set; }
+        /// <summary>Paid, but the Inforu sub-account was not topped up yet (retried automatically).</summary>
+        public bool ProviderSyncPending { get; set; }
+        public string? ErrorDescription { get; set; }
+        /// <summary>The bank after this purchase - filled on the confirm call so the return page can show it.</summary>
+        public MarketingQuotaRes? Quota { get; set; }
     }
 
     public class MarketingProviderQuotaRes

@@ -179,6 +179,68 @@ public class MarketingController : GeorgeControllerBase, IAuthUserProvider
         return await SafeCallWithErrorCatchingAsync(() => _marketingService.AllocateQuotaAsync(accountId, req, cancelToken));
     }
 
+    //*************************    Packages / self-service purchase    *************************//
+
+    /// <summary>GET /Marketing/Packages - the packages a shop can buy (prices before VAT + the charged total).</summary>
+    [HttpGet("Packages")]
+    [ProducesResponseType(typeof(IApiResponse<MarketingPackagesRes>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> GetPackagesAsync([FromQuery] int? accountId, CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() => _marketingService.GetPackagesAsync(accountId, includeInactive: false, cancelToken));
+    }
+
+    /// <summary>Super-admin: the whole catalog, inactive rows included.</summary>
+    [HttpGet("Packages/Admin")]
+    [ProducesResponseType(typeof(IApiResponse<MarketingPackagesRes>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> GetPackagesForAdminAsync(CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() => _marketingService.GetPackagesForAdminAsync(cancelToken));
+    }
+
+    /// <summary>Super-admin: replace the catalog (rows left out are deactivated, never deleted).</summary>
+    [HttpPut("Packages/Admin")]
+    [ProducesResponseType(typeof(IApiResponse<MarketingPackagesRes>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> SavePackagesAsync([FromBody] List<MarketingPackageSaveReq> req, CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() => _marketingService.SavePackagesAsync(req, cancelToken));
+    }
+
+    /// <summary>GET /Marketing/Admin/Overview - super-admin: SMS volumes, banks and package revenue per account for a period (default: this month).</summary>
+    [HttpGet("Admin/Overview")]
+    [ProducesResponseType(typeof(IApiResponse<MarketingAdminOverviewRes>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> GetAdminOverviewAsync([FromQuery] DateTime? fromUtc, [FromQuery] DateTime? toUtc, CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() => _marketingService.GetAdminOverviewAsync(fromUtc, toUtc, cancelToken));
+    }
+
+    /// <summary>POST /Marketing/Purchases - account admin starts buying a package; answers with the Cardcom hosted page URL.</summary>
+    [HttpPost("Purchases")]
+    [ProducesResponseType(typeof(IApiResponse<MarketingPurchaseStartRes>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> StartPurchaseAsync([FromBody] MarketingPurchaseStartReq req, CancellationToken cancelToken = default)
+    {
+        var appOrigin = string.IsNullOrWhiteSpace(req?.AppOrigin) ? Request.Headers.Origin.FirstOrDefault() : req!.AppOrigin;
+        return await SafeCallWithErrorCatchingAsync(() => _marketingService.StartPurchaseAsync(new MarketingPurchaseStartReq
+        {
+            AccountId = req?.AccountId, PackageId = req?.PackageId ?? 0, AppOrigin = appOrigin,
+        }, cancelToken));
+    }
+
+    /// <summary>POST /Marketing/Purchases/{id}/Confirm - the return page asks for the outcome (settles if the webhook has not).</summary>
+    [HttpPost("Purchases/{purchaseId:int}/Confirm")]
+    [ProducesResponseType(typeof(IApiResponse<MarketingPurchaseRes>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> ConfirmPurchaseAsync([FromRoute] int purchaseId, [FromQuery] int? accountId, CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() => _marketingService.ConfirmPurchaseAsync(purchaseId, accountId, cancelToken));
+    }
+
+    /// <summary>GET /Marketing/Purchases - the account's purchase history (newest first).</summary>
+    [HttpGet("Purchases")]
+    [ProducesResponseType(typeof(IApiResponse<List<MarketingPurchaseRes>>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> ListPurchasesAsync([FromQuery] int? accountId, CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() => _marketingService.ListPurchasesAsync(accountId, cancelToken));
+    }
+
     [HttpGet("Settings")]
     [ProducesResponseType(typeof(IApiResponse<MarketingSettingsRes>), (int)HttpStatusCode.OK)]
     public async Task<IActionResult> GetSettingsAsync([FromQuery] int? accountId, CancellationToken cancelToken = default)

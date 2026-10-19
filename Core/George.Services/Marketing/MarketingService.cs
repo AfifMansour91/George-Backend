@@ -18,7 +18,7 @@ namespace George.Services.Marketing;
 /// settings - plus the two public token endpoints (tracked link, unsubscribe). Actual sending is done by
 /// <see cref="MarketingDispatchService"/>; creating a send here only stores its definition.
 /// </summary>
-public class MarketingService : ServiceBase
+public partial class MarketingService : ServiceBase
 {
     public const string ErrMarketingDisabled = "מודול השיווק אינו פעיל בחשבון זה";
     private const string ErrNoAccount = "לא נמצא חשבון לפעולה";
@@ -37,6 +37,7 @@ public class MarketingService : ServiceBase
     private readonly AccountSmsService _accountSms;
     private readonly InforuQuotaService _inforuQuota;
     private readonly IConfiguration _configuration;
+    private readonly George.Services.Payments.Cardcom.CardcomGateway _cardcom;
 
     public MarketingService(
         ILogger<MarketingService> logger,
@@ -48,9 +49,11 @@ public class MarketingService : ServiceBase
         SiteAccessService siteAccess,
         AccountSmsService accountSms,
         InforuQuotaService inforuQuota,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        George.Services.Payments.Cardcom.CardcomGateway cardcom)
         : base(logger, mapper, cache)
     {
+        _cardcom = cardcom;
         _inforuQuota = inforuQuota;
         _storage = storage;
         _userStorage = userStorage;
@@ -1000,6 +1003,7 @@ public class MarketingService : ServiceBase
         var res = new MarketingQuotaRes
         {
             PurchaseUrl = string.IsNullOrWhiteSpace(_configuration["Marketing:PurchaseUrl"]) ? null : _configuration["Marketing:PurchaseUrl"]!.Trim(),
+            CanPurchase = PlatformBilling.FromConfiguration(_configuration) != null,
             // Own provider account = the shop pays the provider directly. A platform-opened sub-account is still ours to meter.
             IsExempt = config != null && !config.BilledByPlatform,
             Balance = totals.Purchased - totals.Consumed,

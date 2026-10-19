@@ -855,4 +855,234 @@ public class MarketingStorage : StorageBase
             .Where(s => s.AccountId == accountId)
             .ToDictionaryAsync(s => s.Id, s => s.SiteName ?? string.Empty, cancelToken).ConfigureAwait(false);
     }
+
+
+    //*************************    Packages + self-service purchases    *************************//
+
+    public static class PurchaseStatus
+    {
+        /// <summary>Hosted page created, the shop has not finished paying (or we have not heard yet).</summary>
+        public const string Initiated = "initiated";
+        public const string Paid = "paid";
+        public const string Failed = "failed";
+        public const string Canceled = "canceled";
+    }
+
+    public async Task<List<MarketingPackage>> GetPackagesAsync(bool activeOnly, CancellationToken cancelToken)
+    {
+        var q = _dbContext.MarketingPackage.AsNoTracking();
+        if (activeOnly)
+            q = q.Where(p => p.IsActive);
+        return await q.OrderBy(p => p.SortOrder).ThenBy(p => p.Messages).ThenBy(p => p.Id).ToListAsync(cancelToken).ConfigureAwait(false);
+    }
+
+    public async Task<MarketingPackage?> GetPackageAsync(int packageId, CancellationToken cancelToken)
+    {
+        return await _dbContext.MarketingPackage.AsNoTracking().FirstOrDefaultAsync(p => p.Id == packageId, cancelToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Replaces the catalog with <paramref name="packages"/>: rows with an id are updated, id 0 inserted, rows missing from the
+    /// list are deactivated (never deleted - purchases reference them).
+    /// </summary>
+    public async Task<List<MarketingPackage>> SavePackagesAsync(IReadOnlyList<MarketingPackage> packages, int? userId, CancellationToken cancelToken)
+    {
+        var now = DateTime.UtcNow;
+        var existing = await _dbContext.MarketingPackage.ToListAsync(cancelToken).ConfigureAwait(false);
+        var keep = new HashSet<int>();
+        foreach (var p in packages)
+        {
+            var row = p.Id > 0 ? existing.FirstOrDefault(e => e.Id == p.Id) : null;
+            if (row == null)
+            {
+                row = new MarketingPackage { CreationTime = now };
+                _dbContext.MarketingPackage.Add(row);
+            }
+            row.Name = p.Name;
+            row.Messages = p.Messages;
+            row.Price = p.Price;
+            row.IsActive = p.IsActive;
+            row.SortOrder = p.SortOrder;
+            row.Badge = p.Badge;
+            row.UpdateTime = now;
+            row.UpdateUserId = userId;
+            if (row.Id > 0) keep.Add(row.Id);
+        }
+        foreach (var gone in existing.Where(e => !keep.Contains(e.Id) && e.IsActive))
+        {
+            gone.IsActive = false;
+            gone.UpdateTime = now;
+            gone.UpdateUserId = userId;
+        }
+        await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+        return await GetPackagesAsync(activeOnly: false, cancelToken).ConfigureAwait(false);
+    }
+
+    public async Task<MarketingPurchase> AddPurchaseAsync(MarketingPurchase purchase, CancellationToken cancelToken)
+    {
+        if (purchase.CreationTime == default) purchase.CreationTime = DateTime.UtcNow;
+        _dbContext.MarketingPurchase.Add(purchase);
+        await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+        return purchase;
+    }
+
+    public async Task<MarketingPurchase?> GetPurchaseAsync(int purchaseId, CancellationToken cancelToken)
+    {
+        return await _dbContext.MarketingPurchase.AsNoTracking().FirstOrDefaultAsync(p => p.Id == purchaseId, cancelToken).ConfigureAwait(false);
+    }
+
+    public async Task<MarketingPurchase?> GetPurchaseByLowProfileIdAsync(string lowProfileId, CancellationToken cancelToken)
+    {
+        return await _dbContext.MarketingPurchase.AsNoTracking().FirstOrDefaultAsync(p => p.LowProfileId == lowProfileId, cancelToken).ConfigureAwait(false);
+    }
+
+    public async Task<List<MarketingPurchase>> ListPurchasesAsync(int accountId, int take, CancellationToken cancelToken)
+    {
+        return await _dbContext.MarketingPurchase.AsNoTracking()
+            .Where(p => p.AccountId == accountId)
+            .OrderByDescending(p => p.Id).Take(take)
+            .ToListAsync(cancelToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Flips an <c>initiated</c> purchase to <c>paid</c> in ONE statement. Returns false when another caller (the webhook
+    /// vs. the return page) already did - only the winner credits the bank.
+    /// </summary>
+    public async Task<bool> TryMarkPurchasePaidAsync(int purchaseId, string? transactionId, string? approvalNumber, string? last4, string? brand, string? documentNumber, string? documentUrl, CancellationToken cancelToken)
+    {
+        var now = DateTime.UtcNow;
+        var rows = await _dbContext.MarketingPurchase
+            .Where(p => p.Id == purchaseId && p.Status == PurchaseStatus.Initiated)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(p => p.Status, PurchaseStatus.Paid)
+                .SetProperty(p => p.PaidAt, now)
+                .SetProperty(p => p.TransactionId, transactionId)
+                .SetProperty(p => p.ApprovalNumber, approvalNumber)
+                .SetProperty(p => p.CardLast4, last4)
+                .SetProperty(p => p.CardBrand, brand)
+                .SetProperty(p => p.DocumentNumber, documentNumber)
+                .SetProperty(p => p.DocumentUrl, documentUrl)
+                .SetProperty(p => p.ErrorDescription, (string?)null), cancelToken)
+            .ConfigureAwait(false);
+        return rows == 1;
+    }
+
+    public async Task<bool> TryMarkPurchaseFailedAsync(int purchaseId, string? error, CancellationToken cancelToken)
+    {
+        var rows = await _dbContext.MarketingPurchase
+            .Where(p => p.Id == purchaseId && p.Status == PurchaseStatus.Initiated)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(p => p.Status, PurchaseStatus.Failed)
+                .SetProperty(p => p.ErrorDescription, error), cancelToken)
+            .ConfigureAwait(false);
+        return rows == 1;
+    }
+
+    public async Task UpdatePurchaseAsync(int purchaseId, Action<MarketingPurchase> apply, CancellationToken cancelToken)
+    {
+        var row = await _dbContext.MarketingPurchase.FirstOrDefaultAsync(p => p.Id == purchaseId, cancelToken).ConfigureAwait(false);
+        if (row == null) return;
+        apply(row);
+        await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+    }
+
+
+    //*************************    Super-admin overview    *************************//
+
+    public class AdminOverviewRow
+    {
+        public int AccountId { get; set; }
+        public string AccountName { get; set; } = string.Empty;
+        public bool IsActive { get; set; }
+        public bool MarketingEnabled { get; set; }
+        /// <summary>Active SMS row: provider name, or null = the system account.</summary>
+        public string? SmsProvider { get; set; }
+        public bool BilledByPlatform { get; set; }
+        public int OperationalMessages { get; set; }
+        public int OperationalUnits { get; set; }
+        public int MarketingMessages { get; set; }
+        public int MarketingUnits { get; set; }
+        public int SystemUnits { get; set; }
+        /// <summary>Marketing bank per George's ledger (SUM bank).</summary>
+        public int BankBalance { get; set; }
+        public int BankPurchased { get; set; }
+        public int PurchasesInPeriod { get; set; }
+        public decimal RevenueInPeriod { get; set; }
+        public int PurchasesTotal { get; set; }
+        public decimal RevenueTotal { get; set; }
+        public DateTime? LastPurchaseAt { get; set; }
+    }
+
+    /// <summary>
+    /// One row per account for the super-admin SMS screen: what went out in the period (from <c>MessageLog</c>, by kind),
+    /// the marketing bank, and what the shop paid for packages. Accounts without any SMS activity are still listed.
+    /// </summary>
+    public async Task<List<AdminOverviewRow>> GetAdminOverviewAsync(DateTime fromUtc, DateTime toUtc, CancellationToken cancelToken)
+    {
+        var accounts = await _dbContext.Account.AsNoTracking()
+            .Where(a => !a.IsDeleted)
+            .Select(a => new { a.Id, a.Name, a.IsActive, a.MarketingEnabled })
+            .ToListAsync(cancelToken).ConfigureAwait(false);
+
+        var sms = await _dbContext.Set<AccountSmsSettings>().AsNoTracking()
+            .Where(s => s.IsEnabled)
+            .Select(s => new { s.AccountId, s.Provider, s.BilledByPlatform })
+            .ToListAsync(cancelToken).ConfigureAwait(false);
+        var smsByAccount = sms.GroupBy(s => s.AccountId).ToDictionary(g => g.Key, g => g.First());
+
+        var usage = await _dbContext.MessageLog.AsNoTracking()
+            .Where(m => m.AccountId != null && m.Success && m.CreationTime >= fromUtc && m.CreationTime < toUtc)
+            .GroupBy(m => new { m.AccountId, m.Kind })
+            .Select(g => new { g.Key.AccountId, g.Key.Kind, Units = g.Sum(m => m.Units), Messages = g.Count() })
+            .ToListAsync(cancelToken).ConfigureAwait(false);
+
+        var bank = await _dbContext.MarketingQuotaLedger.AsNoTracking()
+            .Where(l => l.Bucket == BucketBank)
+            .GroupBy(l => l.AccountId)
+            .Select(g => new { AccountId = g.Key, Balance = g.Sum(l => l.Amount), Purchased = g.Sum(l => l.Amount > 0 ? l.Amount : 0) })
+            .ToListAsync(cancelToken).ConfigureAwait(false);
+        var bankByAccount = bank.ToDictionary(b => b.AccountId);
+
+        var paid = await _dbContext.MarketingPurchase.AsNoTracking()
+            .Where(p => p.Status == PurchaseStatus.Paid)
+            .Select(p => new { p.AccountId, p.Total, p.PaidAt })
+            .ToListAsync(cancelToken).ConfigureAwait(false);
+        var paidByAccount = paid.GroupBy(p => p.AccountId).ToDictionary(g => g.Key, g => g.ToList());
+
+        var rows = new List<AdminOverviewRow>(accounts.Count);
+        foreach (var a in accounts)
+        {
+            var row = new AdminOverviewRow { AccountId = a.Id, AccountName = a.Name, IsActive = a.IsActive, MarketingEnabled = a.MarketingEnabled };
+            if (smsByAccount.TryGetValue(a.Id, out var s))
+            {
+                row.SmsProvider = s.Provider;
+                row.BilledByPlatform = s.BilledByPlatform;
+            }
+            foreach (var u in usage.Where(u => u.AccountId == a.Id))
+            {
+                switch (u.Kind)
+                {
+                    case "operational": row.OperationalUnits += u.Units; row.OperationalMessages += u.Messages; break;
+                    case "marketing": row.MarketingUnits += u.Units; row.MarketingMessages += u.Messages; break;
+                    default: row.SystemUnits += u.Units; break;
+                }
+            }
+            if (bankByAccount.TryGetValue(a.Id, out var b))
+            {
+                row.BankBalance = b.Balance;
+                row.BankPurchased = b.Purchased;
+            }
+            if (paidByAccount.TryGetValue(a.Id, out var purchases))
+            {
+                row.PurchasesTotal = purchases.Count;
+                row.RevenueTotal = purchases.Sum(p => p.Total);
+                var inPeriod = purchases.Where(p => p.PaidAt >= fromUtc && p.PaidAt < toUtc).ToList();
+                row.PurchasesInPeriod = inPeriod.Count;
+                row.RevenueInPeriod = inPeriod.Sum(p => p.Total);
+                row.LastPurchaseAt = purchases.Max(p => p.PaidAt);
+            }
+            rows.Add(row);
+        }
+        return rows;
+    }
 }

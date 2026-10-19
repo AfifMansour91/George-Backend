@@ -128,4 +128,26 @@ namespace George.Services.Request
         public int? WarningLevel { get; set; }
         public string? Note { get; set; }
     }
+
+    /// <summary>Shop (account admin): start buying a package - answers with the hosted payment page.</summary>
+    public class MarketingPurchaseStartReq
+    {
+        public int? AccountId { get; set; }
+        public int PackageId { get; set; }
+        /// <summary>The browser origin the shop is on; the hosted page returns there (falls back to App:PublicBaseUrl).</summary>
+        public string? AppOrigin { get; set; }
+    }
+
+    /// <summary>Super-admin: one catalog row (id 0 = new; rows missing from the saved list are deactivated).</summary>
+    public class MarketingPackageSaveReq
+    {
+        public int Id { get; set; }
+        public string? Name { get; set; }
+        public int Messages { get; set; }
+        /// <summary>ILS before VAT.</summary>
+        public decimal Price { get; set; }
+        public bool IsActive { get; set; } = true;
+        public int SortOrder { get; set; }
+        public string? Badge { get; set; }
+    }
 }

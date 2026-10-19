@@ -1,4 +1,5 @@
 using System.Text.Json;
+using George.Services.Marketing;
 using George.Services.Payments;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -12,11 +13,13 @@ namespace George.Api.Controllers;
 public class CardcomWebhookController : ControllerBase
 {
     private readonly PaymentService _paymentSvc;
+    private readonly MarketingService _marketingSvc;
     private readonly ILogger<CardcomWebhookController> _logger;
 
-    public CardcomWebhookController(PaymentService paymentSvc, ILogger<CardcomWebhookController> logger)
+    public CardcomWebhookController(PaymentService paymentSvc, MarketingService marketingSvc, ILogger<CardcomWebhookController> logger)
     {
         _paymentSvc = paymentSvc;
+        _marketingSvc = marketingSvc;
         _logger = logger;
     }
 
@@ -35,6 +38,29 @@ public class CardcomWebhookController : ControllerBase
         {
             // Return 200 so Cardcom does not keep retrying; errors are logged for investigation.
             _logger.LogError(ex, "Cardcom webhook processing failed.");
+        }
+
+        return Ok();
+    }
+
+    /// <summary>
+    /// POST /Webhooks/Cardcom/Marketing - payments on the PLATFORM's terminal (SMS package purchases). A separate URL, so
+    /// an order's LowProfileId and a purchase's never have to be told apart.
+    /// </summary>
+    [HttpPost("Marketing")]
+    public async Task<IActionResult> MarketingPostAsync(CancellationToken cancelToken)
+    {
+        try
+        {
+            var lowProfileId = await ResolveLowProfileIdAsync(cancelToken);
+            if (!string.IsNullOrWhiteSpace(lowProfileId))
+                await _marketingSvc.ProcessCardcomWebhookAsync(lowProfileId, cancelToken);
+            else
+                _logger.LogWarning("Cardcom marketing webhook: could not resolve LowProfileId from request.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Cardcom marketing webhook processing failed.");
         }
 
         return Ok();

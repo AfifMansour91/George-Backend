@@ -36,6 +36,11 @@ public sealed class CreateHostedSessionRequest
     public string? CustomerEmail { get; init; }
     /// <summary>Order lines shown on the hosted page as the order summary (PayPlus `items`; ignored by Cardcom).</summary>
     public IReadOnlyList<HostedSessionLineItem>? Items { get; init; }
+    /// <summary>
+    /// Cardcom: issue this document together with the charge (LowProfile/Create "Document"). Null = no document from the
+    /// hosted page (orders issue theirs after capture). Used by the platform's own sales (SMS packages).
+    /// </summary>
+    public CardcomTransactionDocument? Document { get; init; }
 }
 
 /// <summary>One display line of the hosted-page order summary.</summary>

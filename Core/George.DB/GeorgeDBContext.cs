@@ -70,6 +70,8 @@ namespace George.DB
 		public virtual DbSet<MarketingDelivery> MarketingDelivery { get; set; }
 		public virtual DbSet<MarketingAttribution> MarketingAttribution { get; set; }
 		public virtual DbSet<MarketingQuotaLedger> MarketingQuotaLedger { get; set; }
+		public virtual DbSet<MarketingPackage> MarketingPackage { get; set; }
+		public virtual DbSet<MarketingPurchase> MarketingPurchase { get; set; }
 
 		// DB Views mapping
 
