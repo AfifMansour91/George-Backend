@@ -14,7 +14,8 @@ public static class MarketingMessageRenderer
     public const string TokenStoreName = "[store_name]";
     public const string TokenLink = "[link]";
 
-    public const string UnsubscribePrefix = "להסרה: ";
+    /// <summary>Shortened from "להסרה: " on 20.10 - every character counts in a 70-char Hebrew segment.</summary>
+    public const string UnsubscribePrefix = "הסרה ";
     public const int MaxBodyLength = 1000;
 
     // No vowels and no look-alikes (0/o, 1/l/i): tokens are typed from a phone now and then, and must never spell a word.

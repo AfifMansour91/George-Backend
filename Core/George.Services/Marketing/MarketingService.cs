@@ -63,13 +63,21 @@ public partial class MarketingService : ServiceBase
         _configuration = configuration;
     }
 
-    /// <summary>Base of the short links in a message. A dedicated short domain later; the API's public URL until then.</summary>
+    /// <summary>
+    /// Base of the short links in a message: <c>Marketing:ShortLinkBaseUrl</c> (e.g. https://s.giorgio.co.il), else the API's public
+    /// URL. The scheme is dropped by default - phones linkify a bare domain and it saves 8 characters per link in a 70-char Hebrew
+    /// segment; <c>Marketing:ShortLinkIncludeScheme=true</c> keeps it. The public pages themselves are always served over https.
+    /// </summary>
     public static string ShortLinkBaseUrl(IConfiguration configuration)
     {
         var url = configuration["Marketing:ShortLinkBaseUrl"];
         if (string.IsNullOrWhiteSpace(url))
             url = configuration["Payment:PublicApiBaseUrl"];
-        return (url ?? string.Empty).Trim().TrimEnd('/');
+        var trimmed = (url ?? string.Empty).Trim().TrimEnd('/');
+        var includeScheme = string.Equals(configuration["Marketing:ShortLinkIncludeScheme"], "true", StringComparison.OrdinalIgnoreCase);
+        if (includeScheme)
+            return trimmed;
+        return System.Text.RegularExpressions.Regex.Replace(trimmed, "^https?://", string.Empty, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     }
 
 
@@ -890,9 +898,7 @@ public partial class MarketingService : ServiceBase
         if (!TimeSpan.TryParseExact(req.SendWindowStart, @"hh\:mm", null, out var start)
             || !TimeSpan.TryParseExact(req.SendWindowEnd, @"hh\:mm", null, out var end) || end <= start)
             return CreateResponse(response, StatusCode.InvalidRequest, "שעות השליחה לא חוקיות");
-        // The law (חוק הספאם) has no hour limit, good manners do: never before 08:00 or after 21:00.
-        if (start < new TimeSpan(8, 0, 0) || end > new TimeSpan(21, 0, 0))
-            return CreateResponse(response, StatusCode.InvalidRequest, "שעות השליחה חייבות להיות בין 08:00 ל-21:00");
+        // No hour clamp: the window is the shop's own rule (George 19.10 - "any hours of the day"); the law (חוק הספאם) has none either.
 
         var saved = await _storage.UpsertSettingsAsync(new MarketingSettings
         {

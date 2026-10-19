@@ -348,7 +348,7 @@ public class MarketingSqlIntegrationTests
             Assert.Contains("שלום דנה ממעדני גורמה", first);             // first name + the customer's own branch
             Assert.Contains("https://g.test/s/", first);                 // tracked link, not the raw URL
             Assert.DoesNotContain("shop.test", first);
-            Assert.Contains("להסרה: https://g.test/x/", first);
+            Assert.Contains("הסרה g.test/x/", first);
 
             Assert.Equal(2, logQueue.Rows.Count);
             Assert.All(logQueue.Rows, r => Assert.Equal((MessageKind.Marketing, true, 2), (r.Kind, r.Success, r.Units)));

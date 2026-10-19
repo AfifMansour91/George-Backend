@@ -170,14 +170,14 @@ public class MarketingMessageRendererTests
     public void Replaces_tokens_and_appends_unsubscribe_line()
     {
         var text = MarketingMessageRenderer.Render("שלום [customer_name], מבצע ב[store_name]: [link]", "דנה לוי", "מעדני גורמה", "https://g.co/s/abc", "https://g.co/x/abc");
-        Assert.Equal("שלום דנה, מבצע במעדני גורמה: https://g.co/s/abc\nלהסרה: https://g.co/x/abc", text);
+        Assert.Equal("שלום דנה, מבצע במעדני גורמה: https://g.co/s/abc\nהסרה https://g.co/x/abc", text);
     }
 
     [Fact]
     public void Link_without_placeholder_is_appended_on_its_own_line()
     {
         var text = MarketingMessageRenderer.Render("מבצע!", "דנה", "חנות", "https://g.co/s/abc", "https://g.co/x/abc");
-        Assert.Equal("מבצע!\nhttps://g.co/s/abc\nלהסרה: https://g.co/x/abc", text);
+        Assert.Equal("מבצע!\nhttps://g.co/s/abc\nהסרה https://g.co/x/abc", text);
     }
 
     [Fact]
