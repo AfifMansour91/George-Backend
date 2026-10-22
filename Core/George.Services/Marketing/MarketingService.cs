@@ -68,6 +68,21 @@ public partial class MarketingService : ServiceBase
     /// URL. The scheme is dropped by default - phones linkify a bare domain and it saves 8 characters per link in a 70-char Hebrew
     /// segment; <c>Marketing:ShortLinkIncludeScheme=true</c> keeps it. The public pages themselves are always served over https.
     /// </summary>
+    /// <summary>
+    /// The caller's identity must reach the SMS-settings service too: ProvisionInforuSubAccountAsync saves through it, and
+    /// its platform-only guard (ErrInforuPlatformOnly) saw an empty AuthUser - the sub-account was opened at InforU but
+    /// never saved (Deliz, prod 21.10). The controller only sets the auth user on this service, so forward it here.
+    /// </summary>
+    public override AuthenticatedUser AuthUser
+    {
+        get => base.AuthUser;
+        set
+        {
+            base.AuthUser = value;
+            _accountSms.AuthUser = value;
+        }
+    }
+
     public static string ShortLinkBaseUrl(IConfiguration configuration)
     {
         var url = configuration["Marketing:ShortLinkBaseUrl"];
@@ -796,6 +811,11 @@ public partial class MarketingService : ServiceBase
             return CreateResponse(response, StatusCode.InvalidRequest, "שם לקוח, שם משתמש וסיסמה הם חובה");
         if (!AccountSmsService.IsValidInforuSender(req.Sender))
             return CreateResponse(response, StatusCode.InvalidRequest, "שם השולח חייב להיות עד 11 אותיות או ספרות באנגלית, בלי רווחים");
+        // InforU's Customer/Create rules (answers seen live 21.10): an email is mandatory, and the password must be ≥8 with lower, upper, digit and one of $@!%*#?&_
+        if (string.IsNullOrWhiteSpace(req.Email) || !req.Email.Contains('@'))
+            return CreateResponse(response, StatusCode.InvalidRequest, "InforU דורשת אימייל לתת-החשבון (אליו נשלחות התראות המכסה)");
+        if (!IsInforuPasswordValid(req.Password))
+            return CreateResponse(response, StatusCode.InvalidRequest, "הסיסמה חייבת להכיל לפחות 8 תווים, אות קטנה, אות גדולה, ספרה ותו מיוחד (!@#$%*?&)");
         if (req.QuotaTypeId is not (InforuQuotaService.QuotaTypeMonthly or InforuQuotaService.QuotaTypePackages))
             return CreateResponse(response, StatusCode.InvalidRequest, "סוג מכסה לא חוקי");
         if (req.QuotaAmount < 0 || req.QuotaAmount > 1_000_000)
@@ -822,7 +842,28 @@ public partial class MarketingService : ServiceBase
             BilledByPlatform = true, InforuCustomerId = customerId,
         }, cancelToken);
         if (!saved.IsSuccessful)
-            return CreateResponse(response, StatusCode.GeneralError, $"תת-החשבון נפתח ב-InforU (משתמש {spec.Username}) אבל השמירה בג'ורג'יו נכשלה: {saved.Description}. יש להזין את הפרטים ידנית.");
+        {
+            // The sub-account exists at InforU with a token only we know - it must land in our DB whatever the guarded path said
+            // (Deliz, prod 21.10: the guard saw an empty caller and the token was lost). scope.Unrestricted was verified above.
+            try
+            {
+                await _accountStorage.UpsertSmsSettingsAsync(new AccountSmsSettings
+                {
+                    AccountId = scope.AccountId, IsEnabled = true, Provider = SmsProviderNames.Inforu, Username = spec.Username, ApiToken = apiToken,
+                    FromName = req.Sender.Trim(), BilledByPlatform = true, InforuCustomerId = customerId,
+                    CreationUserId = AuthUser.Id > 0 ? AuthUser.Id : null, UpdateUserId = AuthUser.Id > 0 ? AuthUser.Id : null,
+                }, cancelToken);
+                _logger.LogWarning("Inforu sub-account for account {AccountId} saved through storage after the guarded save failed: {Error}", scope.AccountId, saved.Description);
+                saved = await _accountSms.GetSettingsAsync(scope.AccountId, cancelToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Inforu sub-account for account {AccountId}: storage save failed too.", scope.AccountId);
+            }
+        }
+        if (!saved.IsSuccessful)
+            // Both saves failed - hand the token over, or the shop is locked out of its own sub-account.
+            return CreateResponse(response, StatusCode.GeneralError, $"תת-החשבון נפתח ב-InforU (משתמש {spec.Username}, לקוח {customerId ?? "?"}) אבל השמירה בג'ורג'יו נכשלה: {saved.Description}. יש להזין ידנית ב'חבר תת-חשבון קיים': שם משתמש {spec.Username}, טוקן {apiToken}, שם שולח {req.Sender.Trim()}.");
 
         if (req.QuotaAmount > 0)
         {
@@ -866,6 +907,10 @@ public partial class MarketingService : ServiceBase
         response.Data = await BuildQuotaAsync(scope.AccountId, includeLedger: true, cancelToken);
         return response;
     }
+
+    /// <summary>InforU's password policy, verbatim from its Customer/Create rejection: ^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[$@$!%*#?&])[A-Za-z\d$@$!%*#?&_]{8,}$</summary>
+    public static bool IsInforuPasswordValid(string? password) =>
+        !string.IsNullOrEmpty(password) && System.Text.RegularExpressions.Regex.IsMatch(password, @"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[$@!%*#?&])[A-Za-z\d$@!%*#?&_]{8,}$");
 
     private static string NewApiToken()
     {

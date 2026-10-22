@@ -79,6 +79,53 @@ namespace George.Data
             return res;
         }
 
+        /// <summary>
+        /// Per-account counts for the super-admin Accounts screen: sites, products, catalog-sourced products and distinct
+        /// categories. Three grouped queries, so the client no longer downloads every product in the system to count them.
+        /// </summary>
+        public async Task<Dictionary<int, AccountStats>> GetAccountStatsAsync(IReadOnlyCollection<int> accountIds, CancellationToken cancelToken)
+        {
+            var result = new Dictionary<int, AccountStats>();
+            if (accountIds.Count == 0) return result;
+            AccountStats Get(int id) => result.TryGetValue(id, out var s) ? s : (result[id] = new AccountStats());
+
+            var sites = await _dbContext.Site.AsNoTracking()
+                .Where(s => !s.IsDeleted && accountIds.Contains(s.AccountId))
+                .GroupBy(s => s.AccountId)
+                .Select(g => new { AccountId = g.Key, Count = g.Count() })
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+            foreach (var s in sites) Get(s.AccountId).SiteCount = s.Count;
+
+            var accountProducts = _dbContext.Product.AsNoTracking()
+                .Where(p => !p.IsDeleted && p.AccountId != null && accountIds.Contains(p.AccountId.Value));
+
+            var products = await accountProducts
+                .GroupBy(p => p.AccountId!.Value)
+                .Select(g => new
+                {
+                    AccountId = g.Key,
+                    Count = g.Count(),
+                    Catalog = g.Count(p => (p.TemplateId != null && p.TemplateId != "") || (p.SourceProductId != null && p.SourceProductId != "")),
+                })
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+            foreach (var p in products)
+            {
+                var s = Get(p.AccountId);
+                s.ProductCount = p.Count;
+                s.CatalogProductCount = p.Catalog;
+            }
+
+            var categories = await _dbContext.ProductCategory.AsNoTracking()
+                .Join(accountProducts, pc => pc.ProductId, p => p.Id, (pc, p) => new { AccountId = p.AccountId!.Value, pc.CategoryId })
+                .Distinct()
+                .GroupBy(x => x.AccountId)
+                .Select(g => new { AccountId = g.Key, Count = g.Count() })
+                .ToListAsync(cancelToken).ConfigureAwait(false);
+            foreach (var c in categories) Get(c.AccountId).CategoryCount = c.Count;
+
+            return result;
+        }
+
         public async Task<Account?> GetAccountAsync(long accountId, CancellationToken cancelToken)
         {
             return await _dbContext.Account
@@ -594,6 +641,15 @@ namespace George.Data
                 _logger.LogWarning(ex, "AccountWizardStepData table missing for SaveWizardSessionJsonAsync. Run Scripts/Create_AccountWizardStepData.sql.");
             }
         }
+    }
+
+    /// <summary>Counts returned by <see cref="AccountStorage.GetAccountStatsAsync"/>.</summary>
+    public sealed class AccountStats
+    {
+        public int SiteCount { get; set; }
+        public int ProductCount { get; set; }
+        public int CatalogProductCount { get; set; }
+        public int CategoryCount { get; set; }
     }
 }
 

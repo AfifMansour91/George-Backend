@@ -186,15 +186,18 @@ namespace George.Providers
             if (body == null)
                 return new InforuCustomerOutcome { Error = "תשובה לא צפויה מ-InforU", Raw = raw };
             if (body.StatusId != 1)
-                return new InforuCustomerOutcome { Error = Describe(body.StatusId, body.StatusDescription, body.DetailedDescription), Raw = raw };
+                return new InforuCustomerOutcome { Error = Describe(body.StatusId, FriendlyCloudError(body.StatusDescription), body.DetailedDescription ?? body.DetailDescription), Raw = raw };
             string? customerId = null;
-            if (body.Data is Newtonsoft.Json.Linq.JObject data)
+            if (body.CustomerId is > 0)
+                return new InforuCustomerOutcome { Success = true, CustomerId = body.CustomerId.Value.ToString(), Raw = raw };
+            var payload = body.ReturnData ?? body.Data;
+            if (payload is Newtonsoft.Json.Linq.JObject data)
             {
                 foreach (var key in new[] { "CustomerId", "customerId", "Id", "id" })
                     if (data.TryGetValue(key, StringComparison.OrdinalIgnoreCase, out var v) && v.Type != Newtonsoft.Json.Linq.JTokenType.Null) { customerId = v.ToString(); break; }
             }
-            else if (body.Data != null && body.Data.Type is Newtonsoft.Json.Linq.JTokenType.Integer or Newtonsoft.Json.Linq.JTokenType.String)
-                customerId = body.Data.ToString();
+            else if (payload != null && payload.Type is Newtonsoft.Json.Linq.JTokenType.Integer or Newtonsoft.Json.Linq.JTokenType.String)
+                customerId = payload.ToString();
             return new InforuCustomerOutcome { Success = true, CustomerId = customerId, Raw = raw };
         }
 
@@ -202,6 +205,16 @@ namespace George.Providers
         {
             var basicToken = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{username}:{apiToken}"));
             _httpHelper.SetHttpHeaderKey("Authorization", $"Basic {basicToken}");
+        }
+
+        /// <summary>InforU's password rule comes back as a raw regex - say it in words.</summary>
+        private static string? FriendlyCloudError(string? description)
+        {
+            if (description != null && description.StartsWith("^(?=", StringComparison.Ordinal))
+                return "הסיסמה לא עומדת בכללי InforU (לפחות 8 תווים, אות קטנה, אות גדולה, ספרה ותו מיוחד)";
+            if (description != null && description.Replace(" ", string.Empty).StartsWith("Usernamealreadyexists", StringComparison.OrdinalIgnoreCase))
+                return "שם המשתמש כבר קיים ב-InforU - כנראה מניסיון קודם שנכשל בשמירה. חבר אותו דרך \"חבר תת-חשבון קיים\" או בחר שם משתמש אחר";
+            return description;
         }
 
         private static string Describe(int? statusId, string? description, string? detailed) =>

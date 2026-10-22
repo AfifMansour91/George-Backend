@@ -41,6 +41,20 @@ namespace George.Services
                 .Select(account => _mapper.Map<AccountRes>(account))
                 .ToList();
 
+            if (request.Filter?.IncludeStats == true && response.Data.Items.Count > 0)
+            {
+                var ids = response.Data.Items.Select(a => (int)a.Id).ToList();
+                var stats = await _accountStorage.GetAccountStatsAsync(ids, cancelToken);
+                foreach (var item in response.Data.Items)
+                {
+                    stats.TryGetValue((int)item.Id, out var s);
+                    item.SiteCount = s?.SiteCount ?? 0;
+                    item.ProductCount = s?.ProductCount ?? 0;
+                    item.CatalogProductCount = s?.CatalogProductCount ?? 0;
+                    item.CategoryCount = s?.CategoryCount ?? 0;
+                }
+            }
+
             response.Data.Skip = request.Skip;
             response.Data.Limit = request.Take;
             response.Data.Total = res.Total;

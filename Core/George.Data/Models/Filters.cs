@@ -57,6 +57,8 @@ namespace George.Common
         public SearchFilter? Search { get; set; }
         public string? Status { get; set; }        // "Active" / "Inactive" (optional)
         public string? WizardStatus { get; set; }  // "InProgress" / "Completed" (optional)
+        /// <summary>Super-admin Accounts screen: also return per-account site/product/category counts (grouped server-side) instead of the client downloading every product in the system.</summary>
+        public bool IncludeStats { get; set; }
     }
 
     public class SiteFilter

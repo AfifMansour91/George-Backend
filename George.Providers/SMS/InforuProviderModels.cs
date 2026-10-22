@@ -240,6 +240,12 @@ namespace George.Providers
         [JsonProperty("StatusId")] public int? StatusId { get; set; }
         [JsonProperty("StatusDescription")] public string? StatusDescription { get; set; }
         [JsonProperty("DetailedDescription")] public string? DetailedDescription { get; set; }
+        /// <summary>The field InforU actually sends (live answer 21.10.2026).</summary>
+        [JsonProperty("DetailDescription")] public string? DetailDescription { get; set; }
         [JsonProperty("Data")] public Newtonsoft.Json.Linq.JToken? Data { get; set; }
+        /// <summary>The field InforU actually sends for the payload (live answer 21.10.2026).</summary>
+        [JsonProperty("ReturnData")] public Newtonsoft.Json.Linq.JToken? ReturnData { get; set; }
+        /// <summary>Customer/Create success: the new customer's id sits at the top level (live answer 21.10.2026).</summary>
+        [JsonProperty("CustomerId")] public long? CustomerId { get; set; }
     }
 }

@@ -381,3 +381,17 @@ public class MarketingDraftRulesTests
         Assert.False(George.Services.Marketing.MarketingService.IsEditable(late, now));
     }
 }
+
+public class InforuPasswordPolicyTests
+{
+    [Theory]
+    [InlineData("Qa7mKp2xWz9t", false)]   // the old generator: letters+digits only - InforU rejects it (Deliz, prod 21.10)
+    [InlineData("Qa7mKp2xWz9t!", true)]
+    [InlineData("abcdefg1!", false)]      // no uppercase
+    [InlineData("ABCDEFG1!", false)]      // no lowercase
+    [InlineData("Abcdefgh!", false)]      // no digit
+    [InlineData("Abcdefg1", false)]       // no special
+    [InlineData("Ab1!", false)]           // too short
+    [InlineData("", false)]
+    public void Inforu_password_policy(string password, bool expected) => Assert.Equal(expected, MarketingService.IsInforuPasswordValid(password));
+}

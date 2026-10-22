@@ -65,6 +65,13 @@ namespace George.Services.Response
 
         /// <summary>Default duration in days for the &quot;חדש&quot; product label when enabled.</summary>
         public int DefaultNewLabelDays { get; set; } = 7;
+
+        /// <summary>Filled only when <c>AccountFilter.IncludeStats</c> is set (super-admin Accounts list).</summary>
+        public int? SiteCount { get; set; }
+        public int? ProductCount { get; set; }
+        /// <summary>Products created from the global catalog (TemplateId / SourceProductId set).</summary>
+        public int? CatalogProductCount { get; set; }
+        public int? CategoryCount { get; set; }
     }
 
     //public class AccountRes
