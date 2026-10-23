@@ -189,6 +189,14 @@ public class PartnerCustomerRes
     public string? SavedCardBrand { get; set; }
     /// <summary>Customer consented to marketing SMS.</summary>
     public bool MarketingSms { get; set; }
+    /// <summary>
+    /// Standing discount the shop granted this customer: <c>percent</c> (of the cart after promotions) or
+    /// <c>amount</c> (fixed NIS). Null = none. Quote and CreateOrder apply it automatically when
+    /// <c>customerPhone</c> matches; shown so the agent can tell the customer ("הנחת לקוח קבועה 10%").
+    /// </summary>
+    public string? PermanentDiscountType { get; set; }
+    /// <summary>Percent (e.g. 10) or NIS amount, by <see cref="PermanentDiscountType"/>.</summary>
+    public decimal? PermanentDiscountValue { get; set; }
 }
 
 /// <summary>POST /Partner/v1/Orders/Quote - server-side pricing of a cart before the customer confirms.</summary>
@@ -200,8 +208,19 @@ public class PartnerQuoteRes
     public List<PartnerQuoteLineRes> Lines { get; set; } = new();
     /// <summary>Sum of line totals before discounts.</summary>
     public decimal SubTotal { get; set; }
-    /// <summary>Total promotion / coupon discount.</summary>
+    /// <summary>All discounts: promotions + coupon + the customer's standing discount (<see cref="CustomerDiscountAmount"/>).</summary>
     public decimal DiscountTotal { get; set; }
+    /// <summary>
+    /// The customer's standing discount (set by the shop on the customer record), applied automatically when
+    /// <c>customerPhone</c> matched a known customer. Computed after promotions: <c>percent</c> of the
+    /// cart net of promotions, or a fixed NIS <c>amount</c> capped at cart + delivery. Included in
+    /// <see cref="DiscountTotal"/>. 0 when the customer has none.
+    /// </summary>
+    public decimal CustomerDiscountAmount { get; set; }
+    /// <summary><c>percent</c> | <c>amount</c> - how the standing discount is defined. Null when none applied.</summary>
+    public string? CustomerDiscountType { get; set; }
+    /// <summary>The configured percent (e.g. 10) or NIS amount behind <see cref="CustomerDiscountAmount"/>.</summary>
+    public decimal? CustomerDiscountValue { get; set; }
     public decimal ShippingCost { get; set; }
     public bool FreeShippingApplied { get; set; }
     /// <summary>SubTotal − DiscountTotal + ShippingCost. Weight-sold lines are re-priced at picking by actual weight.</summary>

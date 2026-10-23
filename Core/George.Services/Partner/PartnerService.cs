@@ -262,6 +262,8 @@ namespace George.Services.Partner
                 SavedCardLast4 = savedCard?.Last4Digits,
                 SavedCardBrand = savedCard?.CardBrand,
                 MarketingSms = customer.MarketingSms,
+                PermanentDiscountType = customer.PermanentDiscountValue is > 0m ? NormalizeDiscountType(customer.PermanentDiscountType) : null,
+                PermanentDiscountValue = customer.PermanentDiscountValue is > 0m ? customer.PermanentDiscountValue : null,
             };
             return response;
         }
@@ -478,6 +480,11 @@ namespace George.Services.Partner
                 SubTotal = quote.SubTotal,
                 ShippingCost = quote.ShippingCost,
                 Total = quote.Total,
+                // Standing customer discount, stored the way the phone-order screen stores it (manual discount),
+                // so picking, voucher and invoice show "הנחה 10%" and Total stays consistent with the quote.
+                ManualDiscountAmount = quote.CustomerDiscountAmount > 0m ? quote.CustomerDiscountAmount : null,
+                ManualDiscountType = quote.CustomerDiscountAmount > 0m ? quote.CustomerDiscountType : null,
+                ManualDiscountValue = quote.CustomerDiscountAmount > 0m ? quote.CustomerDiscountValue : null,
                 Items = lines,
             };
 
@@ -669,10 +676,46 @@ namespace George.Services.Partner
                 quote.FreeShippingApplied = free;
             }
 
+            // The customer's standing discount (Customer.PermanentDiscount*, set from the phone-order screen) -
+            // the shop expects every order of that customer to carry it, whichever channel placed it (Zano 10/19).
+            // Same math as the phone-order screen: after promotions, before delivery for percent.
+            if (quote.Lines.Count > 0 && !string.IsNullOrWhiteSpace(customerPhone))
+            {
+                var customer = await _customerStorage.GetCustomerByPhoneAsync(siteId, customerPhone, cancelToken).ConfigureAwait(false);
+                var discount = ComputeCustomerDiscount(customer?.PermanentDiscountType, customer?.PermanentDiscountValue,
+                    quote.SubTotal, quote.DiscountTotal, quote.ShippingCost);
+                if (discount > 0m)
+                {
+                    quote.CustomerDiscountAmount = discount;
+                    quote.CustomerDiscountType = NormalizeDiscountType(customer!.PermanentDiscountType);
+                    quote.CustomerDiscountValue = customer.PermanentDiscountValue;
+                    quote.DiscountTotal = Math.Round(quote.DiscountTotal + discount, 2, MidpointRounding.AwayFromZero);
+                }
+            }
+
             quote.Total = Math.Max(0m, Math.Round(quote.SubTotal - quote.DiscountTotal + quote.ShippingCost, 2, MidpointRounding.AwayFromZero));
             quote.IsValid = quote.Errors.Count == 0;
             return quote;
         }
+
+        /// <summary>
+        /// NIS value of a customer's standing discount for a cart, exactly as the phone-order screen computes it
+        /// (NewManualOrderPage): <c>percent</c> of (subtotal − promotion discount), or a fixed <c>amount</c>
+        /// capped at (subtotal − promotion discount + delivery). 0 when the customer has none.
+        /// </summary>
+        public static decimal ComputeCustomerDiscount(string? type, decimal? value, decimal subTotal, decimal promotionDiscount, decimal shippingCost)
+        {
+            if (value is not > 0m) return 0m;
+            var baseAmount = Math.Max(0m, subTotal - promotionDiscount);
+            var amount = NormalizeDiscountType(type) == "amount"
+                ? Math.Min(baseAmount + shippingCost, value.Value)
+                : Math.Min(baseAmount, baseAmount * value.Value / 100m);
+            return Math.Round(Math.Max(0m, amount), 2, MidpointRounding.AwayFromZero);
+        }
+
+        /// <summary>"amount" or "percent" (the screen's default for anything else).</summary>
+        public static string NormalizeDiscountType(string? type) =>
+            string.Equals(type?.Trim(), "amount", StringComparison.OrdinalIgnoreCase) ? "amount" : "percent";
 
         /// <summary>Same engine and channel mapping the order-creation path uses (Source WhatsApp/Partner → channel "web").</summary>
         private async Task ApplyPromotionsToQuoteAsync(

@@ -96,7 +96,7 @@ public class PartnerQuoteReq
 
     public string? CouponCode { get; set; }
 
-    /// <summary>Customer phone - enables per-customer promotion limits (optional).</summary>
+    /// <summary>Customer phone (optional but recommended): applies the customer's standing discount and per-customer promotion limits.</summary>
     public string? CustomerPhone { get; set; }
 
     /// <summary>Optional: validated against the shop's closed dates when sent.</summary>

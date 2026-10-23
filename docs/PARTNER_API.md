@@ -70,7 +70,7 @@
 
 | Method | Path | תיאור |
 |---|---|---|
-| GET | `/Customer?phone=` | זיהוי לקוח לפי טלפון (כל פורמט: 05x, +972). `found: false` ללקוח חדש. מחזיר שם, כתובת ברירת מחדל, מספר הזמנות, `hasSavedCard` (+4 ספרות), `marketingSms` |
+| GET | `/Customer?phone=` | זיהוי לקוח לפי טלפון (כל פורמט: 05x, +972). `found: false` ללקוח חדש. מחזיר שם, כתובת ברירת מחדל, מספר הזמנות, `hasSavedCard` (+4 ספרות), `marketingSms`, ו-`permanentDiscountType`/`permanentDiscountValue` (הנחת לקוח קבועה שהחנות הגדירה: `percent` או `amount`; `null` כשאין) |
 | GET | `/Customer/LastOrderItems?phone=` | פריטי ההזמנה האחרונה ("אותו דבר כמו פעם שעברה") |
 | GET | `/Customer/Orders?phone=&skip=0&take=10` | היסטוריית הזמנות של הלקוח בסניף (כל הערוצים, גם אתר), מהחדשה לישנה. לשאלת "מה עם ההזמנה שלי?" |
 
@@ -78,7 +78,7 @@
 
 | Method | Path | תיאור |
 |---|---|---|
-| POST | `/Orders/Quote` | תמחור עגלה ללא יצירה. מחזיר `isValid`, `errors[]` (לפי שורה), `lines[]` עם מחיר/הנחה, `subTotal`, `discountTotal`, `shippingCost`, `freeShippingApplied`, `total`, `couponApplied`/`couponMessage`, `promotionsApplied[]`, `promotionsNearby[]` ("הוסף עוד X כדי לקבל…") |
+| POST | `/Orders/Quote` | תמחור עגלה ללא יצירה. מחזיר `isValid`, `errors[]` (לפי שורה), `lines[]` עם מחיר/הנחה, `subTotal`, `discountTotal` (כל ההנחות: מבצעים + קופון + הנחת לקוח קבועה), `customerDiscountAmount`/`customerDiscountType`/`customerDiscountValue` (הנחת הלקוח הקבועה, מוחלת אוטומטית לפי `customerPhone`), `shippingCost`, `freeShippingApplied`, `total`, `couponApplied`/`couponMessage`, `promotionsApplied[]`, `promotionsNearby[]` ("הוסף עוד X כדי לקבל…") |
 | POST | `/Orders` | יצירת הזמנה (ראו §4) |
 | GET | `/Orders/{orderId}` | הזמנה לפי מזהה Giorgio (חייבת להשתייך לסניף של המפתח) |
 | GET | `/Orders/ByRef/{partnerRef}` | הזמנה לפי ה-`partnerRef` שלכם |
@@ -131,6 +131,7 @@
 | `OnAccount` / `BankTransfer` | הקפה / העברה בנקאית (אם החנות הפעילה) | כלום |
 
 - `couponCode`: קופון לא תקף לא מפיל את ההזמנה; בדקו `couponApplied` ב-Quote לפני.
+- **הנחת לקוח קבועה**: החנות יכולה להגדיר ללקוח אחוז (או סכום) קבוע שמוחל על כל הזמנה שלו. Quote ו-Create מחילים אותה אוטומטית כש-`customerPhone` תואם לקוח מוכר. אין מה לשלוח בבקשה. ב-Quote היא חוזרת ב-`customerDiscountAmount` (₪), `customerDiscountType` (`percent`/`amount`) ו-`customerDiscountValue` (למשל 10), וכלולה ב-`discountTotal`. אחוז מחושב על הסל אחרי מבצעים ולפני דמי משלוח; סכום קבוע מוגבל לסל + משלוח. הציגו ללקוח "הנחת לקוח קבועה 10%" מתוך ה-Quote. ב-`GET /Customer` השדות `permanentDiscountType`/`permanentDiscountValue` מראים אם יש ללקוח הנחה כזו עוד לפני בניית הסל.
 - התשובה היא אובייקט הזמנה (§5) עם `orderNumber` להצגה ללקוח.
 
 ---
@@ -169,6 +170,7 @@
 | `paymentMethod` | `Cash`, `CreditSms` (= PaymentLink), `SavedCard`, `OnAccount`, `BankTransfer`, `WooCommerce` (הזמנות אתר) | |
 | `pickedQuantity` | ממולא רק משלב `Ready` | המשקל/כמות בפועל |
 | `total` | הסכום הסופי לאחר ליקוט משתנה למוצרי משקל | |
+| `discountTotal` | כל ההנחות על ההזמנה: מבצעים + קופון + הנחת לקוח קבועה | |
 
 ---
 
@@ -241,7 +243,7 @@ compare constant-time with header X-Partner-Signature
 1. `GET /Site` פעם בהתחלה (ובקאש שעה): שעות סגירה, אמצעי תשלום, דמי משלוח.
 2. עם תחילת שיחה: `GET /Customer?phone=` → פנייה בשם, כתובת ברירת מחדל, `GET /Customer/LastOrderItems` ל"כמו פעם שעברה".
 3. בניית עגלה מהקטלוג (`GET /Products`, קאש שעה). שאלת וריאציה כשנדרש, אימות יחידות למוצרי משקל.
-4. `POST /Orders/Quote` → הצגת סיכום (שורות, הנחות, משלוח, סה"כ, הערת "לפי משקל בפועל"). אישור מפורש מהלקוח.
+4. `POST /Orders/Quote` עם `customerPhone` → הצגת סיכום (שורות, מבצעים, הנחת לקוח קבועה אם `customerDiscountAmount > 0`, משלוח, סה"כ, הערת "לפי משקל בפועל"). אישור מפורש מהלקוח.
 5. `POST /Orders` עם `partnerRef` ייחודי. אם `PaymentLink` → `POST /Orders/{id}/PaymentLink` ושליחת הקישור.
 6. הודעות המשך ללקוח מ-webhooks: "ההזמנה בהכנה", "מוכנה לאיסוף", "התשלום התקבל", "יצאה למשלוח" (לינק מעקב).
 7. "מה עם ההזמנה שלי?" → `GET /Customer/Orders?phone=`.

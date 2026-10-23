@@ -129,4 +129,40 @@ public class PartnerServiceRulesTests
     {
         Assert.Equal(expected, PartnerOrderMapper.IsPartnerSource(source));
     }
+
+    // Standing customer discount (Customer.PermanentDiscount*) - same math as the phone-order screen.
+
+    [Fact]
+    public void CustomerDiscount_Percent_AppliesAfterPromotionsBeforeDelivery()
+    {
+        // 300 cart, 50 promo → 10% of 250 = 25; delivery is not discounted.
+        Assert.Equal(25m, PartnerService.ComputeCustomerDiscount("percent", 10m, 300m, 50m, 30m));
+    }
+
+    [Fact]
+    public void CustomerDiscount_Amount_CappedAtCartPlusDelivery()
+    {
+        Assert.Equal(59m, PartnerService.ComputeCustomerDiscount("amount", 59m, 300m, 0m, 30m));
+        Assert.Equal(80m, PartnerService.ComputeCustomerDiscount("amount", 200m, 100m, 50m, 30m));
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("percent", null)]
+    [InlineData("percent", 0)]
+    [InlineData("percent", -5)]
+    public void CustomerDiscount_NoneWhenUnsetOrNonPositive(string? type, int? value)
+    {
+        Assert.Equal(0m, PartnerService.ComputeCustomerDiscount(type, value, 300m, 0m, 30m));
+    }
+
+    [Fact]
+    public void CustomerDiscount_UnknownTypeDefaultsToPercent_RoundedToAgorot()
+    {
+        Assert.Equal(12.35m, PartnerService.ComputeCustomerDiscount("whatever", 12.345m, 100m, 0m, 0m));
+        // Null type with a value = percent, like the phone-order screen's default mode.
+        Assert.Equal(30m, PartnerService.ComputeCustomerDiscount(null, 10m, 300m, 0m, 30m));
+        Assert.Equal("percent", PartnerService.NormalizeDiscountType(null));
+        Assert.Equal("amount", PartnerService.NormalizeDiscountType(" Amount "));
+    }
 }
