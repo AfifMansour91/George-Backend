@@ -65,6 +65,7 @@ public class PaymentStorage : StorageBase
         tracked.CardcomApiName = site.CardcomApiName;
         tracked.CardcomApiPasswordEncrypted = site.CardcomApiPasswordEncrypted;
         tracked.CardcomSaveCardEnabled = site.CardcomSaveCardEnabled;
+        tracked.SaveCardConsentMode = site.SaveCardConsentMode;
         tracked.CardcomMaxInstallments = site.CardcomMaxInstallments;
         tracked.PaymentAuthBufferPercent = site.PaymentAuthBufferPercent;
         tracked.PaymentMaxAuthAmount = site.PaymentMaxAuthAmount;
