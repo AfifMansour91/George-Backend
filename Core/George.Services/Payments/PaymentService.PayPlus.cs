@@ -48,6 +48,9 @@ public partial class PaymentService
             ApiPasswordStoredButUnreadable = secretKeyStoredButUnreadable,
             TestMode = site.PayPlusTestMode,
             MaxInstallments = Math.Clamp(site.PayPlusMaxInstallments, 1, 36),
+            // Save-card toggle + consent mode are provider-neutral site settings (the column keeps its Cardcom name).
+            SaveCardEnabled = site.CardcomSaveCardEnabled,
+            SaveCardConsentMode = NormalizeSaveCardConsentMode(site.SaveCardConsentMode),
             // Shared (provider-neutral) hold settings - without these the model default (25%) applied to every
             // PayPlus hold regardless of what the site configured (PEPE: 20% set, 2.50 held as 3.13).
             AuthBufferPercent = site.PaymentAuthBufferPercent,
@@ -339,6 +342,8 @@ public partial class PaymentService
 
         order.PaymentSettleStatus = PaymentSettleStatus.Initiated;
         order.PayPlusPageRequestUid = create.LowProfileId;
+        // Already resolved by the caller (site toggle + consent mode + staff / customer tick).
+        order.SaveCardToWallet = saveCard;
         order.PaymentAuthorizedAmount = sessionAmount;
         order.PaymentGateway = PaymentGatewayProviderId.PayPlus;
         order.ExternalPaymentStatus = null;
@@ -1172,6 +1177,15 @@ public partial class PaymentService
             var fields = _payPlus.ExtractSavedTokenFields(ipnJson);
             if (string.IsNullOrWhiteSpace(fields.Token))
                 return;
+            // create_token was only requested when the card may be kept; a token that still arrives (gateway
+            // default) must not become a customer card against the site / customer decision.
+            if (!ShouldKeepCardInWallet(order))
+            {
+                _logger.LogInformation(
+                    "Order {OrderId}: PayPlus token not kept as a customer card (SaveCardToWallet={Flag}).",
+                    order.Id, order.SaveCardToWallet?.ToString() ?? "site-off");
+                return;
+            }
 
             var customerId = await EnsureOrderCustomerIdAsync(order, cancelToken);
             if (customerId is not int cid || !await _paymentStorage.CustomerExistsAsync(cid, cancelToken))

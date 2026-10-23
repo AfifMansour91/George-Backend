@@ -202,6 +202,8 @@ public partial class GeorgeDBContextBase : DbContext
             entity.Property(e => e.NewOrderManagerReminderBeforeDeliveryMinutes).HasDefaultValue(60);
             entity.Property(e => e.NewOrderManagerReminderNoTreatmentMinutes).HasDefaultValue(15);
             entity.Property(e => e.NewOrderManagerSoundEnabled).HasDefaultValue(true);
+            entity.Property(e => e.NewOrderManagerSoundRepeatUntilAck).HasDefaultValue(false);
+            entity.Property(e => e.NewOrderManagerSoundRepeatIntervalSeconds).HasDefaultValue(30);
             entity.Property(e => e.NewOrderManagerSoundTriggerKiosk).HasDefaultValue(true);
             entity.Property(e => e.NewOrderManagerSoundTriggerWebsite).HasDefaultValue(true);
             entity.Property(e => e.OrderNotPickedUpMinutesAfterScheduledPickup).HasDefaultValue(30);

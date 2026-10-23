@@ -164,11 +164,15 @@ public partial class PaymentService : ServiceBase
         return uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
     }
 
+    /// <param name="saveCard">
+    /// "Keep this card for future purchases" tick from the staff MOTO dialog / the customer's payment-link page.
+    /// Null = nobody was asked: the site's save-card toggle + consent mode decide (<see cref="ResolveSaveCardToWallet"/>).
+    /// </param>
     public async Task<IApiResponse<PaymentSessionRes>> CreatePaymentSessionAsync(
         int orderId,
         string? channel,
         CancellationToken cancelToken = default,
-        bool saveCard = true,
+        bool? saveCard = null,
         string? appOrigin = null)
     {
         var response = new ApiResponse<PaymentSessionRes>();
@@ -188,7 +192,7 @@ public partial class PaymentService : ServiceBase
         if (creds == null || creds.ProviderId == PaymentGatewayProviderId.None)
             return CreateResponse(response, StatusCode.InvalidRequest, "Payment gateway is not configured for this site.");
         if (creds.ProviderId == PaymentGatewayProviderId.PayPlus)
-            return await CreatePaymentSessionForPayPlusAsync(order, creds, channel, saveCard, cancelToken, appOrigin);
+            return await CreatePaymentSessionForPayPlusAsync(order, creds, channel, ResolveSaveCardToWallet(creds, saveCard), cancelToken, appOrigin);
         if (creds.ProviderId != PaymentGatewayProviderId.Cardcom)
             return CreateResponse(response, StatusCode.InvalidRequest, "Unsupported payment gateway.");
 
@@ -255,6 +259,9 @@ public partial class PaymentService : ServiceBase
 
         order.PaymentSettleStatus = PaymentSettleStatus.Initiated;
         order.CardcomLowProfileId = create.LowProfileId;
+        // Cardcom always creates the token (the picking charge needs it); this only decides whether the card
+        // is ALSO kept as a reusable customer card once the callback lands (PersistCardcomTokenAsync).
+        order.SaveCardToWallet = ResolveSaveCardToWallet(creds, saveCard);
         order.PaymentAuthorizedAmount = sessionAmount;
         order.PaymentGateway = PaymentGatewayProviderId.Cardcom;
         order.ExternalPaymentStatus = null;
@@ -318,39 +325,71 @@ public partial class PaymentService : ServiceBase
         }
     }
 
+    /// <summary>
+    /// Sends the customer Giorgio's OWN payment link (/pay/{token}) instead of the gateway's hosted-page URL: Cardcom
+    /// links expire, so customers who opened the SMS late hit a dead page. The gateway session is created only when
+    /// the customer clicks (<see cref="StartPaymentLinkAsync"/>), for Cardcom and PayPlus alike (2026-10-23).
+    /// </summary>
+    /// <param name="saveCard">Staff preset for the customer's "keep my card" tick (sites in consent mode "ask"); null = unchecked.</param>
     public async Task<IApiResponse<SendPaymentSmsRes>> SendPaymentSmsAsync(
         int orderId,
         string? overridePhone,
         CancellationToken cancelToken = default,
-        bool saveCard = true)
+        bool? saveCard = null)
     {
-        var session = await CreatePaymentSessionAsync(orderId, "sms", cancelToken, saveCard);
-        if (session.IsSuccessful && session.Data != null && session.Data.PaymentUrl == null)
-        {
-            // No link because the order is already authorized / captured (the customer paid the earlier SMS while
-            // staff were still on the new-order screen - PEPE 22/9). Not an error: say so, send nothing.
-            var paid = await _paymentStorage.GetOrderForPaymentAsync(orderId, cancelToken);
-            if (paid != null && paid.PaymentSettleStatus is PaymentSettleStatus.Authorized or PaymentSettleStatus.Captured)
-                return new ApiResponse<SendPaymentSmsRes>
-                {
-                    Data = new SendPaymentSmsRes { Sent = false, AlreadyPaid = true, PaymentSettleStatus = paid.PaymentSettleStatus },
-                };
-        }
-        if (!session.IsSuccessful || session.Data?.PaymentUrl == null)
-            return CreateResponse(new ApiResponse<SendPaymentSmsRes>(), StatusCode.InvalidRequest,
-                session.DisplayMessage ?? "Could not create payment link.");
-
         var order = await _paymentStorage.GetOrderForPaymentAsync(orderId, cancelToken);
         if (order == null)
             return CreateResponse(new ApiResponse<SendPaymentSmsRes>(), StatusCode.ItemNotFound);
+
+        // A stale hosted session may have been paid without us hearing about it - sync before deciding "already paid"
+        // (same resume the session creation does), so staff never SMS a link for a paid order (PEPE 22/9).
+        if (order.PaymentSettleStatus == PaymentSettleStatus.Initiated)
+        {
+            var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
+            try
+            {
+                if (creds?.ProviderId == PaymentGatewayProviderId.PayPlus && !string.IsNullOrWhiteSpace(order.PayPlusPageRequestUid))
+                    await SyncPayPlusHostedSessionAsync(order, creds, cancelToken);
+                else if (creds?.ProviderId == PaymentGatewayProviderId.Cardcom && !string.IsNullOrWhiteSpace(order.CardcomLowProfileId))
+                    await ApplyValidatedCallbackAsync(order, order.CardcomLowProfileId, cancelToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Stale hosted session sync before payment SMS failed for order {OrderId}", orderId);
+            }
+            order = await _paymentStorage.GetOrderForPaymentAsync(orderId, cancelToken) ?? order;
+        }
+        if (order.PaymentSettleStatus is PaymentSettleStatus.Authorized or PaymentSettleStatus.Captured
+            && !(OrderNeedsImmediateCharge(order) && IsUnsettledOrderPayment(order.PaymentStatus)))
+        {
+            return new ApiResponse<SendPaymentSmsRes>
+            {
+                Data = new SendPaymentSmsRes { Sent = false, AlreadyPaid = true, PaymentSettleStatus = order.PaymentSettleStatus },
+            };
+        }
+
+        var gateway = await ResolveCredentialsAsync(order.SiteId, cancelToken);
+        if (gateway == null || gateway.ProviderId == PaymentGatewayProviderId.None)
+            return CreateResponse(new ApiResponse<SendPaymentSmsRes>(), StatusCode.InvalidRequest, "Payment gateway is not configured for this site.");
 
         var phone = (overridePhone ?? order.CustomerPhone ?? "").Trim();
         if (string.IsNullOrWhiteSpace(phone))
             return CreateResponse(new ApiResponse<SendPaymentSmsRes>(), StatusCode.InvalidRequest, "Customer phone is required.");
 
-        var body = await BuildPaymentLinkSmsBodyAsync(order, session.Data.PaymentUrl, cancelToken);
+        // Staff preset of the consent tick: the customer still decides on the landing page when the site asks.
+        if (saveCard.HasValue)
+            order.SaveCardToWallet = ResolveSaveCardToWallet(gateway, saveCard);
+
+        var paymentUrl = await GetOrCreatePaymentLinkUrlAsync(order, cancelToken);
+        if (string.IsNullOrWhiteSpace(paymentUrl))
+            return CreateResponse(new ApiResponse<SendPaymentSmsRes>(), StatusCode.InvalidRequest,
+                "Public app URL is not configured (App:PublicBaseUrl) - cannot build the payment link.");
+        if (saveCard.HasValue)
+            await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
+
+        var body = await BuildPaymentLinkSmsBodyAsync(order, paymentUrl, cancelToken);
         if (string.IsNullOrWhiteSpace(body) ||
-            !body.Contains(session.Data.PaymentUrl, StringComparison.OrdinalIgnoreCase))
+            !body.Contains(paymentUrl, StringComparison.OrdinalIgnoreCase))
         {
             await LogEventAsync(order.Id, "PaymentLinkSms", "MissingUrl",
                 "SMS body does not contain payment URL after template replace.", null, null, null, null, cancelToken);
@@ -369,7 +408,7 @@ public partial class PaymentService : ServiceBase
         var masked = MaskPhone(phone);
         return new ApiResponse<SendPaymentSmsRes>
         {
-            Data = new SendPaymentSmsRes { Sent = true, MaskedPhone = masked, PaymentUrl = session.Data.PaymentUrl },
+            Data = new SendPaymentSmsRes { Sent = true, MaskedPhone = masked, PaymentUrl = paymentUrl },
         };
     }
 
@@ -1164,7 +1203,8 @@ public partial class PaymentService : ServiceBase
         var items = order.OrderItem?.Where(i => !i.IsDeleted) ?? Enumerable.Empty<OrderItem>();
         var isoCoinId = CardcomDocumentBuilder.MapCurrencyToIsoCoinId(creds.Currency);
         return CardcomDocumentBuilder.Build(order, items, creds.DocumentTypeToCreate, sendByEmail, sendBySms, isoCoinId,
-            promotionAsLinePrice: creds.InvoicePromotionAsLinePrice);
+            promotionAsLinePrice: creds.InvoicePromotionAsLinePrice,
+            promotionDisplayMode: creds.InvoicePromotionDisplayMode);
     }
 
     private static CardcomTransactionDocument BuildRefundDocumentForOrder(
@@ -1672,6 +1712,8 @@ public partial class PaymentService : ServiceBase
             site.CardcomApiPasswordEncrypted = _tokenProtector.Protect(req.CardcomApiPassword.Trim());
         if (req.CardcomSaveCardEnabled.HasValue)
             site.CardcomSaveCardEnabled = req.CardcomSaveCardEnabled.Value;
+        if (!string.IsNullOrWhiteSpace(req.SaveCardConsentMode))
+            site.SaveCardConsentMode = NormalizeSaveCardConsentMode(req.SaveCardConsentMode);
         if (req.CardcomMaxInstallments.HasValue)
             site.CardcomMaxInstallments = Math.Clamp(req.CardcomMaxInstallments.Value, 1, 36);
         if (req.PaymentAuthBufferPercent.HasValue)
@@ -2053,6 +2095,16 @@ public partial class PaymentService : ServiceBase
 
         if (!string.IsNullOrWhiteSpace(validated.ApprovalNumber))
             order.CardcomApprovalNumber = validated.ApprovalNumber.Trim();
+
+        // The order-level token above is enough for this order's picking charge. Keeping the card as a reusable
+        // customer card is a separate decision (site toggle / per-payment consent).
+        if (!ShouldKeepCardInWallet(order))
+        {
+            _logger.LogInformation(
+                "Order {OrderId}: card kept for this order only (SaveCardToWallet={Flag}); no CustomerPaymentMethod.",
+                order.Id, order.SaveCardToWallet?.ToString() ?? "site-off");
+            return;
+        }
 
         var customerId = await EnsureOrderCustomerIdAsync(order, cancelToken);
         if (customerId is not int cid)
@@ -2504,6 +2556,7 @@ public partial class PaymentService : ServiceBase
             ApiPassword = password,
             ApiPasswordStoredButUnreadable = apiPasswordStoredButUnreadable,
             SaveCardEnabled = site.CardcomSaveCardEnabled,
+            SaveCardConsentMode = NormalizeSaveCardConsentMode(site.SaveCardConsentMode),
             MaxInstallments = Math.Clamp(site.CardcomMaxInstallments, 1, 36),
             AuthBufferPercent = site.PaymentAuthBufferPercent,
             MaxAuthAmount = site.PaymentMaxAuthAmount,
@@ -2514,6 +2567,7 @@ public partial class PaymentService : ServiceBase
             DocumentTypeToCreate = ResolveDocumentTypeFromExtras(site.CardcomProviderExtrasJson),
             SendInvoiceSmsAfterCapture = ResolveSendInvoiceSmsAfterCaptureFromExtras(site.CardcomProviderExtrasJson),
             InvoicePromotionAsLinePrice = site.InvoicePromotionAsLinePrice == true,
+            InvoicePromotionDisplayMode = CardcomDocumentBuilder.ResolvePromotionDisplayMode(site.InvoicePromotionDisplayMode, site.InvoicePromotionAsLinePrice),
             Currency = site.Currency,
         };
     }
@@ -3566,6 +3620,7 @@ public partial class PaymentService : ServiceBase
             CardcomApiName = site.CardcomApiName,
             HasCardcomApiPassword = !string.IsNullOrWhiteSpace(site.CardcomApiPasswordEncrypted),
             CardcomSaveCardEnabled = site.CardcomSaveCardEnabled,
+            SaveCardConsentMode = NormalizeSaveCardConsentMode(site.SaveCardConsentMode),
             CardcomMaxInstallments = site.CardcomMaxInstallments,
             PaymentAuthBufferPercent = site.PaymentAuthBufferPercent,
             PaymentMaxAuthAmount = site.PaymentMaxAuthAmount,
@@ -3583,6 +3638,152 @@ public partial class PaymentService : ServiceBase
             PayPlusLogoUrl = site.PayPlusLogoUrl,
             PayPlusHideIdentificationId = ReadPayPlusHideIdentificationId(site.PayPlusProviderExtrasJson),
         };
+
+    // ---------------------------------------------------------------------------------------------------------
+    // Save-card consent (Site.CardcomSaveCardEnabled + Site.SaveCardConsentMode) - 2026-10-23
+    // ---------------------------------------------------------------------------------------------------------
+
+    public const string SaveCardConsentAuto = "auto";
+    public const string SaveCardConsentAsk = "ask";
+
+    public static string NormalizeSaveCardConsentMode(string? mode) =>
+        string.Equals((mode ?? "").Trim(), SaveCardConsentAsk, StringComparison.OrdinalIgnoreCase)
+            ? SaveCardConsentAsk
+            : SaveCardConsentAuto;
+
+    /// <summary>
+    /// Whether the card of a payment being set up now may be kept as a reusable customer card.
+    /// Site toggle off → never. Mode "auto" → yes (unless the caller explicitly said no). Mode "ask" → only on an
+    /// explicit yes from the staff MOTO toggle / the customer's payment-link tick.
+    /// </summary>
+    public static bool ResolveSaveCardToWallet(SitePaymentCredentials creds, bool? requested)
+    {
+        if (!creds.SaveCardEnabled) return false;
+        if (NormalizeSaveCardConsentMode(creds.SaveCardConsentMode) == SaveCardConsentAsk)
+            return requested == true;
+        return requested ?? true;
+    }
+
+    /// <summary>
+    /// Gate for CustomerPaymentMethod persistence after a successful hosted payment. The per-order decision wins;
+    /// legacy orders (NULL - Woo checkout, sessions created before this field) follow the site toggle.
+    /// </summary>
+    private static bool ShouldKeepCardInWallet(Order order)
+    {
+        if (order.SaveCardToWallet is bool decided) return decided;
+        return order.Site?.CardcomSaveCardEnabled ?? true;
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // Giorgio payment link (/pay/{token}) - the SMS link that never expires - 2026-10-23
+    // ---------------------------------------------------------------------------------------------------------
+
+    private static string NewPaymentLinkToken()
+    {
+        // 24 random bytes → 32 url-safe chars; unique index on Order.PaymentLinkToken.
+        var bytes = System.Security.Cryptography.RandomNumberGenerator.GetBytes(24);
+        return Convert.ToBase64String(bytes).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+    }
+
+    /// <summary>True when the site has a usable payment gateway (Cardcom / PayPlus) configured.</summary>
+    public async Task<bool> IsGatewayConfiguredAsync(int siteId, CancellationToken cancelToken = default)
+    {
+        var creds = await ResolveCredentialsAsync(siteId, cancelToken);
+        return creds != null && creds.ProviderId != PaymentGatewayProviderId.None;
+    }
+
+    /// <summary>Public page the SMS points to; null when App:PublicBaseUrl is not configured.</summary>
+    public string? BuildPaymentLinkUrl(string token)
+    {
+        var appBase = (_publicAppBaseUrl ?? "").TrimEnd('/');
+        return string.IsNullOrWhiteSpace(appBase) ? null : $"{appBase}/pay/{token}";
+    }
+
+    /// <summary>Returns the order's /pay/{token} URL, minting and persisting the token on first use.</summary>
+    public async Task<string?> GetOrCreatePaymentLinkUrlAsync(Order order, CancellationToken cancelToken)
+    {
+        if (string.IsNullOrWhiteSpace(order.PaymentLinkToken))
+        {
+            order.PaymentLinkToken = NewPaymentLinkToken();
+            await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
+        }
+        return BuildPaymentLinkUrl(order.PaymentLinkToken);
+    }
+
+    /// <summary>What the public /pay/{token} page shows (shop, order, amount, consent tick) - no login.</summary>
+    public async Task<IApiResponse<PaymentLinkInfoRes>> GetPaymentLinkInfoAsync(string token, CancellationToken cancelToken = default)
+    {
+        var response = new ApiResponse<PaymentLinkInfoRes>();
+        var order = await _paymentStorage.GetOrderForPaymentByLinkTokenAsync(token, cancelToken);
+        if (order == null)
+            return CreateResponse(response, StatusCode.ItemNotFound, "קישור התשלום אינו תקין.");
+
+        var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
+        var configured = creds != null && creds.ProviderId != PaymentGatewayProviderId.None;
+        var chargeNow = OrderNeedsImmediateCharge(order);
+        var amount = chargeNow
+            ? Math.Round(Math.Max(order.Total ?? 0m, 0m), 2, MidpointRounding.AwayFromZero)
+            : (creds != null ? ComputeAuthorizationAmount(order, creds) : Math.Max(order.Total ?? 0m, 0m));
+        var alreadyPaid = order.PaymentSettleStatus is PaymentSettleStatus.Authorized or PaymentSettleStatus.Captured
+            && !(chargeNow && IsUnsettledOrderPayment(order.PaymentStatus));
+        var cancelled = string.Equals(order.Status, "Cancelled", StringComparison.OrdinalIgnoreCase);
+        var offerSaveCard = configured && creds!.SaveCardEnabled
+            && NormalizeSaveCardConsentMode(creds.SaveCardConsentMode) == SaveCardConsentAsk;
+
+        response.Data = new PaymentLinkInfoRes
+        {
+            OrderId = order.Id,
+            OrderNumber = order.OrderNumber,
+            ShopName = order.Site?.SiteName,
+            CustomerName = order.CustomerName,
+            Amount = amount,
+            IsAuthorizationHold = !chargeNow,
+            PaymentGatewayProvider = creds?.ProviderId ?? PaymentGatewayProviderId.None,
+            OfferSaveCard = offerSaveCard,
+            SaveCardDefault = offerSaveCard && order.SaveCardToWallet == true,
+            AlreadyPaid = alreadyPaid,
+            Cancelled = cancelled,
+            GatewayConfigured = configured,
+        };
+        return response;
+    }
+
+    /// <summary>
+    /// Customer clicked "continue": create a FRESH gateway hosted session now (so the link in the SMS never expires)
+    /// and hand back its URL. Re-clicks resume / re-sync the previous session through the regular session logic.
+    /// </summary>
+    public async Task<IApiResponse<PaymentLinkStartRes>> StartPaymentLinkAsync(
+        string token, bool? saveCard, string? appOrigin, CancellationToken cancelToken = default)
+    {
+        var response = new ApiResponse<PaymentLinkStartRes>();
+        var order = await _paymentStorage.GetOrderForPaymentByLinkTokenAsync(token, cancelToken);
+        if (order == null)
+            return CreateResponse(response, StatusCode.ItemNotFound, "קישור התשלום אינו תקין.");
+        if (string.Equals(order.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+            return CreateResponse(response, StatusCode.InvalidRequest, "ההזמנה בוטלה.");
+
+        // The customer's tick only counts when the site asks; otherwise the site decides (ResolveSaveCardToWallet).
+        var creds = await ResolveCredentialsAsync(order.SiteId, cancelToken);
+        bool? requested = null;
+        if (creds != null && NormalizeSaveCardConsentMode(creds.SaveCardConsentMode) == SaveCardConsentAsk)
+            requested = saveCard ?? (order.SaveCardToWallet == true);
+
+        var session = await CreatePaymentSessionAsync(order.Id, "link", cancelToken, requested, appOrigin);
+        if (!session.IsSuccessful || session.Data == null)
+            return CreateResponse(response, (StatusCode)session.StatusCode, session.DisplayMessage ?? "Could not create payment session.");
+
+        await LogEventAsync(order.Id, "PaymentLinkOpened", "0",
+            session.Data.PaymentUrl == null ? "already paid" : $"session created; saveCard={requested?.ToString() ?? "site"}",
+            null, null, session.Data.AuthorizedAmount, null, cancelToken);
+
+        response.Data = new PaymentLinkStartRes
+        {
+            OrderId = order.Id,
+            PaymentUrl = session.Data.PaymentUrl,
+            AlreadyPaid = session.Data.PaymentUrl == null,
+        };
+        return response;
+    }
 
     private static string MaskPhone(string phone)
     {
@@ -3840,6 +4041,9 @@ public partial class PaymentService : ServiceBase
             gatewayExternalOrderId: null,
             gatewaySiteId: null);
         await SaveOrderPaymentStateAndNotifyAsync(order, cancelToken);
+        // A Ready order charged on the store side (plugin "captured" echo) still owes the after-picking voucher
+        // (no-op unless Ready + Paid; idempotent job key).
+        ScheduleAfterPickingAutoPrint(order);
         await LogWooCommerceGatewayPaymentEventAsync(order.Id, payment, gatewayStatus, isFinished, failureReason: null, cancelToken);
         // Checkout-paid website order: send the invoice SMS like a StoreOS capture (no-op unless Paid+Captured).
         await TrySendInvoiceSmsForWooCapturedOrderAsync(order, cancelToken);
@@ -4028,6 +4232,40 @@ public partial class PaymentService : ServiceBase
     {
         await _paymentStorage.SaveOrderPaymentStateAsync(order, cancelToken).ConfigureAwait(false);
         _partnerWebhooks.FireOrderEvent(order.Id, Partner.PartnerWebhookDispatcher.EventPaymentChanged);
+        ScheduleHeldNewOrderAutoPrint(order);
+    }
+
+    /// <summary>
+    /// Site.HoldNewOrderPrintUntilPaid: a credit order that is still "New" just got its payment (hold authorized /
+    /// charged) - let OrderService print the new-order voucher / sticker it held back on arrival. Runs after every
+    /// payment-state save; OrderService re-checks the site flag and the job keys are idempotent, so this is cheap
+    /// and never duplicates.
+    /// </summary>
+    private void ScheduleHeldNewOrderAutoPrint(Order order)
+    {
+        if (!string.Equals(order.Status, "New", StringComparison.OrdinalIgnoreCase)) return;
+        var settle = (order.PaymentSettleStatus ?? "").Trim();
+        var paymentLanded = string.Equals(order.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase)
+            || order.PaidAt != null
+            || settle.Equals(PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase)
+            || settle.Equals(PaymentSettleStatus.OverAuthRequiresTopup, StringComparison.OrdinalIgnoreCase)
+            || settle.Equals(PaymentSettleStatus.Captured, StringComparison.OrdinalIgnoreCase)
+            || settle.Equals(PaymentSettleStatus.PartiallyCaptured, StringComparison.OrdinalIgnoreCase);
+        if (!paymentLanded) return;
+        var orderId = order.Id;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await using var scope = _serviceScopeFactory.CreateAsyncScope();
+                var orders = scope.ServiceProvider.GetRequiredService<OrderService>();
+                await orders.TryEnqueueHeldNewOrderAutoPrintAsync(orderId, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Held new-order auto print after payment failed for order {OrderId}", orderId);
+            }
+        }, CancellationToken.None);
     }
 
     /// <summary>Persist payment columns after WooCommerce gateway update.</summary>

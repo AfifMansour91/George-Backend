@@ -2282,7 +2282,7 @@ namespace George.Services
         /// Backend auto-print for new orders, so printing works even when no user has Orders page open.
         /// Enqueues idempotent job type <c>VoucherAuto:NewImmediate</c>.
         /// </summary>
-        private async Task TryEnqueueNewOrderAutoPrintAsync(Order order, CancellationToken cancelToken)
+        private async Task TryEnqueueNewOrderAutoPrintAsync(Order order, CancellationToken cancelToken, bool afterPaymentLanded = false)
         {
             if (!string.Equals(order.Status, "New", StringComparison.OrdinalIgnoreCase))
                 return;
@@ -2290,6 +2290,16 @@ namespace George.Services
             var site = await _siteStorage.GetSiteAsync(order.SiteId, cancelToken).ConfigureAwait(false);
             if (site == null || site.AutoPrintEnabled != true)
                 return;
+
+            // Site.HoldNewOrderPrintUntilPaid (Zano): a credit order whose customer still has to complete the payment
+            // step prints only once the payment lands. On such sites the payment hook (PaymentService →
+            // TryEnqueueHeldNewOrderAutoPrintAsync) is the ONLY path that prints credit orders, so the create path
+            // and the hook never race on the same (site, order, jobType) key.
+            if (site.HoldNewOrderPrintUntilPaid == true && IsCreditOrderWithCustomerPaymentStep(order))
+            {
+                if (!afterPaymentLanded || IsCreditOrderHeldForCustomerPayment(order))
+                    return;
+            }
 
             // Future (scheduled) orders use their own immediate-print toggle (PrintFutureImmediate);
             // same-day orders use PrintNewOrderImmediate. Without this split a future order printed
@@ -2313,6 +2323,59 @@ namespace George.Services
             // of the voucher toggles. "Label*" job types are routed by the agent to the label printer.
             if (site.PrintCustomerLabelOnNewOrder == true)
                 await EnqueueNewOrderCustomerLabelPrintAsync(site, order, cancelToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Payment landed on an order that is still "New" (hosted page completed, J5 hold placed, SMS link paid,
+        /// saved-card hold): on sites that hold the new-order prints until payment (Site.HoldNewOrderPrintUntilPaid)
+        /// this enqueues the voucher / customer sticker now. Called from PaymentService after every payment-state
+        /// save; the job keys are idempotent per (site, order, jobType).
+        /// </summary>
+        public async Task TryEnqueueHeldNewOrderAutoPrintAsync(int orderId, CancellationToken cancelToken = default)
+        {
+            try
+            {
+                var order = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken).ConfigureAwait(false);
+                if (order == null || !string.Equals(order.Status, "New", StringComparison.OrdinalIgnoreCase))
+                    return;
+                var site = await _siteStorage.GetSiteAsync(order.SiteId, cancelToken).ConfigureAwait(false);
+                if (site == null || site.HoldNewOrderPrintUntilPaid != true)
+                    return;
+                await TryEnqueueNewOrderAutoPrintAsync(order, cancelToken, afterPaymentLanded: true).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Held new-order auto print after payment failed for order {OrderId}", orderId);
+            }
+        }
+
+        /// <summary>
+        /// Credit order whose CUSTOMER completes the payment (website checkout, SMS payment link, saved card /
+        /// gateway session). Phone-credit orders are excluded: the staff takes the card later, so there is no
+        /// customer step for the new-order print to wait for.
+        /// </summary>
+        private static bool IsCreditOrderWithCustomerPaymentStep(Order o)
+        {
+            var m = (o.PaymentMethod ?? "").Trim();
+            if (m.Equals("CreditPhone", StringComparison.OrdinalIgnoreCase)) return false;
+            return m.Equals("CreditCard", StringComparison.OrdinalIgnoreCase)
+                || m.Equals("CreditSms", StringComparison.OrdinalIgnoreCase)
+                || m.Equals("SavedCard", StringComparison.OrdinalIgnoreCase)
+                || !string.IsNullOrWhiteSpace(o.PaymentGateway)
+                || !string.IsNullOrWhiteSpace(o.CardcomLowProfileId);
+        }
+
+        /// <summary>
+        /// Site.HoldNewOrderPrintUntilPaid: nothing landed yet for the credit order - no charge and no authorization
+        /// hold (an authorized / over-auth hold means the card details were entered and approved).
+        /// </summary>
+        private static bool IsCreditOrderHeldForCustomerPayment(Order o)
+        {
+            if (!IsCreditOrderWithCustomerPaymentStep(o)) return false;
+            if (IsOrderPaymentChargedOrPaid(o)) return false;
+            var settle = (o.PaymentSettleStatus ?? "").Trim();
+            return !settle.Equals(PaymentSettleStatus.Authorized, StringComparison.OrdinalIgnoreCase)
+                && !settle.Equals(PaymentSettleStatus.OverAuthRequiresTopup, StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>

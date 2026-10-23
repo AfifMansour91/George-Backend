@@ -308,6 +308,9 @@ namespace George.Common.Request
         public bool? ManagerSoundEnabled { get; set; }
         public string? ManagerSoundKey { get; set; }
         public NewOrderSoundTriggerSourcesReq? ManagerSoundTriggerSources { get; set; }
+        /// <summary>Ring again every ManagerSoundRepeatIntervalSeconds until the alert is confirmed or the order leaves "New".</summary>
+        public bool? ManagerSoundRepeatUntilAck { get; set; }
+        public int? ManagerSoundRepeatIntervalSeconds { get; set; }
         public string? ManagerMessageChannel { get; set; }
         public string? ManagerPhoneNumbers { get; set; }
         public string? ManagerMessageTemplate { get; set; }

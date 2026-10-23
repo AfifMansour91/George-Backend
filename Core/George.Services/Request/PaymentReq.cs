@@ -22,6 +22,8 @@ public class UpdateSitePaymentSettingsReq
     public string? CardcomApiName { get; set; }
     public string? CardcomApiPassword { get; set; }
     public bool? CardcomSaveCardEnabled { get; set; }
+    /// <summary>Sub-option of the save-card toggle (both gateways): "auto" | "ask" (staff / customer consent per payment).</summary>
+    public string? SaveCardConsentMode { get; set; }
     /// <summary>Max installments on the hosted payment page for immediate charges (1-36). 1 hides the selector.</summary>
     public int? CardcomMaxInstallments { get; set; }
     public int? PaymentAuthBufferPercent { get; set; }
@@ -49,4 +51,11 @@ public class UpdateSitePaymentSettingsReq
     /// new one). Without this, switching provider while holds are outstanding is rejected.
     /// </summary>
     public bool ForceProviderSwitch { get; set; }
+}
+
+/// <summary>Customer clicked "continue to payment" on Giorgio's /pay/{token} page.</summary>
+public class StartPaymentLinkReq
+{
+    /// <summary>Customer's "save my card for future purchases" tick (only offered when the site asks for consent).</summary>
+    public bool? SaveCard { get; set; }
 }

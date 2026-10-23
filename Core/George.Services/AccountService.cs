@@ -483,6 +483,8 @@ namespace George.Services
                 NewOrderManagerSoundTriggerKiosk = trig?.Kiosk ?? true,
                 NewOrderManagerSoundTriggerWhatsapp = trig?.Whatsapp ?? false,
                 NewOrderManagerSoundTriggerPhone = trig?.Phone ?? false,
+                NewOrderManagerSoundRepeatUntilAck = n?.ManagerSoundRepeatUntilAck ?? false,
+                NewOrderManagerSoundRepeatIntervalSeconds = Math.Clamp(n?.ManagerSoundRepeatIntervalSeconds ?? 30, 10, 600),
                 NewOrderManagerMessageChannel = string.IsNullOrWhiteSpace(n?.ManagerMessageChannel) ? null : n.ManagerMessageChannel,
                 NewOrderManagerPhoneNumbers = string.IsNullOrWhiteSpace(n?.ManagerPhoneNumbers) ? null : n.ManagerPhoneNumbers,
                 NewOrderManagerMessageTemplate = string.IsNullOrWhiteSpace(n?.ManagerMessageTemplate) ? null : n.ManagerMessageTemplate,

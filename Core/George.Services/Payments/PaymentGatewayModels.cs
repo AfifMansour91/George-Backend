@@ -273,6 +273,8 @@ public sealed class SitePaymentCredentials
     public string? ApiPassword { get; init; }
     public bool ApiPasswordStoredButUnreadable { get; init; }
     public bool SaveCardEnabled { get; init; } = true;
+    /// <summary>Site.SaveCardConsentMode: "auto" | "ask" - whether keeping the card as a reusable customer card needs a per-payment tick.</summary>
+    public string SaveCardConsentMode { get; init; } = "auto";
     /// <summary>Max installments on the hosted payment page for immediate charges. 1 = selector hidden.</summary>
     public int MaxInstallments { get; init; } = 1;
     public int AuthBufferPercent { get; init; } = 25;
@@ -290,5 +292,7 @@ public sealed class SitePaymentCredentials
     public bool SendInvoiceSmsAfterCapture { get; init; } = true;
     /// <summary>Site.InvoicePromotionAsLinePrice - Cardcom invoice prints promotion lines at net ₪/unit + promotion name. Off by default.</summary>
     public bool InvoicePromotionAsLinePrice { get; init; }
+    /// <summary>Site.InvoicePromotionDisplayMode resolved: "discount_total" | "net_price" | "line_discount".</summary>
+    public string InvoicePromotionDisplayMode { get; init; } = CardcomDocumentBuilder.PromotionDisplayDiscountTotal;
     public string Currency { get; init; } = "ILS";
 }

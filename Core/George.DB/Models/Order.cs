@@ -351,6 +351,21 @@ public partial class Order
     public string? PayPlusPageRequestUid { get; set; }
 
     /// <summary>
+    /// Giorgio's own customer payment link (/pay/{token}): the SMS carries this instead of the gateway's hosted-page
+    /// URL, which expires. Clicking it creates a fresh gateway session and redirects (2026-10-23).
+    /// </summary>
+    [StringLength(40)]
+    public string? PaymentLinkToken { get; set; }
+
+    /// <summary>
+    /// Whether the card used for this order may be kept as a reusable customer card (CustomerPaymentMethod).
+    /// Decided when the hosted session is created: site setting (auto) or the staff / customer toggle (ask).
+    /// NULL = legacy order, follow the site's save-card setting. The order-level token for the picking charge is
+    /// stored regardless.
+    /// </summary>
+    public bool? SaveCardToWallet { get; set; }
+
+    /// <summary>
     /// PayPlus transaction_uid. Unlike Cardcom, the SAME id is used for both the authorization hold and its
     /// later capture (Transactions/ChargeByTransactionUID) - no separate reusable token/approval pair needed.
     /// </summary>

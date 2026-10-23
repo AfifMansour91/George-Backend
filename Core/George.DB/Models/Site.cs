@@ -197,6 +197,12 @@ public partial class Site
     public bool? HideUnpaidCreditOrdersInTreatment { get; set; }
 
     /// <summary>
+    /// When true, the new-order auto prints (voucher + customer sticker) of a credit order wait until its payment
+    /// is authorized / charged; abandoned checkouts never print (Zano 2026-10-23). Cash / on-account orders print as usual.
+    /// </summary>
+    public bool? HoldNewOrderPrintUntilPaid { get; set; }
+
+    /// <summary>
     /// Promotion settings (Sprint 4 - `Sprint4/מבצעים.md` "הגדרות מבצעים").
     /// Default for BxPY over-quantity pricing: "same_price" (pro-rated) | "full_price" (regular). Null = "full_price".
     /// </summary>
@@ -293,6 +299,16 @@ public partial class Site
     public bool? InvoicePromotionAsLinePrice { get; set; }
 
     /// <summary>
+    /// Cardcom invoice layout for promotion lines: "discount_total" (catalog price per line + one "הנחה" line before
+    /// the total), "net_price" (deal ₪/unit in the line, no discount line - the old InvoicePromotionAsLinePrice=1) or
+    /// "line_discount" (catalog price per line + a negative "הנחה - {promotion} ({product})" line right under each
+    /// discounted product; Cardcom's recommendation 2026-10-14 - its v11 Products schema has no per-line discount
+    /// field, so the discount is its own line next to the product). NULL = derive from InvoicePromotionAsLinePrice.
+    /// </summary>
+    [StringLength(20)]
+    public string? InvoicePromotionDisplayMode { get; set; }
+
+    /// <summary>
     /// When true, order printouts (voucher/A4) include the permanent customer note (הערה קבועה,
     /// Customer.Notes) in the order-notes line. NULL/0 = not printed (default).
     /// </summary>
@@ -377,6 +393,14 @@ public partial class Site
     public string? CardcomApiPasswordEncrypted { get; set; }
 
     public bool CardcomSaveCardEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Sub-option of <see cref="CardcomSaveCardEnabled"/> (both gateways): "auto" = every card is kept as a reusable
+    /// customer card; "ask" = only when the staff member (MOTO) or the customer (payment-link page) ticked
+    /// "save my card for future purchases" (2026-10-23).
+    /// </summary>
+    [StringLength(10)]
+    public string SaveCardConsentMode { get; set; } = "auto";
 
     /// <summary>
     /// Max installments (תשלומים) offered on the Cardcom hosted payment page for IMMEDIATE charges only.

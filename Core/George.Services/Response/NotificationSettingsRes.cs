@@ -45,6 +45,8 @@ public class NewOrderSettingsRes
     public bool? ManagerSoundEnabled { get; set; }
     public string? ManagerSoundKey { get; set; }
     public NewOrderSoundTriggerSourcesRes? ManagerSoundTriggerSources { get; set; }
+    public bool? ManagerSoundRepeatUntilAck { get; set; }
+    public int? ManagerSoundRepeatIntervalSeconds { get; set; }
     public string? ManagerMessageChannel { get; set; }
     public string? ManagerPhoneNumbers { get; set; }
     public string? ManagerMessageTemplate { get; set; }

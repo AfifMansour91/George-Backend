@@ -108,6 +108,8 @@ public class SitePaymentSettingsRes
     /// <summary>Encrypted password exists but cannot be decrypted (e.g. after server restart before keys were persisted).</summary>
     public bool CardcomApiPasswordNeedsResave { get; set; }
     public bool CardcomSaveCardEnabled { get; set; }
+    /// <summary>Sub-option of the save-card toggle (both gateways): "auto" | "ask".</summary>
+    public string SaveCardConsentMode { get; set; } = "auto";
     /// <summary>Max installments on the hosted payment page for immediate charges. 1 = selector hidden.</summary>
     public int CardcomMaxInstallments { get; set; } = 1;
     public int PaymentAuthBufferPercent { get; set; }
@@ -130,4 +132,33 @@ public class SitePaymentSettingsRes
     public string? PayPlusCssUrl { get; set; }
     public string? PayPlusLogoUrl { get; set; }
     public bool PayPlusHideIdentificationId { get; set; }
+}
+
+/// <summary>What Giorgio's /pay/{token} page shows before redirecting to the gateway.</summary>
+public class PaymentLinkInfoRes
+{
+    public int OrderId { get; set; }
+    public string? OrderNumber { get; set; }
+    public string? ShopName { get; set; }
+    public string? CustomerName { get; set; }
+    /// <summary>Amount the hosted page will hold / charge.</summary>
+    public decimal Amount { get; set; }
+    /// <summary>true = authorization hold (charged after picking); false = immediate charge.</summary>
+    public bool IsAuthorizationHold { get; set; }
+    public string PaymentGatewayProvider { get; set; } = "none";
+    /// <summary>The site asks the customer whether to keep the card (Site.SaveCardConsentMode = ask).</summary>
+    public bool OfferSaveCard { get; set; }
+    /// <summary>Default state of the consent tick (a staff preset from the SMS dialog, else false).</summary>
+    public bool SaveCardDefault { get; set; }
+    public bool AlreadyPaid { get; set; }
+    public bool Cancelled { get; set; }
+    public bool GatewayConfigured { get; set; }
+}
+
+public class PaymentLinkStartRes
+{
+    public int OrderId { get; set; }
+    /// <summary>Fresh gateway hosted-page URL to redirect the customer to; null when already paid.</summary>
+    public string? PaymentUrl { get; set; }
+    public bool AlreadyPaid { get; set; }
 }

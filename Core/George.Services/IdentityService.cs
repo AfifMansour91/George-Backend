@@ -139,7 +139,8 @@ namespace George.Services
 			return response;
         }
 
-        public async Task<IApiResponse<bool>> SendLoginOtpAsync(SendLoginOtpReq request, CancellationToken cancelToken = default)
+        /// <param name="requestOriginHost">Host of the login page that asked for the code - used for the SMS domain-bound autofill line.</param>
+        public async Task<IApiResponse<bool>> SendLoginOtpAsync(SendLoginOtpReq request, CancellationToken cancelToken = default, string? requestOriginHost = null)
         {
             IApiResponse<bool> response = new ApiResponse<bool>();
 
@@ -198,7 +199,7 @@ namespace George.Services
                     // Send the otp via SMS
                     // Using default language ID (1 for English, can be adjusted based on user preference)
                     int languageId = 1; // Default to English, can be retrieved from user model if available
-                    bool smsSent = await _smsProvider.SendOtpMessageAsync(model.Phone, languageId, otp!, cancelToken).ConfigureAwait(false);
+                    bool smsSent = await _smsProvider.SendOtpMessageAsync(model.Phone, languageId, otp!, cancelToken, requestOriginHost).ConfigureAwait(false);
                     
                     if (smsSent)
                     {

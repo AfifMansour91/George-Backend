@@ -36,7 +36,7 @@ public class PaymentController : GeorgeControllerBase, IAuthUserProvider
             && Uri.TryCreate(Request.Headers.Referer.ToString(), UriKind.Absolute, out var referer))
             appOrigin = referer.GetLeftPart(UriPartial.Authority);
         return await SafeCallWithErrorCatchingAsync(() =>
-            _paymentSvc.CreatePaymentSessionAsync(orderId, channel, cancelToken, saveCard ?? true, appOrigin));
+            _paymentSvc.CreatePaymentSessionAsync(orderId, channel, cancelToken, saveCard, appOrigin));
     }
 
     [HttpPost("Order/{orderId:int}/SendSms")]
@@ -47,7 +47,7 @@ public class PaymentController : GeorgeControllerBase, IAuthUserProvider
         CancellationToken cancelToken = default)
     {
         return await SafeCallWithErrorCatchingAsync(() =>
-            _paymentSvc.SendPaymentSmsAsync(orderId, req?.OverridePhone, cancelToken, req?.SaveCard ?? true));
+            _paymentSvc.SendPaymentSmsAsync(orderId, req?.OverridePhone, cancelToken, req?.SaveCard));
     }
 
     [HttpPost("Order/{orderId:int}/Finalize")]

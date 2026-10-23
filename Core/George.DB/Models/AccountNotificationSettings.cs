@@ -48,6 +48,13 @@ public partial class AccountNotificationSettings
     [Column("NewOrder_ManagerSoundTriggerPhone")]
     public bool NewOrderManagerSoundTriggerPhone { get; set; }
 
+    /// <summary>Ring again every N seconds until a user confirms the alert or the order leaves "New" (Meshek Basar 2026-10-23).</summary>
+    [Column("NewOrder_ManagerSoundRepeatUntilAck")]
+    public bool NewOrderManagerSoundRepeatUntilAck { get; set; }
+
+    [Column("NewOrder_ManagerSoundRepeatIntervalSeconds")]
+    public int NewOrderManagerSoundRepeatIntervalSeconds { get; set; }
+
     [Column("NewOrder_ManagerMessageChannel")]
     [StringLength(20)]
     public string? NewOrderManagerMessageChannel { get; set; }

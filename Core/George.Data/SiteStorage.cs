@@ -262,6 +262,7 @@ namespace George.Data
             if (updated.PrintLabelsAfterPicking.HasValue) dbSite.PrintLabelsAfterPicking = updated.PrintLabelsAfterPicking;
             if (updated.PrintCustomerLabelOnNewOrder.HasValue) dbSite.PrintCustomerLabelOnNewOrder = updated.PrintCustomerLabelOnNewOrder;
             if (updated.HideUnpaidCreditOrdersInTreatment.HasValue) dbSite.HideUnpaidCreditOrdersInTreatment = updated.HideUnpaidCreditOrdersInTreatment;
+            if (updated.HoldNewOrderPrintUntilPaid.HasValue) dbSite.HoldNewOrderPrintUntilPaid = updated.HoldNewOrderPrintUntilPaid;
             if (updated.AskBagsCountAtPickingFinish.HasValue) dbSite.AskBagsCountAtPickingFinish = updated.AskBagsCountAtPickingFinish;
             if (updated.ConfirmPickingAfterScan.HasValue) dbSite.ConfirmPickingAfterScan = updated.ConfirmPickingAfterScan;
             if (updated.ScanCompletesReadyOrder.HasValue) dbSite.ScanCompletesReadyOrder = updated.ScanCompletesReadyOrder;
@@ -279,7 +280,23 @@ namespace George.Data
             if (updated.HideUnitWeightInOrders.HasValue) dbSite.HideUnitWeightInOrders = updated.HideUnitWeightInOrders;
             // Only 2 or 3 are meaningful; anything else keeps the stored value (NULL = 2).
             if (updated.PickingWeightDecimals is 2 or 3) dbSite.PickingWeightDecimals = updated.PickingWeightDecimals;
-            if (updated.InvoicePromotionAsLinePrice.HasValue) dbSite.InvoicePromotionAsLinePrice = updated.InvoicePromotionAsLinePrice;
+            // InvoicePromotionDisplayMode supersedes the bool; keep both in sync so older clients and the new
+            // 3-way select agree ("net_price" <=> InvoicePromotionAsLinePrice = true).
+            if (!string.IsNullOrWhiteSpace(updated.InvoicePromotionDisplayMode))
+            {
+                var mode = updated.InvoicePromotionDisplayMode.Trim().ToLowerInvariant();
+                if (mode is "discount_total" or "net_price" or "line_discount")
+                {
+                    dbSite.InvoicePromotionDisplayMode = mode;
+                    dbSite.InvoicePromotionAsLinePrice = mode == "net_price";
+                }
+            }
+            else if (updated.InvoicePromotionAsLinePrice.HasValue)
+            {
+                dbSite.InvoicePromotionAsLinePrice = updated.InvoicePromotionAsLinePrice;
+                if (dbSite.InvoicePromotionDisplayMode is null or "net_price" or "discount_total")
+                    dbSite.InvoicePromotionDisplayMode = updated.InvoicePromotionAsLinePrice == true ? "net_price" : "discount_total";
+            }
             if (updated.ShowCustomerProfileNoteInPrints.HasValue) dbSite.ShowCustomerProfileNoteInPrints = updated.ShowCustomerProfileNoteInPrints;
             if (updated.ShowOrderHandler.HasValue) dbSite.ShowOrderHandler = updated.ShowOrderHandler;
             if (updated.UseStructuredOrderLineDisplay.HasValue) dbSite.UseStructuredOrderLineDisplay = updated.UseStructuredOrderLineDisplay;

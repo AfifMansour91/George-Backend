@@ -216,20 +216,27 @@ namespace George.Providers
             return await SendAsync(phone, MessageType.ValidatePhone, languageId, tokens, cancelToken);
         }
 
-        public async Task<bool> SendOtpMessageAsync(string phone, int languageId, string otp, CancellationToken cancelToken = default)
+        /// <param name="requestOriginHost">
+        /// Host of the page that asked for the code (login request Origin header). The domain-bound last line
+        /// (<c>@host #code</c>) only triggers the one-tap autofill when it matches the page the user is on, and the
+        /// staff app is served from more than one host (giorgio.co.il / storeos.co.il) - so the request's own host
+        /// wins over the configured default.
+        /// </param>
+        public async Task<bool> SendOtpMessageAsync(string phone, int languageId, string otp, CancellationToken cancelToken = default, string? requestOriginHost = null)
         {
             VerifyInit();
 
             _logger.LogTrace($"Sending OTP SMS to {phone}");
 
-            // Human-readable line + standalone code line helps iOS/Android autofill. Optional last line @host #code for Chrome Web OTP (host must match page origin).
-            var lines = new List<string>
-            {
-                $"קוד האימות שלך הוא: {otp}",
-                otp
-            };
-            if (_otpWebOriginHost.Length > 0)
-                lines.Add($"@{_otpWebOriginHost} #{otp}");
+            // Exactly ONE human-readable code line, then (optionally) the domain-bound line. The earlier version also
+            // repeated the bare code on its own line - three copies of the code in one SMS; iOS / Android autofill
+            // then showed no one-tap suggestion and the field reports called it "a long text with two codes".
+            var lines = new List<string> { $"קוד האימות שלך הוא: {otp}" };
+            var boundHost = NormalizeOtpWebOriginHost(requestOriginHost);
+            if (boundHost.Length == 0 || boundHost.Equals("localhost", StringComparison.OrdinalIgnoreCase) || boundHost.StartsWith("127.", StringComparison.Ordinal))
+                boundHost = _otpWebOriginHost;
+            if (boundHost.Length > 0)
+                lines.Add($"@{boundHost} #{otp}");
             string otpText = string.Join(Environment.NewLine, lines);
 
             var phones = new List<string>() { phone };

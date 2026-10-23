@@ -55,7 +55,15 @@ namespace George.Api.Controllers
         [ProducesResponseType(typeof(IApiResponse<bool>), 200)]
         public async Task<IActionResult> SendLoginOtpAsync(SendLoginOtpReq request, CancellationToken cancelToken = default)
         {
-            return await SafeCallWithErrorCatchingAsync(() => _identitySvc.SendLoginOtpAsync(request, cancelToken));
+            // The SMS's domain-bound autofill line (@host #code) must name the host the login page is served from
+            // (giorgio.co.il / storeos.co.il) - take it from the request, fall back to the configured default.
+            string? originHost = null;
+            var origin = Request.Headers.Origin.ToString();
+            if (string.IsNullOrWhiteSpace(origin))
+                origin = Request.Headers.Referer.ToString();
+            if (Uri.TryCreate(origin, UriKind.Absolute, out var originUri))
+                originHost = originUri.Host;
+            return await SafeCallWithErrorCatchingAsync(() => _identitySvc.SendLoginOtpAsync(request, cancelToken, originHost));
         }
 
         [AllowAnonymous]

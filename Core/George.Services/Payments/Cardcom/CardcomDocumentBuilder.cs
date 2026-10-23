@@ -8,6 +8,29 @@ public static class CardcomDocumentBuilder
     public const string DefaultDocumentType = "TaxInvoiceAndReceipt";
     public const string RefundDocumentType = "TaxInvoiceAndReceiptRefund";
 
+    /// <summary>Catalog price on every line + one "הנחה" ADJUSTMENT line before the total (default).</summary>
+    public const string PromotionDisplayDiscountTotal = "discount_total";
+    /// <summary>Deal ₪/unit in the product line with the promotion name; no discount line (InvoicePromotionAsLinePrice = 1).</summary>
+    public const string PromotionDisplayNetPrice = "net_price";
+    /// <summary>
+    /// Catalog price on the product line + a negative "הנחה - {promotion} ({product})" line right under it. Cardcom's
+    /// own recommendation (2026-10-14) was a per-line discount; its v11 Products schema only has ProductID /
+    /// Description / Quantity / UnitCost / TotalLineCost / IsVatFree / IsGiftCard, so the discount is its own line
+    /// next to the product. Coupon / manual discounts still reconcile through ADJUSTMENT.
+    /// </summary>
+    public const string PromotionDisplayLineDiscount = "line_discount";
+    /// <summary>Cardcom rejects negative TotalLineCost on documents; keep every negative line as quantity 1.</summary>
+    public const string DiscountLineProductId = "DISCOUNT";
+
+    /// <summary>Site mode column first; legacy bool second (true = net_price); default discount_total.</summary>
+    public static string ResolvePromotionDisplayMode(string? mode, bool? legacyAsLinePrice)
+    {
+        var m = (mode ?? "").Trim().ToLowerInvariant();
+        if (m is PromotionDisplayDiscountTotal or PromotionDisplayNetPrice or PromotionDisplayLineDiscount)
+            return m;
+        return legacyAsLinePrice == true ? PromotionDisplayNetPrice : PromotionDisplayDiscountTotal;
+    }
+
     public static CardcomTransactionDocument Build(
         Order order,
         IEnumerable<OrderItem> items,
@@ -16,8 +39,10 @@ public static class CardcomDocumentBuilder
         bool sendBySms = false,
         int isoCoinId = 1,
         decimal? amountOverride = null,
-        bool promotionAsLinePrice = false)
+        bool promotionAsLinePrice = false,
+        string? promotionDisplayMode = null)
     {
+        var displayMode = ResolvePromotionDisplayMode(promotionDisplayMode, promotionAsLinePrice);
         List<CardcomDocumentProductLine> lines;
         if (amountOverride is > 0)
         {
@@ -37,7 +62,7 @@ public static class CardcomDocumentBuilder
         }
         else
         {
-            lines = BuildProductLines(order, items, promotionAsLinePrice).ToList();
+            lines = BuildProductLines(order, items, displayMode).ToList();
             if (lines.Count == 0)
             {
                 var amount = order.Total ?? order.SubTotal ?? 0m;
@@ -160,8 +185,10 @@ public static class CardcomDocumentBuilder
     /// 2.17 × 60.00 = 130.20 - so the document needs no "הנחה" adjustment line for promotions. Off (default) keeps
     /// the catalog price per unit on every line and reconciles through the ADJUSTMENT line.
     /// </param>
-    private static IEnumerable<CardcomDocumentProductLine> BuildProductLines(Order order, IEnumerable<OrderItem> items, bool promotionAsLinePrice = false)
+    private static IEnumerable<CardcomDocumentProductLine> BuildProductLines(Order order, IEnumerable<OrderItem> items, string displayMode = PromotionDisplayDiscountTotal)
     {
+        var promotionAsLinePrice = displayMode == PromotionDisplayNetPrice;
+        var promotionAsLineDiscount = displayMode == PromotionDisplayLineDiscount;
         // Bundle children are informational (the parent line carries the bundle money) - never invoice them.
         foreach (var item in BundleOrderLines.WithoutChildren(items.Where(i => !i.IsDeleted)).OrderBy(i => i.SortOrder).ThenBy(i => i.Id))
         {
@@ -224,6 +251,32 @@ public static class CardcomDocumentBuilder
                 UnitCost = unitCost.Value,
                 TotalLineCost = lineTotal,
             };
+
+            // Line-discount mode: the product keeps its catalog price above, and its discount is the very next
+            // line, named after the promotion and the product, so the customer sees which product got the deal
+            // (Cardcom support 2026-10-14; הקצב בעיר). Net of both lines = TotalPrice − DiscountAmount, so no
+            // document-level "הנחה" is needed for promotions.
+            if (promotionAsLineDiscount && item.DiscountAmount is > 0m && lineTotal is > 0m)
+            {
+                var discount = Math.Round(Math.Min(item.DiscountAmount.Value, lineTotal.Value), 2, MidpointRounding.AwayFromZero);
+                if (discount > 0m)
+                {
+                    var promotionName = item.Promotion?.Name?.Trim();
+                    var productName = (item.Title ?? "").Trim();
+                    var discountDescription = string.IsNullOrEmpty(promotionName) ? "הנחה - מבצע" : $"הנחה - {promotionName}";
+                    if (!string.IsNullOrEmpty(productName))
+                        discountDescription += $" ({productName})";
+                    if (discountDescription.Length > 250)
+                        discountDescription = discountDescription[..250];
+                    yield return new CardcomDocumentProductLine
+                    {
+                        ProductId = DiscountLineProductId,
+                        Description = discountDescription,
+                        Quantity = 1,
+                        UnitCost = -discount,
+                    };
+                }
+            }
         }
 
         var shipping = order.ShippingCost ?? 0m;

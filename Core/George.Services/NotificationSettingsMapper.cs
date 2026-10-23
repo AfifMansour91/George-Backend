@@ -20,6 +20,8 @@ public static class NotificationSettingsMapper
                     Whatsapp = e.NewOrderManagerSoundTriggerWhatsapp,
                     Phone = e.NewOrderManagerSoundTriggerPhone
                 },
+                ManagerSoundRepeatUntilAck = e.NewOrderManagerSoundRepeatUntilAck,
+                ManagerSoundRepeatIntervalSeconds = e.NewOrderManagerSoundRepeatIntervalSeconds,
                 ManagerMessageChannel = e.NewOrderManagerMessageChannel,
                 ManagerPhoneNumbers = e.NewOrderManagerPhoneNumbers,
                 ManagerMessageTemplate = e.NewOrderManagerMessageTemplate,

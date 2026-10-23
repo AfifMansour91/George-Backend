@@ -279,6 +279,8 @@ namespace George.Data
                 existing.NewOrderManagerSoundTriggerKiosk = settings.NewOrderManagerSoundTriggerKiosk;
                 existing.NewOrderManagerSoundTriggerWhatsapp = settings.NewOrderManagerSoundTriggerWhatsapp;
                 existing.NewOrderManagerSoundTriggerPhone = settings.NewOrderManagerSoundTriggerPhone;
+                existing.NewOrderManagerSoundRepeatUntilAck = settings.NewOrderManagerSoundRepeatUntilAck;
+                existing.NewOrderManagerSoundRepeatIntervalSeconds = settings.NewOrderManagerSoundRepeatIntervalSeconds;
                 existing.NewOrderManagerMessageChannel = settings.NewOrderManagerMessageChannel;
                 existing.NewOrderManagerPhoneNumbers = settings.NewOrderManagerPhoneNumbers;
                 existing.NewOrderManagerMessageTemplate = settings.NewOrderManagerMessageTemplate;

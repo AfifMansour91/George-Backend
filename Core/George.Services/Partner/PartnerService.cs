@@ -541,19 +541,18 @@ namespace George.Services.Partner
                 response.Data = new PartnerPaymentLinkRes { OrderId = orderId, PaymentUrl = null, AlreadyPaid = true };
                 return response;
             }
-            var session = await _paymentService.CreatePaymentSessionAsync(orderId, channel: null, cancelToken).ConfigureAwait(false);
-            if (!session.IsSuccessful || session.Data == null)
-            {
-                var code = (session.Description ?? "").Contains("gateway", StringComparison.OrdinalIgnoreCase)
-                    ? PartnerErrorCode.GatewayNotConfigured
-                    : PartnerErrorCode.InvalidRequest;
-                return Fail(response, (StatusCode)session.StatusCode, code, session.Description ?? "Could not create a payment link.");
-            }
+            // Giorgio's own /pay/{token} link (2026-10-23): the gateway's hosted-page URL expires, so the vendor's
+            // WhatsApp agent now hands out a link that creates a fresh gateway session when the customer clicks.
+            if (!await _paymentService.IsGatewayConfiguredAsync(order.SiteId, cancelToken).ConfigureAwait(false))
+                return Fail(response, StatusCode.InvalidRequest, PartnerErrorCode.GatewayNotConfigured, "Payment gateway is not configured for this site.");
+            var paymentUrl = await _paymentService.GetOrCreatePaymentLinkUrlAsync(order, cancelToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(paymentUrl))
+                return Fail(response, StatusCode.InvalidRequest, PartnerErrorCode.InvalidRequest, "Could not create a payment link (public app URL not configured).");
             response.Data = new PartnerPaymentLinkRes
             {
                 OrderId = orderId,
-                PaymentUrl = session.Data.PaymentUrl,
-                AlreadyPaid = session.Data.PaymentUrl == null,
+                PaymentUrl = paymentUrl,
+                AlreadyPaid = false,
             };
             return response;
         }

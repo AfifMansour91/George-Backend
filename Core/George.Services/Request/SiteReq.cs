@@ -83,6 +83,8 @@ namespace George.Services.Request
         public bool? PrintCustomerLabelOnNewOrder { get; set; }
         /// <summary>When true, unpaid credit orders are hidden from the treatment board until payment is authorized.</summary>
         public bool? HideUnpaidCreditOrdersInTreatment { get; set; }
+        /// <summary>When true, new-order auto prints of a credit order wait until the payment is authorized / charged.</summary>
+        public bool? HoldNewOrderPrintUntilPaid { get; set; }
 
         // Promotion settings (Sprint 4)
         /// <summary>"same_price" | "full_price" (default). Default for BxPY over-quantity pricing.</summary>
@@ -147,6 +149,8 @@ namespace George.Services.Request
 
         /// <summary>Cardcom invoice: print promotion lines at their net price per unit with the promotion name (no separate discount line). Off by default.</summary>
         public bool? InvoicePromotionAsLinePrice { get; set; }
+        /// <summary>"discount_total" | "net_price" | "line_discount" - Cardcom invoice layout for promotion lines (supersedes InvoicePromotionAsLinePrice).</summary>
+        public string? InvoicePromotionDisplayMode { get; set; }
 
         /// <summary>When true, printouts include the permanent customer note (הערה קבועה). Off by default.</summary>
         public bool? ShowCustomerProfileNoteInPrints { get; set; }

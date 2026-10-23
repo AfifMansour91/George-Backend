@@ -11,6 +11,17 @@ public class PaymentStorage : StorageBase
     {
     }
 
+    /// <summary>Order behind a Giorgio payment link (/pay/{token}); same graph as <see cref="GetOrderForPaymentAsync"/>.</summary>
+    public async Task<Order?> GetOrderForPaymentByLinkTokenAsync(string token, CancellationToken cancelToken)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return null;
+        var id = await _dbContext.Order.AsNoTracking()
+            .Where(o => o.PaymentLinkToken == token && !o.IsDeleted)
+            .Select(o => (int?)o.Id)
+            .FirstOrDefaultAsync(cancelToken);
+        return id is int orderId ? await GetOrderForPaymentAsync(orderId, cancelToken) : null;
+    }
+
     public async Task<Order?> GetOrderForPaymentAsync(int orderId, CancellationToken cancelToken) =>
         await _dbContext.Order
             .Include(o => o.Site)
@@ -376,6 +387,9 @@ public class PaymentStorage : StorageBase
         tracked.PayPlusCardLast4 = order.PayPlusCardLast4;
         tracked.PayPlusCardBrand = order.PayPlusCardBrand;
         tracked.PaymentWallet = order.PaymentWallet;
+        tracked.SaveCardToWallet = order.SaveCardToWallet;
+        if (!string.IsNullOrWhiteSpace(order.PaymentLinkToken))
+            tracked.PaymentLinkToken = order.PaymentLinkToken;
         tracked.PayPlusDocumentUrl = order.PayPlusDocumentUrl;
         tracked.PayPlusRefundDocumentUrl = order.PayPlusRefundDocumentUrl;
         if (order.PayPlusSelectedInstallments != null)
