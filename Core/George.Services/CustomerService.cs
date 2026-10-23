@@ -162,6 +162,7 @@ public class CustomerService : ServiceBase
             PermanentDiscountValue = c.PermanentDiscountValue,
             InvoiceName = c.InvoiceName,
             InvoiceTaxId = c.InvoiceTaxId,
+            SecondaryPhone = c.SecondaryPhone,
             BirthDate = c.BirthDate?.ToString("yyyy-MM-dd"),
         };
     }
@@ -350,10 +351,27 @@ public class CustomerService : ServiceBase
             id, siteId, req.Name.Trim(), req.Notes, req.Email, req.Phone, req.City,
             req.DeliveryStreet, req.DeliveryApartment, req.DeliveryFloor, req.DeliveryEntranceCode,
             req.MarketingEmail, req.MarketingSms, cancelToken,
-            invoiceName: req.InvoiceName, invoiceTaxId: req.InvoiceTaxId, birthDate: req.BirthDate).ConfigureAwait(false);
+            invoiceName: req.InvoiceName, invoiceTaxId: req.InvoiceTaxId, birthDate: req.BirthDate,
+            secondaryPhone: req.SecondaryPhone).ConfigureAwait(false);
         if (phoneConflict)
             return CreateResponse(response, StatusCode.InvalidRequest, "Phone number already in use by another customer");
         if (updated == null)
+            return CreateResponse(response, StatusCode.ItemNotFound);
+        return await GetCustomerAsync(id, siteId, cancelToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Remember a second phone for the payment-link SMS (the credit flow's "שלח למספר אחר" + save). Lightweight on
+    /// purpose: the full update requires the name and every field, this touches one column. Empty = clear.
+    /// </summary>
+    public async Task<IApiResponse<CustomerDetailRes>> SetSecondaryPhoneAsync(int id, int? siteId, string? phone, CancellationToken cancelToken = default)
+    {
+        var response = new ApiResponse<CustomerDetailRes>();
+        var digits = new string((phone ?? "").Where(char.IsDigit).ToArray());
+        if (!string.IsNullOrWhiteSpace(phone) && digits.Length < 7)
+            return CreateResponse(response, StatusCode.InvalidRequest, "Invalid phone number");
+        var ok = await _customerStorage.SetSecondaryPhoneAsync(id, siteId, phone, cancelToken).ConfigureAwait(false);
+        if (!ok)
             return CreateResponse(response, StatusCode.ItemNotFound);
         return await GetCustomerAsync(id, siteId, cancelToken).ConfigureAwait(false);
     }

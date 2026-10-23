@@ -33,6 +33,8 @@ public class CustomerDetailRes : CustomerRes
     /// <summary>"חשבונית על שם אחר": business name printed on invoices instead of the customer name (null = off).</summary>
     public string? InvoiceName { get; set; }
     public string? InvoiceTaxId { get; set; }
+    /// <summary>Second phone that may receive the payment-link SMS (see Customer.SecondaryPhone).</summary>
+    public string? SecondaryPhone { get; set; }
     /// <summary>yyyy-MM-dd, for the "birthday this month" segment.</summary>
     public string? BirthDate { get; set; }
 }

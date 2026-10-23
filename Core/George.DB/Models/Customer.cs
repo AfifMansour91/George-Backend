@@ -42,6 +42,14 @@ public partial class Customer
     [StringLength(50)]
     public string? Phone { get; set; }
 
+    /// <summary>
+    /// Second phone that may receive the payment-link SMS instead of <see cref="Phone"/> (the spouse who pays for
+    /// the order placed by the other). Learned from "שלח למספר אחר" in the credit flow; offered as a choice on the
+    /// next credit-by-SMS order (2026-10-23).
+    /// </summary>
+    [StringLength(50)]
+    public string? SecondaryPhone { get; set; }
+
     [StringLength(200)]
     public string? City { get; set; }
 

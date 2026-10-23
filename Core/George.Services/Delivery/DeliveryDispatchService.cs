@@ -3,6 +3,8 @@ using AutoMapper;
 using George.Common;
 using George.Data;
 using George.DB;
+using George.Services.Request;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace George.Services.Delivery;
@@ -23,6 +25,10 @@ public class DeliveryDispatchService : ServiceBase
     private readonly DeliveryDispatchStorage _dispatchStorage;
     private readonly Partner.PartnerWebhookDispatcher _partnerWebhooks;
     private readonly IReadOnlyDictionary<string, IDeliveryProvider> _providers;
+    private readonly IServiceScopeFactory _serviceScopeFactory;
+
+    /// <summary>Provider settings key: "true" = a courier "completed" webhook moves the Ready order to Completed (archive).</summary>
+    public const string SettingCompleteOrderOnDelivered = "complete_order_on_delivered";
 
     public DeliveryDispatchService(
         ILogger<DeliveryDispatchService> logger,
@@ -31,9 +37,11 @@ public class DeliveryDispatchService : ServiceBase
         OrderStorage orderStorage,
         DeliveryDispatchStorage dispatchStorage,
         IEnumerable<IDeliveryProvider> providers,
-        Partner.PartnerWebhookDispatcher partnerWebhooks)
+        Partner.PartnerWebhookDispatcher partnerWebhooks,
+        IServiceScopeFactory serviceScopeFactory)
         : base(logger, mapper, cache)
     {
+        _serviceScopeFactory = serviceScopeFactory;
         _partnerWebhooks = partnerWebhooks;
         _orderStorage = orderStorage;
         _dispatchStorage = dispatchStorage;
@@ -256,8 +264,58 @@ public class DeliveryDispatchService : ServiceBase
         _logger.LogInformation(
             "Delivery webhook applied: order {OrderId} task {TaskId} ({Provider}) → {Status}",
             dispatch.OrderId, taskId, providerKey, courierStatus);
+
+        await TryCompleteOrderOnDeliveredAsync(config, dispatch.OrderId, courierStatus, cancelToken).ConfigureAwait(false);
         response.Data = true;
         return response;
+    }
+
+    /// <summary>
+    /// Provider setting <see cref="SettingCompleteOrderOnDelivered"/> (LionWheel "בוצע/טופל", 2026-10-23): when the courier
+    /// reports the task completed, a READY order is completed here too (archive), through the regular UpdateOrder
+    /// path so inventory, Woo status push and SMS behave exactly like "סיום טיפול" on the board. A cash order is
+    /// marked paid as well (collected at the door), like the board's manual completion; credit orders keep their
+    /// payment state. Orders not yet Ready are left alone - the shop still has to finish picking.
+    /// </summary>
+    private async Task TryCompleteOrderOnDeliveredAsync(DeliveryProviderConfig config, int orderId, string courierStatus, CancellationToken cancelToken)
+    {
+        try
+        {
+            var settings = ParseSettings(config.SettingsJson);
+            if (!settings.TryGetValue(SettingCompleteOrderOnDelivered, out var flag)
+                || !string.Equals(flag?.Trim(), "true", StringComparison.OrdinalIgnoreCase))
+                return;
+            var delivered = string.Equals(courierStatus, "completed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(courierStatus, "roundtrip_delivered", StringComparison.OrdinalIgnoreCase);
+            if (!delivered)
+                return;
+
+            var order = await _orderStorage.GetOrderByIdAsync(orderId, cancelToken).ConfigureAwait(false);
+            if (order == null || !string.Equals(order.Status, "Ready", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation(
+                    "Courier completed task for order {OrderId} but the order is {Status}; not auto-completing.",
+                    orderId, order?.Status ?? "missing");
+                return;
+            }
+
+            var req = new UpdateOrderReq { Status = "Completed" };
+            var cash = string.Equals((order.PaymentMethod ?? "").Trim(), "Cash", StringComparison.OrdinalIgnoreCase);
+            if (cash && !string.Equals(order.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase))
+                req.PaymentStatus = "Paid";
+
+            await using var scope = _serviceScopeFactory.CreateAsyncScope();
+            var orders = scope.ServiceProvider.GetRequiredService<OrderService>();
+            var result = await orders.UpdateOrderAsync(orderId, req, cancelToken).ConfigureAwait(false);
+            if (result.IsSuccessful)
+                _logger.LogInformation("Order {OrderId} completed automatically after courier delivery ({Provider}).", orderId, config.ProviderKey);
+            else
+                _logger.LogWarning("Auto-complete after courier delivery refused for order {OrderId}: {Message}", orderId, result.Description);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Auto-complete after courier delivery failed for order {OrderId}", orderId);
+        }
     }
 
     /// <summary>Dispatch detail rows for one order (order page display).</summary>

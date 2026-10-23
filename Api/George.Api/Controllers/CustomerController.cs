@@ -91,6 +91,14 @@ namespace George.Api.Controllers
             return await SafeCallWithErrorCatchingAsync(() => _customerSvc.UpdateCustomerAsync(id, siteId, req ?? new CustomerUpdateReq(), cancelToken));
         }
 
+        /// <summary>Second phone for the payment-link SMS (credit flow "שלח למספר אחר" + save). Empty body phone clears it.</summary>
+        [HttpPut("{id:int}/SecondaryPhone")]
+        [ProducesResponseType(typeof(IApiResponse<CustomerDetailRes>), (int)HttpStatusCode.OK)]
+        public async Task<IActionResult> SetSecondaryPhoneAsync([FromRoute] int id, [FromBody] CustomerSecondaryPhoneReq? req, [FromQuery] int? siteId, CancellationToken cancelToken = default)
+        {
+            return await SafeCallWithErrorCatchingAsync(() => _customerSvc.SetSecondaryPhoneAsync(id, siteId, req?.Phone, cancelToken));
+        }
+
         [HttpPost("{id:int}/Activity")]
         [ProducesResponseType(typeof(IApiResponse<CustomerDetailRes>), (int)HttpStatusCode.OK)]
         public async Task<IActionResult> AddActivityNoteAsync([FromRoute] int id, [FromBody] CustomerActivityNoteReq? req, [FromQuery] int? siteId, CancellationToken cancelToken = default)

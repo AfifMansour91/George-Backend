@@ -888,13 +888,27 @@ public class CustomerStorage : StorageBase
 
     /// <summary>Update customer CRM fields (name, note, contact, address, marketing). Null fields are left unchanged.
     /// Returns (customer, phoneConflict): when the new phone collides with another customer at the site, returns (null, true).</summary>
+    /// <summary>Sets / clears the customer's second phone for payment-link SMS. False when the customer does not exist at the site.</summary>
+    public async Task<bool> SetSecondaryPhoneAsync(int customerId, int? siteId, string? phone, CancellationToken cancelToken)
+    {
+        var query = _dbContext.Set<Customer>().Where(x => x.Id == customerId && !x.IsDeleted);
+        if (siteId.HasValue && siteId.Value > 0)
+            query = query.Where(x => x.SiteId == siteId.Value);
+        var c = await query.FirstOrDefaultAsync(cancelToken).ConfigureAwait(false);
+        if (c == null) return false;
+        c.SecondaryPhone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
+        await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+        return true;
+    }
+
     public async Task<(Customer? Customer, bool PhoneConflict)> UpdateCustomerAsync(
         int customerId, int? siteId,
         string name, string? notes, string? email, string? phone, string? city,
         string? deliveryStreet, string? deliveryApartment, string? deliveryFloor, string? deliveryEntranceCode,
         bool? marketingEmail, bool? marketingSms,
         CancellationToken cancelToken,
-        string? invoiceName = null, string? invoiceTaxId = null, string? birthDate = null)
+        string? invoiceName = null, string? invoiceTaxId = null, string? birthDate = null,
+        string? secondaryPhone = null)
     {
         var query = _dbContext.Set<Customer>().Where(x => x.Id == customerId && !x.IsDeleted);
         if (siteId.HasValue && siteId.Value > 0)
@@ -905,6 +919,7 @@ public class CustomerStorage : StorageBase
         c.Name = string.IsNullOrWhiteSpace(name) ? "" : name.Trim();
         if (invoiceName != null) c.InvoiceName = string.IsNullOrWhiteSpace(invoiceName) ? null : invoiceName.Trim();
         if (invoiceTaxId != null) c.InvoiceTaxId = string.IsNullOrWhiteSpace(invoiceTaxId) ? null : invoiceTaxId.Trim();
+        if (secondaryPhone != null) c.SecondaryPhone = string.IsNullOrWhiteSpace(secondaryPhone) ? null : secondaryPhone.Trim();
         if (birthDate != null) c.BirthDate = ParseBirthDate(birthDate);
         if (notes != null) c.Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
         if (email != null) c.Email = string.IsNullOrWhiteSpace(email) ? null : email.Trim();

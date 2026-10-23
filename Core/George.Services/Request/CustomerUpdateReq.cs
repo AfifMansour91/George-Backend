@@ -20,6 +20,14 @@ public class CustomerUpdateReq
     public string? InvoiceName { get; set; }
     /// <summary>ח.פ / ע.מ printed with <see cref="InvoiceName"/>. Null = unchanged; "" = clear.</summary>
     public string? InvoiceTaxId { get; set; }
+    /// <summary>Second phone for the payment-link SMS. undefined = unchanged; "" = clear.</summary>
+    public string? SecondaryPhone { get; set; }
     /// <summary>yyyy-MM-dd (also accepts dd/MM/yyyy). null = unchanged; "" = clear. Feeds the "birthday this month" marketing segment.</summary>
     public string? BirthDate { get; set; }
+}
+
+/// <summary>PUT Customer/{id}/SecondaryPhone body. Empty / null phone clears the stored number.</summary>
+public class CustomerSecondaryPhoneReq
+{
+    public string? Phone { get; set; }
 }
