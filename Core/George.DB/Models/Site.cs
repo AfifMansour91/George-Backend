@@ -149,6 +149,20 @@ public partial class Site
     /// <summary>When true, the manual customer sticker (LabelCustomer) uses the wide 120mm pre-printed branded label layout (order info beside the branding column) instead of the default 58x40mm sticker. Off by default.</summary>
     public bool? CustomerLabelWideFormat { get; set; }
 
+    /// <summary>
+    /// Wide customer sticker: keep the pre-printed branded right column (Zano) - NULL/true. False = plain wide
+    /// label, the text starts at the right edge (Meat Choice 2026-10-23: their 120×80 labels have no branding, so
+    /// Zano's 47 mm column + 17 mm offset pushed everything to the left).
+    /// </summary>
+    public bool? CustomerLabelWideBrandColumn { get; set; }
+
+    /// <summary>
+    /// After-picking labels print the customer-details sticker (name, phone, address, supply day, payment method)
+    /// instead of the numbered bag label "#order / name / address / 1 of N" (Meat Choice 2026-10-23). One per bag,
+    /// no numbering.
+    /// </summary>
+    public bool? AfterPickingLabelCustomerDetails { get; set; }
+
     public bool? PrintNewOrderImmediate { get; set; }
 
     public bool? PrintMovedToTreatment { get; set; }

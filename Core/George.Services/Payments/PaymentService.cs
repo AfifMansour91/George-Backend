@@ -886,7 +886,42 @@ public partial class PaymentService : ServiceBase
                 "Payment token is invalid for this order. Re-authorize the card or contact support.");
         }
 
-        // Picking always charges the token (not J5 capture). Release any open J5 hold first so it does not block the sale.
+        // 2026-10-23: capture the J5 hold FIRST (J4 against the approval number, on the hold's terminal). Voiding the
+        // hold and charging the token afresh left the customer with two lines on the card statement ("why was I
+        // charged twice?") until the void cleared. Only when the capture is declined (over the hold, expired,
+        // gateway refusal) do we fall back to the old void + standalone token charge.
+        var captureApproval = CoalesceNonEmpty(approval, await TryRecoverJ5ApprovalAsync(order, cancelToken));
+        if (!string.IsNullOrWhiteSpace(captureApproval))
+        {
+            order.CardcomApprovalNumber ??= captureApproval;
+            _logger.LogInformation(
+                "FinalizePickingPayment capture-first: orderId={OrderId}, amount={Amount}, authAmount={AuthAmount}, approvalMasked={ApprovalMasked}, holdTerminal={HoldTerminal}",
+                order.Id, finalAmount, authAmount, MaskApprovalNumber(captureApproval), order.CardcomHoldTerminalNumber);
+            var txCaptureFirst = await _cardcom.CaptureAuthorizationAsync(creds, new CaptureAuthorizationRequest
+            {
+                Amount = finalAmount,
+                Token = token,
+                CardExpirationMMYY = cardExp,
+                ApprovalNumber = captureApproval,
+                HoldTerminalNumber = order.CardcomHoldTerminalNumber,
+                ExternalUniqTranId = $"capture-{order.Id}-{DateTime.UtcNow:yyyyMMddHHmmss}",
+                NumOfPayments = ResolveSelectedInstallments(order),
+                CardOwner = cardOwner,
+                Document = invoiceDocument,
+            }, cancelToken);
+            await LogEventAsync(order.Id, "CaptureAuthorization", txCaptureFirst.ResponseCode.ToString(), txCaptureFirst.Description,
+                txCaptureFirst.TranzactionId, MaskToken(token), finalAmount, txCaptureFirst.RawJson, cancelToken);
+            if (txCaptureFirst.Success)
+                return await CompleteFinalizeCaptureAsync(order, creds, invoiceDocument, response, finalAmount, authAmount, txCaptureFirst, cancelToken);
+            _logger.LogWarning(
+                "FinalizePickingPayment capture of the hold declined ({Code}: {Description}); falling back to void + token charge: orderId={OrderId}",
+                txCaptureFirst.ResponseCode, txCaptureFirst.Description, order.Id);
+            await TryLogFinalizeJournalAsync(order.Id, "CaptureFallback",
+                $"Capture of the J5 hold declined ({txCaptureFirst.ResponseCode}: {txCaptureFirst.Description}); charging the token instead.",
+                finalAmount, cancelToken);
+        }
+
+        // Fallback: release any open J5 hold first so it does not block the sale, then charge the token.
         var voidApproval = await TryRecoverJ5ApprovalAsync(order, cancelToken);
         if (!string.IsNullOrWhiteSpace(voidApproval))
         {

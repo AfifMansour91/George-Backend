@@ -55,6 +55,10 @@ namespace George.Services.Request
         public string? VoucherHideDeliveryTimeScope { get; set; }
         /// <summary>Customer sticker uses the wide 120mm pre-printed branded label layout (default off).</summary>
         public bool? CustomerLabelWideFormat { get; set; }
+        /// <summary>Wide sticker keeps the pre-printed branded column (default true); false = plain wide label.</summary>
+        public bool? CustomerLabelWideBrandColumn { get; set; }
+        /// <summary>After-picking labels print the customer-details sticker instead of numbered bag labels.</summary>
+        public bool? AfterPickingLabelCustomerDetails { get; set; }
         public bool? PrintNewOrderImmediate { get; set; }
         public bool? PrintMovedToTreatment { get; set; }
         public bool? PrintAfterPicking { get; set; }

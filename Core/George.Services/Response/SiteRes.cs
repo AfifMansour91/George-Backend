@@ -52,6 +52,8 @@ namespace George.Services.Response
         public string? VoucherHideDeliveryTimeScope { get; set; }
         /// <summary>Customer sticker uses the wide 120mm pre-printed branded label layout (default off).</summary>
         public bool? CustomerLabelWideFormat { get; set; }
+        public bool? CustomerLabelWideBrandColumn { get; set; }
+        public bool? AfterPickingLabelCustomerDetails { get; set; }
         public bool? PrintNewOrderImmediate { get; set; }
         public bool? PrintMovedToTreatment { get; set; }
         public bool? PrintAfterPicking { get; set; }

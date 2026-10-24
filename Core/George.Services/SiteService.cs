@@ -158,6 +158,8 @@ namespace George.Services
             if (req.VoucherHideDeliveryTime.HasValue) model.VoucherHideDeliveryTime = req.VoucherHideDeliveryTime;
             if (req.VoucherHideDeliveryTimeScope != null) model.VoucherHideDeliveryTimeScope = req.VoucherHideDeliveryTimeScope;
             if (req.CustomerLabelWideFormat.HasValue) model.CustomerLabelWideFormat = req.CustomerLabelWideFormat;
+            if (req.CustomerLabelWideBrandColumn.HasValue) model.CustomerLabelWideBrandColumn = req.CustomerLabelWideBrandColumn;
+            if (req.AfterPickingLabelCustomerDetails.HasValue) model.AfterPickingLabelCustomerDetails = req.AfterPickingLabelCustomerDetails;
             if (req.PrintNewOrderImmediate.HasValue) model.PrintNewOrderImmediate = req.PrintNewOrderImmediate;
             if (req.PrintMovedToTreatment.HasValue) model.PrintMovedToTreatment = req.PrintMovedToTreatment;
             if (req.PrintAfterPicking.HasValue) model.PrintAfterPicking = req.PrintAfterPicking;

@@ -130,6 +130,8 @@ public sealed class CaptureAuthorizationRequest
     public string? ApprovalNumber { get; init; }
     /// <summary>PayPlus: the transaction_uid returned by the original authorization - captured via the same id.</summary>
     public string? ProviderTransactionId { get; init; }
+    /// <summary>Cardcom: terminal that placed the J5 (Order.CardcomHoldTerminalNumber); the capture must hit the same one. Null = primary / default routing.</summary>
+    public int? HoldTerminalNumber { get; init; }
     public string ExternalUniqTranId { get; init; } = Guid.NewGuid().ToString("N");
     public bool CreateDocument { get; init; } = true;
     /// <summary>Installments for the charge (customer's hosted-page selection). 1 = single payment.</summary>

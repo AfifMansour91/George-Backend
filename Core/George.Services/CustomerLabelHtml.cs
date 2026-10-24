@@ -24,8 +24,8 @@ namespace George.Services
         private static readonly string[] HebrewWeekdayNames =
             { "ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת" };
 
-        public static string Build(Order order, bool wideFormat)
-            => wideFormat ? BuildWide(order) : BuildStandard(order);
+        public static string Build(Order order, bool wideFormat, bool brandColumn = true)
+            => wideFormat ? BuildWide(order, brandColumn) : BuildStandard(order);
 
         /// <summary>58x40 sticker: order number, name, phone; full address only for Shipping orders.</summary>
         public static string BuildStandard(Order order)
@@ -77,8 +77,12 @@ namespace George.Services
         /// 120x80 pre-printed branded sticker (Site.CustomerLabelWideFormat, e.g. Zano Dagim): the branded
         /// right column stays empty; order info prints on the white left area only.
         /// </summary>
-        public static string BuildWide(Order order)
+        public static string BuildWide(Order order, bool brandColumn = true)
         {
+            // Site.CustomerLabelWideBrandColumn = false (Meat Choice): no pre-printed branding - the text starts at
+            // the right edge instead of after Zano's 47 mm column + 17 mm print-offset compensation.
+            var brandColWidthMm = brandColumn ? WideLabelBrandColumnMm : 0;
+            var infoPadding = brandColumn ? "0 17mm 2mm 1mm" : "1mm 3mm 2mm 2mm";
             var orderNum = Esc(OrderNumber(order));
             var contact = ResolveContact(order);
             var isShipping = IsShipping(order);
@@ -137,10 +141,10 @@ namespace George.Services
       display: flex; flex-direction: row; align-items: stretch;
       text-align: right; line-height: 1.15;
     }}
-    .brand-col {{ box-sizing: border-box; width: {WideLabelBrandColumnMm}mm; flex: 0 0 auto; }}
+    .brand-col {{ box-sizing: border-box; width: {brandColWidthMm}mm; flex: 0 0 auto; }}
     .info-col {{
       box-sizing: border-box; flex: 1 1 auto; min-width: 0;
-      padding: 0 17mm 2mm 1mm; display: flex; flex-direction: column; gap: 1.5mm;
+      padding: {infoPadding}; display: flex; flex-direction: column; gap: 1.5mm;
       overflow: hidden;
     }}
     .order-line {{ line-height: 1; word-break: break-word; }}

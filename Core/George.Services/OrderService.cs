@@ -2387,7 +2387,7 @@ namespace George.Services
             const string jobType = "LabelAuto:NewOrderCustomer";
             try
             {
-                var payload = CustomerLabelHtml.Build(order, site.CustomerLabelWideFormat == true);
+                var payload = CustomerLabelHtml.Build(order, site.CustomerLabelWideFormat == true, site.CustomerLabelWideBrandColumn != false);
                 await _printJobService.CreateAsync(new CreatePrintJobReq
                 {
                     SiteId = order.SiteId,

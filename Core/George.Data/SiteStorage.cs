@@ -247,6 +247,8 @@ namespace George.Data
             if (updated.VoucherHideDeliveryTimeScope != null)
                 dbSite.VoucherHideDeliveryTimeScope = string.Equals(updated.VoucherHideDeliveryTimeScope.Trim(), "shipping", StringComparison.OrdinalIgnoreCase) ? "shipping" : "all";
             if (updated.CustomerLabelWideFormat.HasValue) dbSite.CustomerLabelWideFormat = updated.CustomerLabelWideFormat;
+            if (updated.CustomerLabelWideBrandColumn.HasValue) dbSite.CustomerLabelWideBrandColumn = updated.CustomerLabelWideBrandColumn;
+            if (updated.AfterPickingLabelCustomerDetails.HasValue) dbSite.AfterPickingLabelCustomerDetails = updated.AfterPickingLabelCustomerDetails;
             if (updated.PrintNewOrderImmediate.HasValue) dbSite.PrintNewOrderImmediate = updated.PrintNewOrderImmediate;
             if (updated.PrintMovedToTreatment.HasValue) dbSite.PrintMovedToTreatment = updated.PrintMovedToTreatment;
             if (updated.PrintAfterPicking.HasValue) dbSite.PrintAfterPicking = updated.PrintAfterPicking;

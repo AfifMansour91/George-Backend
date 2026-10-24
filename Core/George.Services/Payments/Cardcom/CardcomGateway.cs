@@ -195,7 +195,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         => await DoTransactionAsync(credentials, request.Amount, request.Token, request.CardExpirationMMYY,
             request.ApprovalNumber, isRefund: false, mtiVoid: false, jValidateHold: false, request.ExternalUniqTranId,
             request.CreateDocument ? request.Document : null, request.CardOwner, cancelToken,
-            numOfPayments: request.NumOfPayments)
+            numOfPayments: request.NumOfPayments, holdTerminalNumber: request.HoldTerminalNumber)
             .ConfigureAwait(false);
 
     public async Task<PaymentTransactionResult> PlaceTokenAuthorizationHoldAsync(
@@ -700,7 +700,10 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         //   (Order.CardcomHoldTerminalNumber); null = primary, which is where hosted-page J5s (card entry with CVV)
         //   and pre-change saved-card holds live. The hosted payment page itself stays on the primary - see
         //   CreateHostedSessionAsync.
-        var terminal = ResolveTransactionTerminal(credentials, mtiVoid, holdTerminalNumber);
+        // A capture against an existing J5 (approval number, not a void) must hit the terminal that placed the hold
+        // too - same rule as the void (2026-10-23, "capture the hold first" at picking).
+        var terminal = ResolveTransactionTerminal(credentials, mtiVoid, holdTerminalNumber,
+            captureOnHold: !mtiVoid && !jValidateHold && !isRefund && !string.IsNullOrWhiteSpace(approvalNumber));
         // Installments apply ONLY to the actual charge; holds, voids and refunds are always single-payment.
         var effectivePayments = (!isRefund && !mtiVoid && !jValidateHold) ? Math.Clamp(numOfPayments, 1, 36) : 1;
         var body = new Dictionary<string, object?>
@@ -792,10 +795,13 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
     /// goes to the no-CVV charge terminal (= primary when none is configured); a void goes to the terminal that
     /// placed the hold, defaulting to the primary.
     /// </summary>
-    public static int ResolveTransactionTerminal(SitePaymentCredentials credentials, bool mtiVoid, int? holdTerminalNumber) =>
+    public static int ResolveTransactionTerminal(SitePaymentCredentials credentials, bool mtiVoid, int? holdTerminalNumber, bool captureOnHold = false) =>
         mtiVoid
             ? (holdTerminalNumber is > 0 ? holdTerminalNumber : credentials.TerminalNumber) ?? 0
-            : credentials.EffectiveChargeTerminalNumber ?? 0;
+            // Capturing a J5: when the caller knows which terminal holds it, charge there; otherwise the usual charge terminal.
+            : captureOnHold && holdTerminalNumber is > 0
+                ? holdTerminalNumber.Value
+                : credentials.EffectiveChargeTerminalNumber ?? 0;
 
     private static string? MaskTokenForLog(string? token) =>
         string.IsNullOrWhiteSpace(token) || token.Length < 4 ? null : $"****{token.Trim()[^4..]}";
