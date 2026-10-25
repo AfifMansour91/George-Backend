@@ -367,6 +367,8 @@ namespace George.Services.Response
     {
         public bool Sent { get; set; }
         public int SentCount { get; set; }
+        /// <summary>Set when the shop's sub-account had no quota and the message went out from Giorgio's own account as "giorgio".</summary>
+        public string? Note { get; set; }
         public string Preview { get; set; } = string.Empty;
     }
 

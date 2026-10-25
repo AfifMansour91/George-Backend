@@ -89,6 +89,24 @@ namespace George.Services
             try
             {
                 result = await _smsProvider.SendTextDetailedAsync(phone, text, config, options, cancelToken).ConfigureAwait(false);
+                // Order confirmations and the like must go out even when the platform-opened sub-account has no messages left
+                // (Zano, prod 25.10: a sub-account opened with 0 quota silently killed every operational SMS). Marketing sends are
+                // NOT retried - the dispatcher pauses them on provider_quota so the shop loads messages.
+                // George's rule (25.10): a shop whose platform-opened sub-account is at 0 still gets its operational SMS and test
+                // sends - through Giorgio's own Inforu account, as "giorgio", from the parent's quota. Marketing sends are NOT retried:
+                // the dispatcher pauses them (provider_quota) so the shop loads messages.
+                var fallbackWanted = !result.Success && result.QuotaExceeded && config is { BilledByPlatform: true }
+                    && (context.Kind == Marketing.MessageKind.Operational || context.Category == Marketing.MessageCategory.MarketingTest);
+                var parentConfig = fallbackWanted ? _inforuQuota?.ParentSendConfig : null;
+                if (fallbackWanted && (parentConfig != null || SmsProvider.CanSendWith(null)))
+                {
+                    _logger.LogWarning("Account {AccountId}: Inforu sub-account has no quota ({Error}) - {Kind}/{Category} SMS sent through {Via} instead.",
+                        context.AccountId, result.Error, context.Kind, context.Category, parentConfig != null ? "Giorgio's parent Inforu account" : "the system account");
+                    LogSend(context, phone, text, config, success: false, error: result.Error + (parentConfig != null ? " → sent via parent account (giorgio)" : " → sent via system account"));
+                    config = parentConfig;
+                    result = await _smsProvider.SendTextDetailedAsync(phone, text, parentConfig, options, cancelToken).ConfigureAwait(false);
+                    result.SentViaParent = result.Success;
+                }
                 if (!result.Success)
                     error = result.Error ?? "provider rejected";
                 return result;

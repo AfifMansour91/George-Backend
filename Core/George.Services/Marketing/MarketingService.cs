@@ -570,22 +570,41 @@ public partial class MarketingService : ServiceBase
 
         var text = await RenderSampleAsync(scope, req.Body, req.LinkUrl, cancelToken, useRealLink: true);
         var sentCount = 0;
+        string? lastError = null;
+        var quotaExceeded = false;
+        var viaParent = false;
         foreach (var phone in phones)
         {
             try
             {
-                if (await _accountSms.SendLoggedAsync(new SmsLogContext { Kind = MessageKind.System, Category = MessageCategory.MarketingTest, AccountId = scope.AccountId }, phone, text, config, cancelToken))
+                var result = await _accountSms.SendLoggedDetailedAsync(new SmsLogContext { Kind = MessageKind.System, Category = MessageCategory.MarketingTest, AccountId = scope.AccountId }, phone, text, config, options: null, cancelToken);
+                if (result.Success)
+                {
                     sentCount++;
+                    viaParent |= result.SentViaParent;
+                }
+                else
+                {
+                    lastError = result.Error;
+                    quotaExceeded |= result.QuotaExceeded;
+                }
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Marketing test SMS to {Phone} failed for account {AccountId}.", phone, scope.AccountId);
+                lastError = ex.Message;
             }
         }
         if (sentCount == 0)
-            return CreateResponse(response, StatusCode.InvalidRequest, "שליחת הודעת הבדיקה נכשלה");
+            return CreateResponse(response, StatusCode.InvalidRequest, quotaExceeded
+                ? "אין יתרת הודעות בחשבון ה-SMS של העסק - גם הודעת בדיקה צריכה יתרה. טען הודעות ונסה שוב."
+                : "שליחת הודעת הבדיקה נכשלה" + (string.IsNullOrWhiteSpace(lastError) ? string.Empty : $" ({lastError})"));
 
-        response.Data = new MarketingTestSendRes { Sent = true, SentCount = sentCount, Preview = text };
+        response.Data = new MarketingTestSendRes
+        {
+            Sent = true, SentCount = sentCount, Preview = text,
+            Note = viaParent ? "אין יתרה בחשבון ה-SMS של העסק, לכן הבדיקה יצאה מחשבון Giorgio. הודעות שיווק יישלחו רק אחרי טעינה." : null,
+        };
         return response;
     }
 

@@ -81,6 +81,18 @@ namespace George.Providers
             {
                 _logger.LogError($"Inforu SMS send failed. HTTP: {res.HttpResponse}, Body: {res.HttpContent}");
                 var code = res.HttpResponse != null ? (int)res.HttpResponse.StatusCode : 0;
+                // Inforu rejects with HTTP 400 but still sends its JSON verdict (e.g. -15 CustomerQuotaExceeded) - surface it, and keep
+                // the status id so callers can tell "no quota" from a real outage.
+                if (res.HttpContent.HasValue())
+                {
+                    try
+                    {
+                        var rejected = Newtonsoft.Json.JsonConvert.DeserializeObject<InforuSmsResponse>(res.HttpContent!);
+                        if (rejected?.StatusId is int sid && sid != 1)
+                            return SmsSendResult.Fail($"Inforu {sid}: {rejected.StatusDescription ?? rejected.Message} (HTTP {code})", sid);
+                    }
+                    catch (Newtonsoft.Json.JsonException) { /* not JSON - fall through */ }
+                }
                 return SmsSendResult.Fail($"HTTP {code}");
             }
 

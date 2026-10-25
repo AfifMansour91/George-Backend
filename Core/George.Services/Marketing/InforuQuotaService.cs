@@ -54,6 +54,24 @@ public class InforuQuotaService
         }
     }
 
+    /// <summary>Sender shown when Giorgio's own account sends on a shop's behalf (Sms:Inforu:Sender, default "giorgio").</summary>
+    public string ParentSender => string.IsNullOrWhiteSpace(_configuration["Sms:Inforu:Sender"]) ? "giorgio" : _configuration["Sms:Inforu:Sender"]!.Trim();
+
+    /// <summary>
+    /// Giorgio's own Inforu account as a send configuration: the fallback when a shop's platform-opened sub-account has no
+    /// messages left - operational SMS and test sends then go out as "giorgio" from the parent's quota (George's rule, 25.10).
+    /// Null when the parent is not configured.
+    /// </summary>
+    public SmsAccountConfig? ParentSendConfig
+    {
+        get
+        {
+            var parent = ParentCredentials;
+            if (parent == null) return null;
+            return new SmsAccountConfig { Provider = SmsProviderNames.Inforu, Username = parent.Username, ApiToken = parent.ApiToken, ApiBaseUrl = parent.ApiBaseUrl, FromName = ParentSender };
+        }
+    }
+
     /// <summary>Live remaining SMS quota of the shop's Inforu sub-account. Never throws - a provider hiccup must not break the settings screen.</summary>
     public async Task<MarketingProviderQuotaRes> GetAsync(int accountId, SmsAccountConfig config, CancellationToken cancelToken)
     {

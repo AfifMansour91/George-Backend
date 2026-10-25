@@ -36,6 +36,9 @@ namespace George.Providers
 		/// <summary>The provider account (or the sub-account) has no messages left - retrying every recipient would only fail them all.</summary>
 		public bool QuotaExceeded => ProviderStatusId is -13 or -14 or -15;
 
+		/// <summary>The shop's sub-account had no quota, so the platform's own (parent) account sent the message as "giorgio".</summary>
+		public bool SentViaParent { get; set; }
+
 		public static SmsSendResult Ok() => new() { Success = true };
 		public static SmsSendResult Fail(string error, int? statusId = null) => new() { Success = false, Error = error, ProviderStatusId = statusId };
 	}
