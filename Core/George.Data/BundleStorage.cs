@@ -622,7 +622,14 @@ public class BundleStorage : StorageBase
     }
 
     /// <summary>variantId → this site's Woo variation id, for a set of variants (per-site map; legacy column as fallback).</summary>
-    public async Task<Dictionary<int, int>> GetSiteVariantWooIdMapAsync(IReadOnlyCollection<int> variantIds, int siteId, CancellationToken cancelToken)
+    /// <param name="preferLegacy">
+    /// True for sites that are NOT network-managed: the product sync maintains only the legacy
+    /// ProductVariant.WooCommerceVariationId for them (WooCommerceService variation sync), so that column is the live
+    /// id and any ProductSiteVariantWooId row is a leftover that may point at a variation the store no longer has
+    /// (Deliz site 22, 2026-10-28: 195 of 200 per-site rows were old-store ids → bundle 15309 failed with
+    /// "oc_bundles_invalid_component 2319" on every sync since 21/9). Network-managed sites keep per-site first.
+    /// </param>
+    public async Task<Dictionary<int, int>> GetSiteVariantWooIdMapAsync(IReadOnlyCollection<int> variantIds, int siteId, CancellationToken cancelToken, bool preferLegacy = false)
     {
         var map = new Dictionary<int, int>();
         if (variantIds.Count == 0) return map;
@@ -634,18 +641,22 @@ public class BundleStorage : StorageBase
             .Select(x => new { x.ProductVariantId, x.WooCommerceVariationId })
             .ToListAsync(cancelToken)
             .ConfigureAwait(false);
-        foreach (var r in perSite) map[r.ProductVariantId] = r.WooCommerceVariationId;
+        var legacy = await _dbContext.ProductVariant
+            .AsNoTracking()
+            .Where(v => ids.Contains(v.Id) && v.WooCommerceVariationId != null)
+            .Select(v => new { v.Id, WooId = v.WooCommerceVariationId!.Value })
+            .ToListAsync(cancelToken)
+            .ConfigureAwait(false);
 
-        var missing = ids.Where(id => !map.ContainsKey(id)).ToList();
-        if (missing.Count > 0)
+        if (preferLegacy)
         {
-            var legacy = await _dbContext.ProductVariant
-                .AsNoTracking()
-                .Where(v => missing.Contains(v.Id) && v.WooCommerceVariationId != null)
-                .Select(v => new { v.Id, WooId = v.WooCommerceVariationId!.Value })
-                .ToListAsync(cancelToken)
-                .ConfigureAwait(false);
             foreach (var r in legacy) map[r.Id] = r.WooId;
+            foreach (var r in perSite) if (!map.ContainsKey(r.ProductVariantId)) map[r.ProductVariantId] = r.WooCommerceVariationId;
+        }
+        else
+        {
+            foreach (var r in perSite) map[r.ProductVariantId] = r.WooCommerceVariationId;
+            foreach (var r in legacy) if (!map.ContainsKey(r.Id)) map[r.Id] = r.WooId;
         }
         return map;
     }

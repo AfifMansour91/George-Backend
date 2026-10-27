@@ -315,7 +315,10 @@ namespace George.Services
                     .Concat(definition.Components.SelectMany(c => c.Swaps).Where(s => s.SwapVariantId.HasValue).Select(s => s.SwapVariantId!.Value))
                     .Distinct().ToList();
                 var wooProductMap = await _bundleStorage.GetSiteWooProductIdMapAsync(productIds, siteId, cancelToken).ConfigureAwait(false);
-                var wooVariantMap = await _bundleStorage.GetSiteVariantWooIdMapAsync(variantIds, siteId, cancelToken).ConfigureAwait(false);
+                // Same variation-id source as the product sync: per-site map only on network-managed sites; everyone
+                // else keeps their live ids in the legacy column (Deliz 2026-10-28: stale per-site rows → 2319).
+                var isNetworkManaged = await IsSiteNetworkManagedCachedAsync(siteId, cancelToken).ConfigureAwait(false);
+                var wooVariantMap = await _bundleStorage.GetSiteVariantWooIdMapAsync(variantIds, siteId, cancelToken, preferLegacy: !isNetworkManaged).ConfigureAwait(false);
 
                 var body = BuildOcBundlesPutBody(productId, definition, wooProductMap, wooVariantMap, out var buildError);
                 if (body == null)
