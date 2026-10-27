@@ -118,7 +118,12 @@ namespace George.Api.Controllers
 		[ProducesResponseType(typeof(IApiResponse<RequestPasswordResetRes>), 200)]
 		public async Task<IActionResult> RequestPasswordResetAsync([FromBody] RequestPasswordResetReq request, CancellationToken cancelToken = default)
 		{
-			return await SafeCallWithErrorCatchingAsync(() => _identitySvc.RequestPasswordResetAsync(request, cancelToken));
+			// The reset link in the SMS is built on the host the login page was served from (giorgio / storeos).
+			var origin = Request.Headers.Origin.ToString();
+			if (string.IsNullOrWhiteSpace(origin)
+				&& Uri.TryCreate(Request.Headers.Referer.ToString(), UriKind.Absolute, out var referer))
+				origin = referer.GetLeftPart(UriPartial.Authority);
+			return await SafeCallWithErrorCatchingAsync(() => _identitySvc.RequestPasswordResetAsync(request, cancelToken, origin));
 		}
 
 		[AllowAnonymous]

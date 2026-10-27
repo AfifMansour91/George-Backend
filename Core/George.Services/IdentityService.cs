@@ -377,7 +377,8 @@ namespace George.Services
 		}
 
 		/// <summary>Request password reset. Generates a token and stores it in cache. Always returns success to avoid revealing if email exists.</summary>
-		public async Task<IApiResponse<RequestPasswordResetRes>> RequestPasswordResetAsync(RequestPasswordResetReq request, CancellationToken cancelToken = default)
+		/// <param name="requestOrigin">Origin of the login page (https://host) - the reset link is built on the same host.</param>
+		public async Task<IApiResponse<RequestPasswordResetRes>> RequestPasswordResetAsync(RequestPasswordResetReq request, CancellationToken cancelToken = default, string? requestOrigin = null)
 		{
 			IApiResponse<RequestPasswordResetRes> response = new ApiResponse<RequestPasswordResetRes>();
 			response.Data = new RequestPasswordResetRes();
@@ -400,20 +401,54 @@ namespace George.Services
 			string cacheKey = "PasswordReset_" + token;
 			_cache.SetCacheItem(cacheKey, user.Id, expirationMinutes * 60);
 
-			// TODO: Send email with reset link when email provider is configured
-			// For now, in dev mode we can return the token so the frontend can redirect to /reset-password?token=xxx
-			bool returnTokenInDev = string.Equals(_configuration["Identity:ReturnResetTokenInDev"], "true", StringComparison.OrdinalIgnoreCase);
-			if (returnTokenInDev)
+			// SECURITY (2026-10-26): the token is NEVER returned to the caller. The earlier "dev mode" switch
+			// (Identity:ReturnResetTokenInDev) was on in production, so anyone who typed an account's email was sent
+			// straight to the "set new password" form. The only way to get the token is the link we send to the
+			// account's phone; the one development exception below requires BOTH the flag and a Development host.
+			var isDevelopmentHost = string.Equals(
+				Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"), "Development", StringComparison.OrdinalIgnoreCase);
+			bool returnTokenInDev = isDevelopmentHost
+				&& string.Equals(_configuration["Identity:ReturnResetTokenInDev"], "true", StringComparison.OrdinalIgnoreCase);
+
+			var resetUrl = BuildPasswordResetUrl(token, requestOrigin);
+			if (!string.IsNullOrWhiteSpace(user.Phone) && !string.IsNullOrWhiteSpace(resetUrl))
 			{
-				response.Data.ResetToken = token;
-				_logger.LogInformation("Password reset token generated for user {UserId} (dev mode - token returned in response)", user.Id);
+				try
+				{
+					var text = $"קישור לאיפוס הסיסמה שלך ב-Giorgio (תקף לשעה):{Environment.NewLine}{resetUrl}";
+					var sent = await _smsProvider.SendTextAsync(user.Phone, text, cancelToken).ConfigureAwait(false);
+					_logger.LogInformation("Password reset link SMS for user {UserId}: sent={Sent}", user.Id, sent);
+				}
+				catch (Exception ex)
+				{
+					_logger.LogError(ex, "Password reset link SMS failed for user {UserId}", user.Id);
+				}
 			}
 			else
 			{
-				_logger.LogInformation("Password reset token generated for user {UserId} - email sending not configured", user.Id);
+				_logger.LogWarning("Password reset requested for user {UserId} but no phone / public URL to deliver the link to", user.Id);
+			}
+
+			if (returnTokenInDev)
+			{
+				response.Data.ResetToken = token;
+				_logger.LogInformation("Password reset token returned in the response for user {UserId} (Development host only)", user.Id);
 			}
 
 			return response;
+		}
+
+		/// <summary>/reset-password?token=... on the host the request came from (fallback: App:PublicBaseUrl).</summary>
+		private string? BuildPasswordResetUrl(string token, string? requestOrigin)
+		{
+			string? baseUrl = null;
+			if (!string.IsNullOrWhiteSpace(requestOrigin)
+				&& Uri.TryCreate(requestOrigin.Trim(), UriKind.Absolute, out var originUri)
+				&& (originUri.Scheme == Uri.UriSchemeHttps || originUri.Scheme == Uri.UriSchemeHttp)
+				&& !string.Equals(originUri.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+				baseUrl = originUri.GetLeftPart(UriPartial.Authority);
+			baseUrl ??= (_configuration["App:PublicBaseUrl"] ?? _configuration["PublicAppBaseUrl"] ?? _configuration["Client:BaseUrl"])?.TrimEnd('/');
+			return string.IsNullOrWhiteSpace(baseUrl) ? null : $"{baseUrl}/reset-password?token={token}";
 		}
 
 		/// <summary>Set new password using a valid reset token.</summary>

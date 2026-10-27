@@ -2651,10 +2651,59 @@ namespace George.Services
         /// <summary>
         /// Parses WooCommerce REST API error response and returns a user-friendly message (Hebrew when applicable).
         /// </summary>
+        /// <summary>
+        /// WordPress answers a PHP fatal with its HTML "critical error" page (HTTP 500) - memory / execution-time
+        /// limits or a plugin crash while WooCommerce saves the product. Variable products (cuts / weight options)
+        /// are the usual victims because the save creates every variation in one request.
+        /// </summary>
+        private static bool IsWordPressCriticalErrorPage(int statusCode, string? responseBody) =>
+            !string.IsNullOrWhiteSpace(responseBody)
+            && (responseBody.Contains("critical error", StringComparison.OrdinalIgnoreCase)
+                || responseBody.Contains("שגיאה קריטית", StringComparison.Ordinal)
+                || responseBody.Contains("wp-die-message", StringComparison.OrdinalIgnoreCase))
+            && (statusCode >= 500 || responseBody.TrimStart().StartsWith("<", StringComparison.Ordinal));
+
+        /// <summary>
+        /// Product create / update with one-shot resilience against a transient store-side failure (HTTP 5xx or the
+        /// WordPress critical-error page): a bulk CSV import pushes hundreds of products back-to-back and the store's
+        /// PHP occasionally runs out of memory / time on a variable product; the same request a few seconds later
+        /// usually succeeds (2026-10-26: 39 of 735 imported products came back as "שגיאה קריטית"). Deterministic
+        /// fatals still fail after the retries and surface with a readable message.
+        /// </summary>
+        private async Task<HttpResponseMessage> SendProductRequestWithRetryAsync(
+            Func<Task<HttpResponseMessage>> send, string what, CancellationToken cancelToken)
+        {
+            var delays = new[] { TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(8) };
+            HttpResponseMessage response = await send().ConfigureAwait(false);
+            for (var attempt = 0; attempt < delays.Length; attempt++)
+            {
+                var status = (int)response.StatusCode;
+                if (status < 500)
+                    return response;
+                var body = await response.Content.ReadAsStringAsync(cancelToken).ConfigureAwait(false);
+                if (!(status >= 500 || IsWordPressCriticalErrorPage(status, body)))
+                    return response;
+                _logger.LogWarning(
+                    "WooCommerce {What} answered {Status} ({Kind}); retry {Attempt}/{Max} in {Delay}s. Body: {Preview}",
+                    what, status, IsWordPressCriticalErrorPage(status, body) ? "WordPress critical error" : "server error",
+                    attempt + 1, delays.Length, delays[attempt].TotalSeconds,
+                    body.Length > 300 ? body[..300] : body);
+                response.Dispose();
+                await Task.Delay(delays[attempt], cancelToken).ConfigureAwait(false);
+                response = await send().ConfigureAwait(false);
+            }
+            return response;
+        }
+
         private static string GetUserFriendlyWooCommerceError(int statusCode, string responseBody)
         {
             if (string.IsNullOrWhiteSpace(responseBody))
                 return "שגיאת WooCommerce (ללא פרטים).";
+
+            if (IsWordPressCriticalErrorPage(statusCode, responseBody))
+                return $"האתר (וורדפרס) קרס בשגיאת PHP בזמן שמירת המוצר (קוד {statusCode}) - גם אחרי ניסיון חוזר. " +
+                       "בדרך כלל חריגת זיכרון/זמן ריצה בשרת האתר או תוסף שנכשל, בעיקר במוצרים עם וריאציות. " +
+                       "הסיבה המדויקת נרשמת ב-wp-content/debug.log של האתר. אפשר לנסות שוב למוצר בודד מהקטלוג.";
 
             try
             {
@@ -3527,9 +3576,10 @@ namespace George.Services
                     // Update existing product (existingWooId was resolved above for image deduplication)
                     var updateUrl = $"{baseUrl}/products/{existingWooId.Value}";
                     var updateJson = JsonSerializer.Serialize(wooProduct);
-                    var updateContent = new StringContent(updateJson, Encoding.UTF8, "application/json");
 
-                    var updateResponse = await httpClient.PutAsync(updateUrl, updateContent, cancelToken);
+                    var updateResponse = await SendProductRequestWithRetryAsync(
+                        () => httpClient.PutAsync(updateUrl, new StringContent(updateJson, Encoding.UTF8, "application/json"), cancelToken),
+                        $"PUT products/{existingWooId.Value} (product {product.Id}, site {siteId})", cancelToken);
                     if (updateResponse.IsSuccessStatusCode)
                     {
                         var updated = await JsonSerializer.DeserializeAsync<WooCommerceProductResponse>(
@@ -3576,9 +3626,10 @@ namespace George.Services
 
                     var createUrl = $"{baseUrl}/products";
                     var createJson = JsonSerializer.Serialize(wooProduct);
-                    var createContent = new StringContent(createJson, Encoding.UTF8, "application/json");
 
-                    var createResponse = await httpClient.PostAsync(createUrl, createContent, cancelToken);
+                    var createResponse = await SendProductRequestWithRetryAsync(
+                        () => httpClient.PostAsync(createUrl, new StringContent(createJson, Encoding.UTF8, "application/json"), cancelToken),
+                        $"POST products (product {product.Id}, site {siteId})", cancelToken);
                     if (createResponse.IsSuccessStatusCode)
                     {
                         var created = await JsonSerializer.DeserializeAsync<WooCommerceProductResponse>(
