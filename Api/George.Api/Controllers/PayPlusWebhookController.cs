@@ -44,11 +44,11 @@ public class PayPlusWebhookController : ControllerBase
             var hashHeader = Request.Headers["hash"].FirstOrDefault();
             var userAgentHeader = Request.Headers["user-agent"].FirstOrDefault();
 
-            var id = await ResolvePayPlusIdAsync(rawBody, cancelToken);
-            if (!string.IsNullOrWhiteSpace(id))
-                await _paymentSvc.ProcessPayPlusWebhookAsync(id, rawBody, hashHeader, userAgentHeader, cancelToken);
+            var ids = await ResolvePayPlusIdsAsync(rawBody, cancelToken);
+            if (!ids.IsEmpty)
+                await _paymentSvc.ProcessPayPlusWebhookAsync(ids, rawBody, hashHeader, userAgentHeader, cancelToken);
             else
-                _logger.LogWarning("PayPlus webhook: could not resolve transaction_uid/page_request_uid from request.");
+                _logger.LogWarning("PayPlus webhook: could not resolve transaction_uid/page_request_uid/more_info from request.");
         }
         catch (Exception ex)
         {
@@ -59,29 +59,42 @@ public class PayPlusWebhookController : ControllerBase
         return Ok();
     }
 
-    private async Task<string?> ResolvePayPlusIdAsync(string? rawBody, CancellationToken cancelToken)
+    /// <summary>
+    /// All three ids a callback may carry, from the query, the form or the JSON body - never just the first one found:
+    /// a transaction_uid the order does not know yet must not hide the page_request_uid / more_info that do identify it
+    /// (PEPE #224, 29.10.2026).
+    /// </summary>
+    private async Task<PayPlusWebhookIds> ResolvePayPlusIdsAsync(string? rawBody, CancellationToken cancelToken)
     {
-        var fromQuery = Request.Query["transaction_uid"].FirstOrDefault()
-            ?? Request.Query["page_request_uid"].FirstOrDefault()
-            ?? Request.Query["more_info"].FirstOrDefault();
-        if (!string.IsNullOrWhiteSpace(fromQuery))
-            return fromQuery.Trim();
+        string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+        var fromQuery = new PayPlusWebhookIds
+        {
+            TransactionUid = Clean(Request.Query["transaction_uid"].FirstOrDefault()),
+            PageRequestUid = Clean(Request.Query["page_request_uid"].FirstOrDefault()),
+            MoreInfo = Clean(Request.Query["more_info"].FirstOrDefault()),
+        };
+        if (!fromQuery.IsEmpty)
+            return fromQuery;
 
         var contentType = (Request.ContentType ?? "").Trim();
         if (IsFormContentType(contentType))
         {
             var form = await Request.ReadFormAsync(cancelToken).ConfigureAwait(false);
-            var fromForm = form["transaction_uid"].FirstOrDefault()
-                ?? form["page_request_uid"].FirstOrDefault()
-                ?? form["more_info"].FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(fromForm))
-                return fromForm.Trim();
+            var fromForm = new PayPlusWebhookIds
+            {
+                TransactionUid = Clean(form["transaction_uid"].FirstOrDefault()),
+                PageRequestUid = Clean(form["page_request_uid"].FirstOrDefault()),
+                MoreInfo = Clean(form["more_info"].FirstOrDefault()),
+            };
+            if (!fromForm.IsEmpty)
+                return fromForm;
         }
 
         if (string.IsNullOrWhiteSpace(rawBody))
-            return null;
+            return new PayPlusWebhookIds();
 
-        return ExtractIdFromJsonBody(rawBody);
+        return ExtractIdsFromJsonBody(rawBody);
     }
 
     private static bool IsFormContentType(string contentType) =>
@@ -102,37 +115,34 @@ public class PayPlusWebhookController : ControllerBase
         return body;
     }
 
-    private string? ExtractIdFromJsonBody(string body)
+    private PayPlusWebhookIds ExtractIdsFromJsonBody(string body)
     {
         var trimmed = body.Trim();
         if (trimmed.Length == 0 || !trimmed.StartsWith('{'))
-            return null;
+            return new PayPlusWebhookIds();
 
         try
         {
             using var doc = JsonDocument.Parse(trimmed);
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
-                return null;
+                return new PayPlusWebhookIds();
 
             // PayPlus callback shape nests these under "data"; some flows may send them at the root.
-            if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
-            {
-                var fromData = FindStringProperty(data, "transaction_uid")
-                    ?? FindStringProperty(data, "page_request_uid")
-                    ?? FindStringProperty(data, "more_info");
-                if (!string.IsNullOrWhiteSpace(fromData))
-                    return fromData;
-            }
+            var hasData = root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object;
+            string? Pick(string name) => (hasData ? FindStringProperty(data, name) : null) ?? FindStringProperty(root, name);
 
-            return FindStringProperty(root, "transaction_uid")
-                ?? FindStringProperty(root, "page_request_uid")
-                ?? FindStringProperty(root, "more_info");
+            return new PayPlusWebhookIds
+            {
+                TransactionUid = Pick("transaction_uid"),
+                PageRequestUid = Pick("page_request_uid"),
+                MoreInfo = Pick("more_info"),
+            };
         }
         catch (JsonException ex)
         {
             _logger.LogWarning(ex, "PayPlus webhook: invalid JSON body.");
-            return null;
+            return new PayPlusWebhookIds();
         }
     }
 

@@ -772,6 +772,17 @@ public partial class PaymentService : ServiceBase
             return response;
         }
 
+        // A New order has not been picked: its total is the ORDERED estimate, and the hold placed at creation is all it may
+        // carry. Every caller of this method charges a picked total (picking finish, late hold on Ready, retry after a
+        // decline) - none of them is legitimate while the order is still New. Zano #4959 (29.10.2026): "נסה שוב" on a New
+        // order captured 795 ₪ and issued the invoice before anyone weighed a fish.
+        if (string.Equals(order.Status?.Trim(), "New", StringComparison.OrdinalIgnoreCase))
+        {
+            await TryLogFinalizeJournalAsync(order.Id, "FinalizeAborted", "Order is still New (not picked) - finalize charges picked orders only.", finalAmount, cancelToken, providerForJournal);
+            return CreateResponse(response, StatusCode.InvalidRequest,
+                "ההזמנה עדיין בסטטוס \"חדשה\" - החיוב הסופי מתבצע רק אחרי ליקוט. לבדיקת תפיסת המסגרת השתמשו ב\"בדוק תשלום מול Cardcom\".");
+        }
+
         if (creds.ProviderId == PaymentGatewayProviderId.PayPlus)
             return await FinalizePickingPaymentForPayPlusAsync(order, creds, finalAmount, authAmount, response, cancelToken);
         if (creds.ProviderId != PaymentGatewayProviderId.Cardcom)

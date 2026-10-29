@@ -210,6 +210,8 @@ namespace George.Services.Response
         public int UnitsPerMessage { get; set; }
         public int TotalUnits { get; set; }
         public int MessageLength { get; set; }
+        /// <summary>Characters that fit in one billable unit for THIS text (Hebrew 201 by default, Latin 459) - the platform SMS package, not the carrier 70.</summary>
+        public int CharsPerUnit { get; set; }
         public MarketingQuotaRes Quota { get; set; } = new();
         public bool QuotaSufficient { get; set; }
         public bool AllowedNow { get; set; }

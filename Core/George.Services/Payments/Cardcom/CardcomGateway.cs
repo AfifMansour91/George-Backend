@@ -168,8 +168,11 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
         };
 
         var json = await PostJsonAsync("LowProfile/GetLpResult", body, cancelToken).ConfigureAwait(false);
+        // No answer / unreadable answer from Cardcom is INCONCLUSIVE, not a decline. Zano #4959 (29.10.2026): one timed-out
+        // poll during card entry was stored as PaymentSettleStatus=Failed, the hosted page then completed the hold, and
+        // "נסה שוב" captured the full amount on a New order. IsPending keeps the session open and the poll going.
         if (json == null)
-            return new ValidateCallbackResult { Success = false, ResponseCode = -1, Description = "Empty response" };
+            return new ValidateCallbackResult { Success = false, ResponseCode = -1, Description = "Empty response", IsPending = true };
 
         try
         {
@@ -184,6 +187,7 @@ public sealed class CardcomGateway : IPaymentGatewayProvider
                 ResponseCode = -1,
                 Description = ex.Message,
                 RawJson = json,
+                IsPending = true,
             };
         }
     }

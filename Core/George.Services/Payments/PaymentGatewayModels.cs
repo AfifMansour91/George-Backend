@@ -89,6 +89,18 @@ public sealed class CardcomCardDisplayFields
         !string.IsNullOrWhiteSpace(Last4Digits) || !string.IsNullOrWhiteSpace(CardBrand);
 }
 
+/// <summary>
+/// The ids a PayPlus server callback may carry (query, form or JSON body). All three are kept - resolving the order
+/// tries them in turn (transaction, page, then the order id in more_info).
+/// </summary>
+public sealed class PayPlusWebhookIds
+{
+    public string? TransactionUid { get; init; }
+    public string? PageRequestUid { get; init; }
+    public string? MoreInfo { get; init; }
+    public bool IsEmpty => string.IsNullOrWhiteSpace(TransactionUid) && string.IsNullOrWhiteSpace(PageRequestUid) && string.IsNullOrWhiteSpace(MoreInfo);
+}
+
 public sealed class ValidateCallbackResult
 {
     public bool Success { get; init; }

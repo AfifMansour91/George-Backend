@@ -394,6 +394,7 @@ public partial class MarketingService : ServiceBase
             UnitsPerMessage = units,
             TotalUnits = units * consent,
             MessageLength = preview.Length,
+            CharsPerUnit = SmsUnits.IsGsm7(preview) ? SmsUnits.Gsm7CharsPerUnit : SmsUnits.Ucs2CharsPerUnit,
             Quota = quota,
             QuotaSufficient = quota.IsExempt || quota.Balance >= units * Math.Max(0, consent - noPhone - duplicates),
             AllowedNow = allowedAt == requestedAt,

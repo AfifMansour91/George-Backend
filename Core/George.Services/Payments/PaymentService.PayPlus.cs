@@ -261,6 +261,9 @@ public partial class PaymentService
         return name.Length > 0 ? name : "פריט";
     }
 
+    /// <summary>How long a hosted page opened from the customer payment link is handed back again instead of a new one.</summary>
+    private static readonly TimeSpan PayPlusLinkPageReuseWindow = TimeSpan.FromMinutes(20);
+
     private async Task<IApiResponse<PaymentSessionRes>> CreatePaymentSessionForPayPlusAsync(
         Order order,
         SitePaymentCredentials creds,
@@ -304,6 +307,30 @@ public partial class PaymentService
                 AuthorizedAmount = order.PaymentAuthorizedAmount ?? authAmount,
             };
             return response;
+        }
+
+        // Payment link opened again within minutes (SMS preview + real tap, a reload, "open in browser"): hand back the
+        // page that is already open for this hold instead of minting another one. PEPE #224 (29.10.2026): two opens
+        // 3 s apart made two pages, the customer paid on the first, the order kept the second. Only for the
+        // customer link and only for a hold (a charge-now page for a Ready order is always fresh).
+        if (string.Equals(channel, "link", StringComparison.OrdinalIgnoreCase)
+            && !chargeNow
+            && order.PaymentSettleStatus == PaymentSettleStatus.Initiated)
+        {
+            var reusable = await TryGetReusablePayPlusPageAsync(order, sessionAmount, PayPlusLinkPageReuseWindow, cancelToken).ConfigureAwait(false);
+            if (reusable is { } page)
+            {
+                _logger.LogInformation("PayPlus: order {OrderId} re-uses hosted page {PageMask} opened less than {Minutes} min ago.",
+                    order.Id, MaskToken(page.Uid), (int)PayPlusLinkPageReuseWindow.TotalMinutes);
+                response.Data = new PaymentSessionRes
+                {
+                    OrderId = order.Id,
+                    PaymentUrl = page.Link,
+                    LowProfileId = page.Uid,
+                    AuthorizedAmount = sessionAmount,
+                };
+                return response;
+            }
         }
 
         var apiBase = (_publicApiBaseUrl ?? _publicAppBaseUrl ?? "").TrimEnd('/');
@@ -951,19 +978,70 @@ public partial class PaymentService
 
     /// <summary>PayPlus server-to-server callback (mirrors <see cref="ProcessCardcomWebhookAsync"/>): never
     /// trusts the webhook body for money decisions - re-confirms via Transactions/View before touching state.</summary>
-    public async Task ProcessPayPlusWebhookAsync(
+    public Task ProcessPayPlusWebhookAsync(
         string payPlusId,
         string? rawBody = null,
         string? hashHeader = null,
         string? userAgentHeader = null,
         CancellationToken cancelToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(payPlusId)) return;
+        => ProcessPayPlusWebhookAsync(new PayPlusWebhookIds { TransactionUid = payPlusId, PageRequestUid = payPlusId }, rawBody, hashHeader, userAgentHeader, cancelToken);
 
-        var order = await _orderStorage.GetOrderByPayPlusIdAsync(payPlusId, cancelToken);
+    /// <summary>
+    /// Resolve the order a PayPlus callback is about. Tried in order: transaction_uid (an order that already knows its
+    /// transaction), page_request_uid (the stored page, then ANY page the order ever opened - the journal keeps them all),
+    /// more_info (the order id Giorgio sends with every page). PEPE #224 (29.10.2026): the SMS link was opened twice 3 s
+    /// apart, the second open replaced the stored page uid, the customer paid on the first page and the callback found
+    /// "no order for id" - the hold sat in PayPlus while the order showed unpaid in מוכן.
+    /// </summary>
+    private async Task<Order?> FindOrderForPayPlusWebhookAsync(PayPlusWebhookIds ids, CancellationToken cancelToken)
+    {
+        if (!string.IsNullOrWhiteSpace(ids.TransactionUid))
+        {
+            var byTx = await _orderStorage.GetOrderByPayPlusIdAsync(ids.TransactionUid.Trim(), cancelToken);
+            if (byTx != null) return byTx;
+        }
+        if (!string.IsNullOrWhiteSpace(ids.PageRequestUid))
+        {
+            var byPage = await _orderStorage.GetOrderByPayPlusIdAsync(ids.PageRequestUid.Trim(), cancelToken);
+            if (byPage != null) return byPage;
+            var journaledOrderId = await _paymentStorage.FindOrderIdByPayPlusPageRequestUidAsync(ids.PageRequestUid, cancelToken);
+            if (journaledOrderId is int jid)
+            {
+                var byJournal = await _paymentStorage.GetOrderForPaymentAsync(jid, cancelToken);
+                if (byJournal != null)
+                {
+                    _logger.LogInformation("PayPlus webhook: page {PageMask} matched order {OrderId} through the hosted-session journal (not the stored page uid).",
+                        MaskToken(ids.PageRequestUid), jid);
+                    return byJournal;
+                }
+            }
+        }
+        if (int.TryParse(ids.MoreInfo?.Trim(), out var orderId) && orderId > 0)
+        {
+            var byId = await _paymentStorage.GetOrderForPaymentAsync(orderId, cancelToken);
+            // more_info is only trusted for an order that really runs on PayPlus (the signature + inquiry below re-check the money).
+            if (byId != null && (string.Equals(byId.PaymentGateway, PaymentGatewayProviderId.PayPlus, StringComparison.OrdinalIgnoreCase)
+                                 || !string.IsNullOrWhiteSpace(byId.PayPlusPageRequestUid)))
+                return byId;
+        }
+        return null;
+    }
+
+    public async Task ProcessPayPlusWebhookAsync(
+        PayPlusWebhookIds ids,
+        string? rawBody = null,
+        string? hashHeader = null,
+        string? userAgentHeader = null,
+        CancellationToken cancelToken = default)
+    {
+        if (ids == null || ids.IsEmpty) return;
+        var payPlusId = CoalesceNonEmpty(ids.TransactionUid, ids.PageRequestUid, ids.MoreInfo) ?? string.Empty;
+
+        var order = await FindOrderForPayPlusWebhookAsync(ids, cancelToken);
         if (order == null)
         {
-            _logger.LogWarning("PayPlus webhook: no order for id {Id}", payPlusId);
+            _logger.LogWarning("PayPlus webhook: no order for transaction_uid={Tx} page_request_uid={Page} more_info={MoreInfo}",
+                MaskToken(ids.TransactionUid), MaskToken(ids.PageRequestUid), ids.MoreInfo);
             return;
         }
 
@@ -994,9 +1072,13 @@ public partial class PaymentService
                 order.Id, payPlusId);
         }
 
-        var transactionUid = CoalesceNonEmpty(order.PayPlusTransactionUid, payPlusId);
+        var transactionUid = CoalesceNonEmpty(order.PayPlusTransactionUid, ids.TransactionUid);
         if (string.IsNullOrWhiteSpace(transactionUid))
+        {
+            // No transaction to look at (callback carried only a page / order id): ask about the order's pages instead.
+            await SyncPayPlusHostedSessionAsync(order, creds, cancelToken).ConfigureAwait(false);
             return;
+        }
 
         var info = await _payPlus.InquireTransactionAsync(creds, transactionUid, cancelToken).ConfigureAwait(false);
         await LogEventAsync(order.Id, "Webhook", info.Success ? "0" : info.ResponseCode.ToString(),
@@ -1127,30 +1209,59 @@ public partial class PaymentService
         SitePaymentCredentials creds,
         CancellationToken cancelToken)
     {
-        if (string.IsNullOrWhiteSpace(order.PayPlusPageRequestUid))
-            return;
         if (creds.ApiPasswordStoredButUnreadable || string.IsNullOrWhiteSpace(creds.ApiPassword))
             return;
 
-        var info = await _payPlus.InquirePageRequestAsync(creds, order.PayPlusPageRequestUid.Trim(), cancelToken)
-            .ConfigureAwait(false);
+        // Every page this order ever opened, stored one first, then newest first from the journal. PEPE #224 (29.10.2026):
+        // two opens of the SMS link 3 s apart minted two pages, the second replaced PayPlusPageRequestUid, and the
+        // customer paid on the first - asking only about the stored page answered "not paid" for a hold PayPlus had.
+        var pageUids = await GetPayPlusPageRequestUidsAsync(order, cancelToken).ConfigureAwait(false);
+        if (pageUids.Count == 0)
+            return;
 
-        // "can-not-find-payment_request_uid" is PayPlus still indexing the page (20-30 s after the customer paid,
-        // see CustomerPayReturnPage) - the return page polls until it clears. Journaling each poll painted two red
-        // "אישור תשלום נכשל" rows on orders that were charged without a hitch (PEPE #10, 24/9).
-        var notYetAvailable = !info.Success
-            && (info.Description ?? "").Contains("can-not-find-payment_request_uid", StringComparison.OrdinalIgnoreCase);
-        if (!notYetAvailable)
-            await LogEventAsync(order.Id, "ValidateReturn", info.ResponseCode.ToString(), info.Description,
-                info.TranzactionId, null, info.Amount, info.RawJson, cancelToken,
-                provider: PaymentGatewayProviderId.PayPlus);
+        CardcomTransactionInfoResult? info = null;
+        string? paidPageUid = null;
+        foreach (var uid in pageUids)
+        {
+            var candidate = await _payPlus.InquirePageRequestAsync(creds, uid, cancelToken).ConfigureAwait(false);
+            var isStoredPage = string.Equals(uid, order.PayPlusPageRequestUid?.Trim(), StringComparison.OrdinalIgnoreCase);
 
-        if (!info.Success)
+            // "can-not-find-payment_request_uid" is PayPlus still indexing the page (20-30 s after the customer paid,
+            // see CustomerPayReturnPage) - the return page polls until it clears. Journaling each poll painted two red
+            // "אישור תשלום נכשל" rows on orders that were charged without a hitch (PEPE #10, 24/9). Older pages are
+            // journaled only when they answer with a payment - their "not paid" is the expected case.
+            var notYetAvailable = !candidate.Success
+                && (candidate.Description ?? "").Contains("can-not-find-payment_request_uid", StringComparison.OrdinalIgnoreCase);
+            if (!notYetAvailable && (candidate.Success || isStoredPage))
+                await LogEventAsync(order.Id, "ValidateReturn", candidate.ResponseCode.ToString(),
+                    candidate.Success && !isStoredPage ? $"{candidate.Description} (earlier page {MaskToken(uid)})" : candidate.Description,
+                    candidate.TranzactionId, null, candidate.Amount, candidate.RawJson, cancelToken,
+                    provider: PaymentGatewayProviderId.PayPlus);
+
+            if (candidate.Success)
+            {
+                info = candidate;
+                paidPageUid = uid;
+                break;
+            }
+            if (isStoredPage || info == null)
+                info = candidate;
+        }
+
+        if (info == null || !info.Success)
         {
             _logger.LogInformation(
-                "PayPlus return inquiry inconclusive: orderId={OrderId}, pageRequestUidMask={PageRequestUidMask}, description={Description}",
-                order.Id, MaskToken(order.PayPlusPageRequestUid), info.Description);
+                "PayPlus return inquiry inconclusive: orderId={OrderId}, pagesAsked={Pages}, pageRequestUidMask={PageRequestUidMask}, description={Description}",
+                order.Id, pageUids.Count, MaskToken(order.PayPlusPageRequestUid), info?.Description);
             return;
+        }
+
+        if (paidPageUid != null && !string.Equals(paidPageUid, order.PayPlusPageRequestUid?.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "PayPlus: order {OrderId} was paid on an EARLIER hosted page {PaidPage} (stored page {StoredPage}) - adopting it.",
+                order.Id, MaskToken(paidPageUid), MaskToken(order.PayPlusPageRequestUid));
+            order.PayPlusPageRequestUid = paidPageUid;
         }
 
         var display = _payPlus.ExtractCardDisplayFields(info.RawJson);
@@ -1164,6 +1275,90 @@ public partial class PaymentService
 
         await ApplyVerifiedPayPlusInfoAsync(order, creds, info, fallbackTransactionUid: null, "hosted-page charge", cancelToken)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// All PayPlus page_request_uids of the order: the stored one first, then every InitHostedSession journal entry
+    /// (newest first). Journal parsing is best-effort - the stored uid alone is the pre-29.10 behaviour.
+    /// </summary>
+    private async Task<List<string>> GetPayPlusPageRequestUidsAsync(Order order, CancellationToken cancelToken)
+    {
+        var uids = new List<string>();
+        void Add(string? uid)
+        {
+            uid = uid?.Trim();
+            if (!string.IsNullOrEmpty(uid) && !uids.Contains(uid, StringComparer.OrdinalIgnoreCase))
+                uids.Add(uid);
+        }
+        Add(order.PayPlusPageRequestUid);
+        try
+        {
+            var events = await _paymentStorage.GetPaymentEventsAsync(order.Id, cancelToken).ConfigureAwait(false);
+            foreach (var e in events)
+            {
+                if (!string.Equals(e.EventType, "InitHostedSession", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.Equals(e.Provider, PaymentGatewayProviderId.PayPlus, StringComparison.OrdinalIgnoreCase)) continue;
+                Add(ExtractPayPlusDataString(e.RawResponseJson, "page_request_uid"));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "PayPlus: could not read the hosted-session journal of order {OrderId}; using the stored page only.", order.Id);
+        }
+        return uids;
+    }
+
+    /// <summary>A string under <c>data</c> (or the root) of a PayPlus answer; null when absent or unparseable.</summary>
+    internal static string? ExtractPayPlusDataString(string? json, string name)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+            if (root.TryGetProperty("data", out var data) && data.ValueKind == System.Text.Json.JsonValueKind.Object
+                && data.TryGetProperty(name, out var inData) && inData.ValueKind == System.Text.Json.JsonValueKind.String)
+                return inData.GetString();
+            if (root.TryGetProperty(name, out var atRoot) && atRoot.ValueKind == System.Text.Json.JsonValueKind.String)
+                return atRoot.GetString();
+            return null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// A hosted page the order opened recently for the same amount, so a second open of the payment link (the SMS
+    /// app's preview plus the real tap, a reload) lands on the SAME page instead of minting another one.
+    /// Null when there is none, it is older than <paramref name="maxAge"/>, or its link cannot be read.
+    /// </summary>
+    private async Task<(string Uid, string Link)?> TryGetReusablePayPlusPageAsync(Order order, decimal amount, TimeSpan maxAge, CancellationToken cancelToken)
+    {
+        var storedUid = order.PayPlusPageRequestUid?.Trim();
+        if (string.IsNullOrEmpty(storedUid)) return null;
+        if (order.PaymentAuthorizedAmount is not decimal stored || stored != amount) return null;
+        try
+        {
+            var events = await _paymentStorage.GetPaymentEventsAsync(order.Id, cancelToken).ConfigureAwait(false);
+            var cutoff = DateTime.UtcNow - maxAge;
+            foreach (var e in events)
+            {
+                if (!string.Equals(e.EventType, "InitHostedSession", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.Equals(e.Provider, PaymentGatewayProviderId.PayPlus, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.Equals(ExtractPayPlusDataString(e.RawResponseJson, "page_request_uid"), storedUid, StringComparison.OrdinalIgnoreCase)) continue;
+                if (e.CreationTime < cutoff) return null;
+                var link = ExtractPayPlusDataString(e.RawResponseJson, "payment_page_link");
+                return string.IsNullOrWhiteSpace(link) ? null : (storedUid, link.Trim());
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "PayPlus: could not look up a reusable page for order {OrderId}.", order.Id);
+        }
+        return null;
     }
 
     /// <summary>

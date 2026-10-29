@@ -99,6 +99,24 @@ public class PaymentStorage : StorageBase
             .OrderByDescending(e => e.CreationTime)
             .ToListAsync(cancelToken);
 
+    /// <summary>
+    /// The order that opened a PayPlus hosted page, by page_request_uid - including pages that are no longer the
+    /// order's stored <c>PayPlusPageRequestUid</c> (every page creation is journaled as an InitHostedSession event with
+    /// PayPlus's raw answer). PEPE #224 (29.10.2026): the customer paid on a page a later open had replaced.
+    /// </summary>
+    public async Task<int?> FindOrderIdByPayPlusPageRequestUidAsync(string pageRequestUid, CancellationToken cancelToken)
+    {
+        var uid = pageRequestUid?.Trim();
+        if (string.IsNullOrEmpty(uid) || uid.Length < 8)
+            return null;
+        var needle = "\"page_request_uid\":\"" + uid + "\"";
+        return await _dbContext.OrderPaymentEvent.AsNoTracking()
+            .Where(e => e.EventType == "InitHostedSession" && e.Provider == "payplus" && e.RawResponseJson != null && e.RawResponseJson.Contains(needle))
+            .OrderByDescending(e => e.Id)
+            .Select(e => (int?)e.OrderId)
+            .FirstOrDefaultAsync(cancelToken);
+    }
+
     /// <summary>Default saved card; pass <paramref name="gatewayProvider"/> to only match tokens redeemable
     /// at that gateway (a Cardcom token is useless at PayPlus and vice versa). Null = no provider filter.</summary>
     public async Task<CustomerPaymentMethod?> GetDefaultPaymentMethodAsync(

@@ -3,6 +3,7 @@ using George.Data;
 using George.DB;
 using George.Providers;
 using George.Services;
+using George.Services.Marketing;
 using George.Services.Utils;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -645,6 +646,9 @@ namespace George.Api.Core
                 ActiveTrailSetting("CampaignUrl", "StoreOS"),
                 ActiveTrailSetting("DisplayName", "StoreOS"),
                 otpWebOriginHost: Configuration["Auth:OtpSmsWebOriginHost"]);
+
+            // Billable SMS units follow the platform's Inforu package (one unit per up to 201 Hebrew chars / 459 Latin); override per deal in Sms:Units:*.
+            SmsUnits.Configure(Configuration["Sms:Units:HebrewCharsPerUnit"], Configuration["Sms:Units:LatinCharsPerUnit"]);
 
             // Which provider the system account uses: "ActiveTrail" (default, the block above) or "Inforu" (Sms:Inforu:Username/ApiToken/Sender).
             // Shops with their own row are unaffected; this is OTP + every account that has no row / chose "system account".

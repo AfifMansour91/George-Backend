@@ -2702,7 +2702,7 @@ namespace George.Services
 
             if (IsWordPressCriticalErrorPage(statusCode, responseBody))
                 return $"האתר (וורדפרס) קרס בשגיאת PHP בזמן שמירת המוצר (קוד {statusCode}) - גם אחרי ניסיון חוזר. " +
-                       "בדרך כלל חריגת זיכרון/זמן ריצה בשרת האתר או תוסף שנכשל, בעיקר במוצרים עם וריאציות. " +
+                       "בדרך כלל חריגת זיכרון/זמן ריצה בשרת האתר או תוסף שנכשל. " +
                        "הסיבה המדויקת נרשמת ב-wp-content/debug.log של האתר. אפשר לנסות שוב למוצר בודד מהקטלוג.";
 
             try
@@ -3064,8 +3064,24 @@ namespace George.Services
                 if (existingWooId.HasValue)
                 {
                     var existingWooProduct = await GetWooCommerceExistingProductForSyncAsync(baseUrl, existingWooId.Value, httpClient, cancelToken);
-                    existingWooImages = existingWooProduct?.Images;
-                    existingWooNonVariationAttributes = existingWooProduct?.NonVariationAttributes;
+                    if (existingWooProduct?.IsVariation == true)
+                    {
+                        // The stored id now belongs to a VARIATION of another product: the store was rebuilt (PEPE
+                        // 26/10: every product recreated, post-id counter restarted below our old ids) and the id
+                        // was reused. A PUT /products/{id} against a variation post makes WooCommerce load a
+                        // WC_Product_Variation where it expects a parent and PHP dies ("באתר זה אירעה שגיאה
+                        // קריטית") on every sync - 39 PEPE products never came back after the rebuild. Treat the
+                        // mapping as gone and create; the duplicate-SKU adoption below still protects the store.
+                        _logger.LogWarning(
+                            "Woo sync: stored Woo id {WooId} of product {ProductId} on site {SiteId} is a variation post of another product (store rebuilt / id reused); creating a new Woo product instead.",
+                            existingWooId.Value, product.Id, siteId);
+                        existingWooId = null;
+                    }
+                    else
+                    {
+                        existingWooImages = existingWooProduct?.Images;
+                        existingWooNonVariationAttributes = existingWooProduct?.NonVariationAttributes;
+                    }
                 }
 
                 // Map images: when updating, use existing WooCommerce image id when URL matches to avoid duplicating in media library.
@@ -3602,6 +3618,10 @@ namespace George.Services
                         var wooProductGone = updateResponse.StatusCode == System.Net.HttpStatusCode.NotFound ||
                             (updateResponse.StatusCode == System.Net.HttpStatusCode.BadRequest &&
                              errorContent.Contains("woocommerce_rest_product_invalid_id", StringComparison.OrdinalIgnoreCase));
+                        // A WordPress fatal on the PUT: when the pre-fetch above could not tell (transient GET
+                        // failure), probe the post once more - a variation post or a vanished id is "gone" too.
+                        if (!wooProductGone && IsWordPressCriticalErrorPage((int)updateResponse.StatusCode, errorContent))
+                            wooProductGone = await IsWooPostGoneOrNotAProductAsync(baseUrl, existingWooId.Value, httpClient, cancelToken);
                         if (wooProductGone)
                         {
                             _logger.LogWarning("Woo product {WooId} for product {ProductId} no longer exists on site {SiteId}; creating it. {Error}", existingWooId.Value, product.Id, siteId, errorContent);
@@ -5525,6 +5545,40 @@ namespace George.Services
             }
         }
 
+        private static bool IsWooVariationPost(WooCommerceProductGetResponse product) =>
+            string.Equals(product.type, "variation", StringComparison.OrdinalIgnoreCase) || product.parent_id > 0;
+
+        /// <summary>
+        /// True when GET /products/{id} says the id is not a product we may PUT to: 404 / invalid id (deleted),
+        /// or a product_variation post (store rebuilt, id reused by a variation of another product). False on
+        /// any doubt (transient failure, a real product) so the caller keeps the conservative update path.
+        /// </summary>
+        private static async Task<bool> IsWooPostGoneOrNotAProductAsync(
+            string baseUrl,
+            int wooProductId,
+            HttpClient httpClient,
+            CancellationToken cancelToken)
+        {
+            try
+            {
+                var response = await httpClient.GetAsync($"{baseUrl}/products/{wooProductId}", cancelToken);
+                var body = await response.Content.ReadAsStringAsync(cancelToken);
+                if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                    return true;
+                if (response.StatusCode == System.Net.HttpStatusCode.BadRequest &&
+                    body.Contains("woocommerce_rest_product_invalid_id", StringComparison.OrdinalIgnoreCase))
+                    return true;
+                if (!response.IsSuccessStatusCode)
+                    return false;
+                var product = TryDeserialize<WooCommerceProductGetResponse>(body);
+                return product != null && IsWooVariationPost(product);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static async Task<WooExistingProductForSync?> GetWooCommerceExistingProductForSyncAsync(
             string baseUrl,
             int wooProductId,
@@ -5541,6 +5595,7 @@ namespace George.Services
                 if (product == null) return null;
                 return new WooExistingProductForSync
                 {
+                    IsVariation = IsWooVariationPost(product),
                     Images = product.images?.Select(img => (img.id, img.src, img.name)).ToList() ?? new(),
                     NonVariationAttributes = product.attributes?
                         .Where(a => !a.variation && !string.IsNullOrWhiteSpace(a.name))
@@ -6173,6 +6228,8 @@ namespace George.Services
         {
             public string? name { get; set; }
             public string? sku { get; set; }
+            public string? type { get; set; }
+            public int parent_id { get; set; }
             public List<WooCommerceImageItem>? images { get; set; }
             public List<WooCommerceProductAttributeReadItem>? attributes { get; set; }
         }
@@ -6193,6 +6250,8 @@ namespace George.Services
         {
             public List<(int id, string? src, string? name)> Images { get; init; } = new();
             public List<WooCommerceProductAttributeReadItem> NonVariationAttributes { get; init; } = new();
+            /// <summary>The post at our stored id is a product_variation (child of another product), not a product.</summary>
+            public bool IsVariation { get; init; }
         }
 
         private class WooCommerceImageItem

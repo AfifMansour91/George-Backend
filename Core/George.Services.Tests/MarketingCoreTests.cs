@@ -14,42 +14,66 @@ public class SmsUnitsTests
     public void Basic(string text, int expected) => Assert.Equal(expected, SmsUnits.Calculate(text));
 
     [Fact]
-    public void Gsm7_160_is_one_161_is_two()
+    public void Defaults_follow_the_platform_package_201_hebrew_459_latin()
     {
-        Assert.Equal(1, SmsUnits.Calculate(new string('a', 160)));
-        Assert.Equal(2, SmsUnits.Calculate(new string('a', 161)));
-        Assert.Equal(2, SmsUnits.Calculate(new string('a', 306)));
-        Assert.Equal(3, SmsUnits.Calculate(new string('a', 307)));
+        Assert.Equal(201, SmsUnits.DefaultUcs2CharsPerUnit);
+        Assert.Equal(459, SmsUnits.DefaultGsm7CharsPerUnit);
+    }
+
+    [Fact]
+    public void Gsm7_459_is_one_460_is_two()
+    {
+        Assert.Equal(1, SmsUnits.Calculate(new string('a', 160), 201, 459));
+        Assert.Equal(1, SmsUnits.Calculate(new string('a', 459), 201, 459));
+        Assert.Equal(2, SmsUnits.Calculate(new string('a', 460), 201, 459));
+        Assert.Equal(2, SmsUnits.Calculate(new string('a', 918), 201, 459));
+        Assert.Equal(3, SmsUnits.Calculate(new string('a', 919), 201, 459));
     }
 
     [Fact]
     public void Gsm7_extended_chars_cost_two_septets()
     {
-        // 80 x '€' = 160 septets -> still one message; one more tips it over.
-        Assert.Equal(1, SmsUnits.Calculate(new string('€', 80)));
-        Assert.Equal(2, SmsUnits.Calculate(new string('€', 81)));
+        // 229 x '€' = 458 septets -> still one unit; two more '€' = 462 septets tip it over.
+        Assert.Equal(1, SmsUnits.Calculate(new string('€', 229), 201, 459));
+        Assert.Equal(2, SmsUnits.Calculate(new string('€', 231), 201, 459));
     }
 
     [Fact]
-    public void Hebrew_is_ucs2_70_then_67_per_part()
+    public void Hebrew_is_one_unit_up_to_201_then_201_per_unit()
     {
-        Assert.Equal(1, SmsUnits.Calculate(new string('א', 70)));
-        Assert.Equal(2, SmsUnits.Calculate(new string('א', 71)));
-        Assert.Equal(2, SmsUnits.Calculate(new string('א', 134)));
-        Assert.Equal(3, SmsUnits.Calculate(new string('א', 135)));
-    }
-
-    [Fact]
-    public void Spec_screen_example_142_hebrew_chars_is_three_messages()
-    {
-        Assert.Equal(3, SmsUnits.Calculate(new string('ש', 142)));
+        // The old carrier rule (70 then 67 per part) no longer bills: George's Inforu package counts up to 201 Hebrew chars as one message.
+        Assert.Equal(1, SmsUnits.Calculate(new string('א', 70), 201, 459));
+        Assert.Equal(1, SmsUnits.Calculate(new string('א', 71), 201, 459));
+        Assert.Equal(1, SmsUnits.Calculate(new string('א', 142), 201, 459));
+        Assert.Equal(1, SmsUnits.Calculate(new string('א', 201), 201, 459));
+        Assert.Equal(2, SmsUnits.Calculate(new string('א', 202), 201, 459));
+        Assert.Equal(2, SmsUnits.Calculate(new string('א', 402), 201, 459));
+        Assert.Equal(3, SmsUnits.Calculate(new string('א', 403), 201, 459));
     }
 
     [Fact]
     public void Emoji_counts_as_two_utf16_units()
     {
-        // 69 Hebrew + one astral emoji (2 units) = 71 units -> two parts.
-        Assert.Equal(2, SmsUnits.Calculate(new string('א', 69) + "🐟"));
+        // 200 Hebrew + one astral emoji (2 units) = 202 units -> two units.
+        Assert.Equal(1, SmsUnits.Calculate(new string('א', 199) + "🐟", 201, 459));
+        Assert.Equal(2, SmsUnits.Calculate(new string('א', 200) + "🐟", 201, 459));
+    }
+
+    [Fact]
+    public void Explicit_thresholds_allow_the_old_carrier_rule()
+    {
+        Assert.Equal(1, SmsUnits.Calculate(new string('א', 70), 70, 160));
+        Assert.Equal(2, SmsUnits.Calculate(new string('א', 71), 70, 160));
+        Assert.Equal(0, SmsUnits.Calculate("", 70, 160));
+    }
+
+    [Fact]
+    public void IsGsm7_detects_hebrew_and_emoji()
+    {
+        Assert.True(SmsUnits.IsGsm7("Hello € world"));
+        Assert.True(SmsUnits.IsGsm7(""));
+        Assert.False(SmsUnits.IsGsm7("שלום"));
+        Assert.False(SmsUnits.IsGsm7("hi 🐟"));
     }
 }
 
