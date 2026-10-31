@@ -40,11 +40,43 @@ public class AiJobCreateReq : AiStudioScopeReq
 
     /// <summary>4K final (+AiStudio:HdCredits). null = the site's AiFinalSize default.</summary>
     public bool? Hd { get; set; }
+
+    /// <summary>True when the source is a photo the user just took (quick product): follows the account's mode. Anything else
+    /// (an image the shop already had - gallery ✨, media-library batch) is charged from credits in every mode
+    /// (AiStudio:ExistingImageAlwaysPaid). The server verifies the claim against the Media row's age and uploader.</summary>
+    public bool? Capture { get; set; }
+
+    /// <summary><c>generate</c> with <see cref="ProductId"/>: when the final lands, set it as the product's image if the product still has none.</summary>
+    public bool? AttachToProduct { get; set; }
+}
+
+/// <summary>POST /AiStudio/Jobs/ForProducts - "צור תמונות למוצרים ללא תמונה": one generate job per product (name + category +
+/// short description → image), attached to the product when done. Products that already have an image are skipped.</summary>
+public class AiJobsForProductsReq : AiStudioScopeReq
+{
+    public List<int> ProductIds { get; set; } = new();
+    /// <summary>studio_white (default) | dark | marble | ambience.</summary>
+    public string? Background { get; set; }
+    public bool? Hd { get; set; }
+}
+
+/// <summary>PUT /AiStudio/Presets - the shop's own settings of one look (הגדרות › סטודיו AI › המראים שלי).</summary>
+public class AiAccountLookSaveReq : AiStudioScopeReq
+{
+    public string Look { get; set; } = string.Empty;
+    /// <summary>False hides the look from this shop's dialogs.</summary>
+    public bool IsActive { get; set; } = true;
+    /// <summary>Free text appended to the prompt ("תמיד על קרש עץ עם רוזמרין"), up to 500 chars, any language.</summary>
+    public string? StyleNotes { get; set; }
+    /// <summary>Up to 3 image URLs (from the shop's media library) the model copies the STYLE of. Empty = the platform's references.</summary>
+    public List<string>? ReferenceUrls { get; set; }
 }
 
 /// <summary>PUT /AiStudio/Admin/Looks - super-admin: the global preset of one look. Empty fields = back to the code default.</summary>
 public class AiLookPresetSaveReq
 {
+    /// <summary>Up to 3 style reference image URLs; empty = the server's AiStudio:ReferenceUrls for this look.</summary>
+    public List<string>? ReferenceUrls { get; set; }
     public string Look { get; set; } = string.Empty;
     public string? Label { get; set; }
     public string? Description { get; set; }
@@ -75,6 +107,9 @@ public class AiSuggestReq : AiStudioScopeReq
     /// <summary>The shop's category names; Claude picks one of them verbatim.</summary>
     public List<string>? Categories { get; set; }
     public string? Barcode { get; set; }
+    /// <summary>Look the barcode up on the web (EAN/UPC of 8+ digits only). null = yes when such a barcode was sent. Costs
+    /// AiStudio:WebSearchCredits instead of 1.</summary>
+    public bool? WebSearch { get; set; }
 }
 
 /// <summary>POST /AiStudio/Purchases - open the hosted payment page for one credit package.</summary>

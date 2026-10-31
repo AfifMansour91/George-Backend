@@ -1158,6 +1158,36 @@ namespace George.Data
         }
 
         // Helper methods for service layer. Each item has Url and optional MediaId (when linked to account media).
+        /// <summary>AI studio "צור תמונות למוצרים ללא תמונה": the account's products among <paramref name="productIds"/> with what the
+        /// prompt needs (name, short description, primary category) and their images, so the caller can skip the ones that have one.</summary>
+        public async Task<List<Product>> GetProductsForAiAsync(int accountId, List<int> productIds, CancellationToken cancelToken)
+        {
+            if (productIds.Count == 0)
+                return new List<Product>();
+            return await _dbContext.Product
+                .AsNoTracking()
+                .Include(p => p.ProductImage)
+                .Include(p => p.ProductCategory).ThenInclude(pc => pc.Category)
+                .Where(p => productIds.Contains(p.Id) && !p.IsDeleted && p.AccountId == accountId)
+                .ToListAsync(cancelToken);
+        }
+
+        /// <summary>Attach an AI result as the product's (first) image, only if the product still has none - the shop may have added
+        /// one while the job ran. Returns the product's assigned site ids for the Woo sync when the image was attached.</summary>
+        public async Task<List<int>?> AddProductImageIfEmptyAsync(int productId, string url, int? mediaId, CancellationToken cancelToken)
+        {
+            var product = await _dbContext.Product
+                .Include(p => p.ProductImage)
+                .Include(p => p.Site)
+                .FirstOrDefaultAsync(p => p.Id == productId && !p.IsDeleted, cancelToken);
+            if (product == null || product.ProductImage.Count > 0)
+                return null;
+            product.ProductImage.Add(new ProductImage { ProductId = productId, Url = url, MediaId = mediaId, SortOrder = 0 });
+            product.UpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancelToken);
+            return product.Site.Select(s => s.Id).ToList();
+        }
+
         public async Task CreateProductImagesAsync(int productId, List<(string Url, int? MediaId)> images, CancellationToken cancelToken)
         {
             var existingImages = await _dbContext.ProductImage

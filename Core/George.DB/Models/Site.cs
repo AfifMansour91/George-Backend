@@ -391,6 +391,14 @@ public partial class Site
     [StringLength(5)]
     public string? AiFinalSize { get; set; }
 
+    /// <summary>AI studio: tone of the texts "כתוב ב-AI" writes - warm (default) | neutral | premium | playful.</summary>
+    [StringLength(20)]
+    public string? AiTextTone { get; set; }
+
+    /// <summary>AI studio: language of those texts - he (default) | en | ar | ru.</summary>
+    [StringLength(5)]
+    public string? AiTextLanguage { get; set; }
+
     /// <summary>
     /// When true, product/variation prices on this site's WooCommerce store are managed by an external
     /// system (e.g. the POS pushes prices directly to Woo). George then never writes price fields on Woo

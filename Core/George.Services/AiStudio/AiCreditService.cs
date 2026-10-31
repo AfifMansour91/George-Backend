@@ -689,6 +689,8 @@ public class AiCreditService : ServiceBase
                     Label = l.Label, Description = l.Description, Prompt = l.Template, Provider = l.Provider, Credits = l.Credits, IsActive = l.IsActive, SortOrder = p?.SortOrder ?? 0,
                     DefaultLabel = d.Label, DefaultDescription = d.Description, DefaultPrompt = d.Template, DefaultCredits = d.Credits,
                     HasOverride = p != null, UpdatedAt = p?.UpdateTime,
+                    ReferenceUrls = AiStudioLooks.ParseReferenceUrls(p?.ReferenceUrls)?.ToList() ?? new List<string>(),
+                    ConfigReferenceUrls = _aiOptions.ReferenceUrls.TryGetValue(l.Key, out var cfgRefs) ? cfgRefs.Where(u => !string.IsNullOrWhiteSpace(u)).ToList() : new List<string>(),
                     Jobs = s?.Jobs ?? 0, Done = s?.Done ?? 0, Failed = s?.Failed ?? 0, Retries = s?.Retries ?? 0,
                     AvgFidelity = s?.AvgFidelity, AvgAesthetic = s?.AvgAesthetic, ThumbsUp = s?.Up ?? 0, ThumbsDown = s?.Down ?? 0,
                     CostUsd = s?.CostUsd ?? 0m, AvgPreviewMs = s?.AvgPreviewMs,
@@ -718,9 +720,15 @@ public class AiCreditService : ServiceBase
             return CreateResponse(response, StatusCode.InvalidRequest, "הפרומפט חייב להכיל לפחות את {category} או {ratio}");
         if (prompt != null && prompt.Length > 4000)
             return CreateResponse(response, StatusCode.InvalidRequest, "פרומפט ארוך מדי (עד 4000 תווים)");
+        var refs = (req.ReferenceUrls ?? new List<string>()).Where(u => !string.IsNullOrWhiteSpace(u)).Select(u => u.Trim()).ToList();
+        if (refs.Count > AiStudioLooks.MaxReferences)
+            return CreateResponse(response, StatusCode.InvalidRequest, $"עד {AiStudioLooks.MaxReferences} תמונות רפרנס למראה");
+        if (refs.Any(u => !u.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !u.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+            return CreateResponse(response, StatusCode.InvalidRequest, "כתובת תמונת רפרנס לא חוקית");
 
         await _studioStorage.SaveGlobalPresetAsync(new AiStylePreset
         {
+            ReferenceUrls = AiStudioLooks.SerializeReferenceUrls(refs),
             Look = look.Key,
             Label = string.Equals(req.Label?.Trim(), look.Label) ? null : req.Label,
             Description = string.Equals(req.Description?.Trim(), look.Description) ? null : req.Description,

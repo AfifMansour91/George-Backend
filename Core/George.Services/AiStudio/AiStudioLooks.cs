@@ -25,7 +25,10 @@ public static class AiStudioLooks
 
     /// <summary><paramref name="Provider"/> null = AiStudio:DefaultProvider. <paramref name="IsActive"/> false = hidden from the shops
     /// (an inactive look still resolves for old jobs' labels).</summary>
-    public sealed record LookDef(string Key, string Label, string Description, int Credits, bool NeedsSource, string Template, string? Provider = null, bool IsActive = true);
+    /// <para><paramref name="References"/> null = the server's AiStudio:ReferenceUrls; <paramref name="StyleNotes"/> = the shop's own
+    /// wishes from its per-account preset row, appended to the prompt by <see cref="PromptBuilder"/>.</para>
+    public sealed record LookDef(string Key, string Label, string Description, int Credits, bool NeedsSource, string Template, string? Provider = null, bool IsActive = true,
+        IReadOnlyList<string>? References = null, string? StyleNotes = null);
 
     /// <summary>The code defaults, in UI order. <see cref="All"/> is these with the super-admin's AiStylePreset rows applied.</summary>
     public static readonly IReadOnlyList<LookDef> Defaults = new List<LookDef>
@@ -89,7 +92,38 @@ public static class AiStudioLooks
         Provider = string.IsNullOrWhiteSpace(p.Provider) ? d.Provider : p.Provider.Trim().ToLowerInvariant(),
         Credits = p.Credits is >= 0 ? p.Credits.Value : d.Credits,
         IsActive = p.IsActive,
+        References = ParseReferenceUrls(p.ReferenceUrls) ?? d.References,
+        StyleNotes = string.IsNullOrWhiteSpace(p.StyleNotes) ? d.StyleNotes : p.StyleNotes.Trim(),
     };
+
+    /// <summary>Max reference images per look (the providers take 2-3 style refs next to the source).</summary>
+    public const int MaxReferences = 3;
+
+    /// <summary>AiStylePreset.ReferenceUrls (JSON array) → list; null for NULL / empty / unparsable, so the lower layer applies.</summary>
+    public static IReadOnlyList<string>? ParseReferenceUrls(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+        try
+        {
+            var list = System.Text.Json.JsonSerializer.Deserialize<List<string>>(json)?
+                .Where(u => !string.IsNullOrWhiteSpace(u) && (u.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || u.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+                .Select(u => u.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Take(MaxReferences).ToList();
+            return list is { Count: > 0 } ? list : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static string? SerializeReferenceUrls(IEnumerable<string>? urls)
+    {
+        var list = (urls ?? Array.Empty<string>())
+            .Where(u => !string.IsNullOrWhiteSpace(u) && (u.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || u.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+            .Select(u => u.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Take(MaxReferences).ToList();
+        return list.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(list);
+    }
 
     /// <summary>The looks a shop can pick as the BACKGROUND of a generated (no-photo) image, in UI order.</summary>
     public static readonly IReadOnlyList<string> BackgroundKeys = new[] { StudioWhite, Dark, Marble, Ambience };

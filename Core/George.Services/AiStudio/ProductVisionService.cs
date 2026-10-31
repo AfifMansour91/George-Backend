@@ -56,6 +56,11 @@ public sealed class ProductCopy
     public string? UnusableReason { get; set; }
     public int? InputTokens { get; set; }
     public int? OutputTokens { get; set; }
+    /// <summary>Web searches Claude ran for the barcode (0 when the tool was off).</summary>
+    public int WebSearches { get; set; }
+    /// <summary>Claude found the product on the web and used it.</summary>
+    public bool FoundOnWeb { get; set; }
+    public string? WebSource { get; set; }
 }
 
 public sealed class ImageJudgement
@@ -89,7 +94,22 @@ public class ProductVisionService
     }
 
     public bool IsConfigured => _options.UseVision && _client.Value != null;
+    /// <summary>The barcode web lookup needs the configured model (web_search_20260209 runs on the Claude 4.6+ / 5 family, which every model name here is).</summary>
+    public bool WebSearchAvailable => IsConfigured;
     private string Model => string.IsNullOrWhiteSpace(_options.Anthropic.Model) ? "claude-opus-5-5" : _options.Anthropic.Model!.Trim();
+
+    private static readonly IReadOnlyDictionary<string, string> Languages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["he"] = "Hebrew", ["en"] = "English", ["ar"] = "Arabic", ["ru"] = "Russian",
+    };
+
+    private static readonly IReadOnlyDictionary<string, string> Tones = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["warm"] = "warm, appetising, concise - like a good butcher talking to a regular customer",
+        ["neutral"] = "factual and neutral: what it is, cut / origin, how to store; no taste adjectives, no marketing",
+        ["premium"] = "premium and restrained, like a high-end delicatessen: refined vocabulary, provenance and craft, no exclamation marks",
+        ["playful"] = "light and friendly with a touch of humour, short punchy sentences, still accurate",
+    };
 
     /// <summary>The Claude model every call here uses (for the provider spend journal).</summary>
     public string ModelName => Model;
@@ -256,24 +276,28 @@ public class ProductVisionService
     /// "כתוב ב-AI" in the quick-product flow: name, descriptions, category (from the shop's own list), brand and the
     /// weight suggestion, all from the photo. Hebrew output; tone per the account. Synchronous, 5-8 seconds.
     /// </summary>
-    public async Task<ProductCopy?> DescribeAsync(ImageInput photo, string? nameHint, string? categoryHint, IReadOnlyList<string> categoryNames, string? barcode, string? tone, CancellationToken cancelToken)
+    public async Task<ProductCopy?> DescribeAsync(ImageInput photo, string? nameHint, string? categoryHint, IReadOnlyList<string> categoryNames, string? barcode, string? tone, string? language, bool webSearch, CancellationToken cancelToken)
     {
         if (!IsConfigured)
             return null;
 
+        var lang = Languages.TryGetValue(language ?? string.Empty, out var l) ? l : "Hebrew";
+        var toneLine = Tones.TryGetValue(tone ?? string.Empty, out var tl) ? tl : Tones["warm"];
         var cats = categoryNames.Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c.Trim()).Distinct().Take(300).ToList();
         var hints = string.Join("\n", new[]
         {
             string.IsNullOrWhiteSpace(nameHint) ? null : $"The shop already typed this name: \"{nameHint}\" - keep it unless it is clearly wrong, and polish it.",
             string.IsNullOrWhiteSpace(categoryHint) ? null : $"The shop already picked the category \"{categoryHint}\".",
-            string.IsNullOrWhiteSpace(barcode) ? null : $"Barcode / PLU scanned: {barcode} (a 2-5 digit code is the shop's own PLU and says nothing about the product).",
+            string.IsNullOrWhiteSpace(barcode) ? null : webSearch
+                ? $"Barcode scanned: {barcode}. Use the web_search tool (at most 3 searches) to look this barcode up - the official product name, brand, net weight and what it is; prefer Israeli retailers and the brand's own site (an Israeli barcode starts with 729). If nothing reliable comes up, rely on the photo alone and say so."
+                : $"Barcode / PLU scanned: {barcode} (a 2-5 digit code is the shop's own PLU and says nothing about the product).",
             cats.Count == 0 ? "The shop has no categories yet: return null for category_name." : "The shop's categories (pick exactly one of these, verbatim, or null): " + string.Join(" | ", cats),
         }.Where(s => s != null));
-        var toneLine = string.IsNullOrWhiteSpace(tone) ? "warm, appetising, concise" : tone.Trim();
+        var nameExamples = lang == "Hebrew" ? "e.g. \"אנטריקוט טרי\", \"פילה סלמון נורבגי\", \"קטשופ היינץ 570 גרם\"" : "e.g. \"Fresh Entrecôte\", \"Norwegian Salmon Fillet\", \"Heinz Ketchup 570 g\"";
 
         var text = await AskAsync(
-            "You write product listings for an Israeli online butcher / grocery / deli (Giorgio). Everything you write is in Hebrew, " +
-            "natural and specific, never generic marketing fluff. Answer ONLY with a JSON object, no prose.",
+            $"You write product listings for an Israeli online butcher / grocery / deli (Giorgio). Everything you write is in {lang}, " +
+            "natural and specific, never generic marketing fluff. Answer ONLY with a JSON object, no prose" + (webSearch ? " (after any searches, the final answer is the JSON object alone)." : "."),
             new List<ContentBlockParam>
             {
                 ImageBlock(photo),
@@ -281,18 +305,19 @@ public class ProductVisionService
                 {
                     Text = hints + "\nLook at this photo a shop owner took of a product they sell and write its listing. Tone: " + toneLine + ".\n" +
                            "Return JSON with keys: " +
-                           "\"usable\" (false if no complete product is visible), \"unusable_reason\" (short Hebrew sentence or empty), " +
-                           "\"name\" (Hebrew product name, 2-6 words, the way it appears on a shop shelf: cut / kind + notable attribute, e.g. \"אנטריקוט טרי\", \"פילה סלמון נורבגי\", \"קטשופ היינץ 570 גרם\"), " +
-                           "\"short_description\" (one Hebrew sentence, max 20 words, what it is and what it is good for), " +
-                           "\"long_description\" (2-3 Hebrew sentences: origin / cut / texture, how to cook or serve, storage; no invented certifications or prices), " +
+                           $"\"usable\" (false if no complete product is visible), \"unusable_reason\" (short {lang} sentence or empty), " +
+                           $"\"name\" ({lang} product name, 2-6 words, the way it appears on a shop shelf: cut / kind + notable attribute, {nameExamples}), " +
+                           $"\"short_description\" (one {lang} sentence, max 20 words, what it is and what it is good for), " +
+                           $"\"long_description\" (2-3 {lang} sentences: origin / cut / texture, how to cook or serve, storage; no invented certifications or prices), " +
                            "\"category_name\" (one of the shop's categories verbatim, or null), " +
                            "\"brand_name\" (brand printed on the packaging when readable, else null), " +
                            "\"is_packaged\" (true if sold in this packaging: labelled tray, bottle, box, vacuum bag), " +
                            "\"is_weighted\" (true for fresh meat / poultry / fish / cheese / produce that is sold by weight, false for packaged goods), " +
                            "\"weight_options_kg\" (when is_weighted: up to 4 typical per-unit weights in kg a customer would order, ascending, e.g. [0.5, 1, 1.5, 2] for beef, [1, 1.5, 2, 3] for a whole fish; else []), " +
-                           "\"unit_weight_kg\" (packaged product: net weight in kg from the label, else null).",
+                           "\"unit_weight_kg\" (packaged product: net weight in kg from the label, else null)" +
+                           (webSearch ? ", \"found_on_web\" (true if a web result identified this barcode and you used it), \"web_source\" (the URL of that result, else null)." : "."),
                 },
-            }, 900, cancelToken).ConfigureAwait(false);
+            }, 900, cancelToken, webSearch ? new List<ToolUnion> { new ToolUnion(new WebSearchTool20260209 { MaxUses = 3 }) } : null).ConfigureAwait(false);
         if (text == null)
             return null;
 
@@ -314,7 +339,12 @@ public class ProductVisionService
                 UnusableReason = Str(r, "unusable_reason"),
                 InputTokens = text.InputTokens,
                 OutputTokens = text.OutputTokens,
+                WebSearches = text.WebSearches,
+                FoundOnWeb = webSearch && (Bool(r, "found_on_web") ?? false),
+                WebSource = webSearch ? Str(r, "web_source") : null,
             };
+            if (copy.WebSource != null && !copy.WebSource.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                copy.WebSource = null;
             if (r.TryGetProperty("weight_options_kg", out var w) && w.ValueKind == JsonValueKind.Array)
             {
                 foreach (var item in w.EnumerateArray())
@@ -342,9 +372,9 @@ public class ProductVisionService
 
     //*************************    Private    *************************//
 
-    private sealed record Answer(string Text, int? InputTokens, int? OutputTokens);
+    private sealed record Answer(string Text, int? InputTokens, int? OutputTokens, int WebSearches = 0);
 
-    private async Task<Answer?> AskAsync(string system, List<ContentBlockParam> content, int maxTokens, CancellationToken cancelToken)
+    private async Task<Answer?> AskAsync(string system, List<ContentBlockParam> content, int maxTokens, CancellationToken cancelToken, List<ToolUnion>? tools = null)
     {
         var client = _client.Value;
         if (client == null)
@@ -354,9 +384,11 @@ public class ProductVisionService
             var message = await client.Messages.Create(new MessageCreateParams
             {
                 Model = Model,
-                MaxTokens = maxTokens,
+                // A web lookup needs room for the search turns + the JSON; the plain calls stay tight.
+                MaxTokens = tools == null ? maxTokens : Math.Max(maxTokens, 2500),
                 System = system,
                 OutputConfig = new OutputConfig { Effort = Effort.Low },
+                Tools = tools,
                 Messages = new List<MessageParam> { new MessageParam { Role = Role.User, Content = content } },
             }, cancellationToken: cancelToken).ConfigureAwait(false);
 
@@ -365,8 +397,12 @@ public class ProductVisionService
                 _logger.LogWarning("AiStudio vision: Claude refused ({Category})", message.StopDetails?.Category);
                 return null;
             }
-            var text = string.Concat(message.Content.Select(b => b.TryPickText(out var t) ? t.Text : string.Empty));
-            return new Answer(text, (int?)message.Usage.InputTokens, (int?)message.Usage.OutputTokens);
+            // With server tools the answer has several text blocks ("let me look that up…", then the JSON): take the last one that
+            // holds an object; without tools, the whole text as before.
+            var texts = message.Content.Select(b => b.TryPickText(out var t) ? t.Text : null).Where(s => !string.IsNullOrEmpty(s)).Select(s => s!).ToList();
+            var text = tools != null ? texts.LastOrDefault(s => s.Contains('{')) ?? string.Concat(texts) : string.Concat(texts);
+            var searches = tools == null ? 0 : (int)(message.Usage.ServerToolUse?.WebSearchRequests ?? 0);
+            return new Answer(text, (int?)message.Usage.InputTokens, (int?)message.Usage.OutputTokens, searches);
         }
         catch (Exception ex)
         {

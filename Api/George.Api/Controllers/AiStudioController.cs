@@ -43,6 +43,31 @@ public class AiStudioController : GeorgeControllerBase, IAuthUserProvider
     }
 
     /// <summary>POST /AiStudio/Jobs/List - recent jobs of the account (optionally one product).</summary>
+    /// <summary>POST /AiStudio/Jobs/ForProducts - "צור תמונות למוצרים ללא תמונה": one generate job per product (up to 50), attached
+    /// to the product when done. Products that already have an image are skipped.</summary>
+    [HttpPost("Jobs/ForProducts")]
+    [ProducesResponseType(typeof(IApiResponse<AiJobsForProductsRes>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> CreateJobsForProductsAsync([FromBody] AiJobsForProductsReq req, CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() => _service.CreateJobsForProductsAsync(req, cancelToken));
+    }
+
+    /// <summary>GET /AiStudio/Presets - the shop's own settings per look (active, style notes, reference images).</summary>
+    [HttpGet("Presets")]
+    [ProducesResponseType(typeof(IApiResponse<List<AiAccountLookRes>>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> GetPresetsAsync([FromQuery] int? accountId, [FromQuery] int? siteId, CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() => _service.GetAccountLooksAsync(new AiStudioScopeReq { AccountId = accountId, SiteId = siteId }, cancelToken));
+    }
+
+    /// <summary>PUT /AiStudio/Presets - save the shop's settings of one look. Defaults (active, no notes, no references) delete the row.</summary>
+    [HttpPut("Presets")]
+    [ProducesResponseType(typeof(IApiResponse<List<AiAccountLookRes>>), (int)HttpStatusCode.OK)]
+    public async Task<IActionResult> SavePresetAsync([FromBody] AiAccountLookSaveReq req, CancellationToken cancelToken = default)
+    {
+        return await SafeCallWithErrorCatchingAsync(() => _service.SaveAccountLookAsync(req, cancelToken));
+    }
+
     [HttpPost("Jobs/List")]
     [ProducesResponseType(typeof(IApiResponse<List<AiJobRes>>), (int)HttpStatusCode.OK)]
     public async Task<IActionResult> ListJobsAsync([FromBody] AiJobListReq req, CancellationToken cancelToken = default)

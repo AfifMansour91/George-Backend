@@ -166,6 +166,8 @@ namespace George.Services.Response
         public string? AiDefaultLook { get; set; }
         public string? AiImageRatio { get; set; }
         public string? AiFinalSize { get; set; }
+        public string? AiTextTone { get; set; }
+        public string? AiTextLanguage { get; set; }
 
         /// <summary>When true, prices on this site's Woo store are managed externally (POS): George skips price fields on Woo updates and the daily job pulls Woo prices back. Off by default.</summary>
         public bool? ExternalPriceManagement { get; set; }

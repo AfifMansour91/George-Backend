@@ -40,6 +40,13 @@ public partial class AiStylePreset
 
     public int SortOrder { get; set; }
 
+    /// <summary>JSON array of up to 3 style reference image URLs. NULL = inherit (account row → global row → AiStudio:ReferenceUrls).</summary>
+    public string? ReferenceUrls { get; set; }
+
+    /// <summary>Per-account rows: the shop's own style wishes ("תמיד על קרש עץ"), appended to the prompt. Any language.</summary>
+    [StringLength(500)]
+    public string? StyleNotes { get; set; }
+
     [Precision(0)]
     public DateTime UpdateTime { get; set; }
 

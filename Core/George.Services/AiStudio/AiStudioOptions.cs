@@ -68,8 +68,22 @@ public class AiStudioOptions
     public decimal AnthropicInputUsdPerMTok { get; set; } = 4m;
     public decimal AnthropicOutputUsdPerMTok { get; set; } = 20m;
 
-    /// <summary>Per-look style reference image URLs (e.g. two deliz.co.il photos for <c>dark</c>). Key = look.</summary>
+    /// <summary>Per-look style reference image URLs (e.g. two deliz.co.il photos for <c>dark</c>). Key = look. The lowest layer:
+    /// a global AiStylePreset row's ReferenceUrls, then an account row's, win over it.</summary>
     public Dictionary<string, List<string>> ReferenceUrls { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>"טקסט + חיפוש ברשת" (spec §7): the price of a Suggest call that also looks the barcode up on the web.</summary>
+    public int WebSearchCredits { get; set; } = 2;
+
+    /// <summary>Anthropic web search list price ($10 per 1,000 searches) for the spend journal.</summary>
+    public decimal WebSearchUsdPerSearch { get; set; } = 0.01m;
+
+    /// <summary>George's rule (31.10.2026): working on an image the shop ALREADY has (gallery ✨, media-library batch) is always
+    /// paid from credits, even in community mode; only a fresh phone capture and generate-from-text follow the account's mode.</summary>
+    public bool ExistingImageAlwaysPaid { get; set; } = true;
+
+    /// <summary>A capture counts as "fresh" (community rules) when its Media row was uploaded by the same user within this many minutes.</summary>
+    public int FreshCaptureMinutes { get; set; } = 30;
 
     public class ProviderKey
     {

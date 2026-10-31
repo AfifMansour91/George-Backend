@@ -2077,7 +2077,7 @@ namespace George.Services
             };
         }
 
-        private async Task SyncProductToWooCommerceForAssignedSitesAsync(int productId, List<int> assignedSiteIds, CancellationToken cancelToken)
+        internal async Task SyncProductToWooCommerceForAssignedSitesAsync(int productId, List<int> assignedSiteIds, CancellationToken cancelToken)
         {
             if (assignedSiteIds == null || !assignedSiteIds.Any())
                 return;

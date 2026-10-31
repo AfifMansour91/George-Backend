@@ -23,6 +23,41 @@ public class AiStudioStatusRes
     public int HdCredits { get; set; }
     /// <summary>The site's defaults (Settings › סטודיו AI › ברירות מחדל): which look starts automatically, ratio, 2k/4k.</summary>
     public AiStudioDefaultsRes Defaults { get; set; } = new();
+    /// <summary>True (George's rule): working on an image the shop already has is paid from credits even in community mode, so the
+    /// gallery / media-library dialogs show credit prices and the balance in both modes.</summary>
+    public bool ExistingImagePaid { get; set; }
+    /// <summary>Price of "כתוב ב-AI" with a web lookup of the barcode (vs 1 without).</summary>
+    public int WebSearchCredits { get; set; }
+}
+
+/// <summary>GET /AiStudio/Presets - one look as the shop may tune it (הגדרות › סטודיו AI › המראים שלי).</summary>
+public class AiAccountLookRes
+{
+    public string Key { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public int Credits { get; set; }
+    public bool NeedsSource { get; set; }
+    public bool IsBackground { get; set; }
+    /// <summary>The platform switched the look off (nothing the shop can do).</summary>
+    public bool PlatformActive { get; set; } = true;
+    public bool IsActive { get; set; } = true;
+    public string? StyleNotes { get; set; }
+    /// <summary>The shop's own references (empty = inherits).</summary>
+    public List<string> ReferenceUrls { get; set; } = new();
+    /// <summary>What applies when the shop has none: the platform's references for this look.</summary>
+    public List<string> PlatformReferenceUrls { get; set; } = new();
+    public bool HasOverride { get; set; }
+}
+
+/// <summary>POST /AiStudio/Jobs/ForProducts.</summary>
+public class AiJobsForProductsRes
+{
+    public List<AiJobRes> Jobs { get; set; } = new();
+    /// <summary>Products that were not queued (already have an image, not the shop's, deleted, over the cap).</summary>
+    public int Skipped { get; set; }
+    public string? SkippedReason { get; set; }
+    public int CreditsCharged { get; set; }
 }
 
 /// <summary>Per-site AI defaults (Site.AiDefaultLook / AiImageRatio / AiFinalSize), resolved for the site the status was asked for.</summary>
@@ -36,6 +71,10 @@ public class AiStudioDefaultsRes
     public string Ratio { get; set; } = "1:1";
     /// <summary>2k | 4k.</summary>
     public string FinalSize { get; set; } = "2k";
+    /// <summary>warm | neutral | premium | playful.</summary>
+    public string TextTone { get; set; } = "warm";
+    /// <summary>he | en | ar | ru.</summary>
+    public string TextLanguage { get; set; } = "he";
 }
 
 public class AiLookRes
@@ -72,6 +111,10 @@ public class AiLookAdminRes
     /// <summary>True when any field is overridden by a saved row.</summary>
     public bool HasOverride { get; set; }
     public DateTime? UpdatedAt { get; set; }
+    /// <summary>The global row's style references (empty = the server config's).</summary>
+    public List<string> ReferenceUrls { get; set; } = new();
+    /// <summary>AiStudio:ReferenceUrls of this look (what applies when no row sets any).</summary>
+    public List<string> ConfigReferenceUrls { get; set; } = new();
     // ---- period stats ----
     public int Jobs { get; set; }
     public int Done { get; set; }
@@ -119,6 +162,11 @@ public class AiSuggestRes
     /// <summary>Packaged product: net weight in kg from the label.</summary>
     public decimal? UnitWeightKg { get; set; }
     public int Credits { get; set; }
+    /// <summary>The barcode was looked up on the web (and found something).</summary>
+    public bool WebSearched { get; set; }
+    public bool FoundOnWeb { get; set; }
+    /// <summary>The page the facts came from, when Claude cited one.</summary>
+    public string? WebSource { get; set; }
 }
 
 /// <summary>The shop's view of a job. Also the SignalR <c>AiJobUpdated</c> payload.</summary>

@@ -28,7 +28,9 @@ public class AiStudioService : ServiceBase
     private const string ErrDailyCap = "הגעתם למכסת התמונות היומית של החשבון. נסו שוב מחר או פנו אלינו להגדלת המכסה.";
     private const string ErrNoProvider = "אף מנוע תמונה לא מוגדר בשרת (AiStudio:OpenAI / AiStudio:Gemini)";
     public const string ErrNoCredits = "אין מספיק קרדיטים בחשבון. אפשר לרכוש חבילה בהגדרות › סטודיו AI.";
+    public const string ErrNoCreditsExisting = "שיפור של תמונה קיימת מחויב בקרדיטים גם במצב הקהילתי, ואין מספיק קרדיטים בחשבון. אפשר לרכוש חבילה בהגדרות › סטודיו AI.";
     public const string ErrConsentRequired = "לפני השימוש הראשון יש לאשר את תנאי המאגר המשותף.";
+    private const string ErrLookOff = "המראה הזה כבוי בחשבון (הגדרות › סטודיו AI › המראים שלי).";
 
     private readonly AiStudioStorage _storage;
     private readonly UserStorage _userStorage;
@@ -42,6 +44,8 @@ public class AiStudioService : ServiceBase
     private readonly AiCreditStorage _credits;
     private readonly IConfiguration _configuration;
     private readonly SiteStorage _siteStorage;
+    private readonly MediaStorage _mediaStorage;
+    private readonly ProductStorage _productStorage;
 
     public AiStudioService(
         ILogger<AiStudioService> logger,
@@ -58,8 +62,12 @@ public class AiStudioService : ServiceBase
         IHttpClientFactory httpClientFactory,
         AiCreditStorage credits,
         IConfiguration configuration,
-        SiteStorage siteStorage) : base(logger, mapper, cache)
+        SiteStorage siteStorage,
+        MediaStorage mediaStorage,
+        ProductStorage productStorage) : base(logger, mapper, cache)
     {
+        _mediaStorage = mediaStorage;
+        _productStorage = productStorage;
         _siteStorage = siteStorage;
         _httpClientFactory = httpClientFactory;
         _credits = credits;
@@ -85,11 +93,15 @@ public class AiStudioService : ServiceBase
 
         var cap = scope.Account.AiStudioDailyCap ?? _options.DefaultDailyCap;
         var statusMode = ModeOf(scope.Account);
-        var statusBalance = statusMode == Account.AiStudioModePaid ? await _credits.GetBalanceAsync(scope.AccountId, cancelToken).ConfigureAwait(false) : 0;
+        // The balance matters in community mode too: existing-image jobs are paid there as well (George's rule, 31.10.2026).
+        var statusBalance = scope.Account.AiStudioEnabled ? await _credits.GetBalanceAsync(scope.AccountId, cancelToken).ConfigureAwait(false) : 0;
         await EnsurePresetsAppliedAsync(cancelToken).ConfigureAwait(false);
+        var accountLooks = await ResolveAccountLooksAsync(scope.AccountId, cancelToken).ConfigureAwait(false);
         response.Data = new AiStudioStatusRes
         {
             HdCredits = _options.HdCredits,
+            ExistingImagePaid = _options.ExistingImageAlwaysPaid,
+            WebSearchCredits = _options.WebSearchCredits,
             Defaults = await ResolveDefaultsAsync(scope, cancelToken).ConfigureAwait(false),
             Balance = statusBalance,
             CanPurchase = PlatformBilling.FromConfiguration(_configuration) != null,
@@ -102,9 +114,89 @@ public class AiStudioService : ServiceBase
             UsedToday = scope.Account.AiStudioEnabled ? await _storage.CountJobsSinceAsync(scope.AccountId, DateTime.UtcNow.Date, cancelToken).ConfigureAwait(false) : 0,
             VisionEnabled = _vision.IsConfigured,
             DefaultProvider = _options.DefaultProvider,
-            Looks = AiStudioLooks.Active.Select(l => new AiLookRes { Key = l.Key, Label = l.Label, Description = l.Description, Credits = l.Credits, NeedsSource = l.NeedsSource, IsBackground = AiStudioLooks.IsBackground(l.Key) }).ToList(),
+            Looks = accountLooks.Where(l => l.IsActive).Select(l => new AiLookRes { Key = l.Key, Label = l.Label, Description = l.Description, Credits = l.Credits, NeedsSource = l.NeedsSource, IsBackground = AiStudioLooks.IsBackground(l.Key) }).ToList(),
         };
         return response;
+    }
+
+    /// <summary>The platform's looks with the account's own preset rows applied (a look the shop switched off is inactive here).</summary>
+    private async Task<List<AiStudioLooks.LookDef>> ResolveAccountLooksAsync(int accountId, CancellationToken cancelToken)
+    {
+        List<AiStylePreset> rows;
+        try
+        {
+            rows = await _storage.GetAccountPresetsAsync(accountId, cancelToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AiStudio: account presets could not be loaded for {AccountId}", accountId);
+            rows = new List<AiStylePreset>();
+        }
+        var byLook = rows.ToDictionary(r => r.Look, StringComparer.OrdinalIgnoreCase);
+        return AiStudioLooks.All
+            .Where(l => l.IsActive) // the platform's switch wins
+            .Select(l => byLook.TryGetValue(l.Key, out var p) ? AiStudioLooks.Merge(l, p) : l)
+            .ToList();
+    }
+
+    /// <summary>One look as the account sees it: platform overlay + the account's row (prompt/provider/credits come from the platform).</summary>
+    private async Task<AiStudioLooks.LookDef?> ResolveAccountLookAsync(int accountId, string key, CancellationToken cancelToken)
+    {
+        var look = AiStudioLooks.Find(key);
+        if (look == null)
+            return null;
+        var row = await _storage.GetAccountPresetAsync(accountId, look.Key, cancelToken).ConfigureAwait(false);
+        return row == null ? look : AiStudioLooks.Merge(look, row);
+    }
+
+    //*************************    Account presets ("המראים שלי")    *************************//
+
+    public async Task<IApiResponse<List<AiAccountLookRes>>> GetAccountLooksAsync(AiStudioScopeReq req, CancellationToken cancelToken)
+    {
+        var response = new ApiResponse<List<AiAccountLookRes>>();
+        var (scope, status, error) = await ResolveScopeAsync(req.AccountId, req.SiteId, requireEnabled: true, cancelToken).ConfigureAwait(false);
+        if (scope == null)
+            return CreateResponse(response, status, error!);
+        await EnsurePresetsAppliedAsync(cancelToken).ConfigureAwait(false);
+        var rows = (await _storage.GetAccountPresetsAsync(scope.AccountId, cancelToken).ConfigureAwait(false)).ToDictionary(r => r.Look, StringComparer.OrdinalIgnoreCase);
+        response.Data = AiStudioLooks.All.Select(l =>
+        {
+            rows.TryGetValue(l.Key, out var row);
+            var platformRefs = l.References ?? (_options.ReferenceUrls.TryGetValue(l.Key, out var cfg) ? cfg : null) ?? new List<string>();
+            return new AiAccountLookRes
+            {
+                Key = l.Key, Label = l.Label, Description = l.Description, Credits = l.Credits, NeedsSource = l.NeedsSource, IsBackground = AiStudioLooks.IsBackground(l.Key),
+                PlatformActive = l.IsActive,
+                IsActive = row?.IsActive ?? true,
+                StyleNotes = row?.StyleNotes,
+                ReferenceUrls = AiStudioLooks.ParseReferenceUrls(row?.ReferenceUrls)?.ToList() ?? new List<string>(),
+                PlatformReferenceUrls = platformRefs.ToList(),
+                HasOverride = row != null,
+            };
+        }).ToList();
+        return response;
+    }
+
+    public async Task<IApiResponse<List<AiAccountLookRes>>> SaveAccountLookAsync(AiAccountLookSaveReq req, CancellationToken cancelToken)
+    {
+        var response = new ApiResponse<List<AiAccountLookRes>>();
+        var (scope, status, error) = await ResolveScopeAsync(req.AccountId, req.SiteId, requireEnabled: true, cancelToken).ConfigureAwait(false);
+        if (scope == null)
+            return CreateResponse(response, status, error!);
+        await EnsurePresetsAppliedAsync(cancelToken).ConfigureAwait(false);
+        var look = AiStudioLooks.Find(req.Look);
+        if (look == null)
+            return CreateResponse(response, StatusCode.InvalidRequest, ErrUnknownLook);
+        var refs = (req.ReferenceUrls ?? new List<string>()).Where(u => !string.IsNullOrWhiteSpace(u)).Select(u => u.Trim()).ToList();
+        if (refs.Count > AiStudioLooks.MaxReferences)
+            return CreateResponse(response, StatusCode.InvalidRequest, $"עד {AiStudioLooks.MaxReferences} תמונות רפרנס למראה");
+        if (refs.Any(u => !IsHttpUrl(u)))
+            return CreateResponse(response, StatusCode.InvalidRequest, "כתובת תמונה לא חוקית");
+        if (req.StyleNotes is { Length: > 500 })
+            return CreateResponse(response, StatusCode.InvalidRequest, "הערות סגנון: עד 500 תווים");
+        await _storage.SaveAccountPresetAsync(scope.AccountId, look.Key, req.IsActive, req.StyleNotes, AiStudioLooks.SerializeReferenceUrls(refs), AuthUser.Id > 0 ? AuthUser.Id : null, cancelToken).ConfigureAwait(false);
+        _logger.LogInformation("AiStudio: account {AccountId} saved its preset of {Look} (active {Active}, notes {HasNotes}, refs {Refs})", scope.AccountId, look.Key, req.IsActive, !string.IsNullOrWhiteSpace(req.StyleNotes), refs.Count);
+        return await GetAccountLooksAsync(req, cancelToken).ConfigureAwait(false);
     }
 
     /// <summary>The worker applies the presets every few minutes; the API process does it on its first status call so a
@@ -139,6 +231,8 @@ public class AiStudioService : ServiceBase
             LookExplicit = explicitLook != null,
             Ratio = NormalizeRatio(site?.AiImageRatio),
             FinalSize = string.Equals(site?.AiFinalSize, "4k", StringComparison.OrdinalIgnoreCase) ? "4k" : "2k",
+            TextTone = (site?.AiTextTone ?? string.Empty).Trim().ToLowerInvariant() is "neutral" or "premium" or "playful" ? site!.AiTextTone!.Trim().ToLowerInvariant() : "warm",
+            TextLanguage = (site?.AiTextLanguage ?? string.Empty).Trim().ToLowerInvariant() is "en" or "ar" or "ru" ? site!.AiTextLanguage!.Trim().ToLowerInvariant() : "he",
         };
     }
 
@@ -163,10 +257,14 @@ public class AiStudioService : ServiceBase
         var look = AiStudioLooks.Find(req.Look);
         if (look == null || !look.IsActive)
             return CreateResponse(response, StatusCode.InvalidRequest, ErrUnknownLook);
-        // A per-account preset row (price / provider / prompt) wins over the global one for this account.
+        // The account's own row (active switch, style notes, references) over the platform's.
         var accountPreset = await _storage.GetAccountPresetAsync(scope.AccountId, look.Key, cancelToken).ConfigureAwait(false);
         if (accountPreset != null)
+        {
             look = AiStudioLooks.Merge(look, accountPreset);
+            if (!look.IsActive)
+                return CreateResponse(response, StatusCode.InvalidRequest, ErrLookOff);
+        }
         var sourceUrl = req.SourceUrl?.Trim();
         if (look.NeedsSource && !IsHttpUrl(sourceUrl))
             return CreateResponse(response, StatusCode.InvalidRequest, ErrNoSource);
@@ -199,20 +297,25 @@ public class AiStudioService : ServiceBase
             Scene = Trunc(req.Scene, 500),
             Provider = provider,
             Background = isGenerate ? (AiStudioLooks.IsBackground(req.Background) ? req.Background!.Trim().ToLowerInvariant() : AiStudioLooks.StudioWhite) : null,
+            AttachToProduct = isGenerate && req.AttachToProduct == true && req.ProductId is > 0,
         };
 
         var mode = ModeOf(scope.Account);
         var paid = mode == Account.AiStudioModePaid;
+        // George's rule (31.10.2026): an image the shop already had is never on the platform's dime. Only a photo the user just
+        // took (quick product, verified against the Media row) and generate-from-text follow the account's mode.
+        var fromExisting = look.NeedsSource && _options.ExistingImageAlwaysPaid && !await IsFreshCaptureAsync(scope.AccountId, req.Capture, req.SourceMediaId, cancelToken).ConfigureAwait(false);
+        var charge = paid || fromExisting;
         // Community mode is free but every result is donated: the shop must have accepted the pool terms once (spec §7).
-        if (!paid && scope.Account.AiStudioPoolConsentAt == null)
+        if (!charge && scope.Account.AiStudioPoolConsentAt == null)
             return CreateResponse(response, StatusCode.InvalidOperation, ErrConsentRequired);
         AiCreditLedger? debit = null;
         var price = look.Credits + hdCredits;
-        if (paid && price > 0)
+        if (charge && price > 0)
         {
             var balance = await _credits.GetBalanceAsync(scope.AccountId, cancelToken).ConfigureAwait(false);
             if (balance < price)
-                return CreateResponse(response, StatusCode.InvalidOperation, ErrNoCredits);
+                return CreateResponse(response, StatusCode.InvalidOperation, paid ? ErrNoCredits : ErrNoCreditsExisting);
             // The ledger entry is written BEFORE the job so a worker can never claim a job whose debit is still in flight.
             debit = await _credits.AddLedgerEntryAsync(new AiCreditLedger
             {
@@ -234,15 +337,120 @@ public class AiStudioService : ServiceBase
             Look = look.Key,
             Status = AiImageJob.StatusQueued,
             OptionsJson = JsonSerializer.Serialize(options),
-            Credits = paid ? price : 0,
-            IsShared = mode == Account.AiStudioModeCommunity && req.Share != false,
+            Credits = charge ? price : 0,
+            // A result the shop paid for is the shop's; only a free community job is donated.
+            IsShared = !charge && mode == Account.AiStudioModeCommunity && req.Share != false,
         };
         job = await _storage.AddJobAsync(job, cancelToken).ConfigureAwait(false);
         if (debit != null)
             await _credits.SetLedgerRefJobAsync(debit.Id, job.Id, cancelToken).ConfigureAwait(false);
-        _logger.LogInformation("AiStudio job {JobId} queued: account {AccountId}, look {Look}, user {UserId}", job.GuidId, job.AccountId, job.Look, job.UserId);
+        _logger.LogInformation("AiStudio job {JobId} queued: account {AccountId}, look {Look}, user {UserId}, charged {Credits} (existing image: {Existing})", job.GuidId, job.AccountId, job.Look, job.UserId, job.Credits, fromExisting);
 
         response.Data = ToRes(job);
+        return response;
+    }
+
+    /// <summary>A "capture" claim holds when the source Media row was uploaded by this user, into this account, in the last
+    /// AiStudio:FreshCaptureMinutes. A gallery image, a stock image or someone else's upload is an existing image.</summary>
+    private async Task<bool> IsFreshCaptureAsync(int accountId, bool? capture, int? sourceMediaId, CancellationToken cancelToken)
+    {
+        if (capture != true || sourceMediaId is not > 0)
+            return false;
+        try
+        {
+            var media = await _mediaStorage.GetMediaAsync(sourceMediaId.Value, cancelToken).ConfigureAwait(false);
+            if (media == null || media.IsDeleted || media.AccountId != accountId)
+                return false;
+            if (media.Origin != null && media.Origin != Media.OriginUpload)
+                return false; // an AI result re-fed as a source is an existing image
+            if (media.CreationUserId != null && AuthUser.Id > 0 && media.CreationUserId != AuthUser.Id)
+                return false;
+            return media.CreationTime >= DateTime.UtcNow.AddMinutes(-Math.Max(1, _options.FreshCaptureMinutes));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AiStudio: could not verify capture media {MediaId}", sourceMediaId);
+            return false;
+        }
+    }
+
+    //*************************    Products without an image    *************************//
+
+    private const int MaxProductsPerBatch = 50;
+
+    /// <summary>"צור תמונות למוצרים ללא תמונה": one generate job per product, attached to the product when the final lands. Charged like
+    /// any generate job (account mode); the whole batch is checked against the balance first so it does not stop halfway.</summary>
+    public async Task<IApiResponse<AiJobsForProductsRes>> CreateJobsForProductsAsync(AiJobsForProductsReq req, CancellationToken cancelToken)
+    {
+        var response = new ApiResponse<AiJobsForProductsRes>();
+        var (scope, status, error) = await ResolveScopeAsync(req.AccountId, req.SiteId, requireEnabled: true, cancelToken).ConfigureAwait(false);
+        if (scope == null)
+            return CreateResponse(response, status, error!);
+        await EnsurePresetsAppliedAsync(cancelToken).ConfigureAwait(false);
+        var ids = (req.ProductIds ?? new List<int>()).Where(i => i > 0).Distinct().Take(MaxProductsPerBatch).ToList();
+        if (ids.Count == 0)
+            return CreateResponse(response, StatusCode.InvalidRequest, "לא נבחרו מוצרים");
+        var generate = await ResolveAccountLookAsync(scope.AccountId, AiStudioLooks.Generate, cancelToken).ConfigureAwait(false);
+        if (generate == null || !generate.IsActive)
+            return CreateResponse(response, StatusCode.InvalidRequest, ErrUnknownLook);
+        var background = AiStudioLooks.IsBackground(req.Background) ? req.Background!.Trim().ToLowerInvariant() : AiStudioLooks.StudioWhite;
+
+        var products = await _productStorage.GetProductsForAiAsync(scope.AccountId, ids, cancelToken).ConfigureAwait(false);
+        var candidates = products.Where(p => p.ProductImage.Count == 0 && !string.IsNullOrWhiteSpace(p.Name)).ToList();
+        var skipped = ids.Count - candidates.Count;
+
+        var cap = scope.Account.AiStudioDailyCap ?? _options.DefaultDailyCap;
+        var usedToday = await _storage.CountJobsSinceAsync(scope.AccountId, DateTime.UtcNow.Date, cancelToken).ConfigureAwait(false);
+        var room = Math.Max(0, cap - usedToday);
+        if (room == 0)
+            return CreateResponse(response, StatusCode.InvalidOperation, ErrDailyCap);
+        if (candidates.Count > room)
+        {
+            skipped += candidates.Count - room;
+            candidates = candidates.Take(room).ToList();
+        }
+        if (candidates.Count == 0)
+        {
+            response.Data = new AiJobsForProductsRes { Skipped = skipped, SkippedReason = "לכל המוצרים שנבחרו כבר יש תמונה" };
+            return response;
+        }
+
+        var defaults = await ResolveDefaultsAsync(scope, cancelToken).ConfigureAwait(false);
+        var hd = req.Hd ?? defaults.FinalSize == "4k";
+        var paid = ModeOf(scope.Account) == Account.AiStudioModePaid;
+        var perJob = generate.Credits + (hd ? Math.Max(0, _options.HdCredits) : 0);
+        if (paid && perJob > 0)
+        {
+            var balance = await _credits.GetBalanceAsync(scope.AccountId, cancelToken).ConfigureAwait(false);
+            if (balance < perJob * candidates.Count)
+                return CreateResponse(response, StatusCode.InvalidOperation, $"ל-{candidates.Count} תמונות דרושים {perJob * candidates.Count} קרדיטים, ובחשבון יש {balance}. אפשר לרכוש חבילה בהגדרות › סטודיו AI.");
+        }
+
+        var result = new AiJobsForProductsRes { Skipped = skipped, SkippedReason = skipped > 0 ? "מוצרים שכבר יש להם תמונה (או מעבר למכסה היומית) לא נוספו" : null };
+        foreach (var p in candidates)
+        {
+            var category = p.ProductCategory.OrderByDescending(pc => pc.IsPrimary).Select(pc => pc.Category?.Name).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
+            var one = await CreateJobAsync(new AiJobCreateReq
+            {
+                AccountId = scope.AccountId, SiteId = scope.SiteId,
+                Look = AiStudioLooks.Generate, Background = background, Hd = hd,
+                ProductId = p.Id, ProductName = p.Name, CategoryName = category, Description = p.ShortDescription,
+                AttachToProduct = true,
+            }, cancelToken).ConfigureAwait(false);
+            if (one.IsSuccessful && one.Data != null)
+            {
+                result.Jobs.Add(one.Data);
+                result.CreditsCharged += one.Data.Credits;
+            }
+            else
+            {
+                // One product failing (e.g. the cap was reached in between) must not undo the ones already queued.
+                result.Skipped++;
+                result.SkippedReason = one.Description ?? result.SkippedReason;
+                _logger.LogWarning("AiStudio: products batch, product {ProductId} not queued: {Error}", p.Id, one.Description);
+            }
+        }
+        response.Data = result;
         return response;
     }
 
@@ -374,8 +582,14 @@ public class AiStudioService : ServiceBase
         if (usedToday >= cap)
             return CreateResponse(response, StatusCode.InvalidOperation, ErrDailyCap);
         var suggestPaid = ModeOf(scope.Account) == Account.AiStudioModePaid;
-        if (suggestPaid && await _credits.GetBalanceAsync(scope.AccountId, cancelToken).ConfigureAwait(false) < SuggestCredits)
+        // A real retail barcode (EAN-8/13, UPC) is worth a web lookup; a 2-5 digit PLU is the shop's own code and is not.
+        var barcode = Trunc(req.Barcode, 40);
+        var digits = barcode == null ? string.Empty : new string(barcode.Where(char.IsDigit).ToArray());
+        var webSearch = req.WebSearch != false && digits.Length >= 8 && digits.Length == barcode!.Trim().Length && _vision.WebSearchAvailable;
+        var suggestPrice = webSearch ? Math.Max(SuggestCredits, _options.WebSearchCredits) : SuggestCredits;
+        if (suggestPaid && await _credits.GetBalanceAsync(scope.AccountId, cancelToken).ConfigureAwait(false) < suggestPrice)
             return CreateResponse(response, StatusCode.InvalidOperation, ErrNoCredits);
+        var suggestDefaults = await ResolveDefaultsAsync(scope, cancelToken).ConfigureAwait(false);
 
         byte[] raw;
         try
@@ -406,14 +620,16 @@ public class AiStudioService : ServiceBase
         }
 
         var categories = (req.Categories ?? new List<string>()).Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c.Trim()).Take(300).ToList();
-        var copy = await _vision.DescribeAsync(photo, Trunc(req.ProductName, 200), Trunc(req.CategoryName, 200), categories, Trunc(req.Barcode, 40), null, cancelToken).ConfigureAwait(false);
+        var copy = await _vision.DescribeAsync(photo, Trunc(req.ProductName, 200), Trunc(req.CategoryName, 200), categories, barcode, suggestDefaults.TextTone, suggestDefaults.TextLanguage, webSearch, cancelToken).ConfigureAwait(false);
         if (copy == null)
             return CreateResponse(response, StatusCode.InvalidOperation, ErrSuggestFailed);
         if (!copy.Usable)
             return CreateResponse(response, StatusCode.InvalidRequest, string.IsNullOrWhiteSpace(copy.UnusableReason) ? "בתמונה לא רואים מוצר שלם. צלמו שוב מקרוב." : copy.UnusableReason);
 
-        _logger.LogInformation("AiStudio suggest: account {AccountId} user {UserId} -> \"{Name}\" ({Tokens} tokens)", scope.AccountId, AuthUser.Id, copy.Name, (copy.InputTokens ?? 0) + (copy.OutputTokens ?? 0));
+        _logger.LogInformation("AiStudio suggest: account {AccountId} user {UserId} -> \"{Name}\" ({Tokens} tokens, web searches {Searches})", scope.AccountId, AuthUser.Id, copy.Name, (copy.InputTokens ?? 0) + (copy.OutputTokens ?? 0), copy.WebSearches);
         var describeCost = _vision.CostUsd(copy.InputTokens, copy.OutputTokens);
+        if (copy.WebSearches > 0)
+            describeCost = (describeCost ?? 0m) + copy.WebSearches * _options.WebSearchUsdPerSearch;
         if (describeCost is > 0m)
         {
             await _storage.AddSpendAsync(new AiProviderSpend
@@ -422,12 +638,14 @@ public class AiStudioService : ServiceBase
                 InputTokens = copy.InputTokens, OutputTokens = copy.OutputTokens, AmountUsd = describeCost.Value,
             }, cancelToken).ConfigureAwait(false);
         }
+        // A web lookup that found nothing is billed as a plain text call.
+        var charged = webSearch && copy.FoundOnWeb ? suggestPrice : SuggestCredits;
         if (suggestPaid)
         {
             await _credits.AddLedgerEntryAsync(new AiCreditLedger
             {
-                AccountId = scope.AccountId, EntryType = AiCreditLedger.TypeConsumption, Amount = -SuggestCredits,
-                Note = "טקסט מהתמונה" + (copy.Name != null ? " · " + copy.Name : string.Empty), CreationUserId = AuthUser.Id > 0 ? AuthUser.Id : null,
+                AccountId = scope.AccountId, EntryType = AiCreditLedger.TypeConsumption, Amount = -charged,
+                Note = (charged > SuggestCredits ? "טקסט + חיפוש ברשת" : "טקסט מהתמונה") + (copy.Name != null ? " · " + copy.Name : string.Empty), CreationUserId = AuthUser.Id > 0 ? AuthUser.Id : null,
             }, cancelToken).ConfigureAwait(false);
         }
         response.Data = new AiSuggestRes
@@ -441,7 +659,10 @@ public class AiStudioService : ServiceBase
             IsWeighted = copy.IsWeighted,
             WeightOptionsKg = copy.WeightOptionsKg,
             UnitWeightKg = copy.UnitWeightKg,
-            Credits = suggestPaid ? SuggestCredits : 0,
+            Credits = suggestPaid ? charged : 0,
+            WebSearched = webSearch,
+            FoundOnWeb = copy.FoundOnWeb,
+            WebSource = copy.WebSource,
         };
         return response;
     }
@@ -481,6 +702,8 @@ public class AiStudioService : ServiceBase
         public bool? IsPackaged { get; set; }
         /// <summary><c>generate</c>: the visual brief Claude wrote (kept for the job log and retries).</summary>
         public string? Brief { get; set; }
+        /// <summary><c>generate</c> for a product without an image: the runner sets the final as the product's image.</summary>
+        public bool AttachToProduct { get; set; }
     }
 
     public static JobOptions ParseOptions(string? json)

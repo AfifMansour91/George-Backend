@@ -147,10 +147,45 @@ public class AiStudioStorage : StorageBase
         return _dbContext.AiStylePreset.AsNoTracking().OrderBy(p => p.SortOrder).ThenBy(p => p.Id).ToListAsync(cancelToken);
     }
 
-    /// <summary>The account's own override of a look, if any (per-account rows are not edited in the UI yet; they are honoured).</summary>
+    /// <summary>The account's own override of a look, if any (edited in הגדרות › סטודיו AI › המראים שלי: active, style notes, references).</summary>
     public Task<AiStylePreset?> GetAccountPresetAsync(int accountId, string look, CancellationToken cancelToken)
     {
         return _dbContext.AiStylePreset.AsNoTracking().FirstOrDefaultAsync(p => p.AccountId == accountId && p.Look == look, cancelToken);
+    }
+
+    /// <summary>All of one account's preset rows (a handful at most).</summary>
+    public Task<List<AiStylePreset>> GetAccountPresetsAsync(int accountId, CancellationToken cancelToken)
+    {
+        return _dbContext.AiStylePreset.AsNoTracking().Where(p => p.AccountId == accountId).ToListAsync(cancelToken);
+    }
+
+    /// <summary>Upsert the account's row of one look. Only the shop-editable fields are touched (IsActive, StyleNotes, ReferenceUrls);
+    /// a row with the defaults (active, no notes, no references) is deleted.</summary>
+    public async Task SaveAccountPresetAsync(int accountId, string look, bool isActive, string? styleNotes, string? referenceUrlsJson, int? userId, CancellationToken cancelToken)
+    {
+        look = look.Trim().ToLowerInvariant();
+        var existing = await _dbContext.AiStylePreset.FirstOrDefaultAsync(p => p.AccountId == accountId && p.Look == look, cancelToken).ConfigureAwait(false);
+        var notes = Clean(styleNotes, 500);
+        if (isActive && notes == null && string.IsNullOrWhiteSpace(referenceUrlsJson))
+        {
+            if (existing != null)
+            {
+                _dbContext.AiStylePreset.Remove(existing);
+                await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
+            }
+            return;
+        }
+        if (existing == null)
+        {
+            existing = new AiStylePreset { AccountId = accountId, Look = look };
+            _dbContext.AiStylePreset.Add(existing);
+        }
+        existing.IsActive = isActive;
+        existing.StyleNotes = notes;
+        existing.ReferenceUrls = string.IsNullOrWhiteSpace(referenceUrlsJson) ? null : referenceUrlsJson;
+        existing.UpdateTime = DateTime.UtcNow;
+        existing.UpdateUserId = userId;
+        await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);
     }
 
     /// <summary>Upsert the global row of one look (NULL fields = "code default"). A row with nothing set is deleted.</summary>
@@ -159,7 +194,7 @@ public class AiStudioStorage : StorageBase
         var look = row.Look.Trim().ToLowerInvariant();
         var existing = await _dbContext.AiStylePreset.FirstOrDefaultAsync(p => p.AccountId == null && p.Look == look, cancelToken).ConfigureAwait(false);
         var empty = string.IsNullOrWhiteSpace(row.Label) && string.IsNullOrWhiteSpace(row.Description) && string.IsNullOrWhiteSpace(row.Prompt)
-                    && string.IsNullOrWhiteSpace(row.Provider) && row.Credits == null && row.IsActive && row.SortOrder == 0;
+                    && string.IsNullOrWhiteSpace(row.Provider) && row.Credits == null && row.IsActive && row.SortOrder == 0 && string.IsNullOrWhiteSpace(row.ReferenceUrls);
         if (empty)
         {
             if (existing != null)
@@ -181,6 +216,7 @@ public class AiStudioStorage : StorageBase
         existing.Credits = row.Credits is >= 0 ? row.Credits : null;
         existing.IsActive = row.IsActive;
         existing.SortOrder = Math.Max(0, row.SortOrder);
+        existing.ReferenceUrls = string.IsNullOrWhiteSpace(row.ReferenceUrls) ? null : row.ReferenceUrls;
         existing.UpdateTime = DateTime.UtcNow;
         existing.UpdateUserId = userId;
         await _dbContext.SaveChangesAsync(cancelToken).ConfigureAwait(false);

@@ -31,6 +31,8 @@ public class AiStudioJobRunner
     private readonly IAiStudioRealtimeNotifier _notifier;
     private readonly AiStudioOptions _options;
     private readonly ILogger<AiStudioJobRunner> _logger;
+    private readonly ProductStorage _productStorage;
+    private readonly ProductService _productService;
 
     /// <summary>Style reference images by URL, downloaded once per process.</summary>
     private static readonly ConcurrentDictionary<string, ImageInput> ReferenceCache = new(StringComparer.OrdinalIgnoreCase);
@@ -45,8 +47,12 @@ public class AiStudioJobRunner
         ProductVisionService vision,
         IAiStudioRealtimeNotifier notifier,
         IOptions<AiStudioOptions> options,
-        ILogger<AiStudioJobRunner> logger)
+        ILogger<AiStudioJobRunner> logger,
+        ProductStorage productStorage,
+        ProductService productService)
     {
+        _productStorage = productStorage;
+        _productService = productService;
         _storage = storage;
         _credits = credits;
         _mediaStorage = mediaStorage;
@@ -153,8 +159,8 @@ public class AiStudioJobRunner
 
             // 3. Prompt + references (a generated image borrows the style references of its chosen background).
             var categoryEn = options.CategoryEn ?? options.CategoryName;
-            job.Prompt = PromptBuilder.Build(look, categoryEn, options.Ratio, job.IncidentalText, options.Scene, brief, options.Background);
-            var references = await LoadReferencesAsync(source == null ? (options.Background ?? look.Key) : look.Key, cancelToken).ConfigureAwait(false);
+            job.Prompt = PromptBuilder.Build(look, categoryEn, options.Ratio, job.IncidentalText, options.Scene, brief, options.Background, look.StyleNotes);
+            var references = await LoadReferencesAsync(source == null ? (options.Background ?? look.Key) : look.Key, job.AccountId, cancelToken).ConfigureAwait(false);
             await _storage.SaveAsync(cancelToken).ConfigureAwait(false);
 
             // 4. Preview.
@@ -221,6 +227,11 @@ public class AiStudioJobRunner
             job.FinishedAt = DateTime.UtcNow;
             await SaveAndNotifyAsync(job, cancelToken).ConfigureAwait(false);
             _logger.LogInformation("AiStudio job {JobId}: done, final in {Ms} ms, est. ${Cost}", job.GuidId, job.FinalMs, job.ProviderCostUsd);
+
+            // "צור תמונות למוצרים ללא תמונה": the final becomes the product's image (only if it still has none) and the product is
+            // pushed to its Woo stores like any product edit. Failing here must not fail the job - the image exists in the library.
+            if (options.AttachToProduct && job.ProductId is > 0)
+                await AttachToProductAsync(job, finalMedia, cancelToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancelToken.IsCancellationRequested)
         {
@@ -252,12 +263,42 @@ public class AiStudioJobRunner
         return source == null ? provider.GenerateAsync(req, cancelToken) : provider.EditAsync(req, cancelToken);
     }
 
-    private async Task<List<ImageInput>> LoadReferencesAsync(string look, CancellationToken cancelToken)
+    private async Task AttachToProductAsync(AiImageJob job, Media finalMedia, CancellationToken cancelToken)
+    {
+        try
+        {
+            var siteIds = await _productStorage.AddProductImageIfEmptyAsync(job.ProductId!.Value, finalMedia.Url, finalMedia.Id, cancelToken).ConfigureAwait(false);
+            if (siteIds == null)
+            {
+                _logger.LogInformation("AiStudio job {JobId}: product {ProductId} already has an image, result left in the library", job.GuidId, job.ProductId);
+                return;
+            }
+            _logger.LogInformation("AiStudio job {JobId}: attached as the image of product {ProductId}", job.GuidId, job.ProductId);
+            if (siteIds.Count > 0)
+                await _productService.SyncProductToWooCommerceForAssignedSitesAsync(job.ProductId.Value, siteIds, cancelToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AiStudio job {JobId}: attaching the result to product {ProductId} failed", job.GuidId, job.ProductId);
+        }
+    }
+
+    /// <summary>Style references for a look: the account's preset row, else the global row, else AiStudio:ReferenceUrls.</summary>
+    private async Task<List<ImageInput>> LoadReferencesAsync(string look, int accountId, CancellationToken cancelToken)
     {
         var list = new List<ImageInput>();
-        if (!_options.ReferenceUrls.TryGetValue(look, out var urls) || urls == null)
+        IReadOnlyList<string>? urls = null;
+        var def = AiStudioLooks.Find(look);
+        if (def != null)
+        {
+            var row = await _storage.GetAccountPresetAsync(accountId, def.Key, cancelToken).ConfigureAwait(false);
+            urls = (row == null ? def : AiStudioLooks.Merge(def, row)).References;
+        }
+        if (urls == null && _options.ReferenceUrls.TryGetValue(look, out var cfg))
+            urls = cfg;
+        if (urls == null)
             return list;
-        foreach (var url in urls.Where(u => !string.IsNullOrWhiteSpace(u)).Take(3))
+        foreach (var url in urls.Where(u => !string.IsNullOrWhiteSpace(u)).Take(AiStudioLooks.MaxReferences))
         {
             if (ReferenceCache.TryGetValue(url, out var cached))
             {
