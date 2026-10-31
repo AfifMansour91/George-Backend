@@ -1,4 +1,5 @@
 using System.Text.Json;
+using George.Services.AiStudio;
 using George.Services.Marketing;
 using George.Services.Payments;
 using Microsoft.AspNetCore.Authorization;
@@ -14,12 +15,14 @@ public class CardcomWebhookController : ControllerBase
 {
     private readonly PaymentService _paymentSvc;
     private readonly MarketingService _marketingSvc;
+    private readonly AiCreditService _aiCreditSvc;
     private readonly ILogger<CardcomWebhookController> _logger;
 
-    public CardcomWebhookController(PaymentService paymentSvc, MarketingService marketingSvc, ILogger<CardcomWebhookController> logger)
+    public CardcomWebhookController(PaymentService paymentSvc, MarketingService marketingSvc, AiCreditService aiCreditSvc, ILogger<CardcomWebhookController> logger)
     {
         _paymentSvc = paymentSvc;
         _marketingSvc = marketingSvc;
+        _aiCreditSvc = aiCreditSvc;
         _logger = logger;
     }
 
@@ -61,6 +64,26 @@ public class CardcomWebhookController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Cardcom marketing webhook processing failed.");
+        }
+
+        return Ok();
+    }
+
+    /// <summary>POST /Webhooks/Cardcom/AiStudio - AI studio credit packages, paid on the PLATFORM's terminal.</summary>
+    [HttpPost("AiStudio")]
+    public async Task<IActionResult> AiStudioPostAsync(CancellationToken cancelToken)
+    {
+        try
+        {
+            var lowProfileId = await ResolveLowProfileIdAsync(cancelToken);
+            if (!string.IsNullOrWhiteSpace(lowProfileId))
+                await _aiCreditSvc.ProcessCardcomWebhookAsync(lowProfileId, cancelToken);
+            else
+                _logger.LogWarning("Cardcom AI studio webhook: could not resolve LowProfileId from request.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Cardcom AI studio webhook processing failed.");
         }
 
         return Ok();

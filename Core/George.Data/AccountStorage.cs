@@ -191,6 +191,9 @@ namespace George.Data
             dbAcc.KioskEnabled = updated.KioskEnabled;
             dbAcc.BundlesEnabled = updated.BundlesEnabled;
             dbAcc.MarketingEnabled = updated.MarketingEnabled;
+            dbAcc.AiStudioEnabled = updated.AiStudioEnabled;
+            dbAcc.AiStudioMode = updated.AiStudioMode;
+            dbAcc.AiStudioDailyCap = updated.AiStudioDailyCap;
 
             // Update address and website fields
             dbAcc.Address = updated.Address;

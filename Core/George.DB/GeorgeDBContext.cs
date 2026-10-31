@@ -73,6 +73,17 @@ namespace George.DB
 		public virtual DbSet<MarketingPackage> MarketingPackage { get; set; }
 		public virtual DbSet<MarketingPurchase> MarketingPurchase { get; set; }
 
+		// AI Product Studio - AiStudio_Phase1_Install.sql. Plain FK ints, no navigations.
+		public virtual DbSet<AiImageJob> AiImageJob { get; set; }
+		// AI Product Studio phase 3 - AiStudio_Phase3_Install.sql.
+		public virtual DbSet<AiCreditLedger> AiCreditLedger { get; set; }
+		public virtual DbSet<AiCreditPackage> AiCreditPackage { get; set; }
+		public virtual DbSet<AiCreditPurchase> AiCreditPurchase { get; set; }
+		public virtual DbSet<AiProviderSpend> AiProviderSpend { get; set; }
+		public virtual DbSet<AiProviderTopUp> AiProviderTopUp { get; set; }
+		// AI Product Studio phase 4 - AiStudio_Phase4_Install.sql.
+		public virtual DbSet<AiStylePreset> AiStylePreset { get; set; }
+
 		// DB Views mapping
 
 

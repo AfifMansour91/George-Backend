@@ -313,6 +313,10 @@ namespace George.Data
                 dbSite.UnderweightPickingThresholdPercent = Math.Clamp(updated.UnderweightPickingThresholdPercent.Value, 0m, 100m);
             if (updated.ScaleEnabled.HasValue) dbSite.ScaleEnabled = updated.ScaleEnabled;
             if (updated.ScaleBarcodeEmbedMode != null) dbSite.ScaleBarcodeEmbedMode = updated.ScaleBarcodeEmbedMode;
+            // AI studio defaults: null = keep, "" = clear (back to the platform default).
+            if (updated.AiDefaultLook != null) dbSite.AiDefaultLook = string.IsNullOrWhiteSpace(updated.AiDefaultLook) ? null : updated.AiDefaultLook.Trim().ToLowerInvariant();
+            if (updated.AiImageRatio != null) dbSite.AiImageRatio = updated.AiImageRatio.Trim() is "4:5" or "3:4" or "4:3" or "16:9" ? updated.AiImageRatio.Trim() : null;
+            if (updated.AiFinalSize != null) dbSite.AiFinalSize = updated.AiFinalSize.Trim().ToLowerInvariant() == "4k" ? "4k" : null;
             if (updated.ExternalPriceManagement.HasValue) dbSite.ExternalPriceManagement = updated.ExternalPriceManagement;
             // Promotion settings (Sprint 4). Without these the per-site Webhook URL never persists,
             // so PromotionWebhookDispatcher.FireAsync no-ops and promotions never sync to WooCommerce.

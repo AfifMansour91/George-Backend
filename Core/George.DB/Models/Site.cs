@@ -378,6 +378,19 @@ public partial class Site
     [StringLength(16)]
     public string? ScaleBarcodeEmbedMode { get; set; }
 
+    /// <summary>AI studio (spec §6.4): the look that starts automatically in the quick-product flow and is preselected in the
+    /// dialogs (studio_white | dark | marble | ambience | enhance). NULL = the first look.</summary>
+    [StringLength(30)]
+    public string? AiDefaultLook { get; set; }
+
+    /// <summary>AI studio: composition of generated images - 1:1 (default) | 4:5 | 3:4 | 4:3 | 16:9.</summary>
+    [StringLength(10)]
+    public string? AiImageRatio { get; set; }
+
+    /// <summary>AI studio: 2k (default) | 4k - 4K finals cost AiStudio:HdCredits more per image.</summary>
+    [StringLength(5)]
+    public string? AiFinalSize { get; set; }
+
     /// <summary>
     /// When true, product/variation prices on this site's WooCommerce store are managed by an external
     /// system (e.g. the POS pushes prices directly to Woo). George then never writes price fields on Woo

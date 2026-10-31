@@ -435,6 +435,8 @@ namespace George.Api.Core
 			services.AddScoped<GlobalBrandStorage>();
 			services.AddScoped<TemplateAttributeStorage>();
 			services.AddScoped<TemplateProductStorage>();
+			services.AddScoped<AiStudioStorage>();
+			services.AddScoped<AiCreditStorage>();
 
             // Add Services.
             services.AddScoped<ConfigurationService>();
@@ -452,6 +454,19 @@ namespace George.Api.Core
 			services.AddScoped<BrandService>();
 			services.AddScoped<AttributeService>();
 			services.AddScoped<MediaService>();
+
+			// AI Product Studio (AI_PRODUCT_STUDIO_SPEC.md). Keys in appsettings.User.json → "AiStudio".
+			services.Configure<George.Services.AiStudio.AiStudioOptions>(Configuration.GetSection(George.Services.AiStudio.AiStudioOptions.SectionName));
+			services.AddScoped<George.Services.AiStudio.IImageModelProvider, George.Services.AiStudio.OpenAiImageProvider>();
+			services.AddScoped<George.Services.AiStudio.IImageModelProvider, George.Services.AiStudio.GeminiImageProvider>();
+			services.AddScoped<George.Services.AiStudio.ProductVisionService>();
+			services.AddScoped<George.Services.AiStudio.AiStudioService>();
+			services.AddScoped<George.Services.AiStudio.AiCreditService>();
+			services.AddScoped<George.Services.AiStudio.AiStudioJobRunner>();
+			services.AddScoped<George.Services.AiStudio.IAiStudioRealtimeNotifier, George.Services.AiStudio.NullAiStudioRealtimeNotifier>();
+			services.AddHttpClient(George.Services.AiStudio.OpenAiImageProvider.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(180));
+			services.AddHttpClient(George.Services.AiStudio.GeminiImageProvider.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(180));
+			services.AddHttpClient(George.Services.AiStudio.AiStudioJobRunner.HttpClientName, c => { c.Timeout = TimeSpan.FromSeconds(60); c.DefaultRequestHeaders.UserAgent.ParseAdd("GiorgioAiStudio/1.0"); });
 			services.AddScoped<ThumbnailService>();
 			services.AddScoped<OrderService>();
 			services.AddScoped<PromotionService>();

@@ -120,6 +120,7 @@ namespace George.Services
                 KioskEnabled = req.KioskEnabled,
                 BundlesEnabled = req.BundlesEnabled,
                 MarketingEnabled = req.MarketingEnabled,
+                AiStudioEnabled = req.AiStudioEnabled,
                 IsActive = true,
                 CreationTime = DateTime.UtcNow,
             };
@@ -256,6 +257,10 @@ namespace George.Services
                 KioskEnabled = canSetModules ? (req.KioskEnabled ?? existingAccount.KioskEnabled) : existingAccount.KioskEnabled,
                 BundlesEnabled = canSetModules ? (req.BundlesEnabled ?? existingAccount.BundlesEnabled) : existingAccount.BundlesEnabled,
                 MarketingEnabled = canSetModules ? (req.MarketingEnabled ?? existingAccount.MarketingEnabled) : existingAccount.MarketingEnabled,
+                AiStudioEnabled = canSetModules ? (req.AiStudioEnabled ?? existingAccount.AiStudioEnabled) : existingAccount.AiStudioEnabled,
+                AiStudioMode = canSetModules ? (req.AiStudioMode ?? existingAccount.AiStudioMode) : existingAccount.AiStudioMode,
+                AiStudioDailyCap = canSetModules && req.AiStudioDailyCap is int cap ? (cap > 0 ? cap : null) : existingAccount.AiStudioDailyCap,
+                AiStudioPoolConsentAt = existingAccount.AiStudioPoolConsentAt,
                 // Address fields: use request value if provided, otherwise preserve existing
                 Address = req.Address ?? existingAccount.Address,
                 City = req.City ?? existingAccount.City,

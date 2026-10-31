@@ -92,6 +92,10 @@ namespace George.Services
                     dest.KioskEnabled = src.KioskEnabled;
                     dest.BundlesEnabled = src.BundlesEnabled;
                     dest.MarketingEnabled = src.MarketingEnabled;
+                    dest.AiStudioEnabled = src.AiStudioEnabled;
+                    dest.AiStudioMode = src.AiStudioMode;
+                    dest.AiStudioDailyCap = src.AiStudioDailyCap;
+                    dest.AiStudioPoolConsentAt = src.AiStudioPoolConsentAt;
                     if (src.KioskSettings != null)
                     {
                         dest.KioskSettings = context.Mapper.Map<KioskSettingsRes>(src.KioskSettings);

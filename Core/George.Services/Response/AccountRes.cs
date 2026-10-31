@@ -51,6 +51,18 @@ namespace George.Services.Response
         /// <summary>Marketing module (שיווק) feature gate (FE <c>allowMarketing</c>).</summary>
         public bool MarketingEnabled { get; set; }
 
+        /// <summary>AI Product Studio feature gate (FE <c>allowAiStudio</c>).</summary>
+        public bool AiStudioEnabled { get; set; }
+
+        /// <summary>community | paid.</summary>
+        public string? AiStudioMode { get; set; }
+
+        /// <summary>AI jobs per day; null = platform default.</summary>
+        public int? AiStudioDailyCap { get; set; }
+
+        /// <summary>Community mode: when the shop accepted the pool terms.</summary>
+        public DateTime? AiStudioPoolConsentAt { get; set; }
+
         /// <summary>Kiosk design and behavior settings (logo override, colors, home bg, payment toggles).</summary>
         public KioskSettingsRes? KioskSettings { get; set; }
 

@@ -239,6 +239,12 @@ namespace George.Common.Request
         public bool? BundlesEnabled { get; set; }
         /// <summary>Marketing module (שיווק) feature gate (FE <c>allowMarketing</c>). Super-admin switch; null = keep the current value.</summary>
         public bool? MarketingEnabled { get; set; }
+        /// <summary>AI Product Studio feature gate (FE <c>allowAiStudio</c>). Super-admin switch; null = keep the current value.</summary>
+        public bool? AiStudioEnabled { get; set; }
+        /// <summary>community | paid; null = keep.</summary>
+        public string? AiStudioMode { get; set; }
+        /// <summary>AI jobs per day; null = keep, 0 = back to the platform default.</summary>
+        public int? AiStudioDailyCap { get; set; }
         public int? WizardStep { get; set; }
         public string? WizardStatus { get; set; }
         /// <summary>Wizard type: "all_sites", "per_site", or "none" (no client-facing wizard).</summary>
@@ -524,6 +530,8 @@ namespace George.Common.Request
         public bool BundlesEnabled { get; set; } = true;
         /// <summary>Marketing module (שיווק) feature gate (FE <c>allowMarketing</c>). OFF by default - opened per account.</summary>
         public bool MarketingEnabled { get; set; } = false;
+        /// <summary>AI Product Studio feature gate (FE <c>allowAiStudio</c>). OFF by default - opened per account.</summary>
+        public bool AiStudioEnabled { get; set; } = false;
 
         public string? LogoUrl { get; set; }
         public string? Website { get; set; }

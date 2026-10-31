@@ -34,6 +34,7 @@ namespace George.Api
 			services.AddHostedService<FutureOrdersAtTimePrintHostedService>();
 			services.AddHostedService<George.Services.Marketing.MessageLogBackgroundWriter>();
 			services.AddHostedService<George.Services.Marketing.MarketingDispatchHostedService>();
+			services.AddHostedService<George.Services.AiStudio.AiStudioJobHostedService>();
 		}
 
 		protected override void Initialize(IServiceCollection services)
@@ -46,12 +47,14 @@ namespace George.Api
 			base.AddCustomDependencies(services);
 			services.AddScoped<IOrderRealtimeNotifier, SignalROrderRealtimeNotifier>();
 			services.AddScoped<IScaleRealtimeNotifier, ScaleRealtimeNotifier>();
+			services.AddScoped<George.Services.AiStudio.IAiStudioRealtimeNotifier, AiStudioRealtimeNotifier>();
 		}
 
 		protected override void MapSignalRHubs(IEndpointRouteBuilder endpoints)
 		{
 			endpoints.MapHub<OrdersHub>("/hubs/orders");
 			endpoints.MapHub<ScaleHub>("/hubs/scale");
+			endpoints.MapHub<AiStudioHub>("/hubs/aistudio");
 		}
 	}
 }

@@ -183,6 +183,11 @@ namespace George.Services.Request
         /// <summary>Scale barcode payload: auto | weight | price.</summary>
         public string? ScaleBarcodeEmbedMode { get; set; }
 
+        /// <summary>AI studio defaults (spec §6.4): default look, image ratio (1:1 | 4:5 | 3:4 | 4:3 | 16:9), final size (2k | 4k). "" = clear.</summary>
+        public string? AiDefaultLook { get; set; }
+        public string? AiImageRatio { get; set; }
+        public string? AiFinalSize { get; set; }
+
         /// <summary>When true, prices on this site's Woo store are managed externally (POS): George skips price fields on Woo updates and the daily job pulls Woo prices back. Off by default.</summary>
         public bool? ExternalPriceManagement { get; set; }
 
