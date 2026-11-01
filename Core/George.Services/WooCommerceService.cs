@@ -5362,14 +5362,13 @@ namespace George.Services
         }
 
         /// <summary>
-        /// Finds a product in WooCommerce by SKU. Tries plain SKU first, then prefixed (S{siteId}_{sku}) for backward compatibility with products synced when prefix was used.
-        /// Returns its ID if found, so we can update instead of create (avoids product_invalid_sku when product already exists).
+        /// Maps linked local products to WooCommerce product IDs for upsell_ids / cross_sell_ids.
+        /// Resolves THIS site's id (ProductSiteWooId; legacy Product.WooCommerceId only as fallback), then a SKU lookup.
+        /// The legacy column goes stale when a store is rebuilt (PEPE site 51, 2026-10-26: every linked id pointed at a
+        /// deleted post or at a variation of another product, so "מוצרים משלימים" vanished from the shop) - never use it first.
+        /// Order matches the local collection; duplicates and deleted products are skipped.
         /// </summary>
-        /// <summary>
-        /// Maps linked local products to WooCommerce product IDs for upsell_ids / cross_sell_ids (uses WooCommerceId, then SKU lookup).
-        /// Order matches the local collection; duplicates are skipped.
-        /// </summary>
-        private static async Task<List<int>> ResolveWooCommerceIdsForLinkedProductsAsync(
+        private async Task<List<int>> ResolveWooCommerceIdsForLinkedProductsAsync(
             string baseUrl,
             int siteId,
             ICollection<Product>? linked,
@@ -5380,11 +5379,27 @@ namespace George.Services
             if (linked == null || linked.Count == 0)
                 return ordered;
 
-            var seen = new HashSet<int>();
-            foreach (var p in linked)
+            var linkedProducts = linked.Where(p => p != null && !p.IsDeleted).ToList();
+            if (linkedProducts.Count == 0)
+                return ordered;
+
+            Dictionary<int, int> siteWooIds;
+            try
             {
-                if (p == null) continue;
-                int? wooId = p.WooCommerceId;
+                siteWooIds = await _bundleStorage
+                    .GetSiteWooProductIdMapAsync(linkedProducts.Select(p => p.Id).ToList(), siteId, cancelToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "WooCommerce sync: failed to load per-site Woo ids for linked products on site {SiteId}; falling back to SKU lookup", siteId);
+                siteWooIds = new Dictionary<int, int>();
+            }
+
+            var seen = new HashSet<int>();
+            foreach (var p in linkedProducts)
+            {
+                int? wooId = siteWooIds.TryGetValue(p.Id, out var mapped) ? mapped : null;
                 if (!wooId.HasValue && !string.IsNullOrWhiteSpace(p.Sku))
                     wooId = await FindProductIdBySkuAsync(baseUrl, siteId, p.Sku, httpClient, cancelToken).ConfigureAwait(false);
                 if (wooId.HasValue && wooId.Value > 0 && seen.Add(wooId.Value))
@@ -5394,6 +5409,10 @@ namespace George.Services
             return ordered;
         }
 
+        /// <summary>
+        /// Finds a product in WooCommerce by SKU. Tries plain SKU first, then prefixed (S{siteId}_{sku}) for backward compatibility with products synced when prefix was used.
+        /// Returns its ID if found, so we can update instead of create (avoids product_invalid_sku when product already exists).
+        /// </summary>
         private static async Task<int?> FindProductIdBySkuAsync(string baseUrl, int siteId, string sku, HttpClient httpClient, CancellationToken cancelToken)
         {
             if (string.IsNullOrWhiteSpace(sku)) return null;
