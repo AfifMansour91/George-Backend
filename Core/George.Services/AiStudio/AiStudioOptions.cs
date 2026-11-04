@@ -82,6 +82,11 @@ public class AiStudioOptions
     /// paid from credits, even in community mode; only a fresh phone capture and generate-from-text follow the account's mode.</summary>
     public bool ExistingImageAlwaysPaid { get; set; } = true;
 
+    /// <summary>Afif/George (4.11.2026): the "שיפור תמונה" look (<see cref="AiStudioLooks.Enhance"/>, the shop's own photo cleaned up, no new
+    /// scene) is ALWAYS paid from credits, even on a fresh capture in community mode: a cleaned-up copy of one shop's photo is
+    /// of no use to the shared catalog, so there is nothing to donate in exchange.</summary>
+    public bool EnhanceAlwaysPaid { get; set; } = true;
+
     /// <summary>A capture counts as "fresh" (community rules) when its Media row was uploaded by the same user within this many minutes.</summary>
     public int FreshCaptureMinutes { get; set; } = 30;
 

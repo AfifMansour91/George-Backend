@@ -28,6 +28,8 @@ public class AiStudioStatusRes
     public bool ExistingImagePaid { get; set; }
     /// <summary>Price of "כתוב ב-AI" with a web lookup of the barcode (vs 1 without).</summary>
     public int WebSearchCredits { get; set; }
+    /// <summary>How long after upload a quick-product photo still counts as a fresh capture (community rules); afterwards it is an existing image.</summary>
+    public int FreshCaptureMinutes { get; set; }
 }
 
 /// <summary>GET /AiStudio/Presets - one look as the shop may tune it (הגדרות › סטודיו AI › המראים שלי).</summary>
@@ -38,6 +40,8 @@ public class AiAccountLookRes
     public string Description { get; set; } = string.Empty;
     public int Credits { get; set; }
     public bool NeedsSource { get; set; }
+    /// <summary>True for "שיפור תמונה": charged from credits in every mode, fresh capture included (AiStudio:EnhanceAlwaysPaid).</summary>
+    public bool AlwaysPaid { get; set; }
     public bool IsBackground { get; set; }
     /// <summary>The platform switched the look off (nothing the shop can do).</summary>
     public bool PlatformActive { get; set; } = true;
@@ -84,6 +88,8 @@ public class AiLookRes
     public string Description { get; set; } = string.Empty;
     public int Credits { get; set; }
     public bool NeedsSource { get; set; }
+    /// <summary>True for "שיפור תמונה": charged from credits in every mode, fresh capture included (AiStudio:EnhanceAlwaysPaid).</summary>
+    public bool AlwaysPaid { get; set; }
     /// <summary>True for the looks that can be the background of a generated (no-photo) image.</summary>
     public bool IsBackground { get; set; }
 }

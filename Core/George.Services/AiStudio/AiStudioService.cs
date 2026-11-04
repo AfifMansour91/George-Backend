@@ -28,6 +28,7 @@ public class AiStudioService : ServiceBase
     private const string ErrDailyCap = "הגעתם למכסת התמונות היומית של החשבון. נסו שוב מחר או פנו אלינו להגדלת המכסה.";
     private const string ErrNoProvider = "אף מנוע תמונה לא מוגדר בשרת (AiStudio:OpenAI / AiStudio:Gemini)";
     public const string ErrNoCredits = "אין מספיק קרדיטים בחשבון. אפשר לרכוש חבילה בהגדרות › סטודיו AI.";
+    public const string ErrNoCreditsEnhance = "שיפור תמונה מחויב בקרדיטים גם במצב הקהילתי, ואין מספיק קרדיטים בחשבון. אפשר לרכוש חבילה בהגדרות › סטודיו AI, או לבחור מראה אחר.";
     public const string ErrNoCreditsExisting = "שיפור של תמונה קיימת מחויב בקרדיטים גם במצב הקהילתי, ואין מספיק קרדיטים בחשבון. אפשר לרכוש חבילה בהגדרות › סטודיו AI.";
     public const string ErrConsentRequired = "לפני השימוש הראשון יש לאשר את תנאי המאגר המשותף.";
     private const string ErrLookOff = "המראה הזה כבוי בחשבון (הגדרות › סטודיו AI › המראים שלי).";
@@ -102,6 +103,7 @@ public class AiStudioService : ServiceBase
             HdCredits = _options.HdCredits,
             ExistingImagePaid = _options.ExistingImageAlwaysPaid,
             WebSearchCredits = _options.WebSearchCredits,
+            FreshCaptureMinutes = Math.Max(1, _options.FreshCaptureMinutes),
             Defaults = await ResolveDefaultsAsync(scope, cancelToken).ConfigureAwait(false),
             Balance = statusBalance,
             CanPurchase = PlatformBilling.FromConfiguration(_configuration) != null,
@@ -114,7 +116,7 @@ public class AiStudioService : ServiceBase
             UsedToday = scope.Account.AiStudioEnabled ? await _storage.CountJobsSinceAsync(scope.AccountId, DateTime.UtcNow.Date, cancelToken).ConfigureAwait(false) : 0,
             VisionEnabled = _vision.IsConfigured,
             DefaultProvider = _options.DefaultProvider,
-            Looks = accountLooks.Where(l => l.IsActive).Select(l => new AiLookRes { Key = l.Key, Label = l.Label, Description = l.Description, Credits = l.Credits, NeedsSource = l.NeedsSource, IsBackground = AiStudioLooks.IsBackground(l.Key) }).ToList(),
+            Looks = accountLooks.Where(l => l.IsActive).Select(l => new AiLookRes { Key = l.Key, Label = l.Label, Description = l.Description, Credits = l.Credits, NeedsSource = l.NeedsSource, IsBackground = AiStudioLooks.IsBackground(l.Key), AlwaysPaid = IsAlwaysPaid(l.Key) }).ToList(),
         };
         return response;
     }
@@ -165,7 +167,7 @@ public class AiStudioService : ServiceBase
             var platformRefs = l.References ?? (_options.ReferenceUrls.TryGetValue(l.Key, out var cfg) ? cfg : null) ?? new List<string>();
             return new AiAccountLookRes
             {
-                Key = l.Key, Label = l.Label, Description = l.Description, Credits = l.Credits, NeedsSource = l.NeedsSource, IsBackground = AiStudioLooks.IsBackground(l.Key),
+                Key = l.Key, Label = l.Label, Description = l.Description, Credits = l.Credits, NeedsSource = l.NeedsSource, IsBackground = AiStudioLooks.IsBackground(l.Key), AlwaysPaid = IsAlwaysPaid(l.Key),
                 PlatformActive = l.IsActive,
                 IsActive = row?.IsActive ?? true,
                 StyleNotes = row?.StyleNotes,
@@ -305,7 +307,9 @@ public class AiStudioService : ServiceBase
         // George's rule (31.10.2026): an image the shop already had is never on the platform's dime. Only a photo the user just
         // took (quick product, verified against the Media row) and generate-from-text follow the account's mode.
         var fromExisting = look.NeedsSource && _options.ExistingImageAlwaysPaid && !await IsFreshCaptureAsync(scope.AccountId, req.Capture, req.SourceMediaId, cancelToken).ConfigureAwait(false);
-        var charge = paid || fromExisting;
+        // "שיפור תמונה" is paid in every mode (4.11.2026): a cleaned-up copy of the shop's own photo gives the shared catalog nothing.
+        var alwaysPaid = IsAlwaysPaid(look.Key);
+        var charge = paid || fromExisting || alwaysPaid;
         // Community mode is free but every result is donated: the shop must have accepted the pool terms once (spec §7).
         if (!charge && scope.Account.AiStudioPoolConsentAt == null)
             return CreateResponse(response, StatusCode.InvalidOperation, ErrConsentRequired);
@@ -315,7 +319,7 @@ public class AiStudioService : ServiceBase
         {
             var balance = await _credits.GetBalanceAsync(scope.AccountId, cancelToken).ConfigureAwait(false);
             if (balance < price)
-                return CreateResponse(response, StatusCode.InvalidOperation, paid ? ErrNoCredits : ErrNoCreditsExisting);
+                return CreateResponse(response, StatusCode.InvalidOperation, paid ? ErrNoCredits : alwaysPaid && !fromExisting ? ErrNoCreditsEnhance : ErrNoCreditsExisting);
             // The ledger entry is written BEFORE the job so a worker can never claim a job whose debit is still in flight.
             debit = await _credits.AddLedgerEntryAsync(new AiCreditLedger
             {
@@ -352,6 +356,8 @@ public class AiStudioService : ServiceBase
 
     /// <summary>A "capture" claim holds when the source Media row was uploaded by this user, into this account, in the last
     /// AiStudio:FreshCaptureMinutes. A gallery image, a stock image or someone else's upload is an existing image.</summary>
+    private bool IsAlwaysPaid(string lookKey) => _options.EnhanceAlwaysPaid && string.Equals(lookKey, AiStudioLooks.Enhance, StringComparison.OrdinalIgnoreCase);
+
     private async Task<bool> IsFreshCaptureAsync(int accountId, bool? capture, int? sourceMediaId, CancellationToken cancelToken)
     {
         if (capture != true || sourceMediaId is not > 0)
