@@ -350,6 +350,13 @@ namespace George.Data
                 .FirstOrDefaultAsync(cancelToken);
         }
 
+        /// <summary>Does the account use this media on any of its sites (AccountMedia)? Media.AccountId stays NULL for uploads, so
+        /// this link table is what ties an uploaded file to the shop.</summary>
+        public Task<bool> IsMediaLinkedToAccountAsync(int accountId, int mediaId, CancellationToken cancelToken)
+        {
+            return _dbContext.AccountMedia.AnyAsync(am => am.AccountId == accountId && am.MediaId == mediaId, cancelToken);
+        }
+
         /// <summary>Record that an account/site uses a media item. Idempotent.</summary>
         public async Task AddAccountMediaUsageAsync(int accountId, int siteId, int mediaId, CancellationToken cancelToken)
         {

@@ -359,7 +359,14 @@ public class AiStudioService : ServiceBase
         try
         {
             var media = await _mediaStorage.GetMediaAsync(sourceMediaId.Value, cancelToken).ConfigureAwait(false);
-            if (media == null || media.IsDeleted || media.AccountId != accountId)
+            if (media == null || media.IsDeleted)
+                return false;
+            // Uploads are stored with Media.AccountId = NULL; the shop's ownership lives in AccountMedia (account + site), and a
+            // quick-product photo whose site link was skipped is still the uploader's own file.
+            var owned = media.AccountId == accountId
+                || (media.AccountId == null && (await _mediaStorage.IsMediaLinkedToAccountAsync(accountId, media.Id, cancelToken).ConfigureAwait(false)
+                                                || (AuthUser.Id > 0 && media.CreationUserId == AuthUser.Id)));
+            if (!owned)
                 return false;
             if (media.Origin != null && media.Origin != Media.OriginUpload)
                 return false; // an AI result re-fed as a source is an existing image
