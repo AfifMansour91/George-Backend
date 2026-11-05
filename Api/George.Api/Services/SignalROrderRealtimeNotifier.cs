@@ -72,6 +72,23 @@ public class SignalROrderRealtimeNotifier : IOrderRealtimeNotifier
         }
     }
 
+    public async Task NotifyMissingInvoiceAsync(MissingInvoiceAlertEvent alert, CancellationToken cancelToken = default)
+    {
+        if (!SysConfig.Data.OrdersRealtimeEnabled || alert == null || alert.SiteId <= 0)
+            return;
+        try
+        {
+            await _hub.Clients
+                .Group(OrdersHub.SiteGroup(alert.SiteId))
+                .SendAsync(RealtimeEventNames.MissingInvoice, alert, cancelToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to push MissingInvoice for order {OrderId}", alert.OrderId);
+        }
+    }
+
     private async Task AppendEventLogAsync(
         OrderRes order,
         string? payloadJson,

@@ -334,6 +334,15 @@ public partial class Site
     /// </summary>
     public bool? ShowOrderHandler { get; set; }
 
+    /// <summary>Website orders print "מספר הזמנה באתר: #N" (ExternalOrderId) under the source line on vouchers/A4.
+    /// NULL/1 = shown (default ON), 0 = hidden.</summary>
+    public bool? ShowWebsiteOrderNumberInPrints { get; set; }
+
+    /// <summary>PEPE (4.11.2026): alert (in-app + manager SMS) when a charged card order has no invoice document after
+    /// <see cref="MissingInvoiceAlertMinutes"/> minutes (default 10). NULL/0 = off.</summary>
+    public bool? MissingInvoiceAlertEnabled { get; set; }
+    public int? MissingInvoiceAlertMinutes { get; set; }
+
     /// <summary>
     /// Feature flag: render order-line attributes from the typed <see cref="OrderItem.LineDisplayJson"/>
     /// snapshot (no Hebrew-label parsing) on lines that have one; lines without it always use the legacy

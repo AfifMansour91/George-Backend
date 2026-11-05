@@ -475,6 +475,7 @@ namespace George.Api.Core
 			services.AddScoped<SiteAccessService>();
 			services.AddScoped<George.Services.Orders.IOrderRealtimeNotifier, George.Services.Orders.NullOrderRealtimeNotifier>();
 			services.AddScoped<George.Services.Payments.PaymentService>();
+			services.AddScoped<George.Services.Payments.MissingInvoiceAlertService>();
 			services.AddScoped<George.Services.Payments.Cardcom.CardcomGateway>();
 			services.AddScoped<George.Services.Payments.PayPlus.PayPlusGateway>();
 			services.AddSingleton<George.Services.Payments.PaymentTokenProtector>();

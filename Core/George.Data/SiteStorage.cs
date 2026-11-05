@@ -301,6 +301,9 @@ namespace George.Data
             }
             if (updated.ShowCustomerProfileNoteInPrints.HasValue) dbSite.ShowCustomerProfileNoteInPrints = updated.ShowCustomerProfileNoteInPrints;
             if (updated.ShowOrderHandler.HasValue) dbSite.ShowOrderHandler = updated.ShowOrderHandler;
+            if (updated.ShowWebsiteOrderNumberInPrints.HasValue) dbSite.ShowWebsiteOrderNumberInPrints = updated.ShowWebsiteOrderNumberInPrints;
+            if (updated.MissingInvoiceAlertEnabled.HasValue) dbSite.MissingInvoiceAlertEnabled = updated.MissingInvoiceAlertEnabled;
+            if (updated.MissingInvoiceAlertMinutes.HasValue) dbSite.MissingInvoiceAlertMinutes = Math.Clamp(updated.MissingInvoiceAlertMinutes.Value, 1, 1440);
             if (updated.UseStructuredOrderLineDisplay.HasValue) dbSite.UseStructuredOrderLineDisplay = updated.UseStructuredOrderLineDisplay;
             if (updated.FastPickingScan.HasValue) dbSite.FastPickingScan = updated.FastPickingScan;
             if (updated.ShowPickingExceptionsPopup.HasValue) dbSite.ShowPickingExceptionsPopup = updated.ShowPickingExceptionsPopup;

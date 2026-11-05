@@ -162,6 +162,13 @@ namespace George.Services.Request
         /// <summary>When true, show the handler name (מטפל) under the order source on cards and printouts. Off by default.</summary>
         public bool? ShowOrderHandler { get; set; }
 
+        /// <summary>Website orders print their website order number under the source line. NULL/true = shown (default), false = hidden.</summary>
+        public bool? ShowWebsiteOrderNumberInPrints { get; set; }
+
+        /// <summary>Alert (in-app + manager SMS) when a charged card order has no invoice after N minutes. Off by default.</summary>
+        public bool? MissingInvoiceAlertEnabled { get; set; }
+        public int? MissingInvoiceAlertMinutes { get; set; }
+
         /// <summary>Feature flag: render order lines from the typed LineDisplayJson snapshot when present. Off by default.</summary>
         public bool? UseStructuredOrderLineDisplay { get; set; }
 

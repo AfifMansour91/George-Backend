@@ -687,7 +687,10 @@ namespace George.Data
             // line would under-charge by that line's stamp.
             var promo = active.Sum(i =>
                 SumOrderLineMerchandise(i) > 0m && i.DiscountAmount is > 0m ? i.DiscountAmount.Value : 0m);
-            var manual = order.ManualDiscountAmount is > 0m ? order.ManualDiscountAmount.Value : 0m;
+            // A picking discount (percent) follows what was actually picked; the stored amount is refreshed with it.
+            var manual = OrderDiscountTotals.ResolveManualDiscount(order.ManualDiscountType, order.ManualDiscountValue, order.ManualDiscountAmount, sum, promo, order.ShippingCost ?? 0m);
+            if (manual != (order.ManualDiscountAmount ?? 0m))
+                order.ManualDiscountAmount = manual > 0m ? manual : null;
             order.SubTotal = sum;
             order.Total = OrderDiscountTotals.ComputeGrandTotal(sum, order.ShippingCost ?? 0m, promo, manual);
         }

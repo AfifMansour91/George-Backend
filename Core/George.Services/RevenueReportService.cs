@@ -298,6 +298,9 @@ namespace George.Services
         private static decimal OrderNetContribution(Order o, RefundAmountIndex refunds) =>
             GrossChargedAmount(o) - CreditAmount(o, refunds) - CancellationNetDeduction(o);
 
+        /// <summary>"שולמו" (report filter, default): charged, not cancelled and not credited - whatever the fulfilment status.</summary>
+        private static bool IsPaidNet(Order o) => WasEverCharged(o) && !IsCancelled(o) && !HasCredit(o);
+
         private static string MapDisplayStatus(Order o)
         {
             if (HasCredit(o)) return "credited";
@@ -360,7 +363,7 @@ namespace George.Services
             if (payments.Count > 0)
                 q = q.Where(o => payments.Contains(MapPaymentKey(o)));
             if (statuses.Count > 0)
-                q = q.Where(o => statuses.Contains(MapDisplayStatus(o)));
+                q = q.Where(o => statuses.Contains(MapDisplayStatus(o)) || (statuses.Contains("paid") && IsPaidNet(o)));
             if (cities.Count > 0)
             {
                 q = q.Where(o =>
@@ -788,7 +791,7 @@ namespace George.Services
             }.Select(x => new RevenueReportFilterOptionDto { Key = x.Item1, Name = x.Item2 }).ToList();
 
         private static List<RevenueReportFilterOptionDto> BuildStatusOptions() =>
-            new[] { "delivered", "credited", "cancelled" }
+            new[] { "paid", "delivered", "credited", "cancelled" }
                 .Select(s => new RevenueReportFilterOptionDto { Key = s, Name = s })
                 .ToList();
 

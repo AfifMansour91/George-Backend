@@ -1,3 +1,4 @@
+using George.Common.Payment;
 using George.DB;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -92,6 +93,38 @@ public class PaymentStorage : StorageBase
         _dbContext.OrderPaymentEvent.Add(evt);
         await _dbContext.SaveChangesAsync(cancelToken);
     }
+
+    /// <summary>Journal row written once per order by the missing-invoice alert (its dedup key).</summary>
+    public const string MissingInvoiceAlertEventType = "MissingInvoiceAlert";
+
+    /// <summary>
+    /// Charged card orders (Cardcom/PayPlus: Paid + Captured) on sites with the missing-invoice alert, paid inside the
+    /// window, that still have no invoice document and were not alerted yet. The per-site delay is applied by the caller
+    /// (Site is included).
+    /// </summary>
+    public async Task<List<Order>> GetPaidOrdersMissingInvoiceAsync(DateTime paidAfterUtc, DateTime paidBeforeUtc, CancellationToken cancelToken) =>
+        await _dbContext.Order.AsNoTracking()
+            .Include(o => o.Site)
+            .Where(o => !o.IsDeleted
+                && o.Site.MissingInvoiceAlertEnabled == true
+                && o.PaymentStatus == "Paid"
+                && o.PaymentSettleStatus == PaymentSettleStatus.Captured
+                && (o.PaymentGateway == PaymentGatewayProviderId.Cardcom || o.PaymentGateway == PaymentGatewayProviderId.PayPlus)
+                && o.PaidAt != null && o.PaidAt > paidAfterUtc && o.PaidAt < paidBeforeUtc
+                && (o.InvoiceNumber == null || o.InvoiceNumber == "")
+                && (o.CardcomDocumentUrl == null || o.CardcomDocumentUrl == "")
+                && (o.PayPlusDocumentUrl == null || o.PayPlusDocumentUrl == "")
+                && !_dbContext.OrderPaymentEvent.Any(e => e.OrderId == o.Id && e.EventType == MissingInvoiceAlertEventType))
+            .OrderBy(o => o.PaidAt)
+            .Take(50)
+            .ToListAsync(cancelToken);
+
+    /// <summary>The newest failed CreateDocument journal row of an order (why the gateway refused the invoice), if any.</summary>
+    public async Task<OrderPaymentEvent?> GetLastDocumentFailureAsync(int orderId, CancellationToken cancelToken) =>
+        await _dbContext.OrderPaymentEvent.AsNoTracking()
+            .Where(e => e.OrderId == orderId && e.EventType == "CreateDocument" && e.StatusCode != "0")
+            .OrderByDescending(e => e.Id)
+            .FirstOrDefaultAsync(cancelToken);
 
     public async Task<List<OrderPaymentEvent>> GetPaymentEventsAsync(int orderId, CancellationToken cancelToken) =>
         await _dbContext.OrderPaymentEvent.AsNoTracking()

@@ -52,6 +52,23 @@ namespace George.Services
             ["Partner"] = "שותף",
         };
         private const string VoucherQrCaption = "פתיחת הזמנה";
+
+        /// <summary>"#N" for website/Woo orders that carry the website's order number; "" otherwise. The voucher prints it bare (George, 5.11.2026).</summary>
+        private static string VoucherWebsiteOrderNumber(Order order)
+        {
+            var isWebsite = string.Equals(order.Source, "Website", StringComparison.OrdinalIgnoreCase) || string.Equals(order.Source, "WooCommerce", StringComparison.OrdinalIgnoreCase);
+            var raw = order.ExternalOrderId?.Trim();
+            if (!isWebsite || string.IsNullOrEmpty(raw)) return "";
+            var digits = raw.TrimStart('#').Trim();
+            return "#" + (digits.Length > 0 ? digits : raw);
+        }
+
+        /// <summary>A4 meta line keeps the label ("מספר הזמנה באתר: #N") because it shares a line with the date and handler.</summary>
+        private static string VoucherWebsiteOrderNumberLine(Order order)
+        {
+            var no = VoucherWebsiteOrderNumber(order);
+            return string.IsNullOrEmpty(no) ? "" : "מספר הזמנה באתר: " + no;
+        }
         private const string VoucherStatusLabel = "סטטוס:";
         private const string VoucherDateLabel = "תאריך אספקה:";
         private const string VoucherTimeLabel = "שעה:";
@@ -678,7 +695,15 @@ namespace George.Services
                 if (req.CouponCode != null)
                     o.CouponCode = string.IsNullOrWhiteSpace(req.CouponCode) ? null : req.CouponCode.Trim();
                 if (req.ManualDiscountAmount.HasValue)
+                {
+                    // Picking "הנחה" saved on its own (no Total): the stored total follows the discount change, like a
+                    // shipping change above. A caller that sends Total owns it.
+                    var previousManual = o.ManualDiscountAmount ?? 0m;
                     o.ManualDiscountAmount = req.ManualDiscountAmount.Value <= 0m ? null : req.ManualDiscountAmount.Value;
+                    var newManual = o.ManualDiscountAmount ?? 0m;
+                    if (!req.Total.HasValue && o.Total.HasValue && previousManual != newManual)
+                        o.Total = Math.Max(0m, o.Total.Value + previousManual - newManual);
+                }
                 if (req.ManualDiscountType != null)
                     o.ManualDiscountType = string.IsNullOrWhiteSpace(req.ManualDiscountType) ? null : req.ManualDiscountType.Trim();
                 if (req.ManualDiscountValue.HasValue)
@@ -2456,8 +2481,8 @@ namespace George.Services
                     cancelToken).ConfigureAwait(false)
                 : null;
             var payload = useA4
-                ? BuildAutoVoucherA4Html(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines, site.ShowOrderHandler == true, showBundleComponents)
-                : BuildAutoVoucherHtml(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines, site.ShowOrderHandler == true, showBundleComponents);
+                ? BuildAutoVoucherA4Html(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines, site.ShowOrderHandler == true, showBundleComponents, site.ShowWebsiteOrderNumberInPrints != false)
+                : BuildAutoVoucherHtml(orderForPrint, hideDeliveryTime, hideUnitWeight, customerProfileNote, useStructuredLines, site.ShowOrderHandler == true, showBundleComponents, site.ShowWebsiteOrderNumberInPrints != false);
             if (string.IsNullOrWhiteSpace(payload))
                 return false;
 
@@ -2586,7 +2611,7 @@ namespace George.Services
         internal static bool VoucherHidesDeliveryTime(Site site, Order order) =>
             VoucherDeliveryTimeVisibility.HidesTime(site.VoucherHideDeliveryTime, site.VoucherHideDeliveryTimeScope, IsVoucherShipping(order));
 
-        private string BuildAutoVoucherA4Html(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false, bool showHandler = false, bool showBundleComponents = true)
+        private string BuildAutoVoucherA4Html(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false, bool showHandler = false, bool showBundleComponents = true, bool showWebsiteOrderNumber = true)
         {
             // Bundle children are never standalone voucher lines (spec §8): they render indented under their parent
             // on entry vouchers and are hidden after picking. Totals count parents + plain lines only.
@@ -2597,6 +2622,8 @@ namespace George.Services
             var sourceLabel = VoucherSourceLabels.TryGetValue(order.Source ?? "", out var srcLabel) ? srcLabel : (order.Source ?? "");
             // Site.ShowOrderHandler: append the handler name (מטפל) next to the order source.
             var handlerLabel = showHandler && !string.IsNullOrWhiteSpace(order.HandlerName) ? "מטפל: " + order.HandlerName!.Trim() : "";
+            // Site.ShowWebsiteOrderNumberInPrints (default on): the website's own order number next to the source.
+            var websiteNoLabel = showWebsiteOrderNumber ? VoucherWebsiteOrderNumberLine(order) : "";
             var isShipping = IsVoucherShipping(order);
             var deliveryDate = isShipping ? order.DeliveryDate : order.PickupDate;
             // Site.VoucherHideDeliveryTime: print the delivery date without the time slot.
@@ -2731,7 +2758,7 @@ namespace George.Services
 
             sb.Append("  <div style=\"display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin-bottom:14px;\">");
             sb.Append($"<div style=\"font-size:20px;font-weight:800;\">הזמנה #{EscapeHtml(orderNo)}</div>");
-            sb.Append($"<div style=\"color:#6B7280;\">{EscapeHtml(created)}{(string.IsNullOrEmpty(sourceLabel) ? "" : " · " + EscapeHtml(sourceLabel))}{(string.IsNullOrEmpty(handlerLabel) ? "" : " · " + EscapeHtml(handlerLabel))}</div>");
+            sb.Append($"<div style=\"color:#6B7280;\">{EscapeHtml(created)}{(string.IsNullOrEmpty(sourceLabel) ? "" : " · " + EscapeHtml(sourceLabel))}{(string.IsNullOrEmpty(websiteNoLabel) ? "" : " · " + EscapeHtml(websiteNoLabel))}{(string.IsNullOrEmpty(handlerLabel) ? "" : " · " + EscapeHtml(handlerLabel))}</div>");
             sb.AppendLine("</div>");
 
             sb.Append("  <div style=\"display:flex;flex-wrap:wrap;gap:24px;border:1px solid #E5E7EB;border-radius:6px;padding:14px 16px;margin-bottom:20px;\">");
@@ -2757,7 +2784,7 @@ namespace George.Services
             return sb.ToString();
         }
 
-        private string BuildAutoVoucherHtml(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false, bool showHandler = false, bool showBundleComponents = true)
+        private string BuildAutoVoucherHtml(Order order, bool hideDeliveryTime = false, bool hideUnitWeight = false, string? customerProfileNote = null, bool useStructuredLines = false, bool showHandler = false, bool showBundleComponents = true, bool showWebsiteOrderNumber = true)
         {
             var sb = new StringBuilder();
             // Bundle children are never standalone voucher lines (spec §8): they render indented under their parent
@@ -2772,6 +2799,8 @@ namespace George.Services
             var sourceTop = string.IsNullOrWhiteSpace(sourceLabel) ? "" : $"מקור: {sourceLabel}";
             // Site.ShowOrderHandler: handler name (מטפל) printed under the order source.
             var handlerTop = showHandler && !string.IsNullOrWhiteSpace(order.HandlerName) ? $"מטפל: {order.HandlerName!.Trim()}" : "";
+            // Site.ShowWebsiteOrderNumberInPrints (default on): bare "#N" right under "מקור: אתר" (George, 5.11.2026: no label).
+            var websiteNoTop = showWebsiteOrderNumber ? VoucherWebsiteOrderNumber(order) : "";
             var isShipping = IsVoucherShipping(order);
             var deliveryDate = isShipping
                 ? order.DeliveryDate
@@ -2844,6 +2873,8 @@ namespace George.Services
             sb.Append($"<span style=\"font-weight:400;white-space:nowrap;word-break:normal;overflow-wrap:normal;\">{EscapeHtml(created)}</span>");
             sb.Append($"<span style=\"font-weight:700;\">{EscapeHtml(sourceTop)}</span>");
             sb.Append("</div>");
+            if (!string.IsNullOrEmpty(websiteNoTop))
+                sb.Append($"<div style=\"margin-top:2px;text-align:left;font-size:12px;line-height:13px;\">{EscapeHtml(websiteNoTop)}</div>");
             if (!string.IsNullOrEmpty(handlerTop))
                 sb.Append($"<div style=\"margin-top:2px;text-align:left;font-size:12px;line-height:13px;\">{EscapeHtml(handlerTop)}</div>");
             var voucherStatus = VoucherOrderStatusLabel(order);

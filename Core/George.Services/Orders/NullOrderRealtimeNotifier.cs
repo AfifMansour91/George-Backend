@@ -7,4 +7,7 @@ public class NullOrderRealtimeNotifier : IOrderRealtimeNotifier
 {
     public Task NotifyNewOrderAsync(OrderRes order, CancellationToken cancelToken = default) =>
         Task.CompletedTask;
+
+    public Task NotifyMissingInvoiceAsync(MissingInvoiceAlertEvent alert, CancellationToken cancelToken = default) =>
+        Task.CompletedTask;
 }

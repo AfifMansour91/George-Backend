@@ -16,6 +16,8 @@ public static class RealtimeFeatures
 public static class RealtimeEventNames
 {
     public const string NewOrderCreated = "NewOrderCreated";
+    /// <summary>A charged order has no invoice document (Site.MissingInvoiceAlertEnabled).</summary>
+    public const string MissingInvoice = "MissingInvoice";
     public const string ScaleWeightChanged = "ScaleWeightChanged";
 }
 
